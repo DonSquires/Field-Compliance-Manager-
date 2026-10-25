@@ -65,6 +65,27 @@ function git(cwd, args, options = {}) {
   }
 }
 
+// A guessed path that does not exist gets the closest tracked paths back, so the model can
+// recover in one step instead of cycling through extensions and directories.
+function similarPaths(workspacePath, requested, cap = 8) {
+  const stem = path.basename(String(requested || '')).replace(/\.[^.]+$/, '').toLowerCase();
+  if (stem.length < 3) return [];
+  let tracked;
+  try { tracked = git(workspacePath, ['ls-files']).split('\n'); } catch { return []; }
+  const wantedDir = path.dirname(String(requested || '')).toLowerCase();
+  return tracked
+    .filter((file) => file && path.basename(file).toLowerCase().includes(stem))
+    .sort((a, b) => Number(path.dirname(b).toLowerCase() === wantedDir) - Number(path.dirname(a).toLowerCase() === wantedDir) || a.length - b.length)
+    .slice(0, cap);
+}
+
+function missingPath(workspacePath, kind, normalized) {
+  const suggestions = similarPaths(workspacePath, normalized);
+  return suggestions.length
+    ? { error: `not a ${kind}: ${normalized}`, did_you_mean: suggestions }
+    : { error: `not a ${kind}: ${normalized}`, hint: 'do not guess paths; use search or list_dir to find the real one' };
+}
+
 function clip(text, cap, label = 'output') {
   const value = String(text ?? '');
   if (value.length <= cap) return value;
@@ -628,14 +649,14 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     },
     list_dir({ path: dir = '.' }) {
       const { normalized, absolute } = resolveInside(workspacePath, dir || '.');
-      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) return { error: `not a directory: ${normalized}` };
+      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) return missingPath(workspacePath, 'directory', normalized);
       const entries = fs.readdirSync(absolute, { withFileTypes: true }).filter((entry) => !SKIP_DIRS.has(entry.name)).slice(0, limits.listCapEntries)
         .map((entry) => `${entry.isDirectory() ? entry.name + '/' : entry.name}`).sort();
       return { path: normalized, entries };
     },
     read_file({ path: file, start_line, end_line }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
-      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return { error: `not a file: ${normalized}` };
+      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return missingPath(workspacePath, 'file', normalized);
       const buffer = fs.readFileSync(absolute);
       if (looksBinary(buffer)) return { error: `binary file: ${normalized}` };
       const lines = buffer.toString('utf8').split('\n');
@@ -646,7 +667,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     },
     outline({ path: file, pattern }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
-      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return { error: `not a file: ${normalized}` };
+      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return missingPath(workspacePath, 'file', normalized);
       const buffer = fs.readFileSync(absolute);
       if (looksBinary(buffer)) return { error: `binary file: ${normalized}` };
       let filter = null;

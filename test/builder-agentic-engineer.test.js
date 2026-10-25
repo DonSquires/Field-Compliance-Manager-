@@ -564,6 +564,10 @@ test('outline indexes the declarations of a big file with line numbers; search c
   assert.match(outline.entries.join('\n'), /^1: const test = require/m);
   assert.match(tools.outline({ path: 'lib/sum.js', pattern: '[' }).error, /not a valid regular expression/);
   assert.match(tools.outline({ path: 'lib' }).error, /not a file/);
+  assert.deepEqual(tools.read_file({ path: 'src/sum.ts' }).did_you_mean, ['lib/sum.js', 'test/sum.test.js']);
+  assert.deepEqual(tools.read_file({ path: 'test/sum.ts' }).did_you_mean, ['test/sum.test.js', 'lib/sum.js']);
+  assert.match(tools.read_file({ path: 'nothing/here.js' }).hint, /do not guess paths/);
+  assert.deepEqual(tools.list_dir({ path: 'apps/web/sum' }).did_you_mean, ['lib/sum.js', 'test/sum.test.js']);
 
   const plain = tools.search({ query: 'sum adds', path: 'test' });
   assert.equal(plain.results.length, 1);
