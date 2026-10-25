@@ -222,6 +222,45 @@ const JOB_REF = /\b(?:bob\/job-)?((?=[0-9a-f-]*\d)[0-9a-f]{8}[0-9a-f-]{0,28})\b/
 const IMPERATIVE = /^(?:(?:please|can you|could you|would you|bob,?|hey bob,?)\s+)*(?:fix|build|add|create|change|update|implement|redesign|refactor|propose|investigate|plan|remove|delete|rename|move|make|style|restyle|show|display|wire|replace|improve|clean|write|design|draft|migrate)\b/i;
 const INVESTIGATION = /\b(?:why|how (?:does|do))\b/i;
 
+// The owner explicitly asked for a job to be proposed. The model must then end with propose_job,
+// not a refusal: live thread 2026-10-25, qwen2.5-coder:7b read schema.sql 13 times and replied that
+// it had "no permission to modify the file" instead of proposing the fix it was asked for.
+const PROPOSE_REQUEST = /\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b[^.?!\n]{0,40}\b(?:builder\s+)?(?:job|build|fix|change)\b/i;
+const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|without|instead of|rather than|before you)\b[^.?!\n]{0,24}\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b|\b(?:propose|draft|create|open|raise|queue|make)\b[^.?!\n]{0,40}\b(?:job|build|fix|change)\b[^.?!\n]{0,12}\b(?:yet|later)\b/i;
+// "How do I create a job?" asks for an explanation; "Can you propose a job?" asks Bob to act.
+const INFORMATIONAL = /^\s*(?:how|what|why|when|where|which|who|is|are|does|do|did|should|would it)\b/i;
+const ADDRESSED_REQUEST = /\b(?:can|could|would|will) you\b|\bplease\b/i;
+function proposeIntent(text) {
+  const value = String(text || '');
+  if (!PROPOSE_REQUEST.test(value) || PROPOSE_NEGATED.test(value)) return false;
+  return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
+}
+
+const FRONTEND_HINT = /\b(?:frontend|front-end|apps\/web|\.tsx|\.css|ui|ux|page|screen|panel|component|layout|button|composer)\b/i;
+const BACKEND_HINT = /\b(?:backend|back-end|supabase|sql|migration|rpc|function|schema|table|edge function|worker|trigger|race|lock)\b/i;
+// Last resort when the model never proposes: a draft built only from the owner's own brief and the
+// paths Bob actually read, clearly labelled, for the owner to review before Create job.
+function draftProposalFromBrief(brief, readPaths = []) {
+  const text = String(brief || '').trim();
+  const first = (text.replace(/^\s*please\s+/i, '').split(/(?<=[.!?])\s|\n/)[0] || text)
+    .replace(/^(?:investigate and\s+)?(?:propose|draft|plan|create|open|raise)\s+(?:a\s+)?(?:builder\s+)?job\s+(?:for|to)\s+/i, '')
+    .replace(/\s*\([^)]*\)/g, '').trim();
+  const title = (first.charAt(0).toUpperCase() + first.slice(1)).slice(0, 150).trim().replace(/[.:;,]+$/, '');
+  const paths = [...new Set(readPaths)].slice(0, 12);
+  // validateProposal caps task_description at 8000 characters while the chat accepts 20000: keep the
+  // head of the brief and say plainly that the rest is in the thread, never drop the draft silently.
+  const BRIEF_CAP = 6800;
+  const ownerBrief = text.length > BRIEF_CAP
+    ? `${text.slice(0, BRIEF_CAP)}\n\n[Owner brief continues: ${text.length - BRIEF_CAP} more characters are in this Builder chat message. The specification step must read the full brief there before planning.]`
+    : text;
+  const task = [ownerBrief, paths.length ? `Evidence Bob read in chat: ${paths.join(', ')}.` : null,
+    'Drafted from the owner brief because the chat model did not produce its own proposal; the specification gate must confirm the details against the code and schema before implementation.'].filter(Boolean).join('\n\n');
+  const scope = text.replace(/\bno\s+(?:ui|ux|frontend|front-end|backend|schema)\s+changes?\b/gi, '');
+  const frontend = FRONTEND_HINT.test(scope);
+  const backend = BACKEND_HINT.test(scope) || !frontend;
+  return validateProposal({ title, task_description: task, frontend_required: frontend, backend_required: backend, rationale: 'Owner asked for a proposal; drafted from the brief.' }).proposal || null;
+}
+
 // Classifies a ledger question: owner (what needs me), job (one job by id/branch) or jobs (general status).
 function statusIntent(text) {
   const value = String(text || '').trim();
@@ -308,6 +347,9 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const intent = statusIntent(message.content);
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
+  const proposeMode = !statusMode && proposeIntent(message.content) && typeof allTools.propose_job === 'function';
+  const readPaths = [];
+  let proposeNudged = false;
   const tools = statusMode ? Object.fromEntries(LEDGER_TOOLS.filter(name => typeof allTools[name] === 'function').map(name => [name, allTools[name]])) : allTools;
   // The fallback is only as good as the latest ledger read, and only for the question actually asked.
   let ledgerAnswer = null;
@@ -325,6 +367,11 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     await store.post(thread.id, { role: 'tool', kind: 'tool', content: `${preloadTool}${preloadArgs.job ? ` ${preloadArgs.job}` : ''}`, payload: { message_id: message.id, tool: preloadTool, ok: !preloaded?.error, preview: clip(JSON.stringify(preloaded), 600), preloaded: true } });
   }
   const ledgerFallback = () => (ledgerAnswer ? { reply: `Straight from the job ledger:\n\n${ledgerAnswer}`, proposal: null, model: null, ledger: true } : null);
+  const draftFallback = () => {
+    if (!proposeMode) return null;
+    const drafted = draftProposalFromBrief(message.content, readPaths);
+    return drafted ? { reply: 'The model did not finish its own proposal, so I drafted this one from your brief and the files I read. Check the title and scope before you press Create job.', proposal: drafted, model: null, drafted: true } : null;
+  };
   const history = await store.history(thread.id, message.seq);
   const transcript = history.map(entry => {
     const label = entry.role === 'owner' ? 'OWNER' : entry.kind === 'proposal' ? 'BOB (proposed job)' : 'BOB';
@@ -336,6 +383,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     contextLine(message.payload?.context),
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (first message)',
     `OWNER NOW SAYS:\n${message.content}`,
+    proposeMode ? 'THE OWNER ASKED FOR A PROPOSAL. Proposing changes nothing and needs no permission: investigate briefly with the read-only tools, then call propose_job. The owner reviews it and decides with Create job. Never answer that you cannot modify files.' : null,
   ].filter(Boolean).join('\n\n');
   const messages = [{ role: 'system', content: builderChatSystemPrompt() }, { role: 'user', content: task }];
   if (statusMode) {
@@ -381,7 +429,9 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     const elapsed = Date.now() - started;
     const final = turn === limits.maxTurns || (turn > 1 && elapsed >= limits.wallBudgetMs - answerReserveMs);
     if (final && !messages.some(entry => entry.final)) {
-      messages.push({ role: 'user', final: true, content: JSON.stringify({ instruction: 'FINAL TURN: no more tools. Call reply now with what you found so far, what is still unknown, and the next step you propose.' }) });
+      messages.push({ role: 'user', final: true, content: JSON.stringify({ instruction: proposeMode && !proposal
+        ? 'FINAL TURN: no more investigation. Call propose_job now with a title, a specific task_description built from what you found, and frontend_required/backend_required.'
+        : 'FINAL TURN: no more tools. Call reply now with what you found so far, what is still unknown, and the next step you propose.' }) });
     }
     const status = health?.[candidate.provider] || {};
     const maxOutput = Math.min(Number(status.max_output_tokens || 4096), status.num_ctx ? Math.floor(status.num_ctx / 2) : 4096);
@@ -404,10 +454,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unavailable = 0;
     const content = String(response.data?.content ?? '');
-    const call = parseToolCall(content);
+    let call = parseToolCall(content);
+    const prose = content.trim() && !content.trim().startsWith('{') && !/<\/?(?:tool_call|invoke|parameter|function)\b/i.test(content);
+    // A required proposal must not escape through plain prose: treat it as a reply so it is nudged or drafted.
+    if ((!call || typeof call.tool !== 'string') && prose && proposeMode && !proposal) call = { tool: 'reply', args: { message: content.trim() } };
     if (!call || typeof call.tool !== 'string') {
       unparseable++;
-      const prose = content.trim() && !content.trim().startsWith('{') && !/<\/?(?:tool_call|invoke|parameter|function)\b/i.test(content);
       // Plain prose is still an answer in a chat lane, but never one that claims an action.
       if (prose && !ACTION_CLAIM.test(content)) return { reply: clip(content.trim(), 8000), proposal, model: response.data?.model };
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object {"thought": string, "tool": string, "args": object}. Use reply {message} to answer.' }) });
@@ -417,9 +469,20 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unparseable = 0;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
-    if (final && call.tool !== 'reply' && call.tool !== 'finish') break;
+    if (final && call.tool !== 'reply' && call.tool !== 'finish' && !(proposeMode && !proposal && call.tool === 'propose_job')) break;
     if (call.tool === 'reply' || call.tool === 'finish') {
       let text = String(args.message || args.summary || call.thought || '').trim() || 'Done.';
+      if (proposeMode && !proposal) {
+        if (!proposeNudged && !final) {
+          proposeNudged = true;
+          messages.push({ role: 'assistant', content: JSON.stringify({ tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+            error: 'Reply refused: the owner asked you to PROPOSE a job. Proposing needs no permission and changes nothing. Call propose_job now with a title, a specific task_description from what you found, and frontend_required/backend_required.',
+          }) });
+          continue;
+        }
+        const drafted = draftFallback();
+        if (drafted) return { ...drafted, executedTools };
+      }
       if (ACTION_CLAIM.test(text) && !claimCorrected) {
         claimCorrected = true;
         messages.push({ role: 'assistant', content: JSON.stringify({ tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
@@ -441,6 +504,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     let result;
     // A small model re-reading the same ledger is looping, not learning anything new: answer from it.
     if (count > 2 && statusMode && LEDGER_TOOLS.includes(call.tool) && ledgerAnswer) break;
+    if (count > 2 && proposeMode && !proposal && proposeNudged) break;
     if (count > 2) result = { error: 'identical call already made; use the earlier result or reply' };
     else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the ledger result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
     else {
@@ -456,6 +520,11 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       payload: { message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600) },
     });
     if (!result?.error) recordLedger(call.tool, result);
+    if (!result?.error && ['read_file', 'outline', 'list_dir'].includes(call.tool) && typeof args.path === 'string') readPaths.push(args.path);
+    if (proposeMode && !proposal && !proposeNudged && (count > 2 || executedTools >= 6)) {
+      proposeNudged = true;
+      result = { ...(result && typeof result === 'object' ? result : { result }), instruction: 'Enough investigation for a proposal. Call propose_job now with what you found; the specification gate checks the details.' };
+    }
     failedCalls = result?.error ? failedCalls + 1 : 0;
     if (failedCalls >= 3) {
       failedCalls = 0;
@@ -466,7 +535,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     messages.push({ role: 'user', content: clip(JSON.stringify({ tool: call.tool, result }), limits.readCapChars) });
   }
   if (proposal) return { reply: 'I have proposed the job above for your confirmation.', proposal };
-  return ledgerFallback() || { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
+  return ledgerFallback() || draftFallback() || { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
 }
 
 async function retry(fn, attempts = 3, delayMs = 500) {
@@ -541,5 +610,5 @@ function createBuilderChatWorker({ supabase, deps, intervalMs = 2500, log = cons
 module.exports = {
   PROMPT_VERSION, BUILDER_CHAT_LIMITS, ACTION_CLAIM, builderChatSystemPrompt, createBuilderChatStore, ensureChatCheckout,
   validateProposal, createBuilderChatTools, builderChatNativeTools, runBuilderChat, processBuilderChatMessage, createBuilderChatWorker,
-  isStatusQuestion, statusIntent, formatOwnerQueue, formatJobStatus, formatJobList,
+  isStatusQuestion, statusIntent, proposeIntent, draftProposalFromBrief, formatOwnerQueue, formatJobStatus, formatJobList,
 };

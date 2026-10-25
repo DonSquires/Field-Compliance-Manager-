@@ -496,3 +496,79 @@ test('owner_queue leaves out a published job whose pull request the owner closed
   const queue = await chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS }).owner_queue();
   assert.deepEqual(queue.pull_requests_to_review.map(job => job.title), ['Open PR', 'Manual PR']);
 });
+
+const PATROL_BRIEF = 'Please investigate and propose a Builder job for a backend race in public.apply_patrol_source_updates (supabase/schema.sql). Add a forward migration that locks the target row before reading v_before. No UI change.';
+
+test('a requested proposal is not answered with a refusal: Bob is told to call propose_job', async () => {
+  const { store, model, deps } = setup([
+    { tool: 'search', args: { query: 'apply_patrol_source_updates' } },
+    { tool: 'reply', args: { message: 'I cannot proceed; I do not have permission to modify the file.' } },
+    { tool: 'propose_job', args: { ...PROPOSAL, title: 'Lock the patrol sync target row', frontend_required: false, backend_required: true } },
+    { tool: 'reply', args: { message: 'I propose the migration above.' } },
+  ]);
+  await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
+  assert.match(model.calls[0].request.messages[1].content, /THE OWNER ASKED FOR A PROPOSAL/);
+  assert.match(model.calls[2].request.messages.at(-1).content, /owner asked you to PROPOSE a job/);
+  const proposal = store.rows.find(row => row.kind === 'proposal');
+  assert.equal(proposal.payload.proposal.title, 'Lock the patrol sync target row');
+  assert.match(store.rows.at(-1).content, /I propose the migration above/);
+});
+
+test('a model that never proposes still leaves the owner a labelled draft from the brief', async () => {
+  const refusal = { tool: 'reply', args: { message: 'I do not have the necessary permissions to modify the file.' } };
+  const { store, deps } = setup([{ tool: 'search', args: { query: 'apply_patrol_source_updates' } }, refusal, refusal]);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
+  assert.equal(outcome.drafted, true);
+  const proposal = store.rows.find(row => row.kind === 'proposal').payload.proposal;
+  assert.equal(proposal.title, 'A backend race in public.apply_patrol_source_updates');
+  assert.equal(proposal.backend_required, true);
+  assert.equal(proposal.frontend_required, false, '"No UI change" is not a frontend signal');
+  assert.match(proposal.task_description, /^Please investigate and propose/);
+  assert.match(proposal.task_description, /Drafted from the owner brief/);
+  assert.match(store.rows.at(-1).content, /did not finish its own proposal/);
+});
+
+test('a proposal request that loops on reads is nudged to propose, then drafted', async () => {
+  const read = { tool: 'search', args: { query: 'apply_patrol_source_updates' } };
+  const { store, model, deps } = setup([read, read, read, read, read, read, read, read], { tools: undefined });
+  deps.tools = { search: async () => ({ matches: 1 }), propose_job: args => chat.validateProposal(args) };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
+  assert.ok(model.calls.some(call => /Enough investigation for a proposal/.test(call.request.messages.at(-1).content)));
+  assert.equal(outcome.drafted, true);
+  assert.ok(store.rows.some(row => row.kind === 'proposal'));
+});
+
+test('proposal requests are told apart from questions and status checks', () => {
+  assert.equal(chat.proposeIntent(PATROL_BRIEF), true);
+  assert.equal(chat.proposeIntent('Draft a fix for the dispatch page spacing'), true);
+  assert.equal(chat.proposeIntent('What is waiting on me?'), false);
+  assert.equal(chat.proposeIntent('Where are the dispatch console styles?'), false);
+});
+
+test('explanations and negated requests are not mandatory proposals', () => {
+  assert.equal(chat.proposeIntent('How do I create a Builder job?'), false);
+  assert.equal(chat.proposeIntent("Don't propose a job yet, just look at the dispatch page"), false);
+  assert.equal(chat.proposeIntent('Can you propose a job for the dispatch spacing?'), true);
+});
+
+test('the drafted proposal honours explicit scope words and stays within proposal limits', () => {
+  const frontend = chat.draftProposalFromBrief('Propose a Builder job for frontend accessibility improvements on the roster screens.');
+  assert.equal(frontend.frontend_required, true);
+  assert.equal(frontend.backend_required, false);
+  const long = chat.draftProposalFromBrief(`Please propose a job to ${'tidy '.repeat(80)}. ${'Keep every existing behaviour. '.repeat(700)}`);
+  assert.ok(long, 'a long brief still yields a draft');
+  assert.ok(long.title.length <= 160 && !/OMITTED|…/.test(long.title));
+  assert.ok(long.task_description.length <= 8000);
+  assert.match(long.task_description, /more characters are in this Builder chat message/);
+});
+
+test('a plain-prose refusal to a proposal request is nudged, not returned as the answer', async () => {
+  const { store, model, deps } = setup([
+    'I cannot proceed; I do not have permission to modify the file.',
+    { tool: 'propose_job', args: { ...PROPOSAL, title: 'Lock the patrol sync target row', frontend_required: false, backend_required: true } },
+    { tool: 'reply', args: { message: 'I propose the migration above.' } },
+  ]);
+  await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
+  assert.match(model.calls[1].request.messages.at(-1).content, /owner asked you to PROPOSE a job/);
+  assert.equal(store.rows.find(row => row.kind === 'proposal').payload.proposal.title, 'Lock the patrol sync target row');
+});
