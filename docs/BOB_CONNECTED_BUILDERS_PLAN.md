@@ -262,6 +262,14 @@ The exact UI request was also misclassified before model inference:
 the negation matcher's 24-character gap. Correct that producer contradiction
 and test the actual opening packet, preserving positive planning instructions
 in separate or contrastive clauses. This does not solve general NLU.
+Review identified additional clause-boundary cases in the initial correction:
+an independent "just propose" must not inherit a file-edit prohibition;
+parenthetical ", however," must not detach a prohibition; and "explain how to
+create a job" must not become a job request after a clause split. Test both
+classification and the actual opening packet for each. These cases reinforce
+why lexical completion guards must not become the future semantic tool/model
+selector. They remain a bounded compatibility correction, not the proposed
+Conductor/Caddie/Oracle architecture.
 
 Next measured slice, reusing the existing delivery lanes rather than adding
 another product or a model call before every answer:

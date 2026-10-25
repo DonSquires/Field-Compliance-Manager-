@@ -793,6 +793,28 @@ test('a coordinated no-job instruction does not inject mandatory planning into t
   assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
 });
 
+test('proposal intent respects independent positive clauses, explanatory clauses and parenthetical modifiers', async () => {
+  const cases = [
+    ['Please do not edit any application files, just propose a Builder job to fix dispatch spacing.', true],
+    ['Without changing any source files, please propose a Builder job.', true],
+    ['Please do not, however, create a Builder job; just explain the method.', false],
+    ['Please do not create a job, but instead explain how to create a Builder job.', false],
+    ['Please do not create a Builder job; explain how to create a job.', false],
+    ['Do not just propose a Builder job; explain the options.', false],
+  ];
+  for (const [content, expected] of cases) {
+    assert.equal(chat.proposeIntent(content), expected, content);
+    const { store, deps, model } = setup([
+      { tool: 'reply', args: { message: 'This is the requested explanation, not a proposal.' } },
+    ]);
+    await chat.processBuilderChatMessage({
+      store, message: ownerMessage(content), deps,
+      limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 1 },
+    });
+    assert.equal(model.calls[0].request.messages[1].content.includes('THE OWNER ASKED FOR A PROPOSAL'), expected, content);
+  }
+});
+
 test('a rejected owner-requested proposal cannot end as a successfully answered ordinary conversation', async () => {
   const { store, deps } = setup([
     { tool: 'propose_job', args: PROPOSAL },
