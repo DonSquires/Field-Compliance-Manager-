@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Lock, MessageSquarePlus, Send, Wrench, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './BuilderChatPanel.css';
+import { BuilderResearchComposer } from './BuilderResearchComposer';
 
 export interface BuilderChatProposal {
   title: string;
@@ -50,6 +51,23 @@ function errorText(error: unknown): string {
 
 function requestId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function ResearchReceipt({ value }: { value: unknown }) {
+  if (!value || typeof value !== 'object' || !('provider' in value) || value.provider !== 'ollama_cloud' || !('sources' in value) || !Array.isArray(value.sources)) return null;
+  return <details className="bchat-research-receipt">
+    <summary>Research sources and transfer receipt</summary>
+    <p>Only the approved current question/files were eligible. Images use cloud vision; documents use bounded extracted text, never raw document files. Research is advisory, not approval to change the system.</p>
+    <ul>{value.sources.map((source: unknown, index: number) => {
+      if (!source || typeof source !== 'object') return null;
+      const title = 'title' in source && typeof source.title === 'string' ? source.title : `Source ${index + 1}`;
+      const url = 'url' in source && typeof source.url === 'string' && /^https:\/\/[^/@?#]+\/[^?#]*$/.test(source.url) ? source.url : null;
+      return <li key={index}>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{title}</a> : title}
+        {'retrieved_at' in source && typeof source.retrieved_at === 'string' && <small> · Retrieved {source.retrieved_at}</small>}
+        {'sha256' in source && typeof source.sha256 === 'string' && <small> · SHA-256 {source.sha256}</small>}
+      </li>;
+    })}</ul>
+  </details>;
 }
 
 /** Only short scalar page context travels with a message (the lane caps it at 4 KB). */
@@ -135,6 +153,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [researchMode, setResearchMode] = useState(false);
   const threadEnd = useRef<HTMLDivElement | null>(null);
   // Per-tab reservation tokens, so this tab can retry its own create but another tab cannot duplicate it.
   const reservations = useRef(new Map<string, string>());
@@ -244,6 +263,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
         if (closeError) throw closeError;
       }
       setMessages([]);
+      setResearchMode(false);
       setThreadId(await openThread(true));
     } catch (newError) {
       setError(errorText(newError));
@@ -310,6 +330,8 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
                   creatingElsewhere={typeof item.message.payload.creating_token === 'string' && item.message.payload.creating_token !== reservations.current.get(item.message.id) && Date.now() - Date.parse(String(item.message.payload.creating_at ?? '')) < 5 * 60_000} onCreate={() => void createFromProposal(item.message)} onOpenJob={onOpenJob} />
                 : <div key={item.message.id} className={`bchat-msg bchat-msg--${item.message.role}${item.message.kind === 'error' ? ' is-error' : ''}${item.message.kind === 'status' ? ' is-status' : ''}`}>
                     <p>{item.message.content}</p>
+                    {item.message.payload.research_mode === 'public_cloud' && <small>Owner-approved public cloud research · previous chat excluded</small>}
+                    <ResearchReceipt value={item.message.payload.research} />
                     {item.message.role === 'owner' && item.message.status === 'failed' && <span className="bchat-msg__meta">Not answered</span>}
                   </div>)}
             {working && <div className="bchat__state" role="status"><Loader2 size={15} className="bchat-spin" /> Bob Builder is working…</div>}
@@ -317,13 +339,15 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
           </div>
           {error && <p className="bchat__error" role="alert">{error}</p>}
           <p className="bchat__context">{typeof context.job_title === 'string' && context.job_title ? <>Looking at job: <strong>{context.job_title}</strong></> : 'No job selected · Bob sees the whole Builder queue'}</p>
-          <form className="bchat__composer" onSubmit={event => { event.preventDefault(); void send(draft); }}>
+          <form className="bchat__composer" onSubmit={event => { event.preventDefault(); if (!researchMode) void send(draft); }}>
+            <label><input type="checkbox" checked={researchMode} disabled={Boolean(busy) || working} onChange={event => setResearchMode(event.target.checked)} /> Public cloud research (images, documents and web)</label>
             <label htmlFor="bchat-input" className="bchat__sr">Message Bob Builder</label>
             <textarea id="bchat-input" value={draft} onChange={event => setDraft(event.target.value)} rows={3} maxLength={20000} placeholder="Ask Bob Builder about a job, or describe what to build"
-              disabled={access !== 'allowed' || !threadId}
-              onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(draft); } }} />
-            <span className="bchat__hint">Enter to send · Shift+Enter for a new line</span>
-            <button type="submit" disabled={access !== 'allowed' || !threadId || !draft.trim() || Boolean(busy)} aria-label="Send to Bob Builder">{busy === 'send' ? <Loader2 size={15} className="bchat-spin" /> : <Send size={15} />}</button>
+              disabled={access !== 'allowed' || !threadId || Boolean(busy)}
+              onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !researchMode) { event.preventDefault(); void send(draft); } }} />
+            {researchMode && threadId && <BuilderResearchComposer threadId={threadId} question={draft} disabled={Boolean(busy) || working} onSent={() => setDraft('')} onError={message => setError(message || null)} onBusy={value => setBusy(value ? 'research' : null)} />}
+            <span className="bchat__hint">{researchMode ? 'Use Send approved cloud research · Enter adds a new line' : 'Enter to send · Shift+Enter for a new line'}</span>
+            {!researchMode && <button type="submit" disabled={access !== 'allowed' || !threadId || !draft.trim() || Boolean(busy)} aria-label="Send to Bob Builder">{busy === 'send' ? <Loader2 size={15} className="bchat-spin" /> : <Send size={15} />}</button>}
           </form>
         </>
       )}

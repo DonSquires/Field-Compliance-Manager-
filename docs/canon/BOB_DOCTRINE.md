@@ -11,6 +11,31 @@
 
 ## 1. What Bob is
 
+**Owner-approved Builder chat cloud research, 2026-10-25.** For eligible
+public research, try verified available Ollama Cloud candidates first; do not
+spend the entire turn on small private models or introduce metered providers.
+The owner must explicitly attest, for each message, that the current question,
+source URLs and selected attachments contain no personal, confidential,
+restricted, credential or proprietary information. Changing those inputs
+invalidates approval. This is an isolated research lane: previous conversation,
+repository tools/source and tenant records are excluded. Normal source
+investigation remains on private compute, even if cloud is configured.
+
+Support screenshots through models whose live capability metadata advertises
+vision. PDF, DOCX, XLSX, CSV and text documents currently use bounded private
+text extraction; the chosen cloud API does not provide verified native document
+inputs. State truncation, selected-sheet and scanned-PDF/OCR limitations rather
+than implying complete document inspection. Consent permits native originals
+only where a future adapter actually verifies and implements that support.
+
+For current web claims, retrieve a verified primary publisher or corroborating
+evidence from three distinct publisher domains, validate quotes against actual
+retrieved content, and label insufficient corroboration explicitly. Three
+domains are not proof of editorial independence or interpretation correctness.
+Persist source URLs, retrieval timestamps, hashes, evidence status, selected
+model and transfer shape. Research can inform a plan; it cannot authorize a
+write, create a job, deploy, or substitute for source/Atlas investigation.
+
 **Owner-approved autonomous visual baseline candidates, 2026-10-21.** Builder,
 self-heal/autopilot and Vibe may generate bounded Playwright Linux PNG
 baselines through the dedicated offline, credential-free fixture worker.

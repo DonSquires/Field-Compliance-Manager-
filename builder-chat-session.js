@@ -12,9 +12,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { createTools, parseToolCall, compactMessages } = require('./builder-agentic-engineer');
-const { applyVibeRouting, vibeCloudAllowed, vibeProviderCandidates, vibeNativeTools, vibeToolSchema } = require('./builder-vibe-session');
+const { applyVibeRouting, vibeProviderCandidates, vibeNativeTools, vibeToolSchema } = require('./builder-vibe-session');
 const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
+const { runBuilderResearch } = require('./builder-chat-research');
 
 const PROMPT_VERSION = 'builder-chat-v3';
 const BUILDER_CHAT_LIMITS = Object.freeze({
@@ -48,6 +49,7 @@ function builderChatSystemPrompt() {
     '- Read the Builder job ledger: owner_queue (what is waiting on the owner), list_jobs, job_status.',
     '- Plan a build and propose it with propose_job. The owner then confirms it in the UI; only that creates the job, which runs through specification, implementation and release approval gates and publishes a pull request.',
     '- For interactive, iterative edits suggest the Vibe Builder tab (chat-to-code on a live branch).',
+    '- Public cloud research is a separate owner-approved message mode in this chat: best available configured Ollama Cloud candidates first, no metered providers, prior conversation and repository tools excluded. The owner can attach reviewed non-sensitive screenshots and documents and request public web evidence. Never send private source, credentials or tenant records to that mode; ask the owner to use its explicit approval controls. Returned research is advisory, not release authority.',
     'RULES:',
     '- Ground every claim in a tool result from this conversation: name files, tables and jobs you actually read. Never invent tables, columns, files, job IDs or statuses. An empty search is not proof something is missing.',
     '- You cannot edit files, create or cancel jobs, approve gates, merge or deploy. Never say you did. Say "I propose" and use propose_job.',
@@ -458,7 +460,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const modelRequest = applyVibeRouting(buildModelRunRequest({
     organizationId: 'platform', jobId: thread.id, stepId: message.id, builderMode: 'builder_chat', workloadKind: 'builder_conversation',
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task, outputSchema: builderChatToolSchema(tools),
-  }), { allowCloud: deps.allowCloud ?? vibeCloudAllowed() });
+  }), { allowCloud: false });
   const nativeTools = builderChatNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
@@ -643,9 +645,12 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
     if (!thread || thread.status === 'closed') { await retry(() => store.complete(message.id, 'failed'), 3, deps.retryDelayMs ?? 500); return { skipped: true }; }
     await store.updateThread(thread.id, { status: 'working' });
     await store.post(thread.id, { role: 'bob', kind: 'thinking', content: 'Looking into it…', payload: { message_id: message.id } });
-    const checkout = deps.workspacePath ? { workspacePath: deps.workspacePath, head: deps.head || null }
+    const cloudResearch = message.payload?.research_mode === 'public_cloud';
+    const checkout = cloudResearch ? { workspacePath: null, head: null } : deps.workspacePath ? { workspacePath: deps.workspacePath, head: deps.head || null }
       : ensureChatCheckout({ workspaceRoot: deps.workspaceRoot, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead });
-    const outcome = await runBuilderChat({ store, thread, message, workspacePath: checkout.workspacePath, head: checkout.head, gateway: deps.gateway, deps, limits });
+    const outcome = cloudResearch
+      ? await runBuilderResearch({ supabase: deps.supabase, thread, message, post: row => store.post(thread.id, row), ...deps.research })
+      : await runBuilderChat({ store, thread, message, workspacePath: checkout.workspacePath, head: checkout.head, gateway: deps.gateway, deps, limits });
     if (outcome.proposal) {
       await store.post(thread.id, {
         role: 'bob', kind: 'proposal', content: `${outcome.proposal.title}\n\n${outcome.proposal.task_description}`,
