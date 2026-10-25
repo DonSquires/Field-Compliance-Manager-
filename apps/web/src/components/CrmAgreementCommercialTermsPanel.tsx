@@ -12,6 +12,7 @@ import {
   commercialTermsFormFrom,
   commercialTermsPayload,
   commercialTermsProblem,
+  formatLimit,
   type CommercialModel,
   type CommercialSettingsRow,
   type CommercialTermsForm,
@@ -40,7 +41,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
     setLoadError(null);
     // ATLAS READS: crm_commercial_settings (RLS: provider or client org access)
     const { data, error: readError } = await supabase.from('crm_commercial_settings')
-      .select('commercial_model,billing_cycle,payment_terms_days,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,updated_at')
+      .select('commercial_model,billing_cycle,payment_terms_days,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,standing_authority_limit,updated_at')
       .eq('service_agreement_id', agreementId)
       .maybeSingle();
     if (readError) {
@@ -99,6 +100,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
 
     {!editing && !loading && !loadError && (savedModel ? <dl className="agreement-commercial-summary">
       <div className="is-wide"><dt>Billing model</dt><dd><strong>{commercialModelLabel(savedModel)}</strong><small>{COMMERCIAL_MODEL_HELP[savedModel]}</small></dd></div>
+      {savedModel === 'do_and_invoice' && <div className="is-wide"><dt>Standing authority limit per job</dt><dd>{saved?.standing_authority_limit != null ? <>{formatLimit(Number(saved.standing_authority_limit))}<small>A job costing more than this needs the client's approval reference in Dispatch before it is invoiced.</small></> : <>No limit<small>Every job is invoiced at actuals without asking first. Set a limit if the client caps what one job may cost.</small></>}</dd></div>}
       <div><dt>Billing cycle</dt><dd>{saved?.billing_cycle ? cycleLabels[saved.billing_cycle as keyof typeof cycleLabels] ?? saved.billing_cycle : 'Not set'}</dd></div>
       <div><dt>Payment terms</dt><dd>{saved?.payment_terms_days != null ? `${saved.payment_terms_days} days` : 'Not set'}</dd></div>
       <div><dt>Invoice email</dt><dd>{saved?.invoice_email || 'Not set'}</dd></div>
@@ -120,6 +122,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
         <label className="is-wide"><span>Why is the billing model changing? (required)</span><input required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="New contract signed from 1 July" /></label>
       </div>}
       <div className="agreement-obligation-grid">
+        {form.model === 'do_and_invoice' && <label className="is-wide"><span>Standing authority limit per job, excl. GST (optional)</span><input inputMode="decimal" value={form.standingAuthorityLimit} aria-describedby="commercial-limit-help" onChange={(event) => setForm({ ...form, standingAuthorityLimit: event.target.value })} placeholder="No limit" /><small id="commercial-limit-help">The most one job may cost before R&amp;M needs the client's approval. Leave blank if the client has not set a cap.</small></label>}
         <label><span>Billing cycle</span><select value={form.billingCycle} onChange={(event) => setForm({ ...form, billingCycle: event.target.value as CommercialTermsForm['billingCycle'] })}>{BILLING_CYCLES.map((cycle) => <option key={cycle} value={cycle}>{cycleLabels[cycle]}</option>)}</select></label>
         <label><span>Payment terms (days)</span><input inputMode="numeric" required value={form.paymentTermsDays} onChange={(event) => setForm({ ...form, paymentTermsDays: event.target.value })} /></label>
         <label><span>Invoice email (optional)</span><input type="email" maxLength={320} value={form.invoiceEmail} onChange={(event) => setForm({ ...form, invoiceEmail: event.target.value })} /></label>

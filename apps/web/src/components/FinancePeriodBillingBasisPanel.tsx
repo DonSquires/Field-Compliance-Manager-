@@ -8,7 +8,7 @@ type BasisTotals = {
   contract_cost: number;
   extra_cost: number;
   unclassified_cost: number;
-  /** Agreements not billed fixed price + Extra: all their service cost is billable at agreed rates. */
+  /** Agreements not billed fixed price + Extra: all their service cost is billable (see billable_by_model). */
   billable_cost: number;
   other_cost: number;
   total_cost: number;
@@ -21,11 +21,16 @@ type AgreementSplit = BasisTotals & {
   client_name: string | null;
   agreement_price: number | null;
   commercial_model: string | null;
+  /** Split of billable_cost: pay as you go at agreed rates, do and invoice at actuals, per request against client requests. */
+  rates_cost?: number;
+  actuals_cost?: number;
+  request_cost?: number;
 };
+type BillableByModel = { pay_as_you_go: number; do_and_invoice: number; per_request: number };
 type PeriodSplit = {
   pl_period_id: string;
   period_name: string;
-  totals: BasisTotals & { unlinked_cost: number };
+  totals: BasisTotals & { unlinked_cost: number; billable_by_model?: BillableByModel };
   by_agreement: AgreementSplit[];
 };
 
@@ -33,11 +38,30 @@ const AGREEMENT_PREVIEW = 6;
 const money = (value: number | null | undefined) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(Number(value ?? 0));
 const share = (part: number, total: number) => (total > 0 ? Math.max(0, (Number(part) / Number(total)) * 100) : 0);
 
+const BILLABLE_PARTS = [
+  { key: 'pay_as_you_go', label: 'at agreed rates (pay as you go)' },
+  { key: 'do_and_invoice', label: 'at actuals (do and invoice)' },
+  { key: 'per_request', label: 'against client requests (per request)' },
+] as const;
+
+/** How a billable amount is priced, in finance words. */
+export function billableHow(model: string | null): string {
+  if (model === 'do_and_invoice') return 'at actuals';
+  if (model === 'per_request') return 'against requests';
+  return 'at agreed rates';
+}
+
+/** e.g. "$1,200 at agreed rates (pay as you go) · $300 at actuals (do and invoice)", skipping zero parts. */
+export function describeBillableByModel(byModel: Partial<BillableByModel> | null | undefined, format: (value: number) => string): string | null {
+  const parts = BILLABLE_PARTS.filter((part) => Number(byModel?.[part.key] ?? 0) > 0).map((part) => `${format(Number(byModel?.[part.key]))} ${part.label}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 const SEGMENTS = [
   { key: 'contract_cost', label: 'Contract', hint: 'Covered by the agreement price', className: 'is-contract' },
   { key: 'extra_cost', label: 'Extra', hint: 'Outside the contract — billable', className: 'is-extra' },
   { key: 'unclassified_cost', label: 'Not classified', hint: 'Needs a Contract or Extra decision', className: 'is-unclassified' },
-  { key: 'billable_cost', label: 'Billed at agreed rates', hint: 'Pay as you go, do and invoice, per request', className: 'is-billable' },
+  { key: 'billable_cost', label: 'Billable, no Contract/Extra split', hint: 'Pay as you go, do and invoice, per request', className: 'is-billable' },
   { key: 'other_cost', label: 'Other cost', hint: 'Timesheets, overheads and manual cost', className: 'is-other' },
 ] as const;
 
@@ -63,7 +87,7 @@ export function FinancePeriodBillingBasisPanel({ periodId }: { periodId: string 
 
   useEffect(() => { setShowAll(false); void load(); }, [load]);
 
-  const heading = <div className="finance-ops-panel-heading"><div><h3 id="finance-billing-basis-title">Contract and Extra this period</h3><p>Recorded service cost split by what the agreement covers, what is billable as Extra, and work for clients billed at agreed rates</p></div><Scale size={18} aria-hidden="true" /></div>;
+  const heading = <div className="finance-ops-panel-heading"><div><h3 id="finance-billing-basis-title">Contract and Extra this period</h3><p>Recorded service cost split by what the agreement covers, what is billable as Extra, and work for clients with no Contract/Extra split (agreed rates, actuals or per request)</p></div><Scale size={18} aria-hidden="true" /></div>;
 
   if (!periodId) {
     return <section className="finance-ops-panel finance-basis-panel" aria-labelledby="finance-billing-basis-title">{heading}<div className="finance-ops-empty">Choose a money check period to see the Contract and Extra split.</div></section>;
@@ -88,7 +112,7 @@ export function FinancePeriodBillingBasisPanel({ periodId }: { periodId: string 
       {SEGMENTS.map((segment) => <span key={segment.key} className={segment.className} style={{ width: `${share(Number(totals[segment.key] ?? 0), totals.total_cost)}%` }} />)}
     </div>
     <dl className="finance-basis-totals">
-      {SEGMENTS.map((segment) => <div key={segment.key} className={segment.className}><dt>{segment.label}</dt><dd>{money(Number(totals[segment.key] ?? 0))}</dd><small>{segment.hint}</small></div>)}
+      {SEGMENTS.map((segment) => <div key={segment.key} className={segment.className}><dt>{segment.label}</dt><dd>{money(Number(totals[segment.key] ?? 0))}</dd><small>{segment.key === 'billable_cost' ? describeBillableByModel(totals.billable_by_model, money) ?? segment.hint : segment.hint}</small></div>)}
     </dl>
     {(Number(totals.unclassified_cost) > 0 || totals.conflict_rows > 0 || missingPrices > 0) && <ul className="finance-basis-notes">
       {Number(totals.unclassified_cost) > 0 && <li>{money(totals.unclassified_cost)} is not classified{totals.unclassified_rows ? ` — ${totals.unclassified_rows} workbook row(s) have no TYPE and no known charge code` : ''}{Number(totals.unlinked_cost) > 0 ? `, and ${money(totals.unlinked_cost)} of imported cost has no source row` : ''}. Set the charge-code basis or the job billing choice to classify it.</li>}
@@ -98,13 +122,13 @@ export function FinancePeriodBillingBasisPanel({ periodId }: { periodId: string 
     <div className="finance-basis-table-wrap">
       <table className="finance-basis-table">
         <caption>Contract and Extra by agreement — {split.period_name}</caption>
-        <thead><tr><th scope="col">Agreement</th><th scope="col">Contract</th><th scope="col">Extra</th><th scope="col">Not classified</th><th scope="col">At agreed rates</th><th scope="col">Other</th><th scope="col">Total</th><th scope="col">Agreement price</th></tr></thead>
+        <thead><tr><th scope="col">Agreement</th><th scope="col">Contract</th><th scope="col">Extra</th><th scope="col">Not classified</th><th scope="col">Billable</th><th scope="col">Other</th><th scope="col">Total</th><th scope="col">Agreement price</th></tr></thead>
         <tbody>{agreements.map((row) => <tr key={row.service_agreement_id}>
           <th scope="row"><span>{row.agreement_name}</span>{row.client_name && <small>{row.client_name}</small>}<small className="finance-basis-model">{commercialModelLabel(asCommercialModel(row.commercial_model))}</small></th>
           <td data-label="Contract">{money(row.contract_cost)}</td>
           <td data-label="Extra">{money(row.extra_cost)}</td>
           <td data-label="Not classified" className={Number(row.unclassified_cost) > 0 ? 'is-attention' : ''}>{money(row.unclassified_cost)}{row.conflict_rows > 0 && <small>{row.conflict_rows} to review</small>}</td>
-          <td data-label="At agreed rates">{money(row.billable_cost)}</td>
+          <td data-label="Billable">{money(row.billable_cost)}{Number(row.billable_cost) > 0 && <small>{billableHow(row.commercial_model)}</small>}</td>
           <td data-label="Other">{money(row.other_cost)}</td>
           <td data-label="Total"><strong>{money(row.total_cost)}</strong></td>
           <td data-label="Agreement price">{row.agreement_price === null ? <span className="finance-basis-muted">Not recorded</span> : money(row.agreement_price)}</td>

@@ -3,6 +3,11 @@
  * (owner ruling 2026-10-26). Mirrors crm_commercial_settings.commercial_model
  * and public.agreement_uses_contract_extra(): only fixed price plus Extra, or
  * a model that has not been set yet, uses the Contracted work / Extra decision.
+ *
+ * Do and invoice is not pay as you go: it is standing authority to do what is needed and invoice the
+ * actual time, travel and materials. An optional per-job standing authority limit
+ * (crm_commercial_settings.standing_authority_limit) holds a job above it until the client's approval
+ * reference is recorded; no limit means nothing is held back.
  */
 
 import { useEffect, useState } from 'react';
@@ -19,8 +24,8 @@ export const COMMERCIAL_MODEL_LABEL: Record<CommercialModel, string> = {
 
 export const COMMERCIAL_MODEL_HELP: Record<CommercialModel, string> = {
   fixed_price_with_extras: 'A fixed contract price covers the agreed service. Work outside it is Extra and billed on top, so each callout is marked Contracted work or Extra.',
-  pay_as_you_go: 'All work is charged at the agreed rates and invoiced each billing cycle. There is no Contracted work / Extra decision.',
-  do_and_invoice: 'Standing authority to do what is needed. The actual work done is invoiced; there is no Contracted work / Extra decision.',
+  pay_as_you_go: 'Every job is charged at the agreed rates and invoiced each billing cycle. There is no Contracted work / Extra decision.',
+  do_and_invoice: 'Standing authority: R&M does what is needed without asking first, then invoices the actual time, travel and materials. A job over the agreed standing authority limit (if one is set) needs the client\'s approval reference before it is invoiced.',
   per_request: 'The client asks for each job. Each callout needs the client\'s request or purchase-order reference before it can be invoiced.',
 };
 
@@ -37,13 +42,29 @@ export function commercialModelLabel(model: CommercialModel | null | undefined):
   return model ? COMMERCIAL_MODEL_LABEL[model] : 'Billing model not set';
 }
 
-/** Commercial model per agreement id. Agreements with no settings row are absent (treated as not set). */
-export function useAgreementCommercialModels(agreementIds: ReadonlyArray<string>): { models: Map<string, CommercialModel | null>; loading: boolean; error: string | null } {
+/** How the work on a job is priced on the invoice, in the dispatcher's words. */
+export const COMMERCIAL_MODEL_PRICING: Record<Exclude<CommercialModel, 'fixed_price_with_extras'>, string> = {
+  pay_as_you_go: 'billed at agreed rates',
+  do_and_invoice: 'standing authority · invoiced at actuals',
+  per_request: 'billed against the client request',
+};
+
+export const formatLimit = (limit: number) => limit.toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' });
+
+/** Do and invoice: true when the job costs more than the standing authority limit. No limit = never over. */
+export function overStandingAuthority(limit: number | null | undefined, jobTotal: number): boolean {
+  return limit != null && jobTotal > limit;
+}
+
+export type AgreementCommercialModels = { models: Map<string, CommercialModel | null>; limits: Map<string, number | null> };
+
+/** Commercial model (and do-and-invoice standing authority limit) per agreement id. Agreements with no settings row are absent (treated as not set). */
+export function useAgreementCommercialModels(agreementIds: ReadonlyArray<string>): AgreementCommercialModels & { loading: boolean; error: string | null } {
   const key = Array.from(new Set(agreementIds.filter(Boolean))).sort().join(',');
-  const [state, setState] = useState<{ models: Map<string, CommercialModel | null>; loading: boolean; error: string | null }>({ models: new Map(), loading: false, error: null });
+  const [state, setState] = useState<AgreementCommercialModels & { loading: boolean; error: string | null }>({ models: new Map(), limits: new Map(), loading: false, error: null });
 
   useEffect(() => {
-    if (!key) { setState({ models: new Map(), loading: false, error: null }); return; }
+    if (!key) { setState({ models: new Map(), limits: new Map(), loading: false, error: null }); return; }
     let cancelled = false;
     setState((prev) => ({ ...prev, loading: true, error: null }));
     void loadCommercialModels(key.split(',')).then((result) => {
@@ -55,19 +76,21 @@ export function useAgreementCommercialModels(agreementIds: ReadonlyArray<string>
   return state;
 }
 
-export async function loadCommercialModels(agreementIds: ReadonlyArray<string>): Promise<{ models: Map<string, CommercialModel | null>; error: string | null }> {
+export async function loadCommercialModels(agreementIds: ReadonlyArray<string>): Promise<AgreementCommercialModels & { error: string | null }> {
   const ids = Array.from(new Set(agreementIds.filter(Boolean)));
-  if (ids.length === 0) return { models: new Map(), error: null };
+  if (ids.length === 0) return { models: new Map(), limits: new Map(), error: null };
   // Imported lazily so the pure helpers above stay usable without a configured client (unit tests).
   const { supabase } = await import('./supabase');
-  // ATLAS READS: crm_commercial_settings (commercial_model per service agreement)
-  const { data, error } = await supabase.from('crm_commercial_settings').select('service_agreement_id,commercial_model').in('service_agreement_id', ids);
-  if (error) return { models: new Map(), error: error.message };
+  // ATLAS READS: crm_commercial_settings (commercial_model and standing_authority_limit per service agreement)
+  const { data, error } = await supabase.from('crm_commercial_settings').select('service_agreement_id,commercial_model,standing_authority_limit').in('service_agreement_id', ids);
+  if (error) return { models: new Map(), limits: new Map(), error: error.message };
   const models = new Map<string, CommercialModel | null>();
-  for (const row of (data as Array<{ service_agreement_id: string; commercial_model: string | null }>) ?? []) {
+  const limits = new Map<string, number | null>();
+  for (const row of (data as Array<{ service_agreement_id: string; commercial_model: string | null; standing_authority_limit: number | string | null }>) ?? []) {
     models.set(row.service_agreement_id, asCommercialModel(row.commercial_model));
+    limits.set(row.service_agreement_id, row.standing_authority_limit == null ? null : Number(row.standing_authority_limit));
   }
-  return { models, error: null };
+  return { models, limits, error: null };
 }
 
 export const BILLING_CYCLES = ['weekly', 'fortnightly', 'monthly', 'quarterly'] as const;
@@ -90,6 +113,8 @@ export interface CommercialTermsForm {
   purchaseOrderNumber: string;
   notes: string;
   rates: Record<RateKey, string>;
+  /** Do and invoice only; blank = no cap. */
+  standingAuthorityLimit: string;
 }
 
 export interface CommercialSettingsRow {
@@ -104,6 +129,7 @@ export interface CommercialSettingsRow {
   callout_rate_per_hour: number | null;
   callout_minimum_hours: number | null;
   travel_rate_per_km: number | null;
+  standing_authority_limit?: number | null;
   updated_at?: string | null;
 }
 
@@ -119,10 +145,12 @@ export function commercialTermsFormFrom(row: CommercialSettingsRow | null): Comm
     purchaseOrderNumber: row?.purchase_order_number ?? '',
     notes: row?.notes ?? '',
     rates: Object.fromEntries(RATE_FIELDS.map(({ key }) => [key, text(row?.[key])])) as Record<RateKey, string>,
+    standingAuthorityLimit: text(row?.standing_authority_limit),
   };
 }
 
 const RATE_PATTERN = /^\d{1,7}(\.\d{1,4})?$/;
+const LIMIT_PATTERN = /^\d{1,10}(\.\d{1,2})?$/;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /** Mirrors set_agreement_commercial_terms validation so the form explains problems before saving. */
@@ -135,15 +163,19 @@ export function commercialTermsProblem(form: CommercialTermsForm, savedModel: Co
     const value = form.rates[key].trim();
     if (value && !RATE_PATTERN.test(value)) return `${label} must be zero or a positive number (up to 4 decimals).`;
   }
+  const limit = form.standingAuthorityLimit.trim();
+  if (form.model === 'do_and_invoice' && limit && !LIMIT_PATTERN.test(limit)) return 'The standing authority limit must be zero or a positive amount (up to 2 decimals), or blank for no limit.';
   if (form.notes.length > 2000) return 'Notes are limited to 2000 characters.';
   if (savedModel && savedModel !== form.model && reason.trim().length < 3) return 'Say why the billing model is changing.';
   return null;
 }
 
-/** The p_terms object: every editable key is sent; blank rates and text clear the stored value. */
+/** The p_terms object: every editable key is sent; blank rates and text clear the stored value. Other models always clear the standing authority limit. */
 export function commercialTermsPayload(form: CommercialTermsForm): Record<string, string | number | null> {
   const blankToNull = (value: string) => (value.trim() ? value.trim() : null);
+  const limit = form.standingAuthorityLimit.trim();
   return {
+    standing_authority_limit: form.model === 'do_and_invoice' && limit ? Number(limit) : null,
     billing_cycle: form.billingCycle,
     payment_terms_days: Number(form.paymentTermsDays.trim()),
     invoice_email: blankToNull(form.invoiceEmail),

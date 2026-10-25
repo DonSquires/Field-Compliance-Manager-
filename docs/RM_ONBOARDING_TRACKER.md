@@ -2800,7 +2800,39 @@ regenerated):
   `generate_crm_invoice_from_completed_work`, `set_dispatch_job_billing_basis`
   and both summary RPCs.
 
-**Still to confirm or build.** Billing cycle, payment terms and rates per
+**Step G (do and invoice is standing authority, not pay as you go) - done 2026-10-26.**
+A review found Step F billed `do_and_invoice` exactly like pay as you go. Ruling
+recorded in `ORG_SERVICE_MODEL.md`. Migration
+`20261026100000_do_and_invoice_standing_authority.sql` (rolled-back preview,
+then applied live; its own test and the 090000, 091600 and 120000 tests pass
+live, rolled back; `schema.sql` regenerated):
+- `crm_commercial_settings.standing_authority_limit` (NULL = no cap; CHECK: only
+  on do and invoice), set and cleared through `set_agreement_commercial_terms`.
+- Internal helper `dispatch_job_over_standing_authority` (postgres only).
+- `generate_crm_invoice_from_completed_work` blocks over-limit jobs with no
+  client approval reference, prints `Actuals — ` lines and audits the count;
+  `get_agreement_billing_basis_summary` returns the limit and the jobs waiting
+  for approval; `get_finance_pl_period_billing_basis` splits billable cost into
+  agreed rates / actuals / per request (totals still reconcile).
+- Defect fixed: the unique index `idx_invoice_line_items_source_dispatch`
+  allowed one invoice line per dispatch job, so a job with Attendance plus
+  Travel could not be invoiced. Now non-unique; charge lines are locked while
+  stamped.
+- UI: the billing terms panel shows a "Standing authority limit per job"
+  field only for do and invoice ("No limit" when blank); Dispatch reads "Do and
+  invoice · standing authority · invoiced at actuals" and offers "Record client
+  approval" with the limit in the help; Completed work counts "callouts at
+  actuals" and holds over-limit jobs ("Fix in Dispatch first"); the agreement
+  Billing tab reads "Work invoiced at actuals" and warns about jobs waiting for
+  approval; the finance period bucket is "Billable, no Contract/Extra split"
+  with the per-model breakdown.
+- Tests: web `tsc` clean, vitest 382 files / 1,846 tests pass.
+- Atlas (refresh after merge): `crm_commercial_settings.standing_authority_limit`
+  read by `commercialModel.ts`, `CrmAgreementCommercialTermsPanel` and the
+  invoice/summary RPCs; new function `dispatch_job_over_standing_authority`.
+
+**Still to confirm or build.** The standing authority limit per do-and-invoice
+client (none set; owner decision); billing cycle, payment terms and rates per
 client (seeded defaults only); whether 13,333 is excluding GST (recorded as
 excluding); the recurring monthly OneFortyOne contract invoice (not
 generated); loading the rate cards into `rate_rules`; GL codes and financial

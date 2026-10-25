@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { localToday } from '../lib/agreementTerm';
 import { extraWorkOrderInForce, type ExtraWorkOrder } from '../lib/extraWorkOrders';
-import { COMMERCIAL_MODEL_HELP, commercialModelLabel, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
+import { COMMERCIAL_MODEL_HELP, COMMERCIAL_MODEL_PRICING, commercialModelLabel, formatLimit, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
 
 export type BillingBasis = 'contract' | 'extra';
 export type BillingChoice = BillingBasis | 'unset';
@@ -21,11 +21,15 @@ export interface JobBillingState {
   extraWorkOrderId: string | null;
   /** The agreement's commercial model; null/absent = not set, so Contract/Extra applies. */
   commercialModel?: CommercialModel | null;
-  /** The client's request or PO reference (per request agreements). */
+  /** The client's request or PO reference (per request) or approval reference (do and invoice over the limit). */
   clientOrderReference?: string | null;
+  /** Do and invoice standing authority limit per job; null/absent = no limit. */
+  standingAuthorityLimit?: number | null;
 }
 
 const needsReference = (job: JobBillingState) => job.commercialModel === 'per_request' && !job.clientOrderReference?.trim();
+/** The reference field applies to per request (always) and do and invoice (client approval above the standing authority limit). */
+export const takesClientReference = (model: CommercialModel | null | undefined) => model === 'per_request' || model === 'do_and_invoice';
 
 type OrderSummary = Pick<ExtraWorkOrder, 'id' | 'reference' | 'title' | 'starts_on' | 'ends_on'>;
 
@@ -49,7 +53,9 @@ export function useExtraWorkOrders(agreementId: string | null | undefined) {
 export const billingBasisWords = (job: JobBillingState, orders: OrderSummary[] = []) => {
   if (!usesContractExtra(job.commercialModel)) {
     if (needsReference(job)) return 'Per request · client reference needed before invoicing';
-    return job.clientOrderReference ? `${commercialModelLabel(job.commercialModel)} · ref ${job.clientOrderReference}` : `${commercialModelLabel(job.commercialModel)} · billed at agreed rates`;
+    const model = job.commercialModel as Exclude<CommercialModel, 'fixed_price_with_extras'>;
+    if (model === 'do_and_invoice') return job.clientOrderReference ? `Do and invoice · invoiced at actuals · client approval ${job.clientOrderReference}` : `Do and invoice · ${COMMERCIAL_MODEL_PRICING.do_and_invoice}`;
+    return job.clientOrderReference ? `${commercialModelLabel(model)} · ref ${job.clientOrderReference}` : `${commercialModelLabel(model)} · ${COMMERCIAL_MODEL_PRICING[model]}`;
   }
   if (!job.billingBasis) return 'Billing not set';
   if (job.billingBasis === 'contract') return 'Contracted work';
@@ -66,12 +72,24 @@ export function BillingBasisChip({ job }: { job: JobBillingState }) {
   return <span className={`dispatch-billing-chip is-${tone}`}>{job.billingBasis === 'extra' ? 'Extra' : job.billingBasis === 'contract' ? 'Contract' : 'Billing not set'}</span>;
 }
 
-/** The client's request or PO reference. Used on per request agreements by the create form and the job detail. */
-export function ClientReferenceField({ idPrefix, value, onChange, required }: { idPrefix: string; value: string; onChange: (next: string) => void; required?: boolean }) {
+/** Help for the reference field, in the client's billing terms. */
+export const clientReferenceHelp = (model: CommercialModel | null | undefined, limit?: number | null) => {
+  if (model === 'do_and_invoice') {
+    return limit != null
+      ? `Standing authority covers jobs up to ${formatLimit(limit)}. Record the client's approval reference if this job will cost more; without it a job over the limit cannot be invoiced.`
+      : 'No standing authority limit is set for this client, so no approval is needed. Record a reference only if the client gave one.';
+  }
+  return 'This client asks for each job. The reference goes on the invoice line, and the job cannot be invoiced without it.';
+};
+
+/** The client's request/PO reference (per request) or approval reference (do and invoice). Used by the create form and the job detail. */
+export function ClientReferenceField({ idPrefix, value, onChange, required, model = 'per_request', limit }: { idPrefix: string; value: string; onChange: (next: string) => void; required?: boolean; model?: CommercialModel | null; limit?: number | null }) {
+  const label = model === 'do_and_invoice' ? 'Client approval reference' : 'Client request or PO reference';
+  const optional = model === 'do_and_invoice' ? ' (only if over the limit)' : ' (optional now)';
   return <div className="dispatch-console-form-field">
-    <label className="dispatch-console-form-label" htmlFor={`${idPrefix}-client-ref`}>Client request or PO reference{required ? '' : ' (optional now)'}</label>
+    <label className="dispatch-console-form-label" htmlFor={`${idPrefix}-client-ref`}>{label}{required ? '' : optional}</label>
     <input id={`${idPrefix}-client-ref`} maxLength={120} value={value} autoComplete="off" onChange={(event) => onChange(event.target.value)} aria-describedby={`${idPrefix}-client-ref-help`} />
-    <div id={`${idPrefix}-client-ref-help`} className="dispatch-console-form-note">This client asks for each job. The reference goes on the invoice line, and the job cannot be invoiced without it.</div>
+    <div id={`${idPrefix}-client-ref-help`} className="dispatch-console-form-note">{clientReferenceHelp(model, limit)}</div>
   </div>;
 }
 
@@ -129,7 +147,7 @@ export function DispatchJobBillingPanel({ job, onSaved }: {
   return <DispatchJobContractExtraPanel job={job} onSaved={onSaved} />;
 }
 
-/** Pay as you go, do and invoice, per request: no Contract/Extra decision; per request carries the client's reference. */
+/** Pay as you go, do and invoice, per request: no Contract/Extra decision; per request carries the client's reference, do and invoice the client's approval when over the standing authority limit. */
 function DispatchJobRatedBillingPanel({ job, onSaved }: {
   job: JobBillingState & { id: string };
   onSaved: (message: string) => Promise<void> | void;
@@ -150,7 +168,7 @@ function DispatchJobRatedBillingPanel({ job, onSaved }: {
     setError(null);
     const { error: saveError } = await saveJobClientReference(job.id, reference.trim(), changing ? reason.trim() : null);
     if (saveError) setError(saveError.message);
-    else { setEditing(false); await onSaved(`Client reference ${reference.trim()} saved. The change is in the audit log.`); }
+    else { setEditing(false); await onSaved(`${model === 'do_and_invoice' ? 'Client approval reference' : 'Client reference'} ${reference.trim()} saved. The change is in the audit log.`); }
     setSaving(false);
   };
 
@@ -158,8 +176,9 @@ function DispatchJobRatedBillingPanel({ job, onSaved }: {
     <h3 id={`billing-${job.id}`}>Billing</h3>
     <p><BillingBasisChip job={job} /> {billingBasisWords(job)}</p>
     <p className="dispatch-console-form-note">{COMMERCIAL_MODEL_HELP[model]}</p>
-    {model === 'per_request' && (!editing ? <p><button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditing(true)}>{changing ? 'Change client reference' : 'Add client reference'}</button></p> : <>
-      <ClientReferenceField idPrefix={`job-${job.id}`} value={reference} onChange={setReference} required />
+    {model === 'do_and_invoice' && !editing && <p className="dispatch-console-form-note">{job.standingAuthorityLimit != null ? `Standing authority limit: ${formatLimit(job.standingAuthorityLimit)} per job.` : 'No standing authority limit is set for this client.'}</p>}
+    {takesClientReference(model) && (!editing ? <p><button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditing(true)}>{model === 'do_and_invoice' ? (changing ? 'Change client approval' : 'Record client approval') : (changing ? 'Change client reference' : 'Add client reference')}</button></p> : <>
+      <ClientReferenceField idPrefix={`job-${job.id}`} value={reference} onChange={setReference} required model={model} limit={job.standingAuthorityLimit} />
       {changing && <div className="dispatch-console-form-field">
         <label className="dispatch-console-form-label" htmlFor={`job-${job.id}-ref-reason`}>Why is the reference changing?</label>
         <input id={`job-${job.id}-ref-reason`} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />

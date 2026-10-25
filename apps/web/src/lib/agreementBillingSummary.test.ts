@@ -20,7 +20,15 @@ describe('agreement billing summary', () => {
 
   it('survives an empty or malformed payload', () => {
     const summary = parseAgreementBillingSummary(null);
-    expect(summary).toEqual({ agreementPrice: null, months: [], totals: { contract_cost: 0, extra_cost: 0, unclassified_cost: 0, unclassified_rows: 0, conflict_rows: 0 }, dispatch: [], extraOrders: [] });
+    expect(summary).toEqual({ agreementPrice: null, months: [], totals: { contract_cost: 0, extra_cost: 0, unclassified_cost: 0, unclassified_rows: 0, conflict_rows: 0 }, dispatch: [], extraOrders: [], standingAuthority: { limit: null, jobsWithoutApproval: null } });
+  });
+
+  it('reads the do-and-invoice standing authority and warns only about jobs over it without approval', () => {
+    const summary = parseAgreementBillingSummary({ commercial: { commercial_model: 'do_and_invoice', standing_authority_limit: '500.00', jobs_over_standing_authority_without_approval: 2 } });
+    expect(summary.standingAuthority).toEqual({ limit: 500, jobsWithoutApproval: 2 });
+    expect(billingAttention(summary, 'do_and_invoice')).toEqual(['2 jobs cost more than the standing authority limit and have no client approval reference. Record the approval in Dispatch — invoicing is blocked until then.']);
+    expect(billingAttention(summary, 'pay_as_you_go')).toEqual([]);
+    expect(billingAttention(parseAgreementBillingSummary({ commercial: { standing_authority_limit: null, jobs_over_standing_authority_without_approval: null } }), 'do_and_invoice')).toEqual([]);
   });
 
   it('lists what needs attention, blocking items first', () => {

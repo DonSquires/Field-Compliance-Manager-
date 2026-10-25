@@ -42,8 +42,8 @@ export function CrmAgreementBillingPanel({ agreementId, commercialModel = null }
   return <section className="agreement-obligations agreement-billing" aria-labelledby="agreement-billing-title" aria-busy={loading}>
     <div className="agreement-section-heading">
       <div>
-        <h3 id="agreement-billing-title">{contractExtra ? 'Contract and Extra' : 'Work billed at agreed rates'}</h3>
-        <p>{contractExtra ? 'What was done under the fixed contract and what was Extra, month by month.' : `This client is billed ${commercialModelLabel(commercialModel).toLowerCase()}, so all recorded work is billable at the agreed rates.`} Log rows show recorded service cost (job time and travel), not invoiced amounts.</p>
+        <h3 id="agreement-billing-title">{contractExtra ? 'Contract and Extra' : commercialModel === 'do_and_invoice' ? 'Work invoiced at actuals' : 'Work billed at agreed rates'}</h3>
+        <p>{contractExtra ? 'What was done under the fixed contract and what was Extra, month by month.' : commercialModel === 'do_and_invoice' ? 'This client has given standing authority: R&M does what is needed and invoices the actual time, travel and materials.' : `This client is billed ${commercialModelLabel(commercialModel).toLowerCase()}, so all recorded work is billable at the agreed rates.`} Log rows show recorded service cost (job time and travel), not invoiced amounts.</p>
       </div>
       <label className="agreement-billing-period"><span>Period</span>
         <select value={period} onChange={(event) => setPeriod(event.target.value as BillingPeriod)} disabled={loading}>

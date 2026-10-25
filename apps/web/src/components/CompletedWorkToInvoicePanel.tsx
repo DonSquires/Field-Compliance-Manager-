@@ -31,7 +31,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
     if (!organizationId) { setRows([]); setLoading(false); return; }
     setLoading(true);
     setError(null);
-    // ATLAS READS: workshop_work_order_summary (completed, still to invoice), dispatch_job_charge_lines (no invoice line yet), dispatch_jobs.client_order_reference, crm_commercial_settings.commercial_model
+    // ATLAS READS: workshop_work_order_summary (completed, still to invoice), dispatch_job_charge_lines (no invoice line yet), dispatch_jobs.client_order_reference, crm_commercial_settings.commercial_model, crm_commercial_settings.standing_authority_limit
     const [workshopRes, dispatchRes, patrolRes] = await Promise.all([
       supabase.from('workshop_work_order_summary').select('client_organization_id,client_name,order_number,uninvoiced_total,completed_at').eq('organization_id', organizationId).eq('status', 'completed').gt('uninvoiced_total', 0).limit(500),
       supabase.from('dispatch_job_charge_lines').select('client_organization_id,service_agreement_id,source_dispatch_id,line_total,created_at,billing_basis,client:client_organization_id(name),job:source_dispatch_id(client_order_reference)').eq('organization_id', organizationId).is('invoice_line_item_id', null).limit(1000),
@@ -43,7 +43,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
       return;
     }
     const rawDispatch = (dispatchRes.data as Array<Record<string, unknown>>) ?? [];
-    const { models, error: modelError } = await loadCommercialModels(rawDispatch.map((row) => String(row.service_agreement_id ?? '')));
+    const { models, limits, error: modelError } = await loadCommercialModels(rawDispatch.map((row) => String(row.service_agreement_id ?? '')));
     if (modelError) {
       setError(`Billing models could not be loaded: ${modelError}`);
       setLoading(false);
@@ -62,6 +62,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
         billing_basis: row.billing_basis === 'extra' || row.billing_basis === 'contract' ? row.billing_basis : null,
         commercial_model: agreementId ? models.get(agreementId) ?? null : null,
         client_reference: (Array.isArray(job) ? job[0]?.client_order_reference : job?.client_order_reference) ?? null,
+        standing_authority_limit: agreementId ? limits.get(agreementId) ?? null : null,
       };
     });
     const patrolRows: UninvoicedPatrolVisitRow[] = ((patrolRes.data as Array<Record<string, unknown>>) ?? []).map((row) => {
@@ -112,7 +113,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
         <div>
           <p className="finance-owner-eyebrow">Finished work, not yet billed</p>
           <h2 id="completed-work-title">{loading ? 'Checking finished work…' : rows.length === 0 ? 'Everything finished has been billed' : total > 0 ? `${money(total)} waiting to be invoiced` : 'Callouts need attention in Dispatch before invoicing'}</h2>
-          <p className="subtitle">Completed workshop jobs, callouts and priced patrol visits turn into a draft invoice per client, following how each client is billed. On fixed-price agreements only Extra callouts are billed; contracted callouts are covered by the agreement price. Pay as you go, do and invoice and per request clients are billed for every callout at the agreed rates. Nothing is sent until you review it.</p>
+          <p className="subtitle">Completed workshop jobs, callouts and priced patrol visits turn into a draft invoice per client, following how each client is billed. On fixed-price agreements only Extra callouts are billed; contracted callouts are covered by the agreement price. Pay as you go and per request clients are billed for every callout at the agreed rates. Do and invoice clients have given standing authority, so every callout is invoiced at actuals; a job over their standing authority limit waits for their approval reference. Nothing is sent until you review it.</p>
         </div>
         {onOpenInvoices && <button type="button" className="btn btn-secondary" onClick={onOpenInvoices}>Open invoices</button>}
       </header>

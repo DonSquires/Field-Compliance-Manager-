@@ -33,8 +33,12 @@ describe('finance period Contract and Extra split', () => {
       'no agreement price recorded',
       'not invoiced revenue',
       'Contract and Extra by agreement',
-      'Billed at agreed rates',
+      'Billable, no Contract/Extra split',
       'Pay as you go, do and invoice, per request',
+      'at actuals (do and invoice)',
+      'at agreed rates (pay as you go)',
+      'describeBillableByModel(totals.billable_by_model, money)',
+      'billableHow(row.commercial_model)',
     ]) expect(panel).toContain(text);
     expect(panel).toContain('role="alert"');
     expect(panel).toContain('aria-busy="true"');

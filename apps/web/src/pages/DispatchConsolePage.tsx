@@ -28,7 +28,7 @@ import {
   shiftHealthBadge,
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
-import { BillingBasisChip, BillingBasisFields, ClientReferenceField, DispatchJobBillingPanel, saveJobBillingBasis, saveJobClientReference, useExtraWorkOrders, type BillingBasis, type BillingFormChoice } from '../components/DispatchBillingBasis';
+import { BillingBasisChip, BillingBasisFields, ClientReferenceField, DispatchJobBillingPanel, saveJobBillingBasis, saveJobClientReference, takesClientReference, useExtraWorkOrders, type BillingBasis, type BillingFormChoice } from '../components/DispatchBillingBasis';
 import { COMMERCIAL_MODEL_HELP, commercialModelLabel, loadCommercialModels, useAgreementCommercialModels, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
 import { localToday } from '../lib/agreementTerm';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
@@ -100,6 +100,7 @@ interface DispatchJob {
   extraWorkOrderId: string | null;
   commercialModel?: CommercialModel | null;
   clientOrderReference?: string | null;
+  standingAuthorityLimit?: number | null;
 }
 
 interface ClientSite {
@@ -340,8 +341,9 @@ const DispatchConsolePage: React.FC = () => {
 
   const { orders: agreementExtraOrders } = useExtraWorkOrders(selectedAgreement?.id);
   const selectedAgreementIds = useMemo(() => (selectedAgreement ? [selectedAgreement.id] : []), [selectedAgreement]);
-  const { models: selectedAgreementModels, loading: selectedModelLoading, error: selectedModelError } = useAgreementCommercialModels(selectedAgreementIds);
+  const { models: selectedAgreementModels, limits: selectedAgreementLimits, loading: selectedModelLoading, error: selectedModelError } = useAgreementCommercialModels(selectedAgreementIds);
   const selectedCommercialModel = selectedAgreement ? selectedAgreementModels.get(selectedAgreement.id) ?? null : null;
+  const selectedStandingAuthorityLimit = selectedAgreement ? selectedAgreementLimits.get(selectedAgreement.id) ?? null : null;
   const formUsesContractExtra = usesContractExtra(selectedCommercialModel);
   const [formClientReference, setFormClientReference] = useState('');
 
@@ -474,9 +476,12 @@ const DispatchConsolePage: React.FC = () => {
           extraWorkOrderId: j.extra_work_order_id ?? null,
           clientOrderReference: j.client_order_reference ?? null,
         }));
-        const { models: jobModels, error: modelError } = await loadCommercialModels(formatted.map((job) => job.serviceAgreementId ?? ''));
+        const { models: jobModels, limits: jobLimits, error: modelError } = await loadCommercialModels(formatted.map((job) => job.serviceAgreementId ?? ''));
         if (modelError) throw new Error(`Billing models could not be loaded: ${modelError}`);
-        for (const job of formatted) job.commercialModel = job.serviceAgreementId ? jobModels.get(job.serviceAgreementId) ?? null : null;
+        for (const job of formatted) {
+          job.commercialModel = job.serviceAgreementId ? jobModels.get(job.serviceAgreementId) ?? null : null;
+          job.standingAuthorityLimit = job.serviceAgreementId ? jobLimits.get(job.serviceAgreementId) ?? null : null;
+        }
         setJobs(formatted);
         // ATLAS READS: alarm_events (one per alarm-response job; recorded by record_alarm_signal)
         const alarmJobIds = formatted.filter((job) => job.jobType === 'alarm_response').map((job) => job.id);
@@ -782,7 +787,7 @@ const DispatchConsolePage: React.FC = () => {
         const { error: billingError } = await saveJobBillingBasis(createdJobId, formBilling, formExtraOrderId, null);
         if (billingError) setWarning(`Job created, but its billing was not set: ${billingError.message}. Open the job and set billing before it is invoiced.`);
       }
-      if (selectedCommercialModel === 'per_request' && formClientReference.trim()) {
+      if (takesClientReference(selectedCommercialModel) && formClientReference.trim()) {
         const { error: referenceError } = await saveJobClientReference(createdJobId, formClientReference.trim(), null);
         if (referenceError) setWarning(`Job created, but the client reference was not saved: ${referenceError.message}. Open the job and add it before it is invoiced.`);
       }
@@ -1617,7 +1622,7 @@ const DispatchConsolePage: React.FC = () => {
               <div><span className={`dispatch-billing-chip is-rated`}>{commercialModelLabel(selectedCommercialModel)}</span></div>
               <div className="dispatch-console-form-note">{COMMERCIAL_MODEL_HELP[selectedCommercialModel as CommercialModel]}</div>
             </div>
-            {selectedCommercialModel === 'per_request' && <ClientReferenceField idPrefix="dispatch-new-job" value={formClientReference} onChange={setFormClientReference} />}
+            {takesClientReference(selectedCommercialModel) && <ClientReferenceField idPrefix="dispatch-new-job" value={formClientReference} onChange={setFormClientReference} model={selectedCommercialModel} limit={selectedStandingAuthorityLimit} />}
           </>}
 
       {resolvedRate && (

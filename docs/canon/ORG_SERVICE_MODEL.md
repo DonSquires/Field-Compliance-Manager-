@@ -324,7 +324,7 @@ reason required to change an existing model). The four models:
 |---|---|---|---|
 | `fixed_price_with_extras` | A fixed contract price covers the agreed service; anything outside is Extra. | Each callout is Contracted work or Extra (rules above). | Only Extra callouts are billed; Contract is covered by the price; unclassified callouts block invoicing. |
 | `pay_as_you_go` | All work charged at agreed rates each billing cycle. | No Contract/Extra decision; `set_dispatch_job_billing_basis` refuses. | Every completed callout is billed. |
-| `do_and_invoice` | Standing authority to do what is needed, then invoice the work done. | As pay as you go. | Every completed callout is billed. |
+| `do_and_invoice` | Standing authority: R&M does what is needed without asking first and invoices the actual time, travel and materials. **Not** the same as pay as you go (see the ruling below). | No Contract/Extra decision. A job over the agreement's standing authority limit needs the client's approval reference (same field and RPC as per request). | Every completed callout is invoiced at actuals (line text `Actuals — …`); a job over the limit with no approval reference blocks invoicing. |
 | `per_request` | The client asks for each job. | The job carries the client's request or PO reference (`dispatch_jobs.client_order_reference`, via `set_dispatch_job_client_reference`, audited, reason to change, refused once invoiced). | Every completed callout is billed; a callout with no reference blocks invoicing and the reference is printed on the line. |
 
 - **No model yet = Contract/Extra.** An agreement with no model behaves as fixed
@@ -334,9 +334,11 @@ reason required to change an existing model). The four models:
   used for the invoice due date when an agreement is invoiced), invoice email,
   standing PO, rates and notes are optional terms on the same row.
 - **Finance shows the difference.** `get_finance_pl_period_billing_basis` moves
-  all service cost on non-fixed agreements into a separate **billed at agreed
-  rates** bucket, so Contract, Extra and not classified only ever describe
-  fixed-price clients. Totals still reconcile to the period's recorded cost.
+  all service cost on non-fixed agreements into a separate **billable, no
+  Contract/Extra split** bucket, broken down as agreed rates (pay as you go),
+  actuals (do and invoice) and per request, so Contract, Extra and not
+  classified only ever describe fixed-price clients. Totals still reconcile to
+  the period's recorded cost.
 - **R&M seed (owner confirmed, 2026-10-26).** Fixed price + Extra: OneFortyOne,
   STAND, TDC, Birdhurst, Stringer, Wrattens, Thomas Bros, Taylors. Pay as you
   go: NCC, R&M Other Private, Private Parks, Private Redvale-Merc. Do and
@@ -345,3 +347,35 @@ reason required to change an existing model). The four models:
   payment terms are seeded as defaults until confirmed per client.
 - **OneFortyOne contract price.** Recorded as an accepted quote (13,333 per
   month, per the R&M finance workbook Sheet2), with its commercial snapshot.
+
+## Ruling 2026-10-26 — do and invoice is standing authority, not pay as you go
+
+The first build treated `do_and_invoice` exactly like `pay_as_you_go`. That was
+wrong. Pay as you go bills each job at the agreed rates. Do and invoice means
+the client has given R&M **standing authority** to do what is needed without
+asking first; R&M then invoices the **actual** time, travel and materials.
+The authority can be capped:
+
+- **Standing authority limit.** `crm_commercial_settings.standing_authority_limit`
+  (numeric, excl. GST, per job; NULL = no cap). A CHECK allows a value only on
+  `do_and_invoice` agreements. It is written only through
+  `set_agreement_commercial_terms` (audited); switching an agreement to another
+  model clears it.
+- **Over the limit needs approval.** A job whose charge lines (all of them,
+  invoiced or not) total more than the limit needs the client's approval
+  reference, recorded through `set_dispatch_job_client_reference` (audited).
+  Until then `generate_crm_invoice_from_completed_work` refuses to invoice the
+  client, and the agreement summary counts the job in
+  `jobs_over_standing_authority_without_approval`.
+- **Invoices say actuals.** Do-and-invoice lines are prefixed `Actuals — `
+  (plus `Client approval REF — ` when a reference exists).
+- **No limit is set for any client yet.** The R&M finance documents define no
+  standing authority amount, so the seeded agreements (Tasman Pine Forests,
+  Merril and Ring, NMDHB, NZ Health) have no cap until the owner sets one.
+
+Migration `20261026100000_do_and_invoice_standing_authority.sql` also fixed a
+defect found while previewing this: the unique index
+`idx_invoice_line_items_source_dispatch` allowed only one invoice line per
+dispatch job, but completion writes Attendance and Travel as separate charge
+lines, so any job with travel could not be invoiced. The index is now
+non-unique, and the invoice loop locks the charge lines it stamps.

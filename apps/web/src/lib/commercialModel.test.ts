@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { billingAttention, type AgreementBillingSummary } from './agreementBillingSummary';
-import { asCommercialModel, commercialTermsFormFrom, commercialTermsPayload, commercialTermsProblem, usesContractExtra } from './commercialModel';
+import { asCommercialModel, COMMERCIAL_MODEL_HELP, COMMERCIAL_MODEL_PRICING, commercialTermsFormFrom, commercialTermsPayload, commercialTermsProblem, overStandingAuthority, usesContractExtra } from './commercialModel';
 
 describe('commercial model', () => {
   it('only fixed price + Extra, or no model yet, uses the Contracted work / Extra decision', () => {
@@ -33,8 +33,32 @@ describe('commercial model', () => {
   it('sends only the keys the RPC accepts, clearing blanks', () => {
     const form = { ...commercialTermsFormFrom(null), model: 'pay_as_you_go' as const, paymentTermsDays: ' 20 ', invoiceEmail: ' ', rates: { ...commercialTermsFormFrom(null).rates, base_rate_per_hour: '45.5' } };
     const payload = commercialTermsPayload(form);
-    expect(Object.keys(payload).sort()).toEqual(['base_rate_per_hour', 'billing_cycle', 'callout_minimum_hours', 'callout_rate_per_hour', 'invoice_email', 'notes', 'overtime_rate_per_hour', 'payment_terms_days', 'purchase_order_number', 'travel_rate_per_km']);
-    expect(payload).toMatchObject({ billing_cycle: 'monthly', payment_terms_days: 20, invoice_email: null, base_rate_per_hour: 45.5, travel_rate_per_km: null });
+    expect(Object.keys(payload).sort()).toEqual(['base_rate_per_hour', 'billing_cycle', 'callout_minimum_hours', 'callout_rate_per_hour', 'invoice_email', 'notes', 'overtime_rate_per_hour', 'payment_terms_days', 'purchase_order_number', 'standing_authority_limit', 'travel_rate_per_km']);
+    expect(payload).toMatchObject({ billing_cycle: 'monthly', payment_terms_days: 20, invoice_email: null, base_rate_per_hour: 45.5, travel_rate_per_km: null, standing_authority_limit: null });
+  });
+
+  it('keeps do and invoice distinct from pay as you go: a standing authority limit, validated and sent only for do and invoice', () => {
+    expect(COMMERCIAL_MODEL_HELP.do_and_invoice).toMatch(/Standing authority/);
+    expect(COMMERCIAL_MODEL_HELP.do_and_invoice).toMatch(/actual time, travel and materials/);
+    expect(COMMERCIAL_MODEL_HELP.pay_as_you_go).toMatch(/agreed rates/);
+    expect(COMMERCIAL_MODEL_HELP.pay_as_you_go).not.toMatch(/standing authority/i);
+    expect(COMMERCIAL_MODEL_PRICING.do_and_invoice).toMatch(/actuals/);
+    expect(COMMERCIAL_MODEL_PRICING.pay_as_you_go).toMatch(/agreed rates/);
+
+    const doForm = { ...commercialTermsFormFrom({ commercial_model: 'do_and_invoice', standing_authority_limit: 750 } as never), model: 'do_and_invoice' as const };
+    expect(doForm.standingAuthorityLimit).toBe('750');
+    expect(commercialTermsProblem(doForm, 'do_and_invoice', '')).toBeNull();
+    expect(commercialTermsPayload(doForm).standing_authority_limit).toBe(750);
+    expect(commercialTermsProblem({ ...doForm, standingAuthorityLimit: '-5' }, 'do_and_invoice', '')).toMatch(/standing authority limit/);
+    expect(commercialTermsProblem({ ...doForm, standingAuthorityLimit: '10.555' }, 'do_and_invoice', '')).toMatch(/standing authority limit/);
+    expect(commercialTermsPayload({ ...doForm, standingAuthorityLimit: ' ' }).standing_authority_limit).toBeNull();
+    // Switching away from do and invoice clears the limit, even if the field still holds a value.
+    expect(commercialTermsProblem({ ...doForm, model: 'pay_as_you_go', standingAuthorityLimit: 'junk' }, 'pay_as_you_go', '')).toBeNull();
+    expect(commercialTermsPayload({ ...doForm, model: 'pay_as_you_go' }).standing_authority_limit).toBeNull();
+
+    expect(overStandingAuthority(null, 10_000)).toBe(false);
+    expect(overStandingAuthority(500, 500)).toBe(false);
+    expect(overStandingAuthority(500, 500.01)).toBe(true);
   });
 
   it('raises no Contract/Extra warnings on agreements billed at agreed rates', () => {
@@ -44,6 +68,7 @@ describe('commercial model', () => {
       totals: { contract_cost: 0, extra_cost: 0, unclassified_cost: 50, unclassified_rows: 2, conflict_rows: 1 },
       dispatch: [{ basis: 'unclassified', lines: 3, total: 300, uninvoiced_total: 300 }],
       extraOrders: [],
+      standingAuthority: { limit: null, jobsWithoutApproval: null },
     };
     expect(billingAttention(summary).length).toBe(4);
     expect(billingAttention(summary, 'fixed_price_with_extras').length).toBe(4);

@@ -38,6 +38,8 @@ export interface AgreementBillingSummary {
   totals: { contract_cost: number; extra_cost: number; unclassified_cost: number; unclassified_rows: number; conflict_rows: number };
   dispatch: BillingDispatchBasis[];
   extraOrders: BillingExtraOrder[];
+  /** Do and invoice: the per-job standing authority limit (null = no limit) and jobs over it still waiting for the client's approval (null when no limit applies). */
+  standingAuthority: { limit: number | null; jobsWithoutApproval: number | null };
 }
 
 const num = (value: unknown): number => {
@@ -55,7 +57,10 @@ export function parseAgreementBillingSummary(raw: unknown): AgreementBillingSumm
   const price = data.agreement_price as Record<string, unknown> | null | undefined;
   const totals = (data.imported_cost_totals ?? {}) as Record<string, unknown>;
   const list = (value: unknown) => (Array.isArray(value) ? value as Array<Record<string, unknown>> : []);
+  const commercial = (data.commercial && typeof data.commercial === 'object' ? data.commercial : {}) as Record<string, unknown>;
+  const orNull = (value: unknown) => (value === null || value === undefined ? null : num(value));
   return {
+    standingAuthority: { limit: orNull(commercial.standing_authority_limit), jobsWithoutApproval: orNull(commercial.jobs_over_standing_authority_without_approval) },
     agreementPrice: price ? { lines: num(price.lines), total: num(price.total) } : null,
     months: list(data.imported_cost_months).map((row) => ({
       month: String(row.month),
@@ -107,10 +112,14 @@ export function monthLabel(month: string): string {
   return new Date(year, mm - 1, 1).toLocaleDateString('en-NZ', { month: 'short', year: 'numeric' });
 }
 
-/** Plain-language warnings, in the order a finance person should act on them. Agreements not billed fixed price + Extra have no Contract/Extra decision, so none of these apply. */
+/** Plain-language warnings, in the order a finance person should act on them. Agreements not billed fixed price + Extra have no Contract/Extra decision, so only the do-and-invoice standing authority check applies to them. */
 export function billingAttention(summary: AgreementBillingSummary, model: CommercialModel | null = null): string[] {
   const notes: string[] = [];
-  if (!usesContractExtra(model)) return notes;
+  if (!usesContractExtra(model)) {
+    const waiting = model === 'do_and_invoice' ? summary.standingAuthority.jobsWithoutApproval ?? 0 : 0;
+    if (waiting > 0) notes.push(`${waiting} job${waiting === 1 ? ' costs' : 's cost'} more than the standing authority limit and ${waiting === 1 ? 'has' : 'have'} no client approval reference. Record the approval in Dispatch — invoicing is blocked until then.`);
+    return notes;
+  }
   const unsetCallouts = summary.dispatch.find((row) => row.basis === 'unclassified');
   if (unsetCallouts && unsetCallouts.lines > 0) {
     notes.push(`${unsetCallouts.lines} callout charge line${unsetCallouts.lines === 1 ? ' has' : 's have'} no billing decision. Set them in Dispatch before invoicing — invoicing is blocked until then.`);
