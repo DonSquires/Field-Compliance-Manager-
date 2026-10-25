@@ -1462,9 +1462,11 @@ async function runAgenticEngineer({
       }
       // A window overflow or an exhausted quota will not clear on its own; a dropped connection or a
       // 5xx usually does. One dropped connection at turn 42 used to discard 41 turns of work (job
-      // 1021dbaa): give the same provider three consecutive chances with a short backoff first.
+      // 1021dbaa): give the same provider three consecutive chances with a short backoff first. A
+      // timeout is different: it already spent a whole turn budget, so escalate at once when possible.
+      const timedOut = response.timeout === true || status === 408 || response.code === 'provider_timeout';
       const transient = (ESCALATE_STATUSES.has(status) && status !== 413 && status !== 429) || response.timeout;
-      const giveUpHere = status === 413 || status === 429 || (transient && unavailableStreak >= 3);
+      const giveUpHere = status === 413 || status === 429 || timedOut || (transient && unavailableStreak >= 3);
       if (giveUpHere && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) { unavailableStreak = 0; continue; }
       if (unavailableStreak >= 3) { outcome = { ok: false, error: `model unavailable: ${response.error}` }; break; }
       turns--; // the turn did not happen

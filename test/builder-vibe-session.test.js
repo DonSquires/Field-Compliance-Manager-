@@ -1170,3 +1170,32 @@ test('a pure answer with no tool use does not trigger the browser walk', async (
   assert.equal(result.error, undefined);
   assert.equal(walk.calls.length, 0);
 });
+
+const VIBE_TIMEOUT_SHAPES = [
+  ['client abort', { ok: false, status: 408, error: 'model gateway timed out', timeout: true }],
+  ['gateway provider timeout', { ok: false, status: 504, error: 'model provider timed out', code: 'provider_timeout' }],
+];
+
+for (const [shape, timedOutResponse] of VIBE_TIMEOUT_SHAPES) {
+  test(`a model timeout (${shape}) switches to the next candidate at once and tells the owner why`, async () => {
+    const seen = [];
+    const { store, deps } = setup([], {
+      callModel: async ({ modelRequest }) => {
+        seen.push(`${modelRequest.provider}/${modelRequest.model_name}`);
+        if (seen.length === 1) return { ...timedOutResponse };
+        const call = seen.length === 2
+          ? { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"hello"' } }
+          : { tool: 'reply', args: { message: 'Changed the greeting.' } };
+        return { ok: true, data: { content: JSON.stringify(call) } };
+      },
+    });
+    const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+    assert.equal(result.error, undefined);
+    assert.notEqual(seen[1], seen[0], 'the timed-out model is not given a second full turn budget');
+    const notice = store.state.rows.find(row => row.payload?.reason === 'timeout');
+    assert.ok(notice, 'the owner sees why the model changed');
+    assert.equal(`${notice.payload.previous_provider}/${notice.payload.previous_model}`, seen[0]);
+    assert.equal(`${notice.payload.provider}/${notice.payload.model}`, seen[1]);
+    assert.match(notice.content, /did not answer within \d+ min; switching to/);
+  });
+}
