@@ -166,6 +166,22 @@ function toolCallKey(tool, args) {
 
 const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
 const EDIT_VIBE_TOOLS = new Set(['write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'generate_visual_baselines']);
+// Files an edit call targets, so a failure on one file is cleared only by a later success on that file.
+function editTargets(tool, args = {}) {
+  if (tool === 'apply_patch') {
+    const paths = new Set();
+    for (const line of String(args.diff || '').split('\n')) {
+      const match = /^(?:\+\+\+|---) (?:[ab]\/)?(\S+)/.exec(line) || /^\*\*\* (?:Update|Add|Delete) File: (.+?)\s*$/.exec(line) || /^\*\*\* Move to: (.+?)\s*$/.exec(line);
+      if (match && match[1] !== '/dev/null') paths.add(match[1]);
+    }
+    return paths.size ? [...paths] : ['apply_patch (no file paths in diff)'];
+  }
+  if (tool === 'generate_visual_baselines') {
+    const paths = Array.isArray(args.paths) ? args.paths.map(String).filter(Boolean) : [];
+    return paths.length ? paths : ['generate_visual_baselines'];
+  }
+  return [String(args.path || tool)];
+}
 const isVerificationCommand = command => /^(?:node --(?:test|check)\b|npm (?:run (?:test|lint|build)|test)\b)/.test(command);
 const verificationKey = command => /^npm (?:run test|test) --prefix apps\/web -- .*?\be2e\//.test(command) ? 'human_test'
   : /^npm (?:run test|test)\b/.test(command)
@@ -801,8 +817,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const handoff = async (reply, model, { browser = true } = {}) => {
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
-    if (!effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply)) reply = `No files changed during this message.\n\n${reply}`;
-    else if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
+    const noChange = !effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply);
+    if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
+    if (noChange) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
@@ -972,9 +989,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
         const beforeEdit = EDIT_VIBE_TOOLS.has(call.tool) ? uiFingerprint(changedVsBase()) : null;
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
         if (EDIT_VIBE_TOOLS.has(call.tool)) {
-          const target = String(args.path || call.tool);
-          if (!result?.error) failedEdits.delete(target);
-          else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
+          for (const target of editTargets(call.tool, args)) {
+            if (!result?.error) failedEdits.delete(target);
+            else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
+          }
         }
         if (beforeEdit !== null && !result?.error && beforeEdit !== uiFingerprint(changedVsBase())) {
           effectiveEdits++;
@@ -1221,4 +1239,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
