@@ -125,6 +125,21 @@ full runtime validation passed 1,715 tests with nine existing skips.
 
 ### 3. Evidence-supported investigation
 
+Cancellation recovery follow-up: the private Chat client enforces a shorter
+turn deadline than the gateway's inference deadline. Source inspection found
+that a disconnected model-run HTTP caller did not cancel upstream inference,
+leaving the local provider occupied during fallback. Propagate response-close
+cancellation to the upstream fetch, including body consumption; release the
+existing serial guard only when that invocation unwinds. Caller cancellation
+must not poison provider health or count as a planning timeout. This fixes a
+specific resource-lifecycle defect, not tool-loop reasoning or model competence.
+Review follow-up extends the same caller signal through health and native-tool
+capability probes while preserving their existing deadlines. Cancellation during
+fetch or body consumption must return as caller cancellation before updating
+health/capability caches; the next request must perform the unfinished probe
+again. Focused regression tests cover both probe phases and the OpenAI model-list
+body as well as inference cancellation.
+
 Owner clarification after #224: Atlas is a map, not evidence. It identifies
 where to research; facts require investigation of those locations. The live
 `bob_atlas_blast_radius` card retrieved during acceptance still said "PROVEN

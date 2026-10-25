@@ -18,6 +18,31 @@ const webhookSecret = 'test-webhook-secret';
 const baseUrl = `http://127.0.0.1:${port}`;
 let serverProcess;
 
+test('model-run disconnect cancels upstream work without writing to a closed response', async () => {
+  const { EventEmitter } = require('node:events');
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  const start = source.indexOf("  if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run')");
+  const end = source.indexOf("  // Bob's terminal", start);
+  const route = vm.runInNewContext(`(async function(req,res){${source.slice(start, end)}})`, {
+    AbortController, url: { pathname: '/api/bob/builder/model-run' }, body: {}, modelGatewayConfig: {},
+    modelGatewayAuthorized: () => true,
+    invokeBuilderModel: async ({ signal }) => {
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      return { status: 499, body: { code: 'request_cancelled' } };
+    },
+    json: () => { throw new Error('must not write to disconnected caller'); },
+  });
+  const res = new EventEmitter();
+  res.writableEnded = false;
+  res.destroyed = false;
+  const pending = route({ method: 'POST' }, res);
+  assert.equal(res.listenerCount('close'), 1);
+  res.destroyed = true;
+  res.emit('close');
+  await pending;
+  assert.equal(res.listenerCount('close'), 0);
+});
+
 test('single-step acceptance does not wait for preflight or models and shares the run lock', async () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   const functionSource = source.slice(source.indexOf('async function runBuilderJobBounded('), source.indexOf('// Bob autopilot:'));
