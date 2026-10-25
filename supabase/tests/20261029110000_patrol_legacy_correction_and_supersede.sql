@@ -55,7 +55,8 @@ create or replace function pg_temp.evt(
   );
 $$;
 create or replace function pg_temp.dart_update_evt(
-  p_ref text, p_hash text, p_site uuid, p_at text, p_row integer, p_officer uuid, p_location text
+  p_ref text, p_hash text, p_site uuid, p_at text, p_row integer, p_officer uuid, p_location text,
+  p_comments text default 'Prefeed check camera.'
 ) returns jsonb language sql as $$
   select fixture || jsonb_build_object('payload', fixture->'payload' || jsonb_build_object(
     'job_number', null,
@@ -64,7 +65,7 @@ create or replace function pg_temp.dart_update_evt(
     'location_raw', p_location
   ))
   from (select pg_temp.evt(p_ref, p_hash, p_site, null, p_at,
-    p_row, p_officer, 'Update 251215') as fixture) source;
+    p_row, p_officer, 'Update 251215', 20, p_comments) as fixture) source;
 $$;
 create or replace function pg_temp.manifest(p_key text, p_client uuid, p_sheet text default null) returns jsonb language sql as $$
   select jsonb_build_object(
@@ -126,7 +127,8 @@ declare
   v_err text;
 begin
   foreach v_key in array array['dst', 'std', 'time', 'identity', 'payload', 'linked', 'sourced',
-    'copy', 'differs', 'leg', 'legbad', 'pair', 'paircopy', 'hold', 'holdcopy'] loop
+    'copy', 'differs', 'leg', 'legbad', 'pair', 'paircopy', 'hold', 'holdcopy',
+    'year', 'winter', 'copylinked', 'early', 'earlycopy', 'dup', 'dupcopy1', 'dupcopy2'] loop
     v_ref := v_ref || jsonb_build_object(v_key, 'rm_patrol_import:ORACLE:' || v_key || '-' || v_suffix);
   end loop;
 
@@ -149,7 +151,7 @@ begin
   -- Seed the records through the governed importer, then age them into legacy rows.
   perform pg_temp.as_user(v_automation);
   v_batch := public.begin_patrol_import_batch(v_provider, v_client, 'Oracle legacy seed', 'oracle.xlsx', v_hash, 'xlsx',
-    pg_temp.manifest('oracle-legacy-seed-' || v_suffix, v_client),     '{"headers":[]}'::jsonb, 15, 0, 0);
+    pg_temp.manifest('oracle-legacy-seed-' || v_suffix, v_client),     '{"headers":[]}'::jsonb, 23, 0, 0);
   perform public.stage_patrol_import_chunk(v_batch.id, v_provider, v_client, '[]'::jsonb, jsonb_build_array(
     pg_temp.evt(v_ref->>'dst', v_hash, v_site, 'Prefeed', v_nzdt, 1, v_officer),
     pg_temp.evt(v_ref->>'std', v_hash, v_site, 'Prefeed', v_nzst, 2, v_officer),
@@ -158,19 +160,28 @@ begin
     pg_temp.evt(v_ref->>'payload', v_hash, v_site, 'Prefeed', v_nzdt, 5, v_officer),
     pg_temp.evt(v_ref->>'linked', v_hash, v_site, 'Prefeed', v_nzdt, 6, v_officer),
     pg_temp.evt(v_ref->>'sourced', v_hash, v_site, 'Prefeed', v_nzdt, 7, v_officer),
-    pg_temp.evt(v_ref->>'copy', v_hash, v_site, null, v_nzdt, 8, v_officer, 'Update'),
-    pg_temp.evt(v_ref->>'differs', v_hash, v_site, 'Cat', v_nzdt, 9, v_officer, 'Update'),
+    pg_temp.evt(v_ref->>'copy', v_hash, v_site, null, v_nzdt, 8, v_officer, 'Copy'),
+    pg_temp.evt(v_ref->>'differs', v_hash, v_site, 'Cat', v_nzdt, 9, v_officer, 'Copy'),
     pg_temp.evt(v_ref->>'leg', v_hash, v_site, 'Prefeed', v_nzst, 10, v_officer),
     pg_temp.evt(v_ref->>'legbad', v_hash, v_site, 'Prefeed', v_nzst, 11, v_officer),
     pg_temp.evt(v_ref->>'pair', v_hash, v_site, 'Prefeed', v_nzdt, 12, v_officer),
     pg_temp.evt(v_ref->>'paircopy', v_hash, v_site, null, v_nzdt, 14, v_officer, 'Update 251215'),
     pg_temp.evt(v_ref->>'hold', v_hash, v_site, 'Prefeed', v_nzdt, 13, v_officer),
-    pg_temp.evt(v_ref->>'holdcopy', v_hash, v_site, 'Cat', v_nzdt, 15, v_officer, 'Update 251215')
+    pg_temp.evt(v_ref->>'holdcopy', v_hash, v_site, 'Cat', v_nzdt, 15, v_officer, 'Update 251215'),
+    pg_temp.evt(v_ref->>'year', v_hash, v_site, null, v_nzdt, 16, v_officer, '2026'),
+    pg_temp.evt(v_ref->>'winter', v_hash, v_site, null, v_nzst, 17, v_officer, 'Copy'),
+    pg_temp.evt(v_ref->>'copylinked', v_hash, v_site, null, v_nzdt, 18, v_officer, 'Copy'),
+    pg_temp.evt(v_ref->>'early', v_hash, v_site, 'Prefeed', v_nzdt, 19, v_officer, '2025', 20, 'Early check.'),
+    pg_temp.evt(v_ref->>'earlycopy', v_hash, v_site, null, v_nzdt, 20, v_officer, 'Update 251215', 20, 'Early check.'),
+    pg_temp.evt(v_ref->>'dup', v_hash, v_site, 'Prefeed', v_nzdt, 21, v_officer, '2025', 20, 'Dup check.'),
+    pg_temp.evt(v_ref->>'dupcopy1', v_hash, v_site, null, v_nzdt, 22, v_officer, 'Update 251215', 20, 'Dup check.'),
+    pg_temp.evt(v_ref->>'dupcopy2', v_hash, v_site, null, v_nzdt, 23, v_officer, 'Update 251215', 20, 'Dup check.')
   ), '[]'::jsonb);
   perform public.finalize_patrol_import_batch(v_batch.id, '{"direct_workshop_writes":0,"direct_finance_writes":0}'::jsonb);
   perform pg_temp.as_admin();
   foreach v_key in array array['dst', 'std', 'time', 'identity', 'payload', 'linked', 'sourced',
-    'copy', 'differs', 'leg', 'legbad', 'pair', 'paircopy', 'hold', 'holdcopy'] loop
+    'copy', 'differs', 'leg', 'legbad', 'pair', 'paircopy', 'hold', 'holdcopy',
+    'year', 'winter', 'copylinked', 'early', 'earlycopy', 'dup', 'dupcopy1', 'dupcopy2'] loop
     v_id := v_id || jsonb_build_object(v_key, (select id from public.location_events
       where organization_id = v_client and external_ref = v_ref->>v_key));
   end loop;
@@ -183,17 +194,24 @@ begin
   perform pg_temp.make_leg_legacy((v_id->>'legbad')::uuid, 999);
   perform pg_temp.make_legacy((v_id->>'pair')::uuid, interval '1 hour');
   perform pg_temp.make_legacy((v_id->>'hold')::uuid, interval '1 hour');
+  perform pg_temp.make_legacy((v_id->>'early')::uuid, interval '1 hour');
+  perform pg_temp.make_legacy((v_id->>'dup')::uuid, interval '1 hour');
   perform pg_temp.make_legacy((v_id->>'identity')::uuid, interval '1 hour');
   update public.location_events set status = 'Check' where id = (v_id->>'identity')::uuid;
   perform pg_temp.make_legacy((v_id->>'payload')::uuid, interval '1 hour');
   update public.location_events set payload = payload || '{"job_cost":30}' where id = (v_id->>'payload')::uuid;
   perform pg_temp.make_legacy((v_id->>'linked')::uuid, interval '1 hour');
   insert into public.file_import_row_proposals(organization_id, batch_id, source_record_key, source_row_number, target_type, source_values, status)
-  values (v_provider, v_batch.id, v_ref->>'linked', 6, 'finance_service_cost', jsonb_build_object('job_cost', 20), 'approved');
+  values (v_provider, v_batch.id, v_ref->>'linked', 6, 'finance_service_cost', jsonb_build_object('job_cost', 20), 'approved'),
+         (v_provider, v_batch.id, v_ref->>'copylinked', 18, 'finance_service_cost', jsonb_build_object('job_cost', 20), 'approved');
   -- Worksheet copies carry provenance but repeat the canonical visit one hour late.
   update public.location_events set occurred_at = occurred_at + interval '1 hour'
   where id in ((v_id->>'copy')::uuid, (v_id->>'differs')::uuid,
-    (v_id->>'paircopy')::uuid, (v_id->>'holdcopy')::uuid);
+    (v_id->>'paircopy')::uuid, (v_id->>'holdcopy')::uuid, (v_id->>'year')::uuid, (v_id->>'winter')::uuid,
+    (v_id->>'copylinked')::uuid, (v_id->>'dupcopy1')::uuid, (v_id->>'dupcopy2')::uuid);
+  -- The legacy artifact never made a copy early.
+  update public.location_events set occurred_at = occurred_at - interval '1 hour'
+  where id = (v_id->>'earlycopy')::uuid;
 
   perform pg_temp.as_user(v_automation);
   v_batch := public.begin_patrol_import_batch(v_provider, v_client, 'Oracle legacy correction', 'oracle.xlsx', v_hash, 'xlsx',
@@ -269,7 +287,13 @@ begin
       jsonb_build_object('kind', 'event', 'record_id', v_id->>'pair', 'external_ref', v_ref->>'pair',
         'source_fingerprint', v_fp, 'desired', pg_temp.evt(v_ref->>'pair', v_hash, v_site, 'Prefeed', v_nzdt, 12, v_officer)),
       jsonb_build_object('kind', 'event', 'record_id', v_id->>'hold', 'external_ref', v_ref->>'hold',
-        'source_fingerprint', v_fp, 'desired', pg_temp.evt(v_ref->>'hold', v_hash, v_site, 'Prefeed', v_nzdt, 13, v_officer))))
+        'source_fingerprint', v_fp, 'desired', pg_temp.evt(v_ref->>'hold', v_hash, v_site, 'Prefeed', v_nzdt, 13, v_officer)),
+      jsonb_build_object('kind', 'event', 'record_id', v_id->>'early', 'external_ref', v_ref->>'early',
+        'source_fingerprint', v_fp, 'desired', pg_temp.evt(v_ref->>'early', v_hash, v_site, 'Prefeed', v_nzdt, 19, v_officer,
+          '2025', 20, 'Early check.')),
+      jsonb_build_object('kind', 'event', 'record_id', v_id->>'dup', 'external_ref', v_ref->>'dup',
+        'source_fingerprint', v_fp, 'desired', pg_temp.evt(v_ref->>'dup', v_hash, v_site, 'Prefeed', v_nzdt, 21, v_officer,
+          '2025', 20, 'Dup check.'))))
   loop
     perform pg_temp.check('Update test canonical legacy row is corrected', v_result.outcome = 'corrected');
   end loop;
@@ -289,6 +313,7 @@ begin
           'copy_external_ref', v_ref->>'paircopy', 'copy_record_id', v_id->>'paircopy',
           'update_external_ref', 'rm_patrol_import:DART_UPDATE:pair-' || v_suffix,
           'update_source_fingerprint', repeat('2', 64),
+          'record_fingerprint', repeat('4', 64),
           'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:pair-' || v_suffix,
             v_hash, v_site, v_nzdt, 14, v_officer, 'New reserve road')
         ),
@@ -299,19 +324,74 @@ begin
           'copy_external_ref', v_ref->>'holdcopy', 'copy_record_id', v_id->>'holdcopy',
           'update_external_ref', 'rm_patrol_import:DART_UPDATE:hold-' || v_suffix,
           'update_source_fingerprint', repeat('3', 64),
+          'record_fingerprint', repeat('4', 64),
           'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:hold-' || v_suffix,
             v_hash, v_site, v_nzdt, 15, v_officer, 'Unchanged reserve road')
+        ),
+        jsonb_build_object(
+          'canonical', jsonb_build_object('kind', 'event', 'record_id', v_id->>'early',
+            'external_ref', v_ref->>'early', 'source_fingerprint', v_fp,
+            'desired', pg_temp.evt(v_ref->>'early', v_hash, v_site, 'Prefeed', v_nzdt, 19, v_officer, '2025', 20, 'Early check.')),
+          'copy_external_ref', v_ref->>'earlycopy', 'copy_record_id', v_id->>'earlycopy',
+          'update_external_ref', 'rm_patrol_import:DART_UPDATE:early-' || v_suffix,
+          'update_source_fingerprint', repeat('5', 64),
+          'record_fingerprint', repeat('4', 64),
+          'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:early-' || v_suffix,
+            v_hash, v_site, v_nzdt, 20, v_officer, 'Early reserve road', 'Early check.')
         )
       ))
   loop
     if v_result.external_ref like '%:pair-%' then
       perform pg_temp.check('one-to-one Update row patches and archives atomically',
         v_result.outcome = 'updated_and_superseded');
+    elsif v_result.external_ref like '%:early-%' then
+      perform pg_temp.check('an Update copy one hour early is not the legacy artifact and is held',
+        v_result.outcome = 'held' and v_result.detail = 'not_an_identical_copy');
     else
       perform pg_temp.check('status-mismatched Update copy is held without archiving',
         v_result.outcome = 'held' and v_result.detail = 'not_an_identical_copy');
     end if;
   end loop;
+
+  -- Two copies claimed for one canonical in the same call: neither is written.
+  for v_result in
+    select * from public.apply_dart_patrol_source_updates_and_supersede(
+      v_canonical_batch.id, v_update_batch.id, v_provider, v_client, (
+        select jsonb_agg(jsonb_build_object(
+          'canonical', jsonb_build_object('kind', 'event', 'record_id', v_id->>'dup',
+            'external_ref', v_ref->>'dup', 'source_fingerprint', v_fp,
+            'desired', pg_temp.evt(v_ref->>'dup', v_hash, v_site, 'Prefeed', v_nzdt, 21, v_officer, '2025', 20, 'Dup check.')),
+          'copy_external_ref', v_ref->>c, 'copy_record_id', v_id->>c,
+          'update_external_ref', 'rm_patrol_import:DART_UPDATE:' || c || '-' || v_suffix,
+          'update_source_fingerprint', repeat(n::text, 64),
+          'record_fingerprint', repeat('4', 64),
+          'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:' || c || '-' || v_suffix,
+            v_hash, v_site, v_nzdt, 21 + n::integer, v_officer, 'Dup reserve road', 'Dup check.')))
+        from unnest(array['dupcopy1', 'dupcopy2']) with ordinality as u(c, n)))
+  loop
+    perform pg_temp.check('a canonical claimed by two Update copies in one call is held',
+      v_result.outcome = 'held' and v_result.detail = 'ambiguous_update_pairing');
+  end loop;
+  -- Sent alone, one copy still collides with the other live Update copy of the same visit.
+  select outcome = 'held' and detail = 'ambiguous_update_copy_group' into v_ok
+  from public.apply_dart_patrol_source_updates_and_supersede(
+    v_canonical_batch.id, v_update_batch.id, v_provider, v_client, jsonb_build_array(jsonb_build_object(
+      'canonical', jsonb_build_object('kind', 'event', 'record_id', v_id->>'dup',
+        'external_ref', v_ref->>'dup', 'source_fingerprint', v_fp,
+        'desired', pg_temp.evt(v_ref->>'dup', v_hash, v_site, 'Prefeed', v_nzdt, 21, v_officer, '2025', 20, 'Dup check.')),
+      'copy_external_ref', v_ref->>'dupcopy1', 'copy_record_id', v_id->>'dupcopy1',
+      'update_external_ref', 'rm_patrol_import:DART_UPDATE:dupcopy1-' || v_suffix,
+      'update_source_fingerprint', repeat('1', 64),
+      'record_fingerprint', repeat('4', 64),
+      'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:dupcopy1-' || v_suffix,
+        v_hash, v_site, v_nzdt, 22, v_officer, 'Dup reserve road', 'Dup check.'))));
+  perform pg_temp.check('a single Update copy with a second live copy of the same visit is held', v_ok);
+  perform pg_temp.as_admin();
+  perform pg_temp.check('held Update pairings write nothing',
+    (select count(*) = 3 from public.location_events
+     where id in ((v_id->>'dupcopy1')::uuid, (v_id->>'dupcopy2')::uuid, (v_id->>'earlycopy')::uuid))
+    and not exists (select 1 from public.patrol_import_record_versions
+      where record_id in ((v_id->>'dup')::uuid, (v_id->>'early')::uuid) and change_kind = 'update'));
   perform pg_temp.as_admin();
   perform pg_temp.check('Update patch preserves the canonical job number, versions the source row, and records audit',
     (select payload->>'location_raw' = 'New reserve road' and payload->>'job_number' = split_part(v_ref->>'pair', ':', 3)
@@ -319,7 +399,10 @@ begin
        and (payload->>'job_cost')::numeric = 20 and (payload->>'job_kms')::numeric = 12
        and abs((payload->>'job_time_hours')::numeric - 0.7) < 0.000000001
      from public.location_events where id = (v_id->>'pair')::uuid)
-    and (select count(*) filter (where change_kind = 'update' and is_current and source_row = 14
+    and (select count(*) filter (where change_kind = 'update' and is_current and source_row = 12
+         and source_sheet = '2025' and source_fingerprint = v_fp and record_fingerprint = repeat('4', 64)
+         and overlay_source->>'source_row' = '14' and overlay_source->>'source_sheet' = 'Update 251215'
+         and overlay_source->>'source_fingerprint' = repeat('2', 64)
          and state_before <> state_after) = 1
      from public.patrol_import_record_versions where record_id = (v_id->>'pair')::uuid)
     and exists (select 1 from public.audit_log where action = 'dart_update_row_applied_and_copy_archived'
@@ -339,6 +422,7 @@ begin
       'copy_external_ref', v_ref->>'paircopy', 'copy_record_id', v_id->>'paircopy',
       'update_external_ref', 'rm_patrol_import:DART_UPDATE:pair-' || v_suffix,
       'update_source_fingerprint', repeat('2', 64),
+      'record_fingerprint', repeat('4', 64),
       'update_desired', pg_temp.dart_update_evt('rm_patrol_import:DART_UPDATE:pair-' || v_suffix,
         v_hash, v_site, v_nzdt, 14, v_officer, 'New reserve road')
     )));
@@ -356,7 +440,11 @@ begin
     select * from public.supersede_duplicate_patrol_events(v_batch.id, v_provider, v_client, jsonb_build_array(
       jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'copy', 'canonical_external_ref', v_ref->>'dst'),
       jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'differs', 'canonical_external_ref', v_ref->>'dst'),
-      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'linked', 'canonical_external_ref', v_ref->>'dst')))
+      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'linked', 'canonical_external_ref', v_ref->>'dst'),
+      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'copylinked', 'canonical_external_ref', v_ref->>'dst'),
+      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'year', 'canonical_external_ref', v_ref->>'dst'),
+      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'winter', 'canonical_external_ref', v_ref->>'std'),
+      jsonb_build_object('kind', 'event', 'external_ref', v_ref->>'holdcopy', 'canonical_external_ref', v_ref->>'hold')))
   loop
     v_key := split_part(split_part(v_result.external_ref, ':', 3), '-', 1);
     if v_key = 'copy' then
@@ -364,6 +452,18 @@ begin
     elsif v_key = 'differs' then
       perform pg_temp.check('a copy with a different issue status is held',
         v_result.outcome = 'held' and v_result.detail = 'not_an_identical_copy:status');
+    elsif v_key = 'linked' then
+      perform pg_temp.check('a copy without source provenance is held',
+        v_result.outcome = 'held' and v_result.detail = 'supersede_requires_same_workbook_provenance');
+    elsif v_key = 'year' then
+      perform pg_temp.check('a record from another source year is never superseded',
+        v_result.outcome = 'held' and v_result.detail = 'source_year_records_remain_separate');
+    elsif v_key = 'winter' then
+      perform pg_temp.check('a one-hour shift outside NZ daylight time is held',
+        v_result.outcome = 'held' and v_result.detail = 'not_an_identical_copy:occurred_at');
+    elsif v_key = 'holdcopy' then
+      perform pg_temp.check('an Update worksheet copy must use the paired path',
+        v_result.outcome = 'held' and v_result.detail = 'update_copy_requires_paired_path');
     else
       perform pg_temp.check('a copy with dependent finance review is held',
         v_result.outcome = 'held' and v_result.detail = 'dependent_proposal_review_required');
@@ -391,7 +491,7 @@ begin
   v_ok := false;
   begin
     perform public.stage_patrol_import_chunk(v_batch.id, v_provider, v_client, '[]'::jsonb,
-      jsonb_build_array(pg_temp.evt(v_ref->>'copy', v_hash, v_site, null, v_nzdt, 8, v_officer, 'Update')), '[]'::jsonb);
+      jsonb_build_array(pg_temp.evt(v_ref->>'copy', v_hash, v_site, null, v_nzdt, 8, v_officer, 'Copy')), '[]'::jsonb);
   exception when others then v_ok := true; v_err := sqlerrm; end;
   perform pg_temp.check('a superseded copy cannot be re-imported: ' || coalesce(v_err, ''), v_ok and v_err ilike '%supersed%');
 
@@ -403,7 +503,7 @@ begin
   perform pg_temp.check('a non-import identity cannot use the supersede path', v_ok);
   perform pg_temp.as_admin();
   perform pg_temp.check('correction and archive do not create or alter consequential proposals',
-    (select count(*) = 1 and bool_and(source_record_key = v_ref->>'linked' and status = 'approved'
+    (select count(*) = 2 and bool_and(source_record_key in (v_ref->>'linked', v_ref->>'copylinked') and status = 'approved'
        and target_type = 'finance_service_cost' and source_values = '{"job_cost":20}'::jsonb)
      from public.file_import_row_proposals where organization_id in (v_provider, v_client)));
   perform pg_temp.check('correction and archive do not create finance, roster, timesheet or payroll records',

@@ -195,21 +195,25 @@ function sheetCopyActions(copies, incoming, managedSourceFields, supersededRefs,
     }
     const canonicalRow = canonicalRows.get(action.canonical_external_ref);
     if (!canonicalRow) return { ...action, operation: 'hold', reason: 'canonical_source_row_missing' };
+    const updatePatch = Object.fromEntries(DART_UPDATE_FIELDS.filter(field => updateRow.payload?.[field] !== null
+      && updateRow.payload?.[field] !== undefined && updateRow.payload?.[field] !== '')
+      .map(field => [field, updateRow.payload[field]]));
+    // The canonical keeps its 2025 source identity; this is what FCM will hold once the Update overlay applies.
+    const patchedCanonical = { ...canonicalRow, payload: { ...canonicalRow.payload, ...updatePatch } };
     return {
       ...action,
       external_ref: action.canonical_external_ref,
       operation: 'update_and_supersede',
       record_id: canonicalAction.record_id,
       source_fingerprint: canonicalAction.source_fingerprint,
+      record_fingerprint: recordFingerprint(logicalRow(patchedCanonical, 'event', managedSourceFields)),
       canonical_desired: canonicalRow,
       copy_external_ref: action.external_ref,
       copy_record_id: action.record_id,
       update_external_ref: updateRow.external_ref,
       update_source_fingerprint: recordFingerprint(logicalRow(updateRow, 'event', updateManagedFields)),
       update_desired: updateRow,
-      update_patch: Object.fromEntries(DART_UPDATE_FIELDS.filter(field => updateRow.payload?.[field] !== null
-        && updateRow.payload?.[field] !== undefined && updateRow.payload?.[field] !== '')
-        .map(field => [field, updateRow.payload[field]])),
+      update_patch: updatePatch,
     };
   });
 }
@@ -289,7 +293,14 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     } else if (!checkpoint) {
       actions.push({ ...action, operation: 'hold', reason: 'initial_difference_requires_review', record_id: current.id });
     } else if (checkpoint.source_fingerprint === sourceFingerprint) {
-      actions.push({ ...action, operation: 'hold', reason: 'source_and_record_checkpoint_disagree', record_id: current.id });
+      // Source and record both match the last sync; a reviewed Update overlay is why they differ.
+      if (checkpoint.record_fingerprint !== checkpoint.source_fingerprint) {
+        actions.push({ ...action, operation: 'unchanged', record_id: current.id, update_overlay: true });
+      } else {
+        actions.push({ ...action, operation: 'hold', reason: 'source_and_record_checkpoint_disagree', record_id: current.id });
+      }
+    } else if (checkpoint.record_fingerprint !== checkpoint.source_fingerprint) {
+      actions.push({ ...action, operation: 'hold', reason: 'update_overlay_review_required', record_id: current.id });
     } else {
       actions.push({ ...action, operation: 'update', record_id: current.id,
         prior_source_fingerprint: checkpoint.source_fingerprint,
@@ -464,7 +475,8 @@ export async function loadLinkedBaseline(sourcePlan, providerOrganizationId, que
   const checkpointSql = (syncHistory ? `,
         'checkpoints', (SELECT coalesce(jsonb_agg(jsonb_build_object(
           'external_ref',v.external_ref,'record_id',v.record_id,'kind',v.record_kind,
-          'source_file',v.source_file,'source_sheet',v.source_sheet,'source_fingerprint',v.source_fingerprint)),'[]'::jsonb)
+          'source_file',v.source_file,'source_sheet',v.source_sheet,'source_fingerprint',v.source_fingerprint,
+          'record_fingerprint',coalesce(to_jsonb(v)->>'record_fingerprint',v.source_fingerprint))),'[]'::jsonb)
           FROM public.patrol_import_record_versions v JOIN requested r ON v.external_ref=r.ref
           WHERE v.client_organization_id='${clientId}'::uuid
             AND v.provider_organization_id='${providerOrganizationId}'::uuid AND v.is_current)` : '')
@@ -500,7 +512,7 @@ export async function loadLinkedBaseline(sourcePlan, providerOrganizationId, que
     baseline.events.push(...rows[0].activity.events);
     baseline.superseded_refs.push(...(rows[0].activity.superseded ?? []));
     for (const checkpoint of rows[0].activity.checkpoints ?? []) {
-      baseline.checkpoints.push({ ...checkpoint, record_fingerprint: checkpoint.source_fingerprint });
+      baseline.checkpoints.push({ ...checkpoint, record_fingerprint: checkpoint.record_fingerprint ?? checkpoint.source_fingerprint });
     }
   }
   if (copySheets.length) {
@@ -545,13 +557,20 @@ export function buildSyncChunks(sourcePlan, plan, { chunkSize = 200, sheetUpdate
     proposalsByRef.set(proposal.source_record_key, list);
   }
   const units = [];
+  const pairedKeys = new Set();
   for (const action of plan.actions) {
     if (action.operation === 'update_and_supersede') {
       const canonical = sourceRows.get(action.external_ref);
       const update = updateSourceRows.get(action.update_external_ref);
       if (!canonical || canonical.kind !== 'event' || !update || !action.copy_external_ref || !action.copy_record_id
-        || !action.update_source_fingerprint || !action.update_patch?.location_raw) {
+        || !action.update_source_fingerprint || !/^[a-f0-9]{64}$/.test(action.record_fingerprint ?? '')
+        || !action.update_patch?.location_raw) {
         throw new Error('A DART Update row must map to one canonical event and one existing source copy');
+      }
+      // One-to-one across the whole run, not just within one chunk: a collision group never reaches the server.
+      for (const key of [`canonical:${action.external_ref}`, `copy:${action.copy_external_ref}`, `update:${update.external_ref}`]) {
+        if (pairedKeys.has(key)) throw new Error('A DART Update pairing repeats a canonical event, copy, or Update row');
+        pairedKeys.add(key);
       }
       const correction = { kind: 'event', external_ref: action.external_ref, record_id: action.record_id,
         source_fingerprint: action.source_fingerprint, desired: action.canonical_desired ?? canonical.row };
@@ -563,6 +582,7 @@ export function buildSyncChunks(sourcePlan, plan, { chunkSize = 200, sheetUpdate
           copy_record_id: action.copy_record_id,
           update_external_ref: update.external_ref,
           update_source_fingerprint: action.update_source_fingerprint,
+          record_fingerprint: action.record_fingerprint,
           update_desired: update,
           update_patch: action.update_patch,
         },
@@ -789,7 +809,7 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
   });
   const report = { mode: commit ? 'apply' : 'dry_run', committed: false, attempt, plan_summary: plan.summary,
     requested: counts, batch_id: null, results: [] };
-  if (!chunks.length) return { ...report, status: 'no_source_changes', summary: summarizeSyncResults([]) };
+  if (!chunks.length && !commit) return { ...report, status: 'no_source_changes', summary: summarizeSyncResults([]) };
 
   const actorRows = await readQuery(`SELECT import_actor_id FROM public.import_source_profiles
     WHERE organization_id='${providerOrganizationId}'::uuid AND profile_code='${batch.manifest.source_profile}' AND active;`);
@@ -831,6 +851,33 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
       dartUpdateBatchId = existingUpdate?.[0]?.id ?? null;
     }
   }
+  // Both receipts close in one transaction, so paired writes can never be left without their
+  // Update receipt; a re-run with no remaining changes still closes batches left in staging.
+  const finalizeBatches = async (results, recovered) => {
+    const summary = summarizeSyncResults(results);
+    const marker = recovered ? { receipt_recovered: true } : {};
+    const statements = [];
+    if (batchId) {
+      const receipt = { direct_workshop_writes: 0, direct_finance_writes: 0, source_row_sync: summary, ...marker };
+      statements.push(`SELECT batch.id FROM public.finalize_patrol_import_batch('${batchId}'::uuid, ${quoted('receipt', receipt)}::jsonb) batch;`);
+    }
+    if (dartUpdateBatchId) {
+      const updateReceipt = { direct_workshop_writes: 0, direct_finance_writes: 0,
+        source_row_update: { dart_update: summary.dart_update }, ...marker };
+      statements.push(`SELECT batch.id FROM public.finalize_patrol_import_batch('${dartUpdateBatchId}'::uuid, ${quoted('update_receipt', updateReceipt)}::jsonb) batch;`);
+    }
+    if (!statements.length) return;
+    await writeQuery(`BEGIN;
+set local request.jwt.claim.sub = '${actorId}';
+${statements.join('\n')}
+COMMIT;`);
+  };
+  if (!chunks.length) {
+    if (!batchId && !dartUpdateBatchId) return { ...report, status: 'no_source_changes', summary: summarizeSyncResults([]) };
+    await finalizeBatches([], true);
+    return { ...report, committed: true, batch_id: batchId, dart_update_batch_id: dartUpdateBatchId,
+      status: 'receipt_recovered', summary: summarizeSyncResults([]) };
+  }
   const results = [];
   for (const chunk of chunks) {
     const rows = await writeQuery(buildSyncChunkSql({ actorId, providerOrganizationId, clientOrganizationId: clientId,
@@ -845,21 +892,7 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
     }
     results.push(...rows[0].results);
   }
-  if (commit) {
-    const receipt = { direct_workshop_writes: 0, direct_finance_writes: 0, source_row_sync: summarizeSyncResults(results) };
-    await writeQuery(`BEGIN;
-set local request.jwt.claim.sub = '${actorId}';
-SELECT batch.id FROM public.finalize_patrol_import_batch('${batchId}'::uuid, ${quoted('receipt', receipt)}::jsonb) batch;
-COMMIT;`);
-    if (dartUpdateBatchId) {
-    const updateReceipt = { direct_workshop_writes: 0, direct_finance_writes: 0,
-      source_row_update: { dart_update: summarizeSyncResults(results).dart_update } };
-    await writeQuery(`BEGIN;
-set local request.jwt.claim.sub = '${actorId}';
-SELECT batch.id FROM public.finalize_patrol_import_batch('${dartUpdateBatchId}'::uuid, ${quoted('receipt', updateReceipt)}::jsonb) batch;
-COMMIT;`);
-    }
-  }
+  if (commit) await finalizeBatches(results, false);
   return { ...report, committed: commit, batch_id: batchId, dart_update_batch_id: dartUpdateBatchId,
     status: 'completed', summary: summarizeSyncResults(results), results };
 }

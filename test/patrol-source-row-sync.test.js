@@ -456,3 +456,111 @@ test('DART Update collisions and unmatched copies remain held without paired wri
   assert.equal(chunks.flatMap(chunk => chunk.dartUpdates ?? []).length, 0);
   assert.equal(chunks.flatMap(chunk => chunk.supersedes).length, 0);
 });
+
+function dartFixture() {
+  const canonical = sourceRow(7, { payload: { ...sourceRow(7).payload, source_sheet: '2025',
+    source_file: 'dart.xlsx', source_row: 12, source_sha256: HASH, derivative_sha256: 'b'.repeat(64),
+    location_raw: 'Old reserve road', reserve_raw: 'R-7', source_category: 'Patrol',
+    patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const canonicalPlan = { ...sourcePlan([canonical]), source_file: 'dart.xlsx', source_sheet: '2025' };
+  const update = sourceRow('copy', { external_ref: 'rm_patrol_import:UPDATE:row-2', status: null,
+    payload: { ...sourceRow(7).payload, job_number: null, source_sheet: 'Update 251215', source_file: 'dart.xlsx',
+      source_row: 2, source_sha256: HASH, derivative_sha256: 'c'.repeat(64), location_raw: 'New reserve road',
+      reserve_raw: 'R-7', source_category: 'Patrol', patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const updatePlan = { ...sourcePlan([update]), source_file: 'dart.xlsx', source_sheet: 'Update 251215' };
+  const copyLive = liveEvent({ ...update, external_ref: 'rm_patrol_import:OLD:copy', status: null }, OTHER);
+  return { canonical, canonicalPlan, update, updatePlan, copyLive };
+}
+
+// What the paired RPC leaves behind: the patched canonical and a version that keeps the 2025 identity.
+function appliedOverlay(canonical, pair) {
+  const live = liveEvent({ ...canonical, payload: { ...canonical.payload, ...pair.update_patch } }, RECORD);
+  const checkpoint = { external_ref: canonical.external_ref, record_id: RECORD, kind: 'event',
+    source_file: 'dart.xlsx', source_sheet: '2025', source_fingerprint: pair.source_fingerprint,
+    record_fingerprint: pair.record_fingerprint };
+  return { live, checkpoint };
+}
+
+test('an applied DART Update overlay resyncs as unchanged; a later source edit to that row is held', async () => {
+  const { previewReconciliation } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const first = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  const pair = first.actions.find(action => action.operation === 'update_and_supersede');
+  assert.match(pair.record_fingerprint, /^[a-f0-9]{64}$/);
+  assert.notEqual(pair.record_fingerprint, pair.source_fingerprint);
+  const { live, checkpoint } = appliedOverlay(canonical, pair);
+
+  for (const options of [{ sheetUpdatePlan: updatePlan }, {}]) {
+    const resync = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [], events: [live],
+      sheet_copies: [], checkpoints: [checkpoint] }, options);
+    const action = resync.actions.find(row => row.external_ref === canonical.external_ref);
+    assert.equal(action.operation, 'unchanged');
+    assert.equal(action.update_overlay, true);
+    assert.equal(action.baseline_required, undefined);
+    assert.equal(resync.summary.baseline_required, 0);
+    assert.equal(resync.summary.hold, 0);
+  }
+
+  const edited = { ...canonicalPlan, events: [{ ...canonical, status: 'completed - gate damaged' }] };
+  const held = previewReconciliation(edited, { organization_id: CLIENT, observations: [], events: [live],
+    sheet_copies: [], checkpoints: [checkpoint] });
+  const action = held.actions.find(row => row.external_ref === canonical.external_ref);
+  assert.equal(action.operation, 'hold');
+  assert.equal(action.reason, 'update_overlay_review_required');
+});
+
+test('a DART Update pairing that repeats a canonical or copy is refused even across chunks', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const result = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  const pair = result.actions.find(action => action.operation === 'update_and_supersede');
+  const repeated = { ...result, actions: [...result.actions,
+    { ...pair, copy_external_ref: 'rm_patrol_import:OLD:copy-2', copy_record_id: '10000000-0000-4000-8000-000000000009' }] };
+  assert.throws(() => buildSyncChunks(canonicalPlan, repeated, { sheetUpdatePlan: updatePlan, includeProposals: false, chunkSize: 1 }),
+    /repeats a canonical event, copy, or Update row/);
+  const { chunks } = buildSyncChunks(canonicalPlan, result, { sheetUpdatePlan: updatePlan, includeProposals: false });
+  assert.equal(chunks[0].dartUpdates[0].record_fingerprint, pair.record_fingerprint);
+});
+
+test('a committed re-run with nothing left to send closes both open batches in one transaction', async () => {
+  const { previewReconciliation, runSourceSync } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const pair = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan })
+    .actions.find(action => action.operation === 'update_and_supersede');
+  const { live, checkpoint } = appliedOverlay(canonical, pair);
+  const UPDATE_BATCH = '10000000-0000-4000-8000-00000000000a';
+  const writes = [];
+  const harness = {
+    readQuery: async sql => {
+      if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true, supersede_history: true } }];
+      if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [live], checkpoints: [checkpoint], superseded: [] } }];
+      if (sql.includes('AS copies')) return [{ copies: [] }];
+      if (sql.includes('import_actor_id')) return [{ import_actor_id: ACTOR }];
+      if (sql.includes('file_import_batches')) {
+        return sql.includes('dart_update:') ? [{ id: UPDATE_BATCH, status: 'staging' }] : [{ id: BATCH, status: 'staging' }];
+      }
+      throw new Error('unexpected read');
+    },
+    writeQuery: async sql => { writes.push(sql); return [{ id: BATCH }]; },
+  };
+  const report = await runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, commit: true,
+    copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan });
+  assert.equal(report.status, 'receipt_recovered');
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /^BEGIN;/);
+  assert.match(writes[0], /COMMIT;$/);
+  assert.equal(writes[0].match(/finalize_patrol_import_batch/g).length, 2);
+  assert.ok(writes[0].includes(BATCH) && writes[0].includes(UPDATE_BATCH));
+  assert.ok(writes[0].includes('"receipt_recovered":true'));
+
+  const dryRun = [];
+  const idle = await runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: async sql => { dryRun.push(sql); return []; },
+    copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan });
+  assert.equal(idle.status, 'no_source_changes');
+  assert.equal(dryRun.length, 0);
+});

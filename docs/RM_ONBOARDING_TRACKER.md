@@ -117,7 +117,24 @@ inferred.
   already suppresses proposals). `--apply` without `--commit` rolls back;
   `--preview-migration` is prohibited with `--commit`. Do not use
   `--canonical-plan` to collapse the separate year sheets.
-- Focused importer/reconciliation tests: 37/37 passing. No production
+- PR #215 review fixes (2026-10-29): the canonical's new version keeps its own
+  2025 source identity and records the Update row separately as
+  `overlay_source` plus a post-overlay `record_fingerprint`, so a later resync
+  reads `unchanged` (or holds a changed source as
+  `update_overlay_review_required`) instead of mismatching file/sheet. Copy
+  time shifts are accepted only when zero or +1h during NZ daylight time.
+  The generic supersede now holds year-sheet records
+  (`source_year_records_remain_separate`), Update-sheet copies
+  (`update_copy_requires_paired_path`) and cross-workbook copies. Repeated
+  pairings are rejected both across planner chunks and server-side
+  (`ambiguous_update_pairing`, `ambiguous_update_copy_group`). Blank Update
+  values never erase canonical values. Both staging batches are finalised in
+  one transaction, and a committed re-run recovers an open receipt.
+- Re-verified after the fixes: SQL truth table passes in a rolled-back
+  transaction; 2025 dry run 681 corrections / 304 `updated_and_superseded` /
+  19 planner holds / 0 proposals; 2026 dry run 1,105 corrections / 0 holds /
+  0 proposals.
+- Focused importer/reconciliation tests: 41/41 passing. No production
   correction, migration apply, commit, deployment or Atlas refresh has occurred
   for Step B. Final reviewed scope and release approval are still required.
 - Rostering follows source reconciliation, not this correction transaction:

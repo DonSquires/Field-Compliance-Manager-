@@ -180,9 +180,12 @@ function importedNumber(value) {
 
 const NZ_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' });
 
-function clockMinutes(value) {
-  const m = /^(\d{1,2}):?(\d{2})$/.exec(String(value ?? '').trim());
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+// Elapsed minutes come from the timestamp parseNzDate already normalised, so every time format it
+// accepts (HH:mm, HH:mm:ss, Excel fractions, ISO) is usable; a blank time cell stays unknown.
+function elapsedMinutes(occurredAt, rawTime) {
+  if (!occurredAt || !String(rawTime ?? '').trim()) return null;
+  const ms = Date.parse(occurredAt);
+  return Number.isFinite(ms) ? ms / 60_000 : null;
 }
 
 // Each patrol day opens with a "Start" row (trip odometer reset). Where a sheet row's formulas
@@ -194,8 +197,8 @@ function startRowLeg(source, start) {
   const minutes = source.minutes !== null && start.minutes !== null ? source.minutes - start.minutes : null;
   if (kms < 0 || minutes === null || minutes < 0) return null;
   const hours = minutes / 60;
-  const hourRate = source.hours ? source.jobCost / source.hours : null;
-  const kmRate = source.kms ? source.travelCost / source.kms : null;
+  const hourRate = source.hours && source.jobCost !== null ? source.jobCost / source.hours : null;
+  const kmRate = source.kms && source.travelCost !== null ? source.travelCost / source.kms : null;
   const jobCost = hourRate !== null && Number.isFinite(hourRate) ? hours * hourRate : null;
   const travelCost = kmRate !== null && Number.isFinite(kmRate) ? Math.round(kms * kmRate * 100) / 100 : null;
   return { kms, hours, jobCost, travelCost, totalCost: jobCost !== null && travelCost !== null ? jobCost + travelCost : null };
@@ -375,7 +378,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   const day = NZ_DAY.format(new Date(occurredAt));
   const sourceKms = importedNumber(r[col.jobKms]);
   const odometer = importedNumber(r[col.odometer]);
-  const minutes = clockMinutes(r[col.time]);
+  const minutes = elapsedMinutes(occurredAt, r[col.time]);
   const startRow = previousDated?.day === day && previousDated.start ? previousDated : null;
   const leg = startRowLeg({ kms: sourceKms, odometer, minutes, hours: importedNumber(r[col.jobTime]),
     jobCost: importedNumber(r[col.jobCost]), travelCost: importedNumber(r[col.travelCost]) }, startRow);

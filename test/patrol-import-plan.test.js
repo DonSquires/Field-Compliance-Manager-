@@ -285,6 +285,23 @@ test('a leg whose sheet formulas skipped the day Start row is recomputed from th
   assert.equal(rows['5'].payload.source_leg_correction, undefined);
 });
 
+test('a Start-row correction accepts every normalised time format and keeps unknown costs unknown', context => {
+  const csv = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost\n'
+    + '1,Camera,04/06/2026,13:00:00,Test place,finish,127,1.5,93.75,61,60.39,154.14\n'
+    + '2,Camera,05/06/2026,0.3854166666666667,,Start,0,,,,,\n'
+    + '3,Camera,05/06/2026,10:19:00,Test place,All clear,43,-2.683333333333332,,-84,,\n';
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const fixed = output.events.find(row => row.payload.job_number === '3');
+  assert.equal(output.counts.start_row_leg_corrections, 1);
+  assert.equal(fixed.distance_km, 43);
+  assert.ok(Math.abs(Number(fixed.payload.job_time_hours) - 64 / 60) < 1e-9);
+  assert.equal(fixed.payload.job_cost, null);
+  assert.equal(fixed.payload.travel_cost, null);
+  assert.equal(fixed.payload.total_cost, null);
+});
+
 test('a negative first-job distance on a new day uses the trip odometer and preserves the source value', context => {
   const csv = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost\n'
     + '790,Camera,04/06/2026,1710,Test place,finish,125,0.5,31.25,10,10.4,41.65\n'

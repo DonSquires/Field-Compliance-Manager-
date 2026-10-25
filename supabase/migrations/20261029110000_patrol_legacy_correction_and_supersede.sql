@@ -29,6 +29,31 @@ alter table public.patrol_import_record_versions
   add constraint patrol_import_record_versions_baseline_first
   check (change_kind = 'superseded' or ((change_kind in ('baseline', 'legacy_correction')) = (version_no = 1)));
 
+-- A reviewed Update overlay leaves FCM deliberately different from its canonical source row.
+-- The version keeps the canonical source identity and fingerprint; record_fingerprint is what
+-- FCM held after that sync and overlay_source records where the overlay came from.
+alter table public.patrol_import_record_versions
+  add column if not exists record_fingerprint text,
+  add column if not exists overlay_source jsonb;
+alter table public.patrol_import_record_versions
+  drop constraint if exists patrol_import_record_versions_overlay_check;
+alter table public.patrol_import_record_versions
+  add constraint patrol_import_record_versions_overlay_check
+  check ((record_fingerprint is null) = (overlay_source is null)
+    and (record_fingerprint is null or record_fingerprint ~ '^[a-f0-9]{64}$')
+    and (overlay_source is null or jsonb_typeof(overlay_source) = 'object'));
+
+-- The legacy importer's one-hour artifact exists only while New Zealand is on daylight time.
+create or replace function public.patrol_nz_daylight(p_at timestamptz)
+returns boolean
+language sql
+stable
+set search_path to 'pg_catalog'
+as $$
+  select (p_at at time zone 'Pacific/Auckland') - (p_at at time zone 'UTC') = interval '13 hours';
+$$;
+revoke all on function public.patrol_nz_daylight(timestamptz) from public, anon, authenticated, service_role;
+
 create table if not exists public.location_events_superseded (
   id uuid primary key default gen_random_uuid(),
   provider_organization_id uuid not null references public.organizations(id),
@@ -434,6 +459,20 @@ begin
       v_hold := 'canonical_record_missing';
     end if;
 
+    -- Only same-workbook duplicates qualify. Year sheets stay separate (owner ruling) and
+    -- Update worksheet copies must go through the one-to-one paired path.
+    if v_hold is null then
+      v_hold := (select case
+        when nullif(source->>'source_sheet', '') is null or nullif(v_canonical.payload->>'source_sheet', '') is null
+          or nullif(source->>'source_sha256', '') is null
+          or source->>'source_sha256' is distinct from v_canonical.payload->>'source_sha256'
+          or source->>'source_file' is distinct from v_canonical.payload->>'source_file'
+          then 'supersede_requires_same_workbook_provenance'
+        when source->>'source_sheet' ~* '^update\M' then 'update_copy_requires_paired_path'
+        when source->>'source_sheet' ~ '^[0-9]{4}$' then 'source_year_records_remain_separate'
+      end from (select coalesce(v_payload, v_event.payload) as source) copy_source);
+    end if;
+
     if v_hold is null then
       v_shift := extract(epoch from v_event.occurred_at - v_canonical.occurred_at);
       select coalesce(array_agg(field order by field), '{}'::text[]) into v_mismatch
@@ -445,8 +484,9 @@ begin
         -- A visit-level copy (no issue status) may stand for any job row of the same visit.
         union all select 'status' where v_event.status is not null and v_event.status is distinct from v_canonical.status
         union all select 'comments' where nullif(btrim(v_event.payload->>'comments'), '') is distinct from nullif(btrim(v_canonical.payload->>'comments'), '')
-        -- Copies may still carry the legacy one-hour NZDT artifact on either side.
-        union all select 'occurred_at' where v_shift not in (0, 3600, -3600)
+        -- A copy may carry the legacy one-hour artifact on either side, but only in NZ daylight time.
+        union all select 'occurred_at' where not (v_shift = 0 or (abs(v_shift) = 3600
+          and public.patrol_nz_daylight(least(v_event.occurred_at, v_canonical.occurred_at))))
       ) compared;
       if cardinality(v_mismatch) > 0 then
         v_hold := 'not_an_identical_copy:' || array_to_string(v_mismatch, ',');
@@ -563,6 +603,8 @@ declare
   v_field text;
   v_version_no integer;
   v_current_copy_version boolean;
+  v_repeated_canonical text[];
+  v_repeated_copy text[];
 begin
   v_canonical_batch := public.patrol_source_sync_batch(
     p_canonical_batch_id, p_provider_organization_id, p_client_organization_id);
@@ -579,6 +621,15 @@ begin
   if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) > 500 then
     raise exception 'Between 0 and 500 DART Update rows are required per call';
   end if;
+
+  -- An Update row must pair one canonical with one copy. Any repeat in the call makes every
+  -- item it touches ambiguous, so none of them are written.
+  select coalesce(array_agg(key), '{}') into v_repeated_canonical
+  from (select value->'canonical'->>'record_id' key from jsonb_array_elements(p_items) value
+        group by 1 having count(*) > 1) repeated;
+  select coalesce(array_agg(key), '{}') into v_repeated_copy
+  from (select value->>'copy_record_id' key from jsonb_array_elements(p_items) value
+        group by 1 having count(*) > 1) repeated;
 
   for v_item in
     select value from jsonb_array_elements(p_items) value order by value->>'copy_external_ref'
@@ -616,6 +667,13 @@ begin
        or nullif(btrim(v_update_payload->>'location_raw'), '') is null then
       raise exception 'DART Update row is missing a mapped source field';
     end if;
+    if coalesce(v_item->>'record_fingerprint', '') !~ '^[a-f0-9]{64}$' then
+      raise exception 'DART Update row is missing the reviewed record fingerprint';
+    end if;
+    if v_canonical_id::text = any(v_repeated_canonical) or v_copy_id::text = any(v_repeated_copy) then
+      external_ref := v_update_ref; record_id := v_canonical_id; outcome := 'held'; detail := 'ambiguous_update_pairing';
+      return next; continue;
+    end if;
 
     perform pg_advisory_xact_lock(hashtextextended(
       p_client_organization_id::text || ':evidence:' || least(v_ref, v_copy_ref), 0));
@@ -638,7 +696,7 @@ begin
          and v_canonical_version.external_ref = v_ref
          and v_canonical_version.change_kind = 'update'
          and v_canonical_version.batch_id = p_update_batch_id
-         and v_canonical_version.source_fingerprint = v_item->>'update_source_fingerprint'
+         and v_canonical_version.overlay_source->>'source_fingerprint' = v_item->>'update_source_fingerprint'
          and public.patrol_source_record_state('event', v_canonical_id) is not distinct from v_canonical_version.state_after then
         external_ref := v_update_ref; record_id := v_canonical_id; outcome := 'already_applied'; detail := null;
       else
@@ -719,9 +777,32 @@ begin
          or v_copy.event_type is distinct from v_canonical.event_type
          or (v_copy.status is not null and v_copy.status is distinct from v_canonical.status)
          or nullif(btrim(v_copy.payload->>'comments'), '') is distinct from nullif(btrim(v_canonical.payload->>'comments'), '')
-         or v_shift not in (0, 3600, -3600) then
+         -- The legacy artifact only ever made the copy one hour late, and only in NZ daylight time.
+         or not (v_shift = 0 or (v_shift = 3600 and public.patrol_nz_daylight(v_canonical.occurred_at))) then
         v_hold := 'not_an_identical_copy';
       end if;
+    end if;
+
+    -- A second live Update copy of the same visit means the pairing is not one-to-one.
+    if v_hold is null and exists (
+      select 1
+      from public.location_events other
+      where other.organization_id = p_client_organization_id
+        and other.source = 'rm_patrol_log_import'
+        and other.id <> v_copy_id
+        and other.id <> v_canonical_id
+        and other.payload->>'source_sheet' = 'Update 251215'
+        and other.zone_id is not distinct from v_canonical.zone_id
+        and other.client_site_id is not distinct from v_canonical.client_site_id
+        and other.observed_entity_id is not distinct from v_canonical.observed_entity_id
+        and other.event_type is not distinct from v_canonical.event_type
+        and (other.status is null or other.status is not distinct from v_canonical.status)
+        and nullif(btrim(other.payload->>'comments'), '') is not distinct from nullif(btrim(v_canonical.payload->>'comments'), '')
+        and (other.occurred_at = v_canonical.occurred_at
+          or (other.occurred_at = v_canonical.occurred_at + interval '1 hour'
+            and public.patrol_nz_daylight(v_canonical.occurred_at)))
+    ) then
+      v_hold := 'ambiguous_update_copy_group';
     end if;
 
     if v_hold is null then
@@ -740,7 +821,7 @@ begin
     v_patch := jsonb_build_object('location_raw', v_update_payload->'location_raw');
     foreach v_field in array array['reserve_raw', 'source_category', 'comments', 'patroller_raw', 'plates_found']
     loop
-      if v_update_payload ? v_field and v_update_payload->v_field <> 'null'::jsonb then
+      if v_update_payload ? v_field and v_update_payload->v_field not in ('null'::jsonb, '""'::jsonb) then
         v_patch := v_patch || jsonb_build_object(v_field, v_update_payload->v_field);
       end if;
     end loop;
@@ -759,16 +840,29 @@ begin
     update public.patrol_import_record_versions
     set is_current = false
     where id = v_canonical_version.id;
+    -- The canonical keeps its 2025 source identity so a later resync still recognises it;
+    -- the Update row is recorded as an overlay with its own provenance.
     insert into public.patrol_import_record_versions(
       provider_organization_id, client_organization_id, record_kind, record_id, external_ref, source_profile,
       source_file, source_sheet, source_row, source_sha256, derivative_sha256, source_fingerprint, batch_id,
-      version_no, change_kind, changed_fields, state_before, state_after, applied_by
+      version_no, change_kind, changed_fields, state_before, state_after, applied_by,
+      record_fingerprint, overlay_source
     ) values (
       p_provider_organization_id, p_client_organization_id, 'event', v_canonical_id, v_ref,
-      v_update_payload->>'classification_profile', v_update_payload->>'source_file', v_update_payload->>'source_sheet',
-      (v_update_payload->>'source_row')::integer, v_update_payload->>'source_sha256',
-      v_update_payload->>'derivative_sha256', v_item->>'update_source_fingerprint', p_update_batch_id,
-      v_canonical_version.version_no + 1, 'update', v_changed, v_before, v_after, auth.uid()
+      v_canonical_version.source_profile, v_canonical_version.source_file, v_canonical_version.source_sheet,
+      v_canonical_version.source_row, v_canonical_version.source_sha256,
+      v_canonical_version.derivative_sha256, v_canonical_version.source_fingerprint, p_update_batch_id,
+      v_canonical_version.version_no + 1, 'update', v_changed, v_before, v_after, auth.uid(),
+      v_item->>'record_fingerprint',
+      jsonb_build_object(
+        'external_ref', v_update_ref,
+        'source_file', v_update_payload->>'source_file',
+        'source_sheet', v_update_payload->>'source_sheet',
+        'source_row', (v_update_payload->>'source_row')::integer,
+        'source_sha256', v_update_payload->>'source_sha256',
+        'derivative_sha256', v_update_payload->>'derivative_sha256',
+        'source_fingerprint', v_item->>'update_source_fingerprint',
+        'batch_id', p_update_batch_id)
     );
 
     select * into v_copy_version
