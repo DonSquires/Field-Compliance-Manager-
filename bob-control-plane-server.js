@@ -1222,6 +1222,11 @@ async function autopilotOnce() {
         },
         verifyRelease: async (job) => verifyGitHubProductionRelease(job.autopilot_report?.merge_sha),
         ...(builderGitHost === 'github' ? { pullRequestState: async (job) => readGitHubPullRequestState({ url: job.workspace_pull_request_url, githubToken, owner: githubOwner, repo: githubRepo }) } : {}),
+        closeDeclinedJob: async (job, details = {}) => {
+          const { error } = await builderSupabase.rpc('builder_record_pull_request_closed', { _job_id: job.id, _pull_request_url: job.workspace_pull_request_url, _details: details });
+          if (error) throw new Error(`declined Builder job ${job.id} could not be closed: ${error.message}`);
+          record('autopilot', 'builder.pull_request.closed_unmerged', job.id, { url: job.workspace_pull_request_url });
+        },
         markDeployed: async (jobId, deployment) => {
           if (deployment?.status !== 'success' || deployment?.live_verified !== true || !/^[a-f0-9]{40}$/i.test(String(deployment?.source_sha || ''))) {
             throw new Error('Builder deployment receipt is incomplete');

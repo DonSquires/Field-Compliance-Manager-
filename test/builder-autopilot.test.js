@@ -704,8 +704,11 @@ test('a published PR the owner closed unmerged finishes the job as declined', as
   const job = { id: 'job-closed', title: 'Old idea', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/owner/repo/pull/9', autopilot_report: {} };
   const actions = actionsRecorder();
   actions.pullRequestState = async () => ({ state: 'closed', closedAt: '2026-10-25T00:00:00Z' });
+  const closed = [];
+  actions.closeDeclinedJob = async (closedJob, details) => { closed.push([closedJob.id, details]); };
   const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
   assert.equal(outcomes[0].outcome, 'closed_unmerged');
+  assert.deepEqual(closed, [['job-closed', { closed_at: '2026-10-25T00:00:00Z' }]], 'the job itself reaches an audited terminal status');
   const [, , state, report] = actions.calls.find(([name]) => name === 'record');
   assert.equal(state, 'done');
   assert.equal(report.state, 'closed_unmerged');
@@ -721,5 +724,20 @@ test('an open or unreadable published PR is only rotated, never re-reported or m
     assert.equal(outcomes[0].outcome, 'published', JSON.stringify(pr));
     const records = actions.calls.filter(([name]) => name === 'record');
     assert.deepEqual(records.map(([, , state, report]) => [state, report]), [['published', null]], JSON.stringify(pr));
+  }
+});
+
+test('an interrupted automerge whose PR the owner already merged or closed is reconciled, not retried', async () => {
+  for (const [pr, expected] of [
+    [{ state: 'merged', mergeSha: 'c'.repeat(40), baseRef: 'main' }, 'merged'],
+    [{ state: 'closed', closedAt: '2026-10-25T00:00:00Z' }, 'closed_unmerged'],
+  ]) {
+    const job = { id: 'job-auto', title: 'Auto', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/owner/repo/pull/11', autopilot_report: { automerge: true, merged: false } };
+    const actions = actionsRecorder();
+    actions.pullRequestState = async () => pr;
+    actions.closeDeclinedJob = async () => {};
+    actions.publish = async () => { throw new Error('a merged or closed PR must not be re-published'); };
+    const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+    assert.equal(outcomes[0].outcome, expected, JSON.stringify(pr));
   }
 });
