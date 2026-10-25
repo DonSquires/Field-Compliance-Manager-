@@ -327,6 +327,80 @@ test('repeated failed calls get a stop-guessing nudge and the last turn is answe
   assert.ok(last.messages.every(entry => !('final' in entry)));
 });
 
+test('a status question is answered from a preloaded owner queue with only ledger tools offered', async () => {
+  const queue = { approval_gates: [{ job: { id: 'aae6d519-a0b9', title: 'CCTV tokens' }, gate: 'implementation_review' }], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] };
+  const { store, model, deps, toolCalls } = setup([
+    { tool: 'search', args: { query: 'job status update' } },
+    { tool: 'reply', args: { message: 'CCTV tokens is waiting on your implementation review.' } },
+  ]);
+  deps.tools.owner_queue = async () => { toolCalls.push(['owner_queue']); return queue; };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('What is waiting on me across Builder jobs?'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(toolCalls, [['owner_queue']], 'code search must not run for a status question');
+  const first = model.calls[0].request;
+  assert.deepEqual(first.tools.map(tool => tool.function.name).sort(), ['list_jobs', 'owner_queue', 'reply']);
+  assert.match(first.messages.at(-1).content, /STATUS QUESTION/);
+  assert.match(model.calls[1].request.messages.at(-1).content, /not used for status questions/);
+  assert.match(store.rows.at(-1).content, /implementation review/);
+});
+
+test('a status question still gets a ledger answer when the model fails or runs out of turns', async () => {
+  const queue = { approval_gates: [{ job: { id: 'aae6d519-a0b9', title: 'CCTV tokens' }, gate: 'implementation_review' }], pull_requests_to_review: [{ id: 'f2a6362e-5ef3', title: 'Dispatch tokens', pull_request: 'https://github.com/x/y/pull/195' }], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] };
+  const { store, deps } = setup([{ tool: 'job_status', args: {} }, { tool: 'job_status', args: { x: 1 } }]);
+  deps.tools.owner_queue = async () => queue;
+  deps.tools.job_status = async () => ({ error: 'give a job id' });
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage("What's waiting on me?"), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
+  assert.equal(outcome.error, undefined);
+  const reply = store.rows.at(-1);
+  assert.equal(reply.kind, 'message');
+  assert.match(reply.content, /Straight from the job ledger/);
+  assert.match(reply.content, /CCTV tokens \(aae6d519\): implementation review/);
+  assert.match(reply.content, /pull\/195/);
+});
+
+test('status questions are told apart from build requests', () => {
+  for (const text of ['What is waiting on me?', 'any pending approvals?', "what's blocked right now", 'What is waiting on me for this build?', 'what do I need to approve?']) assert.equal(chat.statusIntent(text)?.kind, 'owner', text);
+  for (const text of ['job status please', 'How are the builds going?']) assert.equal(chat.statusIntent(text)?.kind, 'jobs', text);
+  assert.deepEqual(chat.statusIntent('Job status for aae6d519 please'), { kind: 'job', job: 'aae6d519' });
+  assert.deepEqual(chat.statusIntent('where is bob/job-aae6d519a0b9 up to?'), { kind: 'job', job: 'aae6d519a0b9' });
+  for (const text of ['Fix the job status badge colour on the queue page', 'Build status badges for the Builder queue', 'Update the job status badge colour',
+    'Remove the pending approvals banner', 'Rename the job status column', 'Please add a release status chip', 'Where is the dispatch console CSS?', 'Why is the build status wrong?', 'Plan a redesign of the queue']) {
+    assert.equal(chat.statusIntent(text), null, text);
+  }
+  assert.match(chat.formatOwnerQueue({ approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] }), /Nothing is waiting on you/);
+});
+
+test('a job-specific status question preloads that job and falls back to its status, not the owner queue', async () => {
+  const { store, model, deps, toolCalls } = setup(Array.from({ length: 20 }, () => ({ fail: { status: 503, error: 'down' } })));
+  deps.tools.owner_queue = async () => { toolCalls.push(['owner_queue']); return { approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] }; };
+  deps.tools.job_status = async args => { toolCalls.push(['job_status', args]); return { job: { id: 'aae6d519-a0b9', title: 'CCTV tokens', status: 'frontend_implementation', autopilot: 'driving' }, steps: [{ step: 'ui_design', status: 'completed' }], approvals: [] }; };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Job status for aae6d519 please'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(toolCalls, [['job_status', { job: 'aae6d519' }]]);
+  assert.ok(model.calls.length >= 1);
+  assert.match(store.rows.at(-1).content, /CCTV tokens \(aae6d519\): frontend_implementation, autopilot driving/);
+  assert.doesNotMatch(store.rows.at(-1).content, /Nothing is waiting/);
+});
+
+test('the ledger fallback uses the latest successful read, not a failed or stale preload', async () => {
+  let reads = 0;
+  const fresh = { approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [{ id: 'bbbb1111-0000', title: 'Patrol lock', status: 'blocked' }] };
+  const { store, deps } = setup([{ tool: 'owner_queue', args: {} }, { tool: 'list_jobs', args: {} }]);
+  deps.tools.owner_queue = async () => (++reads === 1 ? { error: 'approval read failed: timeout' } : fresh);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('What is waiting on me?'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
+  assert.equal(outcome.error, undefined);
+  assert.equal(reads, 2);
+  assert.match(store.rows.at(-1).content, /Patrol lock \(bbbb1111\): blocked/);
+});
+
+test('job_status accepts the id under the argument names small models use', async () => {
+  const rows = [{ id: 'aae6d519-a0b9-46fd-a3ca-df859c889aad', title: 'CCTV', status: 'security_review', workspace_branch: null, updated_at: 'now' }];
+  const query = data => { const q = { select: () => q, eq: () => q, order: () => q, limit: () => q, then: (resolve) => resolve({ data, error: null }) }; return q; };
+  const supabase = { from: table => query(table === 'builder_jobs' ? rows : []) };
+  const tools = chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS });
+  for (const args of [{ job: 'aae6d519' }, { job_id: 'aae6d519' }, { id: 'aae6d519' }]) assert.equal((await tools.job_status(args)).job?.title, 'CCTV', JSON.stringify(args));
+});
+
 test('a tool call on the answer-only turn is not executed', async () => {
   const { store, deps, toolCalls } = setup([{ tool: 'search', args: { query: 'a' } }, { tool: 'search', args: { query: 'b' } }]);
   const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Look'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
