@@ -259,6 +259,30 @@ test('a proposed job is posted for owner confirmation and never created by the w
   assert.equal(store.state.completed[message.id], 'done');
 });
 
+test('rejected unsolicited proposals cannot convert a guidance question into required planning', async () => {
+  for (const invalidArgs of [
+    { ...PROPOSAL, frontend_required: false, backend_required: false },
+    PROPOSAL,
+  ]) {
+    const { store, deps, model } = setup([
+      { tool: 'propose_job', args: invalidArgs },
+      { tool: 'reply', args: { message: 'Atlas is a map, not evidence; investigate the mapped source to establish facts.' } },
+    ]);
+    const message = ownerMessage('Explain how Atlas guides research. This is a guidance question, not a job request.');
+    const outcome = await chat.processBuilderChatMessage({
+      store, message, deps,
+      limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 },
+    });
+    assert.equal(outcome.error, undefined);
+    assert.match(outcome.reply, /Atlas is a map, not evidence/);
+    assert.equal(store.state.completed[message.id], 'done');
+    assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
+    const final = model.calls.at(-1).request;
+    assert.deepEqual(final.output_schema.oneOf.map(branch => branch.properties.tool.const), ['reply']);
+    assert.doesNotMatch(final.messages.at(-1).content, /call propose_job|Missing checks/);
+  }
+});
+
 test('an invalid proposal is returned to the model as an error, not posted', async () => {
   const { store, model, deps } = setup([
     ...RESEARCH,
@@ -750,13 +774,13 @@ test('explanations and negated requests are not mandatory proposals', () => {
   assert.equal(chat.proposeIntent('Do not propose a repair plan yet; just inspect the source.'), false);
 });
 
-test('a rejected proposal cannot end as a successfully answered ordinary conversation', async () => {
+test('a rejected owner-requested proposal cannot end as a successfully answered ordinary conversation', async () => {
   const { store, deps } = setup([
     { tool: 'propose_job', args: PROPOSAL },
     { tool: 'reply', args: { message: 'Next step: propose a job to restore the file.' } },
     { tool: 'reply', args: { message: 'The investigation is complete.' } },
   ]);
-  const message = ownerMessage('Continue investigating the missing Compose source.');
+  const message = ownerMessage('Continue investigating the missing Compose source and propose a repair plan.');
   const outcome = await chat.processBuilderChatMessage({ store, message, deps });
   assert.equal(outcome.error, true);
   assert.equal(store.state.completed[message.id], 'failed');
