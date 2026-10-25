@@ -172,21 +172,40 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
     };
   };
   tools.owner_queue = async () => {
-    const [jobs, approvals] = await Promise.all([
-      supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(100),
-      supabase.from('builder_approvals').select('job_id, approval_type, requested_at, expires_at').eq('status', 'pending').order('requested_at').limit(50),
+    const LIMIT = 50;
+    const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
+    const jobs = () => supabase.from('builder_jobs').select(`${JOB_COLUMNS}, autopilot_report`);
+    // Each actionable set is queried on its own so a busy ledger cannot push a waiting item out of view.
+    const [approvals, published, awaiting, blocked] = await Promise.all([
+      supabase.from('builder_approvals').select('job_id, approval_type, requested_at, expires_at').eq('status', 'pending').order('requested_at').limit(LIMIT),
+      jobs().eq('status', 'release_ready').not('workspace_pull_request_url', 'is', null).order('updated_at', { ascending: false }).limit(LIMIT),
+      jobs().eq('autopilot_state', 'awaiting_human').order('updated_at', { ascending: false }).limit(LIMIT),
+      jobs().eq('autopilot_state', 'blocked').gte('updated_at', since).order('updated_at', { ascending: false }).limit(LIMIT),
     ]);
-    if (jobs.error) return { error: `job ledger read failed: ${jobs.error.message}` };
-    if (approvals.error) return { error: `approval read failed: ${approvals.error.message}` };
-    const byId = new Map((jobs.data || []).map(job => [job.id, job]));
-    const pendingIds = new Set((approvals.data || []).map(row => row.job_id));
-    const recent = Date.now() - 14 * 24 * 3600_000;
+    for (const [label, result] of [['approval', approvals], ['published job', published], ['awaiting job', awaiting], ['blocked job', blocked]]) {
+      if (result.error) return { error: `${label} read failed: ${result.error.message}` };
+    }
+    const gateIds = [...new Set((approvals.data || []).map(row => row.job_id))];
+    const known = new Map([...(published.data || []), ...(awaiting.data || []), ...(blocked.data || [])].map(job => [job.id, job]));
+    const missing = gateIds.filter(id => !known.has(id));
+    if (missing.length) {
+      const gateJobs = await supabase.from('builder_jobs').select(JOB_COLUMNS).in('id', missing);
+      if (gateJobs.error) return { error: `job ledger read failed: ${gateJobs.error.message}` };
+      for (const job of gateJobs.data || []) known.set(job.id, job);
+    }
+    const pendingIds = new Set(gateIds);
+    const merged = job => job.autopilot_report?.merged === true;
+    const truncated = [['approval_gates', approvals], ['pull_requests', published], ['awaiting_owner', awaiting], ['blocked_recently', blocked]]
+      .filter(([, result]) => (result.data || []).length >= LIMIT).map(([name]) => name);
     return {
-      approval_gates: (approvals.data || []).map(row => ({ job: byId.get(row.job_id) ? jobSummary(byId.get(row.job_id)) : { id: row.job_id }, gate: row.approval_type, requested_at: row.requested_at, expires_at: row.expires_at })),
-      pull_requests_to_review: (jobs.data || []).filter(job => job.status === 'release_ready' && job.workspace_pull_request_url && !pendingIds.has(job.id)).map(jobSummary),
-      awaiting_owner: (jobs.data || []).filter(job => job.autopilot_state === 'awaiting_human' && !pendingIds.has(job.id)).map(jobSummary),
-      blocked_recently: (jobs.data || []).filter(job => job.autopilot_state === 'blocked' && Date.parse(job.updated_at) > recent).map(jobSummary),
-      note: 'approval_gates are decided in the Builder queue; pull_requests_to_review need review and merge on GitHub; blocked jobs need a decision (retry, re-scope or cancel).',
+      approval_gates: (approvals.data || []).map(row => ({ job: known.has(row.job_id) ? jobSummary(known.get(row.job_id)) : { id: row.job_id }, gate: row.approval_type, requested_at: row.requested_at, expires_at: row.expires_at })),
+      pull_requests_to_review: (published.data || []).filter(job => !merged(job) && !pendingIds.has(job.id)).map(jobSummary),
+      merged_awaiting_deploy: (published.data || []).filter(merged).map(jobSummary),
+      awaiting_owner: (awaiting.data || []).filter(job => !pendingIds.has(job.id)).map(jobSummary),
+      blocked_recently: (blocked.data || []).map(jobSummary),
+      ...(truncated.length ? { truncated } : {}),
+      note: 'approval_gates are decided in the Builder queue; pull_requests_to_review need review and merge on GitHub; merged_awaiting_deploy need no action unless the release lane stalls; blocked jobs need a decision (retry, re-scope or cancel).'
+        + (truncated.length ? ` Lists capped at ${LIMIT}: ${truncated.join(', ')} may hold more; open the Builder queue for the full list.` : ''),
     };
   };
   tools.propose_job = args => validateProposal(args || {});
@@ -260,11 +279,13 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     });
     return true;
   };
+  const answerReserveMs = Math.min(90_000, Math.floor(limits.wallBudgetMs / 4));
   for (let turn = 1; turn <= limits.maxTurns && Date.now() - started < limits.wallBudgetMs; turn++) {
     const candidate = candidates[active];
     // The last turn (by count or wall clock) is answer-only, so an investigation that ran long
     // still ends with what Bob found instead of a bare timeout.
-    const final = turn === limits.maxTurns || Date.now() - started > limits.wallBudgetMs - 90_000;
+    const elapsed = Date.now() - started;
+    const final = turn === limits.maxTurns || (turn > 1 && elapsed >= limits.wallBudgetMs - answerReserveMs);
     if (final && !messages.some(entry => entry.final)) {
       messages.push({ role: 'user', final: true, content: JSON.stringify({ instruction: 'FINAL TURN: no more tools. Call reply now with what you found so far, what is still unknown, and the next step you propose.' }) });
     }
@@ -273,11 +294,13 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const baseRequest = providerRequest(modelRequest, candidate, null);
     const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::chat-${turn}`, request: { ...baseRequest.request, messages: compactMessages(messages.map(({ final: _final, ...entry }) => entry), { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' || final ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
-    const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
+    // Investigation turns may not eat the reserve; the answer turn gets whatever budget remains.
+    const timeoutMs = Math.max(5_000, Math.min(limits.turnTimeoutMs, final ? Math.max(answerReserveMs, limits.wallBudgetMs - elapsed) : limits.wallBudgetMs - answerReserveMs - elapsed));
+    const response = await callModel({ ...gateway, modelRequest: request, timeoutMs });
     if (!response.ok) {
       const timedOut = response.timeout === true || response.status === 408 || response.code === 'provider_timeout';
       unavailable++;
-      if ((timedOut || unavailable >= 2 || [413, 429].includes(response.status)) && await escalate(timedOut ? 'timeout' : 'unavailable', timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`)) {
+      if ((timedOut || unavailable >= 2 || [413, 429].includes(response.status)) && await escalate(timedOut ? 'timeout' : 'unavailable', timedOut ? `did not answer within ${Math.max(1, Math.round(timeoutMs / 1000))} s` : `is unavailable (${clip(response.error, 160)})`)) {
         unavailable = 0; turn--; continue;
       }
       if (unavailable >= 3) return { reply: `The Builder model stopped responding (${clip(response.error, 200)}). Send the message again to retry.`, error: true };

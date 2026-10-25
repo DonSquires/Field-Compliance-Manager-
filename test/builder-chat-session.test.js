@@ -261,22 +261,54 @@ test('job_status resolves a job by id prefix or branch from the job ledger', asy
   assert.match((await tools.job_status({ job: 'deadbeef' })).error, /no Builder job/);
 });
 
+function filteringSupabase(tables) {
+  const query = rows => {
+    let out = rows;
+    const b = {
+      select: () => b, order: () => b,
+      limit: n => { out = out.slice(0, n); return b; },
+      eq: (column, value) => { out = out.filter(row => row[column] === value); return b; },
+      not: (column, _op, _value) => { out = out.filter(row => row[column] != null); return b; },
+      gte: (column, value) => { out = out.filter(row => row[column] >= value); return b; },
+      in: (column, values) => { out = out.filter(row => values.includes(row[column])); return b; },
+      then: resolve => resolve({ data: out, error: null }),
+    };
+    return b;
+  };
+  return { from: table => query(tables[table] || []) };
+}
+
 test('owner_queue sorts what is waiting on the owner by kind of decision', async () => {
   const now = new Date().toISOString();
   const jobs = [
     { id: 'a1', title: 'Gate pending', status: 'specification_ready', autopilot_state: 'awaiting_human', updated_at: now },
     { id: 'b2', title: 'PR published', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/x/y/pull/1', updated_at: now },
+    { id: 'b3', title: 'PR merged', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/x/y/pull/2', autopilot_report: { merged: true }, updated_at: now },
     { id: 'c3', title: 'Blocked lately', status: 'failed', autopilot_state: 'blocked', updated_at: now },
     { id: 'd4', title: 'Blocked long ago', status: 'failed', autopilot_state: 'blocked', updated_at: '2020-01-01T00:00:00Z' },
     { id: 'e5', title: 'Done', status: 'deployed', autopilot_state: 'done', updated_at: now },
   ];
-  const result = rows => { const b = { select: () => b, order: () => b, limit: () => b, eq: () => b, then: resolve => resolve({ data: rows, error: null }) }; return b; };
-  const supabase = { from: table => table === 'builder_jobs' ? result(jobs) : result([{ job_id: 'a1', approval_type: 'specification_review', requested_at: now, expires_at: now }]) };
+  const supabase = filteringSupabase({ builder_jobs: jobs, builder_approvals: [{ job_id: 'a1', status: 'pending', approval_type: 'specification_review', requested_at: now, expires_at: now }] });
   const queue = await chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS }).owner_queue();
   assert.deepEqual(queue.approval_gates.map(row => [row.job.title, row.gate]), [['Gate pending', 'specification_review']]);
   assert.deepEqual(queue.pull_requests_to_review.map(job => job.title), ['PR published']);
+  assert.deepEqual(queue.merged_awaiting_deploy.map(job => job.title), ['PR merged']);
   assert.deepEqual(queue.awaiting_owner, []);
   assert.deepEqual(queue.blocked_recently.map(job => job.title), ['Blocked lately']);
+  assert.equal(queue.truncated, undefined);
+});
+
+test('owner_queue finds actionable jobs behind many newer jobs and flags capped lists', async () => {
+  const now = new Date().toISOString();
+  const noise = Array.from({ length: 150 }, (_, i) => ({ id: `n${i}`, title: `Noise ${i}`, status: 'deployed', autopilot_state: 'done', updated_at: now }));
+  const blocked = Array.from({ length: 60 }, (_, i) => ({ id: `x${i}`, title: `Blocked ${i}`, status: 'failed', autopilot_state: 'blocked', updated_at: now }));
+  const old = { id: 'p1', title: 'Old PR', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/x/y/pull/9', updated_at: '2026-01-01T00:00:00Z' };
+  const supabase = filteringSupabase({ builder_jobs: [...noise, ...blocked, old], builder_approvals: [] });
+  const queue = await chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS }).owner_queue();
+  assert.deepEqual(queue.pull_requests_to_review.map(job => job.title), ['Old PR']);
+  assert.equal(queue.blocked_recently.length, 50);
+  assert.deepEqual(queue.truncated, ['blocked_recently']);
+  assert.match(queue.note, /capped at 50/);
 });
 
 test('repeated failed calls get a stop-guessing nudge and the last turn is answer-only', async () => {
@@ -300,6 +332,37 @@ test('a tool call on the answer-only turn is not executed', async () => {
   const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Look'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
   assert.equal(toolCalls.length, 1);
   assert.equal(outcome.error, true);
+});
+
+test('a small wall budget still gives the first turn tools and keeps an answer reserve', async () => {
+  const { store, model, deps } = setup([{ tool: 'search', args: { query: 'a' } }, { tool: 'reply', args: { message: 'Found it.' } }]);
+  const timeouts = [];
+  const inner = deps.callModel;
+  deps.callModel = async args => { timeouts.push(args.timeoutMs); return inner(args); };
+  const limits = { ...chat.BUILDER_CHAT_LIMITS, wallBudgetMs: 60_000, turnTimeoutMs: 300_000 };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Look'), deps, limits });
+  assert.equal(outcome.error, undefined);
+  assert.ok(model.calls[0].request.tools, 'first turn must offer tools');
+  assert.ok(timeouts[0] <= 45_000, `investigation turn must leave the 15s reserve, got ${timeouts[0]}`);
+});
+
+test('a slow investigation turn cannot consume the answer reserve', async () => {
+  let clock = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const { store, model, deps } = setup([{ tool: 'search', args: { query: 'a' } }, { tool: 'reply', args: { message: 'Partial answer.' } }]);
+    const timeouts = [];
+    const inner = deps.callModel;
+    deps.callModel = async args => { timeouts.push(args.timeoutMs); clock += args.timeoutMs; return inner(args); };
+    const limits = { ...chat.BUILDER_CHAT_LIMITS, wallBudgetMs: 480_000, turnTimeoutMs: 600_000 };
+    const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Look'), deps, limits });
+    assert.equal(outcome.error, undefined);
+    assert.equal(timeouts[0], 390_000);
+    assert.equal(model.calls[1].request.tools, undefined);
+    assert.match(model.calls[1].request.messages.at(-1).content, /FINAL TURN/);
+    assert.equal(timeouts[1], 90_000);
+  } finally { Date.now = realNow; }
 });
 
 test('the shared read-only checkout follows main and discards stray files', t => {
