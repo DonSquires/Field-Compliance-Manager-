@@ -29,7 +29,10 @@ begin
         from public.reference_codes
        where organization_id in (v_rm, v_mainland) and is_active
        group by organization_id) shape) and
-    (select count(distinct organization_id) from public.reference_codes where code_type = 'charge_code') = 2);
+    -- Group scope (20261024235708): every holder is R&M or an R&M group member.
+    not exists (select 1 from public.reference_codes code
+                 where code.code_type = 'charge_code'
+                   and code.organization_id not in (select member from public.charge_catalog_group_members(v_rm) member)));
   perform pg_temp.check('camera uninstall keeps the OneFortyOne number 40570',
     exists (select 1 from public.reference_codes
              where organization_id = v_rm and code_type = 'charge_code' and code = '40570'
@@ -57,10 +60,10 @@ begin
     (select count(*) from public.reference_codes
       where organization_id = v_ofo and code_type = 'gl_account' and external_refs ? 'replaced_by') >= 4);
 
-  perform pg_temp.check('Mainland ownership is recorded without parentage or access',
-    (select parent_organization_id is null
+  perform pg_temp.check('Mainland is an R&M subsidiary under R&M in the organisation tree',
+    (select parent_organization_id = v_rm
         and external_refs->'corporate_group'->>'parent_organization_id' = v_rm::text
-        and (external_refs->'corporate_group'->>'grants_access')::boolean = false
+        and (external_refs->'corporate_group'->>'grants_access')::boolean
        from public.organizations where id = v_mainland));
 
   perform pg_temp.check('every R&M rule resolves to an R&M catalog row of its declared type',

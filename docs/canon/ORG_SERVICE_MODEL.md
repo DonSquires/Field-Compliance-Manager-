@@ -242,3 +242,19 @@ least one place (a site address or an area) â€” a zone is not specifically
 required. Delivery schedules may be written directly
 (`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
 both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.
+
+## Ruling 2026-10-25 — Mainland Pest Control under R&M; group charge catalog
+
+Owner choice `mainland_parent=true`: Mainland Pest Control, an R&M
+subsidiary, has `parent_organization_id` = R&M (migration
+`20261024235708_rm_group_charge_scope.sql`). This uses the legacy tree path
+that R&M already uses for its client organisations. R&M masters and admins
+reach Mainland by tree descent. Mainland's users gain no upward access to R&M,
+and Mainland's own clients stay own-rooted. Other new organisations remain
+own-rooted under Model A.
+
+Owner choice `scope=rm_group`: the R&M group charge-code catalog (OneFortyOne
+numbering) is owned by R&M and copied to R&M's tree (including Mainland) and
+to the client side of every active operational agreement whose provider is in
+that tree. New children and new agreements receive it by trigger. Ending an
+agreement removes nothing. It is not a platform-wide template.

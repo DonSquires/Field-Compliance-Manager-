@@ -29,10 +29,17 @@ material recorded with its calibre.
 - Migration `20261024233829_rm_charge_code_catalog.sql`, applied and
   live-verified (`supabase/tests/20261024233829_rm_charge_code_catalog.sql`);
   `schema.sql` regenerated.
-- Code = source digit + two-digit subject + two-digit issue (OFO scheme). The
-  catalog lives on R&M and Mainland only: 4 sources, 29 subjects (new ones
-  from 27), 100 issues (new ones from 76), 421 codes (268 OFO, 153 derived).
-  Client organisations do not receive copies.
+- Code = source digit + two-digit subject + two-digit issue (OFO scheme):
+  4 sources, 29 subjects (new ones from 27), 100 issues (new ones from 76),
+  421 codes. OneFortyOne's List sheet has 269 code rows; Security | General |
+  Intel (41535) appears twice, so 268 distinct OneFortyOne codes are
+  reproduced unchanged, plus 153 derived codes.
+- Scope (owner choice `rm_group`, migration
+  `20261024235708_rm_group_charge_scope.sql`, applied and live-verified): R&M
+  owns the catalog; R&M's tree (including Mainland) and every active
+  operational client of a tree member hold synchronised copies. 35
+  organisations live, 19,390 rows. New children and agreements are seeded by
+  trigger.
 - Labels resolve through aliases (plurals, typos, "- company" to "- R&M") and
   combination aliases (Gate Live/Dead to Open/Closed, camera Removal to
   Uninstall 40570/30570, Lock "E-Lock ..." to the E-Lock subject).
@@ -40,9 +47,10 @@ material recorded with its calibre.
   it (Goat 3609, Ammunition 3606, Monitoring 3758, others 3615). Each species
   has its own charge code; there are no per-species GL numbers. Derived codes
   have no billing basis until the owner sets one.
-- Mainland ownership is recorded in `organizations.external_refs.corporate_group`
-  with `grants_access: false`; `parent_organization_id` is not set because
-  parentage widens access under Model A.
+- Mainland Pest Control (owner choice `mainland_parent=true`) now has
+  `parent_organization_id` = R&M (level 2). R&M masters/admins reach it by
+  tree descent; Mainland users gain no upward access. Ruling recorded in
+  `docs/canon/ORG_SERVICE_MODEL.md`.
 - New catalog types: `equipment_type`, `material_type` (ammunition with
   calibre, quantity, unit price). New activities `uninstall`, `manufacture`;
   new subject `sign`. Rules cannot target charge codes; the importer composes
