@@ -29,6 +29,13 @@ still failed to author a valid repair plan. Do not promote a diagnostic setting
 as an established fix. Installed larger GPU models also failed the existing
 memory-budget preflight and were not loaded; installation is not safe capacity.
 
+Planning completion follow-up: "propose your own repair plan" is a planning
+request even when a separate sentence says not to create a job or implement
+anything. Never treat that safety boundary as cancelling the proposal request.
+Once a proposal attempt is rejected for missing research, the turn cannot end
+as a successfully answered ordinary conversation: complete a valid proposal
+or report incomplete investigation with failed status and no job card.
+
 ### Public research, visual and document evidence
 
 Use Builder chat's explicit public-cloud mode for an owner-reviewed public
