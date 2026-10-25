@@ -560,6 +560,107 @@ export type Database = {
           },
         ]
       }
+      agreement_fee_settlements: {
+        Row: {
+          adjustment_amount: number
+          balance: number
+          callout_contract_amount: number
+          client_organization_id: string
+          client_request_id: string
+          contract_work_amount: number
+          created_at: string
+          created_by: string | null
+          fee_amount: number
+          id: string
+          imported_contract_amount: number
+          invoice_id: string
+          justification: string | null
+          organization_id: string
+          outcome: string
+          overrun_decision: string | null
+          overrun_policy: string | null
+          patrol_visit_amount: number
+          period_end: string
+          period_start: string
+          service_agreement_id: string
+        }
+        Insert: {
+          adjustment_amount?: number
+          balance: number
+          callout_contract_amount?: number
+          client_organization_id: string
+          client_request_id: string
+          contract_work_amount: number
+          created_at?: string
+          created_by?: string | null
+          fee_amount: number
+          id?: string
+          imported_contract_amount?: number
+          invoice_id: string
+          justification?: string | null
+          organization_id: string
+          outcome: string
+          overrun_decision?: string | null
+          overrun_policy?: string | null
+          patrol_visit_amount?: number
+          period_end: string
+          period_start: string
+          service_agreement_id: string
+        }
+        Update: {
+          adjustment_amount?: number
+          balance?: number
+          callout_contract_amount?: number
+          client_organization_id?: string
+          client_request_id?: string
+          contract_work_amount?: number
+          created_at?: string
+          created_by?: string | null
+          fee_amount?: number
+          id?: string
+          imported_contract_amount?: number
+          invoice_id?: string
+          justification?: string | null
+          organization_id?: string
+          outcome?: string
+          overrun_decision?: string | null
+          overrun_policy?: string | null
+          patrol_visit_amount?: number
+          period_end?: string
+          period_start?: string
+          service_agreement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agreement_fee_settlements_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agreement_fee_settlements_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agreement_fee_settlements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agreement_fee_settlements_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agreement_obligations: {
         Row: {
           active: boolean
@@ -7862,6 +7963,7 @@ export type Database = {
           commercial_model: string | null
           created_at: string
           currency: string
+          fee_overrun_policy: string | null
           id: string
           infringement_admin_fee: number | null
           invoice_email: string | null
@@ -7883,6 +7985,7 @@ export type Database = {
           commercial_model?: string | null
           created_at?: string
           currency?: string
+          fee_overrun_policy?: string | null
           id?: string
           infringement_admin_fee?: number | null
           invoice_email?: string | null
@@ -7904,6 +8007,7 @@ export type Database = {
           commercial_model?: string | null
           created_at?: string
           currency?: string
+          fee_overrun_policy?: string | null
           id?: string
           infringement_admin_fee?: number | null
           invoice_email?: string | null
@@ -34674,6 +34778,10 @@ export type Database = {
         Args: { p_service_agreement_id: string }
         Returns: string
       }
+      agreement_fee_drawdown_month: {
+        Args: { p_month: string; p_service_agreement_id: string }
+        Returns: Json
+      }
       agreement_service_delivery: {
         Args: {
           p_agreement_id: string
@@ -36292,6 +36400,18 @@ export type Database = {
           p_content: string
           p_context?: Json
           p_thread_id: string
+        }
+        Returns: string
+      }
+      builder_chat_send_research: {
+        Args: {
+          p_allow_cloud?: boolean
+          p_client_request_id: string
+          p_content: string
+          p_files?: Json
+          p_thread_id: string
+          p_urls?: Json
+          p_web_search?: boolean
         }
         Returns: string
       }
@@ -41102,6 +41222,8 @@ export type Database = {
       generate_crm_invoice_from_agreement: {
         Args: {
           p_client_request_id: string
+          p_overrun_decision?: string
+          p_overrun_justification?: string
           p_service_agreement_id: string
           p_service_period_end: string
           p_service_period_start: string
@@ -41341,6 +41463,10 @@ export type Database = {
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
       get_agreement_billing_basis_summary: {
+        Args: { p_from?: string; p_service_agreement_id: string; p_to?: string }
+        Returns: Json
+      }
+      get_agreement_fee_drawdown: {
         Args: { p_from?: string; p_service_agreement_id: string; p_to?: string }
         Returns: Json
       }
