@@ -1,3 +1,8 @@
+.targets-page .targets-summary{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.targets-dialog .target-type-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+.targets-dialog .target-type-tabs button{min-width:0;padding:8px;white-space:normal;overflow-wrap:anywhere}
+.targets-list article.type-workshop{border-left-color:#bd9ce6}
+.targets-summary>div:nth-child(4){border-top-color:#bd9ce6}
 .targets-list article.is-focused{border-color:#69c4af;box-shadow:0 0 0 2px rgba(105,196,175,.22)}.targets-list article>button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;white-space:nowrap}
 /* Every card carries its next action, so the grid has four columns */
 .targets-page .targets-list article {

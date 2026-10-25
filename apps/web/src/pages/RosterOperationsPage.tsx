@@ -32,6 +32,7 @@ export const coverageWords = (preview: CoveragePreview, startLocal: string): { t
     if (!preview.boundary_verified) return { tone: 'warn', text: `${preview.place_name ?? 'The place'} has no verified boundary${preview.place_kind === 'zone' ? ' (it is a zone, not a site)' : ''}, so the officer cannot record arriving or leaving the post. Verify the site boundary first.` };
     return { tone: 'ok', text: `Post at ${preview.place_name}: verified boundary, attendance can be recorded.` };
   }
+  if (preview.kind === 'workshop') return { tone: 'ok', text: 'Manufacturing / maintenance: labour is rostered here. The linked Workshop work order owns the job, place or asset, completion and billing.' };
   return { tone: 'ok', text: 'Office / internal work: no stops or place needed.' };
 };
 
@@ -65,6 +66,7 @@ export const workedWords = (shift: Shift): string => {
 export const endedWords = (reason: string | null | undefined): string => reason === 'officer' ? 'The officer ended it' : reason === 'superseded_by_next_shift' ? 'Stopped when their next shift started — check what was left open' : 'Completed';
 import './RosterCalendar.css';
 import './RosterCommercialReadiness.css';
+import { importedLabourLabel, isPricedRosterLabour, type ImportedLabourRefs } from '../lib/rosterImportedLabour';
 
 interface Staff { id: string; staffId: string; name: string; workReady: boolean; employmentType: string | null; credentialRisk: 'clear' | 'expiring' | 'expired' | 'unverified' | 'unknown'; credentialExpiry: string | null; }
 /** Aggregate credential readiness; the assignment preview supplies type-specific warnings. */
@@ -84,11 +86,28 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
   return 'Recorded credentials verified';
 };
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
-interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; external_refs?: { deputy?: { code?: string; name?: string } } | null; }
-interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
-interface HistoricalOfficer { display_name: string | null; email: string | null; }
-interface HistoricalAssignment { id: string; officer_id: string; patrol_route_id: string | null; service_type: string; specific_date: string; shift: string; start_time: string | null; end_time: string | null; officer: HistoricalOfficer | HistoricalOfficer[] | null; external_refs: { source?: string; beat_names?: string[]; time_precision?: string; source_event_count?: number } | null; }
-interface PatrolRoute { id: string; name: string; route_code: string | null; }
+interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
+interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; external_refs?: ImportedLabourRefs | null; }
+interface SourceAssignment {
+  id: string;
+  officer_id: string;
+  patrol_route_id: string | null;
+  specific_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  officer: { display_name: string | null } | { display_name: string | null }[] | null;
+  external_refs: { source?: string; source_event_count?: number; beat_names?: string[] } | null;
+}
+const sourceOfficerName = (assignment: SourceAssignment): string =>
+  (Array.isArray(assignment.officer) ? assignment.officer[0] : assignment.officer)?.display_name ?? 'Unmatched officer';
+function SourceAssignmentCard({ assignment, onSelect }: { assignment: SourceAssignment; onSelect: () => void }) {
+  return <button type="button" className="roster-shift roster-slot type-patrol" onClick={onSelect}>
+    <strong>{assignment.start_time ? `${assignment.start_time.slice(0, 5)}${assignment.end_time ? `–${assignment.end_time.slice(0, 5)}` : ''}` : 'Time not recorded'}</strong>
+    <span>{sourceOfficerName(assignment)}</span>
+    <small>Patrol log · source assignment</small>
+    <small>Recorded time range · not payable hours</small>
+  </button>;
+}
 interface Leave { staff_id: string; starts_on: string; ends_on: string; }
 type AvailabilityType = 'available' | 'preferred' | 'unavailable' | 'leave';
 interface Availability { id: string; staff_id: string; day_of_week: number | null; specific_date: string | null; available_from: string | null; available_to: string | null; all_day: boolean; availability_type: AvailabilityType; notes: string | null; created_at: string; }
@@ -141,8 +160,8 @@ const RosterOperationsPage: React.FC = () => {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [workUnits, setWorkUnits] = useState<WorkUnit[]>([]);
   const [slots, setSlots] = useState<RosterSlot[]>([]);
-  const [historicalAssignments, setHistoricalAssignments] = useState<HistoricalAssignment[]>([]);
-  const [patrolRoutes, setPatrolRoutes] = useState<PatrolRoute[]>([]);
+  const [sourceAssignments, setSourceAssignments] = useState<SourceAssignment[]>([]);
+  const [selectedSourceAssignment, setSelectedSourceAssignment] = useState<SourceAssignment | null>(null);
   const [leave, setLeave] = useState<Leave[]>([]);
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [coverage, setCoverage] = useState<Coverage[]>([]);
@@ -235,10 +254,9 @@ const RosterOperationsPage: React.FC = () => {
         ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })
         : Promise.resolve({ data: [], error: null }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,external_refs').eq('organization_id', org).eq('active', true).order('name'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,service_type,specific_date,shift,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name,email)').eq('organization_id', org).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
-      supabase.from('patrol_routes').select('id,name,route_code').eq('organization_id', org).order('name'),
+      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs').eq('organization_id', org).eq('active', true).order('name'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
       supabase.from('staff_availability').select('id,staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes,created_at').eq('organization_id', org).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
       supabase.from('shift_coverage_requests').select('id,shift_date').eq('organization_id', org).eq('status', 'open').gte('shift_date', isoDate(weekStart)).lt('shift_date', isoDate(weekEnd)),
@@ -247,10 +265,11 @@ const RosterOperationsPage: React.FC = () => {
       supabase.rpc('get_roster_labour_cost', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
       supabase.rpc('get_roster_attendance_exceptions', { p_organization_id: org, p_grace_minutes: 15, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
     ]);
-    const [rosterStaffRes, shiftRes, unitRes, slotRes, historicalRes, routeRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes, attendanceRes] = responses;
+    const [rosterStaffRes, shiftRes, unitRes, slotRes, sourceRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes, attendanceRes] = responses;
     if (version !== loadVersion.current) return;
     const failures = responses.filter((response) => response.error).map((response) => response.error?.message);
     if (failures.length) setError(failures.join(' · '));
+    setSourceAssignments((sourceRes.data as SourceAssignment[]) ?? []);
     const now = Date.now();
     setStaff(((rosterStaffRes.data ?? []) as Array<{ user_id: string; staff_id: string; display_name: string | null; email: string | null; employment_type: string | null; work_ready: boolean; credential_expiry: string | null; credential_verified: boolean | null }>).map((user) => {
       let credentialRisk: Staff['credentialRisk'] = user.credential_verified === null || user.credential_verified === undefined ? 'unknown' : user.credential_verified === false ? 'unverified' : 'clear';
@@ -258,7 +277,7 @@ const RosterOperationsPage: React.FC = () => {
       else if (user.credential_expiry && new Date(user.credential_expiry).getTime() - now < 30 * 86_400_000) credentialRisk = 'expiring';
       return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk, credentialExpiry: user.credential_expiry ?? null };
     }));
-    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setHistoricalAssignments((historicalRes.data as HistoricalAssignment[]) ?? []); setPatrolRoutes((routeRes.data as PatrolRoute[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setRosterDataReady(![rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes].some((response) => response.error) && canLoadBranchStaff); setLoading(false);
+    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setRosterDataReady(![rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes].some((response) => response.error) && canLoadBranchStaff); setLoading(false);
   }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [load]);
   const syncOfficerResponses = useCallback(async () => {
@@ -267,7 +286,7 @@ const RosterOperationsPage: React.FC = () => {
     if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (version !== loadVersion.current) return;
     if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
@@ -281,6 +300,10 @@ const RosterOperationsPage: React.FC = () => {
   const visibleStaff = staff.filter((person) => (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
   const scheduleStaff = visibleStaff.filter((person) => !selectedStaffId || person.staffId === selectedStaffId);
   const visibleWorkUnits = workUnits.filter((unit) => !search || unit.name.toLowerCase().includes(search.toLowerCase()));
+  const sourceBoardAssignments = sourceAssignments.filter((assignment) => !slots.some((slot) =>
+    slot.external_refs?.source === 'rm_patrol_log_labour'
+    && staff.find((person) => person.staffId === slot.staff_id)?.id === assignment.officer_id
+    && isoDate(new Date(slot.scheduled_start)) === assignment.specific_date));
   const selectedShift = shifts.find((shift) => shift.id === selectedShiftId) ?? null;
   const selectedSlot = slots.find((slot) => slot.id === selectedSlotId) ?? null;
   const selectedSlotUnit = selectedSlot ? workUnits.find((unit) => unit.id === selectedSlot.work_unit_id) ?? null : null;
@@ -293,6 +316,7 @@ const RosterOperationsPage: React.FC = () => {
   const openSlots = slots.filter((slot) => !slot.staff_id && !['cancelled', 'completed'].includes(slot.status));
   useEffect(() => {
     setSelectedStaffId(null); setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
+    setSelectedSourceAssignment(null);
     setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setAttendanceAction(null);
     setNotice(null);
   }, [operatingOrganizationId]);
@@ -302,7 +326,7 @@ const RosterOperationsPage: React.FC = () => {
     (acc, row) => ({
       pay: acc.pay + Number(row.pay_cost ?? 0),
       margin: acc.margin + Number(row.margin ?? 0),
-      unpriced: acc.unpriced + (row.rate_status === 'resolved' ? 0 : 1),
+      unpriced: acc.unpriced + (isPricedRosterLabour(row.rate_status) ? 0 : 1),
     }),
     { pay: 0, margin: 0, unpriced: 0 },
   );
@@ -332,6 +356,10 @@ const RosterOperationsPage: React.FC = () => {
     const start = day ? new Date(day) : new Date(); start.setHours(8, 0, 0, 0); const end = new Date(start); end.setHours(16, 0, 0, 0);
     // Default path: workUnitId: requestedWorkUnit?.id ??
     const preferredWorkUnitId = workUnitOverride ?? requestedWorkUnit?.id ?? workUnits[0]?.id ?? '';
+    if (workUnits.find((unit) => unit.id === preferredWorkUnitId)?.external_refs?.historical_only) {
+      setError('This work unit holds completed source labour only. Choose an active operational work unit for new work.');
+      return;
+    }
     setEditingSlot(null);
     setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', publish: true }); setShowCreate(true);
   };
@@ -408,7 +436,7 @@ const RosterOperationsPage: React.FC = () => {
     const slotResponse = await supabase.rpc('create_roster_slot', { p_client_request_id: crypto.randomUUID(),     p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId ?? null, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null });
     if (slotResponse.error || !slotResponse.data) { setError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
     const slot = slotResponse.data as { id: string };
-    if (form.publish && person && unit?.work_unit_type !== 'internal') {
+    if (form.publish && person && (unit?.work_unit_type === 'patrol' || unit?.work_unit_type === 'static')) {
       const materialized = await supabase.rpc('materialize_roster_slot', { p_slot_id: slot.id, p_expected_status: 'published' });
       if (materialized.error || !materialized.data) { setError(materialized.error?.message ?? 'The roster slot was saved, but the field shift could not be created from it.'); setSaving(false); await load(); return; }
     }
@@ -671,20 +699,6 @@ const RosterOperationsPage: React.FC = () => {
     <div className="roster-schedule-mode" aria-label="Scheduling view"><button type="button" className={scheduleMode === 'staff' ? 'is-active' : ''} aria-pressed={scheduleMode === 'staff'} onClick={() => setScheduleMode('staff')}>Staff schedule</button><button type="button" className={scheduleMode === 'work-unit' ? 'is-active' : ''} aria-pressed={scheduleMode === 'work-unit'} onClick={() => setScheduleMode('work-unit')}>Work unit schedule</button>{selectedStaffId && <button type="button" onClick={() => setSelectedStaffId(null)}>Clear officer focus</button>}{scheduleMode === 'work-unit' && <input aria-label="Search work units" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find work unit" />}</div>
     <div className="roster-horizon-bar"><div className="roster-horizon" aria-label="Roster horizon">{([['week', 'Week'], ['fortnight', '2 weeks'], ['month', 'Month']] as const).map(([value, label]) => <button type="button" className={horizon === value ? 'is-active' : ''} aria-pressed={horizon === value} onClick={() => { setHorizon(value); setPeriodAnchor(new Date()); }} key={value}>{label}</button>)}</div><label><span>Regional holidays</span><select value={calendarRegion ?? ''} disabled={saving} onChange={(event) => void updateCalendarRegion(event.target.value)}><option value="">National only</option>{NZ_HOLIDAY_REGIONS.map(([code, name]) => <option value={code} key={code}>{name}</option>)}</select></label></div>
     {holidays.length > 0 && <section className="roster-holidays" aria-label="Public holidays">{holidays.map((holiday) => <div className={`is-${holiday.scope}`} key={`${holiday.date}-${holiday.name}`}><CalendarDays size={14} /><span>{new Date(`${holiday.date}T12:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}</span><strong>{holiday.name}</strong><i>{holiday.scope}</i></div>)}</section>}
-    <details className="roster-secondary-dock"><summary>Historical source records · {historicalAssignments.length}</summary><section className="roster-history" aria-labelledby="roster-history-title">
-      <header><div><span>Historical source records</span><h2 id="roster-history-title">Forestry roster history</h2></div><strong>{historicalAssignments.length}</strong></header>
-      <div className="roster-history-table-wrap">
-        {historicalAssignments.length === 0 ? <p className="roster-history-empty">No historical assignments in this period.</p> : <table><caption className="sr-only">Historical forestry roster assignments in {periodLabel}</caption><thead><tr><th scope="col">Date</th><th scope="col">Officer</th><th scope="col">Patrol</th><th scope="col">Shift</th><th scope="col">Beat evidence</th></tr></thead><tbody>{historicalAssignments.map((assignment) => {
-          const historicalOfficer = Array.isArray(assignment.officer) ? assignment.officer[0] : assignment.officer;
-          const officerName = historicalOfficer?.display_name ?? historicalOfficer?.email ?? staff.find((person) => person.id === assignment.officer_id)?.name ?? 'Unmatched officer';
-          const routeName = patrolRoutes.find((route) => route.id === assignment.patrol_route_id)?.name ?? 'Forestry patrol';
-          const shiftName = assignment.shift === 'swing' ? 'Evening' : assignment.shift.charAt(0).toUpperCase() + assignment.shift.slice(1);
-          const times = assignment.start_time ? `${assignment.start_time.slice(0, 5)}${assignment.end_time ? `–${assignment.end_time.slice(0, 5)}` : ''}` : 'Time not recorded';
-          const beats = assignment.external_refs?.beat_names?.join(', ') || `${assignment.external_refs?.source_event_count ?? 0} field entries`;
-          return <tr key={assignment.id}><td>{new Date(`${assignment.specific_date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</td><td>{officerName}</td><td>{routeName}</td><td>{shiftName} · {times}</td><td>{beats}</td></tr>;
-        })}</tbody></table>}
-      </div>
-    </section></details>
     <p className="roster-board-scroll-cue" role="note">Scroll within the schedule to keep the dates and staff or work units visible.</p>
     <div className={`roster-board is-${horizon}`} style={{ '--roster-days': days.length } as React.CSSProperties}>
       <div className="roster-board-head">
@@ -711,7 +725,14 @@ const RosterOperationsPage: React.FC = () => {
             const dayShifts = shifts.filter((shift) => shift.officer_user_id === person.id && isoDate(new Date(shift.scheduled_start)) === key);
             const daySlots = slots.filter((slot) => slot.staff_id === person.staffId && !slot.linked_shift_id && isoDate(new Date(slot.scheduled_start)) === key);
             const onLeave = leave.some((record) => record.staff_id === person.staffId && record.starts_on <= key && record.ends_on >= key);
-            return <div className={`roster-cell ${onLeave ? 'is-leave' : ''}`} key={key}>{onLeave && <span className="roster-leave">Leave</span>}{dayShifts.map((shift) => <button className={`roster-shift status-${shift.status}`} onClick={() => setSelectedShiftId(shift.id)} title={`${shift.service_type.replaceAll('_', ' ')} · ${plainWords(shift.status)}`} key={shift.id}><strong>{timeRange(shift.scheduled_start, shift.scheduled_end)}</strong><span>{shift.service_type.replaceAll('_', ' ')}</span><small>{shiftStatusLabel(shift.status)}</small></button>)}{daySlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <button type="button" className={`roster-shift roster-slot type-${unit?.work_unit_type ?? 'internal'} status-${slot.status}`} onClick={() => setSelectedSlotId(slot.id)} title={`${unit?.name ?? 'Roster slot'} · ${slotStatusLabel(slot.status)}`} key={slot.id}><strong>{timeRange(slot.scheduled_start, slot.scheduled_end)}</strong><span>{unit?.name ?? 'Roster slot'}</span><small>{slotStatusLabel(slot.status)}</small></button>; })}{!onLeave && dayShifts.length === 0 && daySlots.length === 0 && <button className="roster-add" onClick={() => openCreate(person, day)} aria-label={`Add shift for ${person.name} on ${day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}`}>+</button>}</div>;
+            const daySources = sourceBoardAssignments.filter((assignment) => assignment.officer_id === person.id && assignment.specific_date === key);
+            return <div className={`roster-cell ${onLeave ? 'is-leave' : ''}`} key={key}>
+              {onLeave && <span className="roster-leave">Leave</span>}
+              {daySources.map((assignment) => <SourceAssignmentCard assignment={assignment} onSelect={() => setSelectedSourceAssignment(assignment)} key={assignment.id} />)}
+              {dayShifts.map((shift) => <button className={`roster-shift status-${shift.status}`} onClick={() => setSelectedShiftId(shift.id)} title={`${shift.service_type.replaceAll('_', ' ')} · ${plainWords(shift.status)}`} key={shift.id}><strong>{timeRange(shift.scheduled_start, shift.scheduled_end)}</strong><span>{shift.service_type.replaceAll('_', ' ')}</span><small>{shiftStatusLabel(shift.status)}</small></button>)}
+              {daySlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <button type="button" className={`roster-shift roster-slot type-${unit?.work_unit_type ?? 'internal'} status-${slot.status}`} onClick={() => setSelectedSlotId(slot.id)} title={`${unit?.name ?? 'Roster slot'} · ${slotStatusLabel(slot.status)}`} key={slot.id}><strong>{timeRange(slot.scheduled_start, slot.scheduled_end)}</strong><span>{unit?.name ?? 'Roster slot'}</span><small>{slotStatusLabel(slot.status)}</small>{importedLabourLabel(slot.external_refs) && <small>{importedLabourLabel(slot.external_refs)}</small>}</button>; })}
+              {!onLeave && dayShifts.length === 0 && daySlots.length === 0 && daySources.length === 0 && <button className="roster-add" onClick={() => openCreate(person, day)} aria-label={`Add shift for ${person.name} on ${day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}`}>+</button>}
+            </div>;
           })}
         </div>
       ))}</>) : (visibleWorkUnits.length === 0 ? <div className="roster-empty roster-empty-guide"><strong>No work units match this search</strong><button type="button" onClick={() => { setSearch(''); }}>Show all work units</button></div> : <>
@@ -725,11 +746,18 @@ const RosterOperationsPage: React.FC = () => {
       </div>}
       {visibleWorkUnits.map((unit) => (
         <div className="roster-row" key={unit.id}>
-          <button className="roster-person" onClick={() => openCreate(undefined, undefined, unit.id)}><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}</small></div><i className="is-ready">Schedule</i></button>
+          {unit.external_refs?.historical_only
+            ? <div className="roster-person" title="Completed source labour only — choose an active work unit for new work"><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}</small></div><i className="is-risk">Source record</i></div>
+            : <button className="roster-person" onClick={() => openCreate(undefined, undefined, unit.id)}><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}</small></div><i className="is-ready">Schedule</i></button>}
           {days.map((day) => {
             const key = isoDate(day);
             const dayAssignments = slots.filter((slot) => slot.work_unit_id === unit.id && isoDate(new Date(slot.scheduled_start)) === key);
-            return <div className="roster-cell" key={key}>{dayAssignments.map((slot) => <button type="button" className={`roster-shift roster-slot type-${unit.work_unit_type} status-${slot.status}`} onClick={() => setSelectedSlotId(slot.id)} title={`${unit.name} · ${slotStatusLabel(slot.status)}`} key={slot.id}><strong>{timeRange(slot.scheduled_start, slot.scheduled_end)}</strong><span>{slot.staff_id ? 'Assigned' : 'Open'}</span><small>{slotStatusLabel(slot.status)}</small></button>)}{dayAssignments.length === 0 && <button className="roster-add" onClick={() => openCreate(undefined, day, unit.id)} aria-label={`Add shift for ${unit.name} on ${day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}`}>+</button>}</div>;
+            const daySources = sourceBoardAssignments.filter((assignment) => Boolean(unit.patrol_route_id) && assignment.patrol_route_id === unit.patrol_route_id && assignment.specific_date === key);
+            return <div className="roster-cell" key={key}>
+              {daySources.map((assignment) => <SourceAssignmentCard assignment={assignment} onSelect={() => setSelectedSourceAssignment(assignment)} key={assignment.id} />)}
+              {dayAssignments.map((slot) => <button type="button" className={`roster-shift roster-slot type-${unit.work_unit_type} status-${slot.status}`} onClick={() => setSelectedSlotId(slot.id)} title={`${unit.name} · ${slotStatusLabel(slot.status)}`} key={slot.id}><strong>{timeRange(slot.scheduled_start, slot.scheduled_end)}</strong><span>{staff.find((person) => person.staffId === slot.staff_id)?.name ?? (slot.staff_id ? 'Staff member' : 'Open')}</span><small>{slotStatusLabel(slot.status)}</small>{importedLabourLabel(slot.external_refs) && <small>{importedLabourLabel(slot.external_refs)}</small>}</button>)}
+              {dayAssignments.length === 0 && daySources.length === 0 && !unit.external_refs?.historical_only && <button className="roster-add" onClick={() => openCreate(undefined, day, unit.id)} aria-label={`Add shift for ${unit.name} on ${day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}`}>+</button>}
+            </div>;
           })}
         </div>
       ))}</>)}
@@ -744,10 +772,41 @@ const RosterOperationsPage: React.FC = () => {
     </>}
     <details id="roster-timesheet-dock" className="roster-secondary-dock roster-timesheet-dock" open={timesheetsOpen} onToggle={(event) => setTimesheetsOpen(event.currentTarget.open)}><summary>Timesheet reconciliation · {timesheetCount ?? 'unknown'} awaiting review</summary><RosterTimesheetPanel key={`${operatingOrganizationId ?? profile?.organizationId}-${isoDate(weekStart)}-${isoDate(weekEnd)}`} from={isoDate(weekStart)} to={isoDate(addDays(weekEnd, -1))} staffId={selectedStaffId} staffNames={Object.fromEntries(staff.map((person) => [person.staffId, person.name]))} onPendingCount={setTimesheetCount} /></details>
     </main></div>
+    {selectedSourceAssignment && <aside className="roster-inspector" aria-label="Patrol source assignment">
+      <header><div><span>Patrol log · source assignment</span><h2>{sourceOfficerName(selectedSourceAssignment)}</h2></div><button type="button" onClick={() => setSelectedSourceAssignment(null)} aria-label="Close source assignment"><X /></button></header>
+      <dl><div><dt>Work date</dt><dd>{selectedSourceAssignment.specific_date}</dd></div><div><dt>Source entries</dt><dd>{selectedSourceAssignment.external_refs?.source_event_count ?? 'Not recorded'}</dd></div><div><dt>Beats</dt><dd>{selectedSourceAssignment.external_refs?.beat_names?.join(', ') || 'Not recorded'}</dd></div></dl>
+      <p>The recorded time range is source evidence, not payable hours or verified attendance. Labour is posted separately from summed job hours through the governed roster import.</p>
+    </aside>}
     {selectedShift && <aside className="roster-inspector"><header><div><span>Assignment</span><h2>{selectedOfficer?.name ?? 'Officer'}</h2></div><button onClick={() => setSelectedShiftId(null)} aria-label="Close"><X /></button></header><dl><div><dt>Service</dt><dd>{plainWords(selectedShift.service_type)}</dd></div><div><dt>Status</dt><dd>{shiftStatusLabel(selectedShift.status)}</dd></div><div><dt>Rostered</dt><dd>{new Date(selectedShift.scheduled_start).toLocaleString('en-NZ')} – {new Date(selectedShift.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</dd></div>{selectedShift.actual_start && <div><dt>Worked</dt><dd>{workedWords(selectedShift)}</dd></div>}{selectedShift.status === 'completed' && <div><dt>How it ended</dt><dd>{endedWords(selectedShift.ended_reason)}</dd></div>}<div><dt>Stops</dt><dd>{selectedShift.total_stops === 0 ? 'None on this shift' : `${selectedShift.completed_stops ?? 0} of ${selectedShift.total_stops} done`}</dd></div><div><dt>Health</dt><dd>{plainWords(selectedShift.shift_health, 'Not calculated yet')}</dd></div></dl>{selectedShift.notes && <p>{selectedShift.notes}</p>}</aside>}
-    {selectedSlot && <aside className="roster-inspector roster-slot-inspector"><header><div><span>Roster slot</span><h2>{selectedSlotUnit?.name ?? 'Typed assignment'}</h2></div><button onClick={() => setSelectedSlotId(null)} aria-label="Close"><X /></button></header><dl><div><dt>Staff</dt><dd>{selectedSlotStaff?.name ?? (selectedSlot.staff_id ? 'Unknown' : 'Nobody assigned')}</dd></div><div><dt>Type</dt><dd>{workUnitTypeLabel(selectedSlotUnit?.work_unit_type)}</dd></div><div><dt>Status</dt><dd>{slotStatusLabel(selectedSlot.status)}</dd></div><div><dt>Start</dt><dd>{new Date(selectedSlot.scheduled_start).toLocaleString('en-NZ')}</dd></div><div><dt>End</dt><dd>{new Date(selectedSlot.scheduled_end).toLocaleString('en-NZ')}</dd></div><div><dt>Field shift</dt><dd>{selectedSlot.linked_shift_id ? 'Created \u2013 the officer can start it' : selectedSlotUnit?.work_unit_type === 'internal' ? 'Not needed for office work' : 'Created when published'}</dd></div>{selectedCommercialReadiness && <><div><dt>Wage rule</dt><dd>{plainWords(selectedCommercialReadiness.pay_status)}</dd></div><div><dt>Billing</dt><dd>{plainWords(selectedCommercialReadiness.billing_status)}</dd></div><div><dt>Quote</dt><dd>{plainWords(selectedCommercialReadiness.quote_status)}</dd></div><div><dt>Geofence</dt><dd>{plainWords(selectedCommercialReadiness.geofence_status)}</dd></div><div><dt>Cost centre</dt><dd>{plainWords(selectedCommercialReadiness.cost_centre_status)}</dd></div></>}</dl>{selectedSlot.notes && <p>{selectedSlot.notes}</p>}<footer>{!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}{selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}{['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}{['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}{['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}{['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}</footer></aside>}
+    {selectedSlot && <aside className="roster-inspector roster-slot-inspector">
+      <header><div><span>Roster slot</span><h2>{selectedSlotUnit?.name ?? 'Typed assignment'}</h2></div><button onClick={() => setSelectedSlotId(null)} aria-label="Close"><X /></button></header>
+      <dl>
+        <div><dt>Staff</dt><dd>{selectedSlotStaff?.name ?? (selectedSlot.staff_id ? 'Unknown' : 'Nobody assigned')}</dd></div>
+        <div><dt>Type</dt><dd>{workUnitTypeLabel(selectedSlotUnit?.work_unit_type)}</dd></div>
+        <div><dt>Status</dt><dd>{slotStatusLabel(selectedSlot.status)}</dd></div>
+        <div><dt>Start</dt><dd>{new Date(selectedSlot.scheduled_start).toLocaleString('en-NZ')}</dd></div>
+        <div><dt>End</dt><dd>{new Date(selectedSlot.scheduled_end).toLocaleString('en-NZ')}</dd></div>
+        <div><dt>Field shift</dt><dd>{selectedSlot.external_refs?.source === 'rm_patrol_log_labour' ? 'Completed source labour; no live shift is created' : selectedSlot.linked_shift_id ? 'Created \u2013 the officer can start it' : selectedSlotUnit?.work_unit_type === 'workshop' ? 'Job execution and completion stay in Workshop' : selectedSlotUnit?.work_unit_type === 'internal' ? 'Not needed for office work' : 'Created when published'}</dd></div>
+        {importedLabourLabel(selectedSlot.external_refs) && <div><dt>Source labour</dt><dd>{importedLabourLabel(selectedSlot.external_refs)}{selectedSlot.external_refs?.pay_code && ` · ${selectedSlot.external_refs.pay_code}`}</dd></div>}
+        {selectedCommercialReadiness && <><div><dt>Wage rule</dt><dd>{plainWords(selectedCommercialReadiness.pay_status)}</dd></div><div><dt>Billing</dt><dd>{plainWords(selectedCommercialReadiness.billing_status)}</dd></div><div><dt>Quote</dt><dd>{plainWords(selectedCommercialReadiness.quote_status)}</dd></div><div><dt>Geofence</dt><dd>{plainWords(selectedCommercialReadiness.geofence_status)}</dd></div><div><dt>Cost centre</dt><dd>{plainWords(selectedCommercialReadiness.cost_centre_status)}</dd></div></>}
+      </dl>
+      {selectedSlotUnit?.workshop_work_order_id && <><p>Client billing, place or asset, job lead and completion are managed on the linked work order. This slot plans labour only and does not change the job lead.</p><button type="button" onClick={() => navigate(`/admin/workshop?workOrderId=${selectedSlotUnit.workshop_work_order_id}`)}>Open work order</button></>}
+      {selectedSlot.notes && <p>{selectedSlot.notes}</p>}
+      <footer>{!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}{selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}{['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}{['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}{['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}{['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}</footer>
+    </aside>}
     {selectedSlot && slotAction && <div className="roster-dialog-backdrop"><form className="roster-dialog roster-slot-dialog" onSubmit={manageSlot} role="dialog" aria-modal="true" aria-labelledby="slot-action-title"><header><div><span>Roster lifecycle</span><h2 id="slot-action-title">{slotAction === 'publish' ? 'Publish roster slot?' : slotAction === 'unpublish' ? 'Recall roster slot to draft?' : slotAction === 'reassign' ? 'Reassign roster slot?' : 'Cancel roster slot?'}</h2></div><button type="button" onClick={() => setSlotAction(null)}><X /></button></header><p>{slotAction === 'publish' ? 'The officer will see this shift on their schedule and can accept or decline it. Field work also gets its shift record now; office and internal work stays a roster slot only.' : slotAction === 'unpublish' ? 'The slot goes back to draft. If its shift has not started, the shift is cancelled.' : slotAction === 'reassign' ? 'The replacement officer must accept the assignment. The shift only moves to them if nothing has been recorded on it yet.' : 'If the linked shift has not started and nothing has been recorded on it, it is cancelled too.'}</p>{slotAction === 'reassign' && <label><span>Replacement officer</span><select required value={replacementStaffId} onChange={(event) => setReplacementStaffId(event.target.value)}><option value="">Select work-ready staff</option>{staff.filter((person) => person.workReady && person.staffId !== selectedSlot.staff_id).map((person) => <option value={person.staffId} key={person.staffId}>{person.name}</option>)}</select></label>}{slotAction !== 'publish' && <label><span>{slotAction === 'reassign' ? 'Reassignment reason' : slotAction === 'unpublish' ? 'Recall reason' : 'Cancellation reason'}</span><textarea required rows={4} value={slotReason} onChange={(event) => setSlotReason(event.target.value)} /></label>}<footer><button type="button" onClick={() => setSlotAction(null)}>Back</button><button type="submit" disabled={saving || (slotAction !== 'publish' && (!slotReason.trim() || (slotAction === 'reassign' && !replacementStaffId)))}>{saving ? 'Saving' : slotAction === 'publish' ? 'Confirm publication' : slotAction === 'unpublish' ? 'Confirm recall' : slotAction === 'reassign' ? 'Confirm reassignment' : 'Confirm cancellation'}</button></footer></form></div>}
-    {showCreate && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={createAssignment} role="dialog" aria-modal="true" aria-labelledby="create-shift-title"><header><div><span>Roster assignment</span><h2 id="create-shift-title">Create shift</h2></div><button type="button" onClick={() => setShowCreate(false)}><X /></button></header><label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={Boolean(editingSlot)} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">{editingSlot ? 'Select work-ready staff' : 'Open shift — advertise to available staff'}</option>{staff.filter((person) => person.workReady).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select><label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value })}><option value="">Select the work this shift covers</option>{workUnits.map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {unit.work_unit_type === 'patrol' ? 'patrol run' : unit.work_unit_type === 'static' ? 'static post' : 'office / internal'}</option>)}</select><div><label><span>Start</span><input type="datetime-local" required value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>{unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}{assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}<label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label><label className="roster-publish"><input type="checkbox" aria-label="Publish immediately" checked={form.publish} onChange={(event) => setForm({ ...form, publish: event.target.checked })} /><span><UserCheck /><b>{form.officerId ? 'Publish immediately' : 'Advertise open shift immediately'}</b><small>{form.officerId ? 'The officer sees it straight away and can accept or decline. Leave off to keep it as a draft you publish later.' : 'Publish the unassigned slot so it can be offered to eligible staff. Leave off to keep it as a planning draft.'}</small></span></label>{error && <p className="roster-assignment-note is-stop roster-dialog-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /><span>{error}</span></p>}<footer><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" disabled={saving || Boolean(editingSlot && !form.officerId) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Creating' : 'Create shift'}</button></footer></form></div>}
+    {showCreate && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={createAssignment} role="dialog" aria-modal="true" aria-labelledby="create-shift-title">
+      <header><div><span>Roster assignment</span><h2 id="create-shift-title">Create shift</h2></div><button type="button" onClick={() => setShowCreate(false)}><X /></button></header>
+      <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={Boolean(editingSlot)} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">{editingSlot ? 'Select work-ready staff' : 'Open shift — advertise to available staff'}</option>{staff.filter((person) => person.workReady).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
+      <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value })}><option value="">Select the work this shift covers</option>{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
+      <div><label><span>Start</span><input type="datetime-local" required value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
+      {unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
+      {assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}
+      <label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label className="roster-publish"><input type="checkbox" aria-label="Publish immediately" checked={form.publish} onChange={(event) => setForm({ ...form, publish: event.target.checked })} /><span><UserCheck /><b>{form.officerId ? 'Publish immediately' : 'Advertise open shift immediately'}</b><small>{form.officerId ? 'The officer sees it straight away and can accept or decline. Leave off to keep it as a draft you publish later.' : 'Publish the unassigned slot so it can be offered to eligible staff. Leave off to keep it as a planning draft.'}</small></span></label>
+      {error && <p className="roster-assignment-note is-stop roster-dialog-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /><span>{error}</span></p>}
+      <footer><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" disabled={saving || Boolean(editingSlot && !form.officerId) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Creating' : 'Create shift'}</button></footer>
+    </form></div>}
   </div>;
 };
 

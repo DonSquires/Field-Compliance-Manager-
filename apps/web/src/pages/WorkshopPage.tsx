@@ -18,11 +18,13 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { PriceListPicker, usePriceList } from '../components/PriceListPicker';
 import PatrolTravelSummary from '../components/PatrolTravelSummary';
 import { useAuth } from '../context/AuthContext';
 import type { PriceListSelection } from '../lib/priceList';
 import { supabase } from '../lib/supabase';
+import { classifyWorkshopJob } from '../lib/workshopJobClassifier';
 import {
   LINE_KIND_LABELS,
   WORK_ORDER_KIND_LABELS,
@@ -69,6 +71,9 @@ const emptyTemplateForm = { id: '', name: '', description: '', kind: 'fabricatio
 const emptyReceiptForm = { token: '', itemId: '', itemName: '', locationId: '', quantity: '1', unitCost: '', reference: '' };
 
 export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
+  const location = useLocation();
+  const requestedWorkOrderId = new URLSearchParams(location.search).get('workOrderId');
+  const clientRosterJob = new URLSearchParams(location.search).get('clientJob') === '1';
   const { profile, operatingOrganizationId } = useAuth();
   const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const orgIds = useMemo(() => (organizationId ? [organizationId] : []), [organizationId]);
@@ -92,8 +97,9 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
   const [templates, setTemplates] = useState<BomTemplate[]>([]);
   const [templateLines, setTemplateLines] = useState<BomTemplateLine[]>([]);
   const [workClassifications, setWorkClassifications] = useState<WorkClassificationOption[]>([]);
+  const [defaultLeadId, setDefaultLeadId] = useState<string | null>(null);
 
-  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showOrderForm, setShowOrderForm] = useState(clientRosterJob);
   const [orderForm, setOrderForm] = useState(emptyOrderForm);
   const [lineForm, setLineForm] = useState(emptyLineForm);
   const [statusNote, setStatusNote] = useState('');
@@ -113,8 +119,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
     }
     setLoading(true);
     setError(null);
-    // ATLAS READS: workshop_work_order_summary, service_agreements, client_sites, assets, finance_inventory_locations, finance_inventory_balances, user_profiles, workshop_bom_templates, workshop_bom_template_lines, reference_codes
-    const [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes] = await Promise.all([
+    // ATLAS READS: workshop_work_order_summary, service_agreements, client_sites, assets, finance_inventory_locations, finance_inventory_balances, user_profiles, workshop_settings, workshop_bom_templates, workshop_bom_template_lines, reference_codes
+    const [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes, linkedOrderRes] = await Promise.all([
       supabase.from('workshop_work_order_summary').select('*').eq('organization_id', organizationId).order('updated_at', { ascending: false }).limit(300),
       supabase.from('service_agreements').select('id,name,client_organization_id,client:client_organization_id(name)').eq('provider_organization_id', organizationId).in('agreement_type', ['operational', 'financial']).order('name'),
       supabase.from('assets').select('id,name,asset_type').eq('organization_id', organizationId).order('name').limit(300),
@@ -124,14 +130,20 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
       supabase.from('workshop_bom_templates').select('id,name,description,kind,active').eq('organization_id', organizationId).order('name'),
       supabase.from('workshop_bom_template_lines').select('id,template_id,line_kind,item_id,description,quantity,unit_of_measure,position').eq('organization_id', organizationId).order('position'),
       supabase.from('reference_codes').select('id,code_type,code,name,description,sort_order').eq('organization_id', organizationId).in('code_type', ['work_subject', 'work_activity']).eq('is_active', true).order('sort_order'),
+      requestedWorkOrderId ? supabase.from('workshop_work_order_summary').select('*').eq('organization_id', organizationId).eq('id', requestedWorkOrderId).maybeSingle() : Promise.resolve({ data: null, error: null }),
     ]);
-    const firstError = [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes].find((res) => res.error)?.error;
+    // The default lead is a convenience only, so a missing setting must not block the Workshop.
+    const settingsRes = await supabase.from('workshop_settings').select('default_job_lead_user_id').eq('organization_id', organizationId).maybeSingle();
+    setDefaultLeadId(settingsRes.error ? null : (settingsRes.data as { default_job_lead_user_id: string | null } | null)?.default_job_lead_user_id ?? null);
+    const firstError = [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes, linkedOrderRes].find((res) => res.error)?.error;
     if (firstError) {
       setError(firstError.message);
       setLoading(false);
       return;
     }
     const orderRows = (ordersRes.data as WorkOrderSummary[]) ?? [];
+    const linkedOrder = linkedOrderRes.data as WorkOrderSummary | null;
+    if (linkedOrder && !orderRows.some((order) => order.id === linkedOrder.id)) orderRows.unshift(linkedOrder);
     setOrders(orderRows);
     setAgreements((agreementsRes.data as AgreementOption[]) ?? []);
     setAssets((assetsRes.data as AssetOption[]) ?? []);
@@ -150,13 +162,33 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
     }
     setSelectedId((current) => current && orderRows.some((row) => row.id === current) ? current : orderRows[0]?.id ?? null);
     setLoading(false);
-  }, [organizationId]);
+  }, [organizationId, requestedWorkOrderId]);
 
   useEffect(() => { void load(); }, [load]);
 
   const selected = useMemo(() => orders.find((row) => row.id === selectedId) ?? null, [orders, selectedId]);
+  useEffect(() => {
+    if (!requestedWorkOrderId || loading) return;
+    const order = orders.find((row) => row.id === requestedWorkOrderId);
+    if (order) { setTab('orders'); setSelectedId(order.id); }
+    else setError('The linked work order is not available in this organisation. Check your operating branch or access.');
+  }, [requestedWorkOrderId, orders, loading]);
   const workSubjects = useMemo(() => workClassifications.filter((option) => option.code_type === 'work_subject'), [workClassifications]);
   const workActivities = useMemo(() => workClassifications.filter((option) => option.code_type === 'work_activity'), [workClassifications]);
+  const classification = classifyWorkshopJob(`${orderForm.title} ${orderForm.description}`);
+  const suggestedSubject = workSubjects.find((row) => row.code === classification.subjectCode);
+  const suggestedActivity = workActivities.find((row) => row.code === classification.activityCode);
+  const usualLead = defaultLeadId ? people.find((person) => person.id === defaultLeadId) ?? null : null;
+  const usualLeadName = usualLead?.display_name ?? usualLead?.email ?? 'the usual job lead';
+  const applyClassification = () => {
+    setOrderForm({
+      ...orderForm,
+      kind: classification.kind,
+      workSubjectCodeId: suggestedSubject?.id ?? '',
+      workActivityCodeId: suggestedActivity?.id ?? '',
+      templateId: classification.kind === orderForm.kind ? orderForm.templateId : '',
+    });
+  };
 
   useEffect(() => {
     if (!selectedId) { setLines([]); return; }
@@ -187,6 +219,10 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
     event.preventDefault();
     if (!organizationId) return;
     const agreement = agreements.find((row) => row.id === orderForm.agreementId) ?? null;
+    if ((clientRosterJob || orderForm.kind === 'maintenance') && !agreement) {
+      setError('Choose the client agreement for this job before creating the work order.');
+      return;
+    }
     void run('Work order created.', async () => {
       // ATLAS CALLS: create_workshop_work_order
       const { data, error: rpcError } = await supabase.rpc('create_workshop_work_order', {
@@ -417,6 +453,7 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
             {showOrderForm && (
               <form className="assessment-form workshop-card" onSubmit={handleCreateOrder}>
                 <h3>New work order</h3>
+                {clientRosterJob && <p className="workshop-hint">Manufacturing and maintenance roster work must belong to a client. Create the work order, then link it from Create work unit and roster the people who do the work.</p>}
                 <div className="form-group"><label htmlFor="wo-kind">What kind of job?</label>
                   <select id="wo-kind" value={orderForm.kind} onChange={(event) => setOrderForm({ ...orderForm, kind: event.target.value as WorkOrderKind, workSubjectCodeId: '', workActivityCodeId: '', templateId: '' })}>
                     {(Object.keys(WORK_ORDER_KIND_LABELS) as WorkOrderKind[]).map((kind) => <option key={kind} value={kind}>{WORK_ORDER_KIND_LABELS[kind]}</option>)}
@@ -427,6 +464,11 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                   <div className="form-group"><label htmlFor="wo-activity">What work is being done?</label><select id="wo-activity" required value={orderForm.workActivityCodeId} onChange={(event) => setOrderForm({ ...orderForm, workActivityCodeId: event.target.value })}><option value="">Choose the work…</option>{workActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</select>{workActivities.length === 0 && <small>No active work activities are configured for this organisation.</small>}</div>
                 </div>}
                 <div className="form-group"><label htmlFor="wo-title">Title</label><input id="wo-title" required value={orderForm.title} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} placeholder={orderForm.kind === 'fabrication' ? 'e.g. Lockbox for Depot gate' : 'e.g. Replace gate hinges'} /></div>
+                {classification.matched.length > 0 && <div className="workshop-hint" role="status">
+                  <p>Suggested from “{classification.matched.join(', ')}”: {WORK_ORDER_KIND_LABELS[classification.kind]} · {suggestedSubject?.name ?? 'Choose a subject from your catalogue'} · {suggestedActivity?.name ?? 'Choose an activity from your catalogue'}.</p>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={applyClassification}>Use suggested classification</button>
+                  <small>Review before saving. This does not set a rate, bill a client, or create a roster assignment.</small>
+                </div>}
                 <div className="form-group"><label htmlFor="wo-template">Start from a template (optional)</label>
                   <select id="wo-template" value={orderForm.templateId} onChange={(event) => setOrderForm({ ...orderForm, templateId: event.target.value })}>
                     <option value="">No template — add lines by hand</option>
@@ -434,8 +476,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                   </select>
                 </div>
                 <div className="form-group"><label htmlFor="wo-agreement">Client agreement (who gets billed)</label>
-                  <select id="wo-agreement" value={orderForm.agreementId} onChange={(event) => setOrderForm({ ...orderForm, agreementId: event.target.value, siteId: '' })}>
-                    <option value="">Internal — no client</option>
+                  <select id="wo-agreement" required={clientRosterJob || orderForm.kind === 'maintenance'} value={orderForm.agreementId} onChange={(event) => setOrderForm({ ...orderForm, agreementId: event.target.value, siteId: '' })}>
+                    <option value="">{clientRosterJob || orderForm.kind === 'maintenance' ? 'Choose the client agreement' : 'Internal — no client'}</option>
                     {agreements.map((row) => <option key={row.id} value={row.id}>{clientName(row)} · {row.name}</option>)}
                   </select>
                 </div>
@@ -467,6 +509,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                       <option value="">Unassigned</option>
                       {people.map((person) => <option key={person.id} value={person.id}>{person.display_name ?? person.email ?? person.id}</option>)}
                     </select>
+                    {usualLead && orderForm.assignedUserId !== usualLead.id && <small>{usualLeadName} usually leads this work. <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOrderForm({ ...orderForm, assignedUserId: usualLead.id })}>Choose {usualLeadName}</button></small>}
+                    <small>This is the job lead. Record each person and their actual time separately in the roster; choosing a lead does not prove attendance.</small>
                   </div>
                 </div>
                 <div className="form-row">

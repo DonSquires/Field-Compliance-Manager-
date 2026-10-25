@@ -77,6 +77,47 @@ checkpoint scans + GPS. Identical mechanism for static (one long stop) and patro
 serviced" reporting. Presence records carry `client_org_id` (same tenancy substrate
 as compliance observations).
 
+### Owner direction 2026-10-25: roster placement and Workshop labour
+
+- Imported forestry assignments belong in the ordinary staff/work-unit roster
+  calendar, not a separate historical-area table. Existing source assignments
+  retain their recorded dates, officer and route. Their time ranges are evidence,
+  not payable durations or verified attendance. Posted patrol-log labour slots
+  take precedence for the same staff/day, with recorded-hours provenance and
+  an explicit approximate-start warning.
+- Create work unit must offer **Manufacturing & maintenance**, for client
+  jobs linked to the existing Workshop work order. This is a
+  distinct roster category, not a relabelled Office / internal unit.
+- Owner clarification: this category requires a client-backed order (lock or
+  gate repairs/installations, signs, digger work and similar maintenance).
+  Generic internal fabrication remains available in Workshop, not in this
+  client roster category. Description-based classification is an explicit,
+  reviewable suggestion using the active organisation catalogue; it cannot
+  determine commercial entitlement, rates or attendance. Digger and excavator
+  work uses the catalogue subject **Earthworks (digger / excavator)**
+  (`earthworks`, added 2026-10-29); an organisation without it must choose a
+  subject manually.
+- Pete Crawford is R&M's usual worker for these jobs. Each organisation's usual
+  job lead is stored in `workshop_settings.default_job_lead_user_id` (written
+  only by the audited `set_workshop_default_job_lead`; R&M is seeded with Pete).
+  The form offers that person as an explicit one-click choice only when they
+  are an active member of the operating organisation; never silently assign a
+  lead or infer who performed historical work. Each actual
+  worker and their hours belongs in a separate roster slot.
+- One work-order-backed unit can roster several people in separate slots. Its
+  service type is derived from the order's `fabrication`/`maintenance` kind.
+  A provider workplace is the roster base; an on-site maintenance job retains
+  its actual client place/zone/asset on the work order.
+- The roster plans labour and applies the existing staff eligibility, overlap,
+  availability and fatigue gates. The work order must be approved/open before
+  labour is rostered. Creating or staffing the unit does not silently reassign
+  the order's job lead or manufacture a patrol/static field shift.
+- Workshop remains the owner of job start/completion, materials, stock and
+  client invoice lines. The roster may estimate wages but must not generate a
+  second client charge or a made-up margin for that time. Internal orders remain
+  internal because they have no client, not because client jobs were classified
+  as internal roster work.
+
 ### Owner direction 2026-10-20: as-attended patrols and recorded travel
 
 - R&M source-backed places completed by Dave Porter belong on Blenheim Forestry
