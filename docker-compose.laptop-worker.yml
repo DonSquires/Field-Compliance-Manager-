@@ -119,7 +119,9 @@ services:
       DOCUMENT_SOURCE_ROOT: /sources/primary
       SOURCE_SYNC_STATE_PATH: /state/rm-source-sync.json
       SOURCE_SYNC_INTERVAL_MS: "60000"
-      SOURCE_SYNC_INCLUDE_PHOTOS: "true"
+      # Most of the R&M photo library is OneDrive online-only; hashing it would download it all.
+      # Photos are promoted name-first by source-promote.mjs on the host instead.
+      SOURCE_SYNC_INCLUDE_PHOTOS: "false"
     volumes:
       - "${BOB_DOCUMENT_ROOT_PATH:?BOB_DOCUMENT_ROOT_PATH is required}:/sources/primary:ro"
       - fcm_rm_source_sync:/state

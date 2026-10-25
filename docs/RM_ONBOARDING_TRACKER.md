@@ -16,6 +16,70 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## NEXT: RECORD/PHOTO AUTOMATION, THEN OFFICE CLIENT WORK (2026-10-26)
+
+- Owner priority: finish importing new and changed records and photos before
+  building the office time-entry surface. The existing laptop source scanner
+  detects workbook/photo versions but still reports `promotion: not_connected`.
+  Versioned record reconciliation and photo matching/attachment exist separately;
+  their presence is not proof of an unattended end-to-end import.
+- Preserve the approved add/update policy: retain source path, workbook
+  sheet/row, content hash, prior versions and audited receipts; never delete
+  business records merely because a source row/file disappears. Acknowledge a
+  queued file version only after its exact path/hash has an applied receipt.
+  Ambiguous photo links, unmapped places and conflicting FCM/source edits must
+  remain visible holds, not guessed matches or successful imports.
+- Built (branch `feat/rm-source-promotion`): `services/document-source-worker/
+  source-promote.mjs` connects the scanner to the versioned writer and photo
+  importer, using the reviewed map `rm-patrol-source-map.json` (14 workbooks
+  mapped, 8 held; duplicate "Issue" headers carry reviewed per-sheet
+  `column_aliases`, following NCC's approved `Secondary Issue (U)` precedent).
+  Workbook rows are exported with narratives and synced evidence-only, so no
+  Workshop proposals are created. Default mode is a dry run; `--commit` writes.
+  A governed RPC refusal becomes a visible hold; a transport failure stays
+  pending for retry. A single lock file prevents overlapping runs.
+- Live workbook dry run (2026-10-26), nothing written: about 788 new rows
+  (MR 27, OFO2025 65, OFO2026 350, STAND 12, TDC 198, TPFL2026 135, TAYLORS 1).
+  OFO2026's 350 rows exceed the 250-row change-volume guard and are held for
+  review. About 9,000 legacy rows would gain source provenance; this adopts
+  provenance and adds no new data. Rows linked to finance costs stay held by
+  the server. NCC is refused because some new rows are at places outside the
+  contracted patrol coverage, which needs review. Rows with an unexplained
+  difference from source (notably about 9,600 across the OFO workbooks) remain
+  untouched holds.
+- **Photo download hazard:** 72,543 of 76,156 R&M photos (424.7 GB) are
+  OneDrive online-only placeholders. Hashing them downloads them. The laptop
+  scanner container's `SOURCE_SYNC_INCLUDE_PHOTOS` is now `"false"`, and photo
+  promotion is name-first: listing, metadata and filename matching never read
+  file bytes. Only a photo that uniquely matches one record is read and
+  attached. Its receipt is keyed by size and modified time, so it is not re-read.
+- Live photo dry run (2026-10-26), no bytes read and the local footprint is
+  unchanged at 3,613 files: 396 unique matches, 19 ambiguous, 11,151 unstructured
+  filenames, and 47,029 with no exact record match. Committing photos needs the
+  governed importer actor (`RM_PHOTO_IMPORT_ACTOR_EMAIL`/`_PASSWORD`). The
+  low match rate is a matching-rule question for review, not a reason to guess
+  links.
+- Seeded spreadsheet jobs remain accepted reporting/billing source truth until
+  R&M operates in FCM, with no retrospective geofence requirement. This does not
+  invent geometry, GPS attendance, a worker identity or a photo-to-job link.
+- Deferred owner requirement: Sally performs CCTV review; she and other office
+  staff need roster-backed work units and entries identifying the worker,
+  client, time, relevant location and purpose. Ash's Habitat app-building work
+  is another example. Keep client work distinct from internal office work and
+  preserve each client's own billing terms.
+- Implementation recommendation, not yet built: reuse shared office/internal
+  work-unit and labour/time-entry paths rather than creating a permanent unit
+  per named employee or forcing office work into patrol/Workshop execution.
+  Distinguish where the employee worked from the client's place being reviewed.
+  Recording time must not automatically create a client invoice or field shift.
+- Owner classification clue: no kilometres travelled is a useful indicator of
+  office-based work for the client, including CCTV review. Interpret explicit
+  recorded zero kilometres as supporting evidence alongside the description,
+  activity and source performer. Blank, missing or invalid kilometres are
+  unknown, not zero. Zero kilometres alone does not prove office work: static
+  duty and on-site repairs can also involve no travel. Do not assign all such
+  work to Sally or reclassify already seeded records without source evidence.
+
 ## R&M GROUP CHARGE CODES (2026-10-25) - APPLIED, PR STACKED ON #190
 
 Owner decisions: OneFortyOne numbers are the group standard; Mainland Pest
