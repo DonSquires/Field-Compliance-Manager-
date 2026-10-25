@@ -23,6 +23,7 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { createBuilderChatWorker } = require('./builder-chat-session');
 const { runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
@@ -1782,6 +1783,16 @@ const vibeWorker = vibeEnabled ? createVibeWorker({
     openPullRequest: ({ workspacePath, branch, head, title, body }) => createGitHubPullRequest({ workspacePath, branchName: branch, expectedHeadSha: head, title: `Bob vibe: ${title}`, body, githubToken, owner: githubOwner, repo: githubRepo, draft: false }),
   },
 }) : null;
+// Bob Builder chat: the Builder page's own conversation lane, independent of in-app Bob (onspace-ai-chat).
+const builderChatWorker = Boolean(builderSupabase) && process.env.BOB_BUILDER_CHAT_ENABLED !== '0' ? createBuilderChatWorker({
+  supabase: builderSupabase,
+  deps: {
+    workspaceRoot: builderWorkspaceRoot,
+    gateway: builderGateway,
+    sourceDirFor: sha => builderGitSource(sha),
+    resolveHead: () => builderRepositoryHead('main').sha,
+  },
+}) : null;
 const redeemVibeTicket = async (sessionId, ticket) => {
   const { data, error } = await builderSupabase.rpc('builder_vibe_redeem_preview_ticket', { p_session_id: sessionId, p_ticket: ticket });
   if (error) throw new Error(error.message);
@@ -1840,6 +1851,7 @@ if (vibeWorker) {
   }, 5000);
   vibePreviewTimer.unref?.();
 }
+if (builderChatWorker) builderChatWorker.start();
 if (autopilotEnabled && builderSupabase) {
   startInterruptedModelRecovery().catch(() => {});
   // This process is the only verifier runner: anything still 'running' at startup was orphaned by

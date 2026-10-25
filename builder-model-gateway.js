@@ -6,10 +6,12 @@ const ALLOWED_BUILDER_MODES = new Set([
   'frontend_engineer',
   'backend_engineer',
   'vibe_engineer',
+  'builder_chat',
   'qa_security_reviewer',
   'code_reviewer',
   'release_engineer'
 ]);
+const NATIVE_TOOL_MODES = new Set(['vibe_engineer', 'builder_chat']);
 // 'xhigh' is the highest value the Chat Completions API accepts for current reasoning models
 // (probed 2026-09-26 against gpt-5.4 … gpt-6-*; 'max' is rejected).
 const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
@@ -287,7 +289,7 @@ function validateModelRequest(input, config) {
   if (!input.prompt_version || typeof input.prompt_version !== 'string') return 'prompt_version is required';
   if (!input.idempotency_key || typeof input.idempotency_key !== 'string') return 'idempotency_key is required';
   if (input.tools !== undefined) {
-    if (input.builder_mode !== 'vibe_engineer' || config[input.provider].kind !== 'ollama') return 'native tools are restricted to private Vibe providers';
+    if (!NATIVE_TOOL_MODES.has(input.builder_mode) || config[input.provider].kind !== 'ollama') return 'native tools are restricted to private Vibe and Builder chat providers';
     if (!Array.isArray(input.tools) || !input.tools.length || input.tools.length > 40) return 'tools must contain 1-40 function definitions';
     if (input.tools.some(tool => tool?.type !== 'function' || !/^[a-z][a-z0-9_]{0,63}$/.test(tool.function?.name || '') ||
       typeof tool.function?.description !== 'string' || tool.function?.parameters?.type !== 'object')) return 'invalid native tool definition';

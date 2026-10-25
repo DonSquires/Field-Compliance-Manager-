@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v14';
+const PROMPT_VERSION = 'vibe-v16';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -61,6 +61,30 @@ const clip = (text, cap) => {
   return value.length <= cap ? value : `${value.slice(0, cap)}\n[… ${value.length - cap} more chars]`;
 };
 
+const EDIT_VERB = /\b(fix|revert|build|add|implement|replace|remove|delete|correct|redesign|update|make|improve|create|restore|rename|refactor|continue|carry on|style|move|wire|change|edit|modify|adjust|tweak|rewrite|convert|migrate|swap|apply|undo)\b/i;
+const NO_EDIT_REQUEST = /\b(without|no)\s+(editing|changing|modifying|touching|code\s+changes?|changes?|edits?)\b|\b(do\s+not|don't|dont|never)\s+(edit|change|modify|touch|write)\b|\b(read[- ]only|dry[- ]run)\b/i;
+// Verification phrases mention "build"/"test" as nouns, not as a request to build something.
+const VERIFY_PHRASE = /\b(?:npm\s+)?(?:run|rerun|re-run|execute|kick off)\s+(?:the\s+|a\s+)?(?:build|tests?|typecheck|type[- ]check|lint|checks?|verification|human[_ ]test|dr\.? bob)\b|\b(?:verify|check|confirm|test|review|inspect|audit|diagnose|explain|show|list|summari[sz]e)\b(?:\s+(?:that|whether|if|the|this|my|it|its|your))?(?:\s+(?:fix|fixes|change|changes|build|update|updates|edit|edits|redesign|revert))?/gi;
+const POLITE_REQUEST = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b|^\s*please\b/i;
+
+// Classifies the owner's message: a question, a request to change files, or neither (verification/informational).
+function classifyOwnerRequest(content) {
+  const text = String(content || '');
+  const politeRequest = POLITE_REQUEST.test(text);
+  const questionForm = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|would|will|explain)\b/i.test(text);
+  if (NO_EDIT_REQUEST.test(text)) return { asked: questionForm && !politeRequest, wantsChange: false };
+  const editText = text.replace(VERIFY_PHRASE, ' ');
+  const wantsChange = EDIT_VERB.test(editText) && (!questionForm || politeRequest);
+  return { asked: questionForm && !wantsChange, wantsChange };
+}
+
+const COMPLETION_CLAIM = /\b(done|fixed|implemented|updated|changed|added|removed|completed|committed|reverted|restored|created|applied|finished|shipped|resolved)\b/i;
+// Only a genuine clarifying question to the owner may skip the change safeguards; "Fixed. Can you check?" is a completion claim.
+function isClarifyingQuestion(reply) {
+  const text = String(reply || '').trim();
+  return /\?\s*$/.test(text) && !COMPLETION_CLAIM.test(text);
+}
+
 function vibeSystemPrompt(limits = VIBE_LIMITS) {
   return [
     'You are Bob Builder in a live vibe-coding session with the platform owner of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root, tests in test/ and apps/web).',
@@ -88,7 +112,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'Reply with ONLY one JSON object per message: {"thought": string, "tool": string, "args": object}.',
     'TOOLS:',
     '- list_dir {path} lists filenames. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". git_log {path?, limit?} | git_diff {}',
-    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text.',
+    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text. apply_patch accepts a git unified diff or a "*** Begin Patch" / "*** Update File: <path>" envelope.',
     '- generate_visual_baselines {paths, reason}  1-6 exact Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     '- human_test {reason}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Returns passed/failed/skipped, failing tests (screenshot mismatches flagged), Dr Bob\'s error findings and UX/layout warnings, and an evidence directory. Not a live tenant test or merge approval.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
@@ -142,6 +166,22 @@ function toolCallKey(tool, args) {
 
 const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
 const EDIT_VIBE_TOOLS = new Set(['write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'generate_visual_baselines']);
+// Files an edit call targets, so a failure on one file is cleared only by a later success on that file.
+function editTargets(tool, args = {}) {
+  if (tool === 'apply_patch') {
+    const paths = new Set();
+    for (const line of String(args.diff || '').split('\n')) {
+      const match = /^(?:\+\+\+|---) (?:[ab]\/)?(\S+)/.exec(line) || /^\*\*\* (?:Update|Add|Delete) File: (.+?)\s*$/.exec(line) || /^\*\*\* Move to: (.+?)\s*$/.exec(line);
+      if (match && match[1] !== '/dev/null') paths.add(match[1]);
+    }
+    return paths.size ? [...paths] : ['apply_patch (no file paths in diff)'];
+  }
+  if (tool === 'generate_visual_baselines') {
+    const paths = Array.isArray(args.paths) ? args.paths.map(String).filter(Boolean) : [];
+    return paths.length ? paths : ['generate_visual_baselines'];
+  }
+  return [String(args.path || tool)];
+}
 const isVerificationCommand = command => /^(?:node --(?:test|check)\b|npm (?:run (?:test|lint|build)|test)\b)/.test(command);
 const verificationKey = command => /^npm (?:run test|test) --prefix apps\/web -- .*?\be2e\//.test(command) ? 'human_test'
   : /^npm (?:run test|test)\b/.test(command)
@@ -196,8 +236,8 @@ function vibeNativeTools(tools) {
     write_note: { properties: { text: path }, required: ['text'] },
     atlas: { properties: { action: { type: 'string', enum: ['capability_map', 'terrain_edges', 'blast_radius', 'gap_report'] }, name: text, type: text, direction: text, depth: integer, limit: integer }, required: ['action'] },
     live_count: { properties: { table: path, column: text, equals: { type: ['string', 'number', 'boolean', 'null'] } }, required: ['table'] },
-    reply: { properties: { message: path, blocked_reason: text }, required: ['message'] },
-    finish: { properties: { message: path, blocked_reason: text }, required: ['message'] },
+    reply: { properties: { message: path, blocked_reason: text, no_change_reason: text }, required: ['message'] },
+    finish: { properties: { message: path, blocked_reason: text, no_change_reason: text }, required: ['message'] },
   };
   const descriptions = {
     list_dir: 'List existing file/directory names, not file contents.',
@@ -207,12 +247,12 @@ function vibeNativeTools(tools) {
     git_diff: 'Inspect current changes before editing further or verifying.',
     replace_in_file: 'Replace exact existing source text copied from read_file. Include unique surrounding lines and complete new_text. Do not append a second component outside its JSX tree.',
     write_file: 'Write complete file content after inspecting existing source. Protected paths remain refused.',
-    apply_patch: 'Apply a textual unified diff. Protected paths and binary patches remain refused.',
+    apply_patch: 'Apply a git unified diff or a "*** Begin Patch / *** Update File: <path>" envelope with @@ context hunks. A failed envelope changes nothing. Protected paths and binary patches remain refused.',
     delete_file: 'Delete an inspected, unprotected file only when required by the task.',
     run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
     atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
-    reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure.',
-    finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures.',
+    reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure, or no_change_reason when the request truly needs no file change.',
+    finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures, or no_change_reason when no file change is needed.',
     generate_visual_baselines: 'Generate up to six exact allowed Playwright PNG paths with an intentional-change rationale, never merely to bless a mismatch.',
     human_test: 'Run Dr Bob\'s human browser walk of this branch (offline fixtures, desktop) plus e2e specs targeting the changed web files. Slow (minutes): use after UI edits are lint-clean.',
   };
@@ -633,7 +673,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let loopRecoveryUsed = false;
   let proseRecoveryUsed = false;
   let emptyReplyCorrected = false;
-  const ownerAsked = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|explain)\b/i.test(String(message.content || ''));
+  // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
+  let effectiveEdits = 0;
+  let noChangeReplyCorrected = false;
+  // Edit targets whose latest edit failed; a success elsewhere must not let the reply claim these were done.
+  const failedEdits = new Map();
+  let failedEditReplyCorrected = false;
+  // A request to alter code; verification-only or question messages may legitimately change nothing.
+  const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
   const nextCandidate = () => {
     const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
@@ -770,6 +817,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const handoff = async (reply, model, { browser = true } = {}) => {
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
+    const noChange = !effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply);
+    if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
+    if (noChange) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
@@ -800,7 +850,19 @@ async function runConversation({ store, session, message, workspacePath, branch,
         continue;
       }
       unavailable++;
-      if (active + 1 < candidates.length && (unavailable >= 2 || [413, 429].includes(response.status))) { active++; unavailable = 0; turn--; continue; }
+      // A timeout already cost the owner a full turn budget of silence; never spend a second one on the
+      // same provider when another candidate exists, and say why the model changed.
+      const timedOut = response.timeout === true || response.status === 408 || response.code === 'provider_timeout';
+      if (active + 1 < candidates.length && (timedOut || unavailable >= 2 || [413, 429].includes(response.status))) {
+        const previous = candidates[active];
+        active++; unavailable = 0; turn--;
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `${previous.provider}/${previous.model} ${timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`}; switching to ${candidates[active].provider}/${candidates[active].model}.`,
+          payload: { message_id: message.id, reason: timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: candidates[active].provider === 'ollama_cloud' },
+        });
+        continue;
+      }
       if (unavailable >= 3) return { reply: `The model stopped responding (${clip(response.error, 200)}). Your branch keeps whatever was done so far; send another message to continue.`, error: true, tools };
       turn--;
       await new Promise(resolve => setTimeout(resolve, 1500 * unavailable));
@@ -853,7 +915,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const args = call.args && typeof call.args === 'object' ? call.args : {};
     if (call.tool === 'reply' || call.tool === 'finish') {
       const replyText = String(args.message || args.summary || call.thought || '');
-      if (!executedTools && !args.blocked_reason && !ownerAsked && !replyText.includes('?') && !emptyReplyCorrected) {
+      if (!executedTools && !args.blocked_reason && !args.no_change_reason && !ownerAsked && !isClarifyingQuestion(replyText) && !emptyReplyCorrected) {
         // A reply that only promises work ("I'll continue...") before any tool ran is not an answer.
         emptyReplyCorrected = true;
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
@@ -871,6 +933,33 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }
         continue;
       }
+      if (!effectiveEdits && ownerWantsChange && !args.blocked_reason && !args.no_change_reason && !isClarifyingQuestion(replyText) && !noChangeReplyCorrected) {
+        // Edits that failed or were byte-identical leave the owner's request undone; "Search for X" is not a result.
+        noChangeReplyCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+          error: 'Reply refused: no file changed during this message (edits failed, were no-ops, or none were made), so the owner\'s request is not done. read_file the exact lines, then make the requested change with replace_in_file or write_file. If nothing should change, reply with args.no_change_reason or args.blocked_reason stating honestly why.',
+        }) });
+        continue;
+      }
+      if (failedEdits.size && !args.blocked_reason && !failedEditReplyCorrected) {
+        // One file changed is not the whole request; failed edits elsewhere must be fixed or reported, never claimed.
+        failedEditReplyCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+          error: 'Reply refused: these edits failed and were never applied, so that part of the owner\'s request is not done. read_file the exact current lines and retry with old_text copied verbatim, or reply with args.blocked_reason naming what remains undone. Do not claim changes to these files.',
+          failed_edits: Object.fromEntries(failedEdits),
+        }) });
+        const next = nextCandidate();
+        if (next > 0) {
+          const previous = candidates[active];
+          active = next;
+          await store.post(session.id, {
+            role: 'system', kind: 'status',
+            content: `${previous.model} tried to finish with failed edits outstanding; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'failed_edits_outstanding', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          });
+        }
+        continue;
+      }
       await ensureTypecheck();
       await ensureHumanTest();
       if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
@@ -881,7 +970,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }) });
         continue;
       }
-      return handoff(args.blocked_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
+      return handoff(args.blocked_reason || args.no_change_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 1500), tool: call.tool, args }) });
     const callKey = toolCallKey(call.tool, args);
@@ -899,7 +988,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
         executedTools++;
         const beforeEdit = EDIT_VIBE_TOOLS.has(call.tool) ? uiFingerprint(changedVsBase()) : null;
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
+        if (EDIT_VIBE_TOOLS.has(call.tool)) {
+          for (const target of editTargets(call.tool, args)) {
+            if (!result?.error) failedEdits.delete(target);
+            else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
+          }
+        }
         if (beforeEdit !== null && !result?.error && beforeEdit !== uiFingerprint(changedVsBase())) {
+          effectiveEdits++;
           for (const key of repeatedCalls.keys()) {
             if (key.startsWith('human_test:') || key.startsWith('run:') && isVerificationCommand(JSON.parse(key.slice(4)).command || '')) repeatedCalls.delete(key);
           }
@@ -1143,4 +1239,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
