@@ -157,8 +157,9 @@ function vibeProviderCandidates(modelRequest, health) {
     // model meant Vibe skipped every later Cloud option after two weak/malformed replies.
     while (true) {
       const [next] = selectProviders({ ...modelRequest, chain: [candidate.provider] }, { health, avoid });
-      if (!next || !add(next)) break;
+      if (!next) break;
       avoid.push({ provider: next.provider, model: next.model });
+      add(next);
     }
   }
   return candidates;
@@ -718,7 +719,6 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let executedTools = 0;
   let unavailable = 0;
   let loopRecoveryUsed = false;
-  let proseRecoveryUsed = false;
   let emptyReplyCorrected = false;
   // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
   let effectiveEdits = 0;
@@ -942,9 +942,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
         error: executedTools ? 'Reply with ONLY one JSON object: {"thought": string, "tool": string, "args": object}. Use reply {message} to answer the owner.'
           : 'No tool has executed this turn, so describing what you will do is not progress. Return ONLY one JSON object {"thought": string, "tool": string, "args": object} that starts the work now (for example read_file a verified starting file).',
       }) });
-      const next = unparseable >= 2 && !proseRecoveryUsed ? nextCandidate() : -1;
+      const next = unparseable >= 2 ? nextCandidate() : -1;
       if (next > 0) {
-        proseRecoveryUsed = true;
         const previous = candidates[active];
         active = next;
         unparseable = 0;

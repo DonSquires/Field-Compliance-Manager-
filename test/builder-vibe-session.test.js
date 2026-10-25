@@ -533,6 +533,39 @@ test('Vibe considers every owner-approved Ollama Cloud model after the ready mod
   ]);
 });
 
+test('Vibe continues past models duplicated across providers to reach a later distinct fallback', () => {
+  const candidates = vibe.vibeProviderCandidates({ chain: ['gpu_workstation', 'ollama'] }, {
+    gpu_workstation: { configured: true, healthy: true, ready_model: 'A', models: ['A', 'B'], installed: ['A', 'B'] },
+    ollama: { configured: true, healthy: true, ready_model: 'A', models: ['A', 'B', 'C'], installed: ['A', 'B', 'C'] },
+  });
+  assert.deepEqual(candidates, [
+    { provider: 'gpu_workstation', model: 'A' },
+    { provider: 'gpu_workstation', model: 'B' },
+    { provider: 'ollama', model: 'C' },
+  ]);
+});
+
+test('malformed Vibe responses advance through Cloud candidates until one can act', async () => {
+  const models = ['gpt-oss:120b', 'kimi-k2.7-code', 'deepseek-v4.1-flash:1017'];
+  const { store, deps, model } = setup([
+    '{malformed response',
+    '{still malformed',
+    { thought: 'read source', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"fixed"' } },
+    { thought: 'reply', tool: 'reply', args: { message: 'Fixed and verified the focused edit.' } },
+  ], {
+    allowCloud: true,
+    fetchHealth: async () => ({ ollama_cloud: { configured: true, healthy: true, models, installed: models, ready_model: models[0] } }),
+  });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('fix the greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(model.calls.map(call => call.model_name), [
+    'gpt-oss:120b', 'gpt-oss:120b', 'kimi-k2.7-code', 'kimi-k2.7-code', 'kimi-k2.7-code',
+  ]);
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'prose_without_tool' && row.payload.model === 'kimi-k2.7-code'));
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
+});
+
 test('repeated failed edits still stop even when another local recovery model is available', async () => {
   const edit = { thought: 'guess edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'missing', new_text: 'bad' } };
   const { store, deps, model } = setup(Array.from({ length: 12 }, () => edit), {
