@@ -17,12 +17,12 @@ const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { runBuilderResearch } = require('./builder-chat-research');
 
-const PROMPT_VERSION = 'builder-chat-v3';
+const PROMPT_VERSION = 'builder-chat-v4';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
   turnTimeoutMs: Math.max(30_000, Number(process.env.BOB_BUILDER_TURN_TIMEOUT_MS || 300_000)),
-  readCapChars: 20_000,
+  readCapChars: 8_000,
   searchCapLines: 120,
   listCapEntries: 300,
   runCapChars: 4_000,
@@ -63,6 +63,7 @@ function builderChatSystemPrompt() {
     '- Answer the question asked. A status question is answered from owner_queue/list_jobs/job_status; do not read source code for it.',
     '- Never guess file paths. If a path is missing, use did_you_mean from the error, search or list_dir. After a couple of failed calls, reply with what you know.',
     '- All repository tools use repository-relative paths, never VPS filesystem paths. Use list_dir {"path":"."} to discover the repository root. A deployment investigation must inspect the actual release lifecycle writers/callers for the affected service, not stop at a Compose file or a different service. A plan to investigate later is not a completed investigation.',
+    '- read_file returns at most 120 lines per call. Continue with the next returned line range only when needed. For generated schema, search an exact relevant table/function first and read that range; the migration-ledger header is not schema evidence. search uses path (a repository-relative string or array), not paths; invalid host paths are refused, never widened into a whole-repository search.',
     '- Ask one clarifying question with reply when the request is genuinely ambiguous; otherwise investigate and act.',
     '- Keep replies short and plain. Respond with exactly ONE JSON object per message: {"thought": string, "tool": string, "args": object}. Finish with reply {"message": string}.',
   ].join('\n');
@@ -200,6 +201,34 @@ function validateProposal(args) {
 function createBuilderChatTools({ supabase, workspacePath, limits }) {
   const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} }) : {};
   const tools = Object.fromEntries(READ_TOOLS.filter(name => typeof base[name] === 'function').map(name => [name, base[name]]));
+  if (workspacePath) {
+    tools.read_file = (args = {}) => {
+      const start = args.start_line === undefined ? 1 : Number(args.start_line);
+      const end = args.end_line === undefined ? start + 119 : Number(args.end_line);
+      if (!Number.isInteger(start) || start < 1 || !Number.isInteger(end) || end < start) {
+        return { error: 'read_file requires positive integer start_line/end_line with end_line >= start_line' };
+      }
+      const boundedEnd = Math.min(end, start + 119);
+      const result = base.read_file({ ...args, start_line: start, end_line: boundedEnd });
+      return result.error ? result : {
+        ...result,
+        ...(result.omitted_range ? { next_start_line: result.omitted_range.start_line }
+          : result.end_line < result.total_lines ? { next_start_line: result.end_line + 1 } : {}),
+        ...(end > boundedEnd ? { requested_end_line: end, note: 'Read capped at 120 lines; follow next_start_line only if the next range is relevant.' } : {}),
+      };
+    };
+    tools.search = (args = {}) => {
+      if (Object.hasOwn(args, 'paths')) return { error: 'search accepts path, not paths; use a repository-relative string or array' };
+      if (args.path !== undefined && typeof args.path !== 'string' && !Array.isArray(args.path)) {
+        return { error: 'search path must be a repository-relative string or array' };
+      }
+      const paths = Array.isArray(args.path) ? args.path : String(args.path ?? '').split(/[\s,]+/).filter(Boolean);
+      if (paths.some(value => typeof value !== 'string' || !value.trim() || /^(?:\/|[A-Za-z]:)|\\|[\0\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(value))) {
+        return { error: 'search path must be repository-relative, not a VPS/absolute path or traversal. Use find_files to discover repository paths; live host access is not available.' };
+      }
+      return base.search({ ...args, path: paths });
+    };
+  }
   if (workspacePath) tools.find_files = ({ name, limit } = {}) => {
     const term = typeof name === 'string' ? name.trim().toLowerCase() : '';
     if (term.length < 2 || term.length > 100) return { error: 'name must be a filename/path fragment of 2-100 characters, not a natural-language question' };

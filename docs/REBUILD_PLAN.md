@@ -8,7 +8,24 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
-Builder chat public research, owner decision 2026-10-25 (in development, not deployed):
+Builder research release follow-up, 2026-10-25:
+
+- PR #213 and generated-catalog PR #214 are merged; governed release
+  `c6fc771cd9f2a6b0979f7211ac72cdb737292ac8` completed with healthy control
+  plane, applied migration, matching live schema and refreshed Atlas.
+- Production UI synthetic thread `c4d91a50-d586-42da-ae9a-101f36468359`
+  completed with Kimi vision, private document extraction and matched official
+  Docker source quotes. Persisted approval and receipt show history withheld,
+  one raw image, no raw documents and three sources. No job was proposed.
+- The subsequent fault-only private investigation failed: Compose rereads and
+  model timeouts, no valid repair plan or job. Larger installed GPU candidates
+  exceed the existing memory guard and were not loaded. A bounded eligible
+  Qwen3 diagnostic still failed; its settings are not promoted.
+- A prepared tool correction refuses invalid search paths instead of silently
+  broadening scope and bounds source reads to 120 lines/8,000 characters.
+  This improves evidence handling, not a claim of autonomous repair completion.
+
+Builder chat public research, owner decision 2026-10-25 (deployed and live UI verified):
 
 - Before: local chat candidates could consume the entire wall budget before
   cloud was reached; chat had no image/document/public-web research input.

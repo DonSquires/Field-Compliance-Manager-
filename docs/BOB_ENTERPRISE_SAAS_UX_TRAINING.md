@@ -19,6 +19,16 @@ the same required arguments. Repeated empty literal searches need a different
 discovery method; repeated invalid arguments need correction or a candidate
 handoff with the existing evidence. Neither counts as progress or completion.
 
+Private investigation follow-up, 2026-10-25: repository search must refuse host
+paths rather than normalize them into an unscoped search. Use its documented
+`path` argument, not `paths`. Read source in at most 120-line ranges with the
+returned next-line cursor. Search the relevant symbol before reading generated
+schema; its migration-ledger header is not evidence about the affected entity.
+The private Qwen3 diagnostic progressed faster with a bounded output budget but
+still failed to author a valid repair plan. Do not promote a diagnostic setting
+as an established fix. Installed larger GPU models also failed the existing
+memory-budget preflight and were not loaded; installation is not safe capacity.
+
 ### Public research, visual and document evidence
 
 Use Builder chat's explicit public-cloud mode for an owner-reviewed public

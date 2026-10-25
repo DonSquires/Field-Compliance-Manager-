@@ -73,6 +73,48 @@ const RESEARCH = [
   { tool: 'atlas', args: { action: 'capability_map', name: 'CctvReviewPage' } },
 ];
 
+test('chat source reads default to 120 lines and expose the next evidence range', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'builder-chat-bounds-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'source.js'), Array.from({ length: 300 }, (_, index) => `const value${index} = ${index};`).join('\n'));
+  const tools = chat.createBuilderChatTools({ workspacePath: root, limits: chat.BUILDER_CHAT_LIMITS });
+  const first = tools.read_file({ path: 'source.js' });
+  assert.equal(first.start_line, 1);
+  assert.equal(first.end_line, 120);
+  assert.equal(first.next_start_line, 121);
+  assert.match(first.content, /120: const value119/);
+  assert.doesNotMatch(first.content, /value120/);
+  const next = tools.read_file({ path: 'source.js', start_line: 121, end_line: 300 });
+  assert.equal(next.end_line, 240);
+  assert.equal(next.next_start_line, 241);
+  assert.equal(next.requested_end_line, 300);
+  for (const args of [{ start_line: 0 }, { start_line: 2, end_line: 1 }, { start_line: 1.5 }, { end_line: 'not-a-line' }]) {
+    assert.match(tools.read_file({ path: 'source.js', ...args }).error, /positive integer/);
+  }
+});
+
+test('chat search rejects invalid scope instead of silently searching the whole repository', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'builder-chat-search-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  fs.mkdirSync(path.join(root, 'src'));
+  fs.writeFileSync(path.join(root, 'src/fixture.js'), 'const publicFixture = true;\n');
+  execFileSync('git', ['add', 'src/fixture.js'], { cwd: root });
+  const tools = chat.createBuilderChatTools({ workspacePath: root, limits: chat.BUILDER_CHAT_LIMITS });
+  for (const scope of ['/srv/fcm/releases/missing', '../outside', 'src/../../outside', 'C:\\outside', ['src', '/srv'], ['']]) {
+    const result = tools.search({ query: 'publicFixture', path: scope });
+    assert.match(result.error, /repository-relative/);
+    assert.equal(result.results, undefined);
+  }
+  assert.match(tools.search({ query: 'publicFixture', paths: ['src'] }).error, /path, not paths/);
+  assert.match(tools.search({ query: 'publicFixture', path: null }).error, /repository-relative/);
+  for (const scope of ['src', ['src'], '.', undefined]) {
+    const result = tools.search({ query: 'publicFixture', path: scope });
+    assert.equal(result.matches, 1);
+    assert.match(result.results[0], /src\/fixture.js/);
+  }
+});
+
 test('the Builder chat prompt keeps it separate from in-app Bob and forbids claiming actions', () => {
   const prompt = chat.builderChatSystemPrompt();
   assert.match(prompt, /separate from in-app Bob/);
