@@ -560,6 +560,15 @@ test('outline indexes the declarations of a big file with line numbers; search c
   const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'ab1eab1eab1eab1eab1eab1e', targetSha: repo.sha });
   const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
   const outline = tools.outline({ path: 'test/sum.test.js' });
+  for (const args of [{}, { path: '.' }, { path: './' }, { path: '' }]) {
+    const listed = tools.list_dir(args);
+    assert.equal(listed.path, '.');
+    assert.ok(listed.entries.includes('lib/'));
+    assert.ok(listed.entries.includes('test/'));
+    assert.ok(!listed.entries.includes('.git'));
+  }
+  assert.throws(() => tools.list_dir({ path: '../' }), /unsafe path|escapes/);
+  assert.throws(() => tools.read_file({ path: '.' }), /unsafe path/);
   assert.equal(outline.total_lines, 5);
   assert.match(outline.entries.join('\n'), /^1: const test = require/m);
   assert.match(tools.outline({ path: 'lib/sum.js', pattern: '[' }).error, /not a valid regular expression/);

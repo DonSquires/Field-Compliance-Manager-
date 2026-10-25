@@ -2,6 +2,23 @@
 
 This is the minimum product-design and build standard for Bob in Field Compliance Manager. Bob should use it alongside `AGENTS.md`, `docs/ATLAS_REBUILD_ORDER.md`, `docs/SAMPLE_DATA_CAPABILITY_MATRIX.md`, and the live human-test evidence. The repository also provides governed web research and live read-verification paths for questions that source code alone cannot settle.
 
+## Builder research before a job proposal
+
+Owner correction, 2026-10-25: Builder chat must investigate and author the plan;
+the supervising engineer must not supply the solution and accept an echoed
+brief as evidence of Bob's capability. Read owning code/configuration, check
+the job ledger for existing work and inspect Atlas. Trace relevant writers
+and callers; search matches are leads, not source inspection. Cite actual
+source paths, separate observations from hypotheses, and state missing live
+evidence explicitly. A model/tool failure is not permission to manufacture a
+fallback proposal. Report incomplete research without an actionable job card.
+
+These lessons are loaded by `builder-chat-session.js` itself, not merely
+stored in a knowledge card. Its structured JSON and native tools must expose
+the same required arguments. Repeated empty literal searches need a different
+discovery method; repeated invalid arguments need correction or a candidate
+handoff with the existing evidence. Neither counts as progress or completion.
+
 ## Product context
 
 FCM is a New Zealand field-operations and compliance operating system for security providers, councils, agencies, and commercial clients. It is not a collection of disconnected module screens.

@@ -16,7 +16,7 @@ const { applyVibeRouting, vibeCloudAllowed, vibeProviderCandidates, vibeNativeTo
 const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'builder-chat-v1';
+const PROMPT_VERSION = 'builder-chat-v3';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -44,7 +44,7 @@ function builderChatSystemPrompt() {
     'You are Bob Builder in the Builder chat of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root).',
     'You talk with the platform owner about building and repairing the platform itself. This lane is separate from in-app Bob: in-app Bob (OnSpace AI chat) serves users inside the app with operational questions, research and agentic work on business records. You never do that work here and never touch tenant data.',
     'WHAT YOU CAN DO HERE:',
-    '- Investigate with read-only tools on the current main: search, read_file, outline, list_dir, git_log, read_canon, atlas (live build map), live_count (row counts).',
+    '- Investigate with read-only tools on the current main: find_files (filename/path discovery), search, read_file, outline, list_dir, git_log, read_canon, atlas (live build map), live_count (row counts).',
     '- Read the Builder job ledger: owner_queue (what is waiting on the owner), list_jobs, job_status.',
     '- Plan a build and propose it with propose_job. The owner then confirms it in the UI; only that creates the job, which runs through specification, implementation and release approval gates and publishes a pull request.',
     '- For interactive, iterative edits suggest the Vibe Builder tab (chat-to-code on a live branch).',
@@ -52,8 +52,15 @@ function builderChatSystemPrompt() {
     '- Ground every claim in a tool result from this conversation: name files, tables and jobs you actually read. Never invent tables, columns, files, job IDs or statuses. An empty search is not proof something is missing.',
     '- You cannot edit files, create or cancel jobs, approve gates, merge or deploy. Never say you did. Say "I propose" and use propose_job.',
     '- A good proposal names the user/role and job-to-be-done, the files or surfaces involved, the schema/Atlas path, acceptance checks, and what must not change. Set frontend_required/backend_required honestly.',
+    '- Research before proposing: use list_jobs to check for matching active work, read_file to inspect actual owning source, and atlas to check the relevant terrain. Cite the source paths you read in your own repair plan. Search matches and directory listings are discovery, not a source investigation. Never copy the owner brief into a job or substitute a fallback draft for unfinished research.',
+    '- search finds literal text INSIDE files, not concepts or filenames. Once a search locates a relevant path, read_file it; after empty searches change method with list_dir or a shorter exact source token. Trace writers and callers, not just the first match. Use bounded start_line/end_line ranges.',
+    '- Start filename discovery with find_files {"name":"release"} or another short path fragment from the task. It lists tracked paths, not their contents or relevance. Select owning lifecycle files, inspect them and follow actual writers/callers before deciding a cause.',
+    '- Tool argument examples: read_file {"path":"scripts/example.sh","start_line":1,"end_line":120}; list_jobs {"limit":25}; atlas {"action":"capability_map","name":"release"}. For terrain_edges use an exact discovered name. Empty Atlas results are a gap, not proof of absence; reads/writes differ from weak references and flow_reach differs from fk_reach.',
+    '- propose_job requires title (4-160 characters), task_description (your own 40+ character summary), frontend_required/backend_required (booleans), findings, plan and acceptance_checks. Each finding has path, source_quote (an exact snippet from read_file) and observation (what that code proves). Supply at least two concrete plan steps and two acceptance checks. Include unknowns separately. A request to investigate later is not a repair plan. A tool error means correct those arguments, not restart the investigation.',
+    '- Separate known facts, hypotheses and unknowns. You have repository/Atlas/ledger read tools, not a VPS shell. If live evidence or access is missing, report that boundary; do not invent host observations. An incomplete investigation ends with an explicit blocker and no Create job card.',
     '- Answer the question asked. A status question is answered from owner_queue/list_jobs/job_status; do not read source code for it.',
     '- Never guess file paths. If a path is missing, use did_you_mean from the error, search or list_dir. After a couple of failed calls, reply with what you know.',
+    '- All repository tools use repository-relative paths, never VPS filesystem paths. Use list_dir {"path":"."} to discover the repository root. A deployment investigation must inspect the actual release lifecycle writers/callers for the affected service, not stop at a Compose file or a different service. A plan to investigate later is not a completed investigation.',
     '- Ask one clarifying question with reply when the request is genuinely ambiguous; otherwise investigate and act.',
     '- Keep replies short and plain. Respond with exactly ONE JSON object per message: {"thought": string, "tool": string, "args": object}. Finish with reply {"message": string}.',
   ].join('\n');
@@ -170,12 +177,35 @@ function validateProposal(args) {
   if (title.length < 4 || title.length > 160) return { error: 'title must be 4-160 characters' };
   if (task.length < 40 || task.length > 8000) return { error: 'task_description must be 40-8000 characters and specific enough to build from' };
   if (!frontend && !backend) return { error: 'set frontend_required and/or backend_required to true' };
-  return { proposal: { title, task_description: task, frontend_required: frontend, backend_required: backend, rationale: clip(String(args.rationale || '').trim(), 1500) } };
+  const findings = args.findings;
+  if (!Array.isArray(findings) || findings.length < 1 || findings.length > 8 || findings.some(item =>
+    !item || typeof item.path !== 'string' || !item.path.trim() || typeof item.source_quote !== 'string' || item.source_quote.trim().length < 12 || item.source_quote.length > 500 || typeof item.observation !== 'string' || item.observation.trim().length < 20 || item.observation.length > 1000
+  )) return { error: 'findings must contain 1-8 objects with path, source_quote (12-500 characters copied from read_file), and observation (20-1000 characters explaining what it proves)' };
+  const lines = (value, min) => Array.isArray(value) && value.length >= min && value.length <= 12 && value.every(line => typeof line === 'string' && line.trim().length >= 10 && line.length <= 1000);
+  if (!lines(args.plan, 2) || !lines(args.acceptance_checks, 2)) return { error: 'plan and acceptance_checks must each contain 2-12 concrete steps/checks of 10-1000 characters; investigating later is not an investigated repair plan' };
+  if (args.unknowns !== undefined && !lines(args.unknowns, 0)) return { error: 'unknowns must be an array of at most 12 non-empty descriptions (10-1000 characters each)' };
+  const description = [
+    task,
+    'Source findings:', ...findings.map(item => `- ${item.path}: ${item.observation.trim()}\n  Source: ${item.source_quote.trim()}`),
+    'Repair plan:', ...args.plan.map((line, index) => `${index + 1}. ${line.trim()}`),
+    'Acceptance checks:', ...args.acceptance_checks.map(line => `- ${line.trim()}`),
+    ...(args.unknowns?.length ? ['Unknowns / live evidence still required:', ...args.unknowns.map(line => `- ${line.trim()}`)] : []),
+  ].join('\n');
+  if (description.length > 8000) return { error: 'the complete proposal including findings, plan and acceptance checks must be at most 8000 characters; shorten it without dropping evidence' };
+  return { proposal: { title, task_description: description, frontend_required: frontend, backend_required: backend, rationale: clip(String(args.rationale || '').trim(), 1500) } };
 }
 
 function createBuilderChatTools({ supabase, workspacePath, limits }) {
   const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} }) : {};
   const tools = Object.fromEntries(READ_TOOLS.filter(name => typeof base[name] === 'function').map(name => [name, base[name]]));
+  if (workspacePath) tools.find_files = ({ name, limit } = {}) => {
+    const term = typeof name === 'string' ? name.trim().toLowerCase() : '';
+    if (term.length < 2 || term.length > 100) return { error: 'name must be a filename/path fragment of 2-100 characters, not a natural-language question' };
+    const cap = Math.min(100, Math.max(1, Number(limit) || 50));
+    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+    const matches = tracked.split('\0').filter(file => file && file.toLowerCase().includes(term)).sort();
+    return { name: term, matches: matches.length, paths: matches.slice(0, cap), truncated: matches.length > cap };
+  };
   tools.list_jobs = async ({ status, limit } = {}) => {
     let query = supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(Math.min(Math.max(Number(limit) || 10, 1), 25));
     if (typeof status === 'string' && status.trim()) query = query.eq('status', status.trim());
@@ -266,31 +296,6 @@ function proposeIntent(text) {
   return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
 }
 
-const FRONTEND_HINT = /\b(?:frontend|front-end|apps\/web|\.tsx|\.css|ui|ux|page|screen|panel|component|layout|button|composer)\b/i;
-const BACKEND_HINT = /\b(?:backend|back-end|supabase|sql|migration|rpc|function|schema|table|edge function|worker|trigger|race|lock)\b/i;
-// Last resort when the model never proposes: a draft built only from the owner's own brief and the
-// paths Bob actually read, clearly labelled, for the owner to review before Create job.
-function draftProposalFromBrief(brief, readPaths = []) {
-  const text = String(brief || '').trim();
-  const first = (text.replace(/^\s*please\s+/i, '').split(/(?<=[.!?])\s|\n/)[0] || text)
-    .replace(/^(?:investigate and\s+)?(?:propose|draft|plan|create|open|raise)\s+(?:a\s+)?(?:builder\s+)?job\s+(?:for|to)\s+/i, '')
-    .replace(/\s*\([^)]*\)/g, '').trim();
-  const title = (first.charAt(0).toUpperCase() + first.slice(1)).slice(0, 150).trim().replace(/[.:;,]+$/, '');
-  const paths = [...new Set(readPaths)].slice(0, 12);
-  // validateProposal caps task_description at 8000 characters while the chat accepts 20000: keep the
-  // head of the brief and say plainly that the rest is in the thread, never drop the draft silently.
-  const BRIEF_CAP = 6800;
-  const ownerBrief = text.length > BRIEF_CAP
-    ? `${text.slice(0, BRIEF_CAP)}\n\n[Owner brief continues: ${text.length - BRIEF_CAP} more characters are in this Builder chat message. The specification step must read the full brief there before planning.]`
-    : text;
-  const task = [ownerBrief, paths.length ? `Evidence Bob read in chat: ${paths.join(', ')}.` : null,
-    'Drafted from the owner brief because the chat model did not produce its own proposal; the specification gate must confirm the details against the code and schema before implementation.'].filter(Boolean).join('\n\n');
-  const scope = text.replace(/\bno\s+(?:ui|ux|frontend|front-end|backend|schema)\s+changes?\b/gi, '');
-  const frontend = FRONTEND_HINT.test(scope);
-  const backend = BACKEND_HINT.test(scope) || !frontend;
-  return validateProposal({ title, task_description: task, frontend_required: frontend, backend_required: backend, rationale: 'Owner asked for a proposal; drafted from the brief.' }).proposal || null;
-}
-
 // Classifies a ledger question: owner (what needs me), job (one job by id/branch) or jobs (general status).
 function statusIntent(text) {
   const value = String(text || '').trim();
@@ -350,18 +355,40 @@ function formatOwnerQueue(queue) {
 
 function builderChatNativeTools(tools) {
   const text = { type: 'string' };
+  const steps = { type: 'array', minItems: 2, maxItems: 12, items: { type: 'string', minLength: 10, maxLength: 1000 } };
   const custom = {
+    find_files: { description: 'Discover tracked filenames/paths by a short case-insensitive fragment. Does not search contents. Read owning source from the returned paths.', parameters: { type: 'object', properties: { name: { type: 'string', minLength: 2, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['name'], additionalProperties: false } },
     list_jobs: { description: 'List recent Builder jobs from the job ledger (newest first).', parameters: { type: 'object', properties: { status: text, limit: { type: 'integer', minimum: 1, maximum: 25 } }, additionalProperties: false } },
     owner_queue: { description: 'Everything waiting on the owner: pending approval gates, published pull requests to review, jobs awaiting a human, and recently blocked jobs. Use for "what is waiting on me" questions.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
     job_status: { description: 'Read one Builder job with its steps and approval gates. job is an id, id prefix or bob/job-… branch.', parameters: { type: 'object', properties: { job: { type: 'string', minLength: 6 } }, required: ['job'], additionalProperties: false } },
     propose_job: {
       description: 'Propose a Builder job for the owner to confirm. Only the owner creates it. Use after investigating.',
-      parameters: { type: 'object', properties: { title: { type: 'string', minLength: 4 }, task_description: { type: 'string', minLength: 40 }, frontend_required: { type: 'boolean' }, backend_required: { type: 'boolean' }, rationale: text }, required: ['title', 'task_description', 'frontend_required', 'backend_required'], additionalProperties: false },
+      parameters: { type: 'object', properties: {
+        title: { type: 'string', minLength: 4, maxLength: 160 }, task_description: { type: 'string', minLength: 40, maxLength: 8000 },
+        frontend_required: { type: 'boolean' }, backend_required: { type: 'boolean' }, rationale: text,
+        findings: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: {
+          path: { type: 'string', minLength: 1 }, source_quote: { type: 'string', minLength: 12, maxLength: 500 }, observation: { type: 'string', minLength: 20, maxLength: 1000 },
+        }, required: ['path', 'source_quote', 'observation'], additionalProperties: false } },
+        plan: steps, acceptance_checks: steps, unknowns: { ...steps, minItems: 0 },
+      }, required: ['title', 'task_description', 'frontend_required', 'backend_required', 'findings', 'plan', 'acceptance_checks'], additionalProperties: false },
     },
   };
   return vibeNativeTools(tools)
     .filter(entry => entry.function.name !== 'finish')
     .map(entry => custom[entry.function.name] ? { type: 'function', function: { name: entry.function.name, ...custom[entry.function.name] } } : entry);
+}
+
+function builderChatToolSchema(tools) {
+  const definitions = builderChatNativeTools(tools);
+  return {
+    ...vibeToolSchema(tools),
+    oneOf: definitions.map(({ function: definition }) => ({
+      type: 'object',
+      properties: { thought: { type: 'string' }, tool: { const: definition.name }, args: definition.parameters },
+      required: ['tool', 'args'],
+      additionalProperties: false,
+    })),
+  };
 }
 
 function contextLine(context) {
@@ -378,7 +405,14 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
   const proposeMode = !statusMode && proposeIntent(message.content) && typeof allTools.propose_job === 'function';
-  const readPaths = [];
+  const research = { source_paths: [], ledger_checked: false, atlas_queries: [] };
+  const sourceReads = new Map();
+  const normalizeQuote = text => text.replace(/^\d+: ?/gm, '').replace(/\s+/g, ' ').trim();
+  const missingResearch = () => [
+    !research.ledger_checked && 'list_jobs (check for matching active jobs)',
+    !research.source_paths.length && 'read_file (inspect actual owning source)',
+    !research.atlas_queries.length && 'atlas (inspect the relevant build terrain)',
+  ].filter(Boolean);
   let proposeNudged = false;
   const tools = statusMode ? Object.fromEntries(LEDGER_TOOLS.filter(name => typeof allTools[name] === 'function').map(name => [name, allTools[name]])) : allTools;
   // The fallback is only as good as the latest ledger read, and only for the question actually asked.
@@ -397,11 +431,10 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     await store.post(thread.id, { role: 'tool', kind: 'tool', content: `${preloadTool}${preloadArgs.job ? ` ${preloadArgs.job}` : ''}`, payload: { message_id: message.id, tool: preloadTool, ok: !preloaded?.error, preview: clip(JSON.stringify(preloaded), 600), preloaded: true } });
   }
   const ledgerFallback = () => (ledgerAnswer ? { reply: `Straight from the job ledger:\n\n${ledgerAnswer}`, proposal: null, model: null, ledger: true } : null);
-  const draftFallback = () => {
-    if (!proposeMode) return null;
-    const drafted = draftProposalFromBrief(message.content, readPaths);
-    return drafted ? { reply: 'The model did not finish its own proposal, so I drafted this one from your brief and the files I read. Check the title and scope before you press Create job.', proposal: drafted, model: null, drafted: true } : null;
-  };
+  const investigationBlocked = () => ({
+    reply: `I did not complete an evidence-based repair plan, so no job has been proposed or started. ${missingResearch().length ? `Missing successful checks: ${missingResearch().join('; ')}.` : 'The model did not finish a valid proposal from the evidence gathered.'} Source files read: ${research.source_paths.join(', ') || 'none'}. The investigation needs to continue from these results, not a draft copied from your request.`,
+    error: true, research,
+  });
   const history = await store.history(thread.id, message.seq);
   const transcript = history.map(entry => {
     const label = entry.role === 'owner' ? 'OWNER' : entry.kind === 'proposal' ? 'BOB (proposed job)' : 'BOB';
@@ -424,7 +457,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   }
   const modelRequest = applyVibeRouting(buildModelRunRequest({
     organizationId: 'platform', jobId: thread.id, stepId: message.id, builderMode: 'builder_chat', workloadKind: 'builder_conversation',
-    promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task, outputSchema: vibeToolSchema(tools),
+    promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task, outputSchema: builderChatToolSchema(tools),
   }), { allowCloud: deps.allowCloud ?? vibeCloudAllowed() });
   const nativeTools = builderChatNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
@@ -439,6 +472,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   let claimCorrected = false;
   let proposal = null;
   let failedCalls = 0;
+  let emptySearches = 0;
   const repeated = new Map();
   if (statusMode) repeated.set(`${preloadTool}:${JSON.stringify(preloadArgs)}`, 1);
   const escalate = async (reason, detail) => {
@@ -460,7 +494,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     const final = turn === limits.maxTurns || (turn > 1 && elapsed >= limits.wallBudgetMs - answerReserveMs);
     if (final && !messages.some(entry => entry.final)) {
       messages.push({ role: 'user', final: true, content: JSON.stringify({ instruction: proposeMode && !proposal
-        ? 'FINAL TURN: no more investigation. Call propose_job now with a title, a specific task_description built from what you found, and frontend_required/backend_required.'
+        ? `FINAL TURN: call propose_job only with completed research and your own evidence-based plan. Missing checks: ${missingResearch().join('; ') || 'none'}. Otherwise reply with the exact blocker; no fallback draft is allowed.`
         : 'FINAL TURN: no more tools. Call reply now with what you found so far, what is still unknown, and the next step you propose.' }) });
     }
     const status = health?.[candidate.provider] || {};
@@ -491,7 +525,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     if (!call || typeof call.tool !== 'string') {
       unparseable++;
       // Plain prose is still an answer in a chat lane, but never one that claims an action.
-      if (prose && !ACTION_CLAIM.test(content)) return { reply: clip(content.trim(), 8000), proposal, model: response.data?.model };
+      if (prose && !ACTION_CLAIM.test(content)) return { reply: clip(content.trim(), 8000), proposal, model: response.data?.model, research };
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object {"thought": string, "tool": string, "args": object}. Use reply {message} to answer.' }) });
       if (unparseable >= 2 && await escalate('prose_without_tool', 'did not produce a usable step')) unparseable = 0;
       else if (unparseable >= 4) return ledgerFallback() || { reply: 'I could not produce a usable answer. Please send the request again or narrow it.', error: true };
@@ -501,7 +535,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     const args = call.args && typeof call.args === 'object' ? call.args : {};
     if (final && call.tool !== 'reply' && call.tool !== 'finish' && !(proposeMode && !proposal && call.tool === 'propose_job')) break;
     if (call.tool === 'reply' || call.tool === 'finish') {
-      let text = String(args.message || args.summary || call.thought || '').trim() || 'Done.';
+      let text = String(args.message || args.summary || '').trim();
+      if (!text) {
+        if (final) return { reply: 'The model returned an empty answer. The investigation is incomplete; no completion is claimed.', error: true, research };
+        messages.push({ role: 'assistant', content: JSON.stringify({ tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({ error: 'reply requires a non-empty message with your actual findings and unresolved gaps. An empty reply is not completion.' }) });
+        continue;
+      }
       if (proposeMode && !proposal) {
         if (!proposeNudged && !final) {
           proposeNudged = true;
@@ -510,8 +549,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
           }) });
           continue;
         }
-        const drafted = draftFallback();
-        if (drafted) return { ...drafted, executedTools };
+        return investigationBlocked();
       }
       if (ACTION_CLAIM.test(text) && !claimCorrected) {
         claimCorrected = true;
@@ -525,47 +563,69 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
           ? 'I proposed the job above. Nothing has been created, started, merged or deployed: it starts only when you confirm it with Create job.'
           : 'I cannot create, start, approve, merge or deploy anything from this chat, and nothing has been done. Ask me to propose a Builder job, or check a job\'s real status in the queue.';
       }
-      return { reply: clip(text, 8000), proposal, model: response.data?.model, executedTools };
+      return { reply: clip(text, 8000), proposal, model: response.data?.model, executedTools, research };
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: clip(call.thought, 1500), tool: call.tool, args }) });
     const key = `${call.tool}:${JSON.stringify(args)}`;
     const count = (repeated.get(key) || 0) + 1;
     repeated.set(key, count);
     let result;
+    const checkedProposal = call.tool === 'propose_job' ? validateProposal(args) : null;
     // A small model re-reading the same ledger is looping, not learning anything new: answer from it.
     if (count > 2 && statusMode && LEDGER_TOOLS.includes(call.tool) && ledgerAnswer) break;
-    if (count > 2 && proposeMode && !proposal && proposeNudged) break;
     if (count > 2) result = { error: 'identical call already made; use the earlier result or reply' };
     else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the ledger result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
-    else {
+    else if (checkedProposal?.error) result = checkedProposal;
+    else if (call.tool === 'propose_job' && (missingResearch().length || args.findings.some(finding =>
+      !research.source_paths.includes(finding.path) || !(sourceReads.get(finding.path) || []).some(content => normalizeQuote(content).includes(normalizeQuote(finding.source_quote)))
+    ) || String(args.task_description || '').trim() === message.content.trim())) {
+      result = { error: `Proposal requires completed research and findings quoting actual inspected source. Missing checks: ${missingResearch().join('; ') || 'none'}. Each finding must cite a source path and exact source_quote from read_file: ${research.source_paths.join(', ') || 'none'}. Do not copy the owner request.` };
+    } else {
       executedTools++;
       try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1200) }; }
     }
+    if (count === 3 && !statusMode) await escalate('repeated_tool_call', 'repeated the same tool call without progress; continuing from the existing evidence');
     if (call.tool === 'propose_job' && result?.proposal) {
       proposal = result.proposal;
       result = { proposed: true, instruction: 'The proposal is shown to the owner with a Create job button. Now reply briefly with what it will do and what the owner should check.' };
     }
     await store.post(thread.id, {
-      role: 'tool', kind: 'tool', content: `${call.tool}${args.path ? ` ${args.path}` : args.query ? ` "${clip(args.query, 80)}"` : args.job ? ` ${args.job}` : ''}`,
+      role: 'tool', kind: 'tool', content: `${call.tool}${args.path ? ` ${args.path}` : args.query ? ` "${clip(args.query, 80)}"` : args.job ? ` ${args.job}` : args.name ? ` ${args.name}` : ''}`,
       payload: { message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600) },
     });
     if (!result?.error) recordLedger(call.tool, result);
-    if (!result?.error && ['read_file', 'outline', 'list_dir'].includes(call.tool) && typeof args.path === 'string') readPaths.push(args.path);
+    if (!result?.error) {
+      if (call.tool === 'read_file' && typeof result?.content === 'string' && result.content.trim() && typeof args.path === 'string' && !/(?:^|\/)docs\/|\.md$/i.test(args.path)) {
+        if (!research.source_paths.includes(args.path)) research.source_paths.push(args.path);
+        sourceReads.set(args.path, [...(sourceReads.get(args.path) || []), result.content]);
+      }
+      if (call.tool === 'list_jobs' && Array.isArray(result?.jobs)) research.ledger_checked = true;
+      if (call.tool === 'atlas' && (Array.isArray(result?.rows) || (Array.isArray(result?.flow_reach) && Array.isArray(result?.fk_reach)))) research.atlas_queries.push({ action: args.action, name: args.name });
+    }
+    if (call.tool === 'search' && !result?.error && result?.matches === 0) {
+      emptySearches++;
+      result = { ...result, instruction: 'No literal source matches. Do not search another natural-language paraphrase. Use list_dir to find owning files, read_file a path already discovered, or search a shorter exact code token.' };
+      if (emptySearches >= 3) {
+        await escalate('unproductive_search', 'made three empty source searches; continuing from the existing investigation');
+        emptySearches = 0;
+      }
+    } else if (call.tool === 'search' && result?.matches > 0) emptySearches = 0;
     if (proposeMode && !proposal && !proposeNudged && (count > 2 || executedTools >= 6)) {
       proposeNudged = true;
-      result = { ...(result && typeof result === 'object' ? result : { result }), instruction: 'Enough investigation for a proposal. Call propose_job now with what you found; the specification gate checks the details.' };
+      result = { ...(result && typeof result === 'object' ? result : { result }), instruction: `Finish focused research before proposing. Missing checks: ${missingResearch().join('; ') || 'none'}. Read owning source rather than repeating searches. Then call propose_job with your own plan and source citations; if blocked, report the gap.` };
     }
     failedCalls = result?.error ? failedCalls + 1 : 0;
     if (failedCalls >= 3) {
       failedCalls = 0;
+      await escalate('tool_failures', 'failed three consecutive tool calls; continuing with the existing evidence');
       result = { ...result, instruction: statusMode
         ? 'Three tool calls in a row failed. The ledger result above already answers this status question: reply with it now.'
         : 'Three tool calls in a row failed. Stop guessing: use search or list_dir to locate what you need, or reply now with what you already know.' };
     }
     messages.push({ role: 'user', content: clip(JSON.stringify({ tool: call.tool, result }), limits.readCapChars) });
   }
-  if (proposal) return { reply: 'I have proposed the job above for your confirmation.', proposal };
-  return ledgerFallback() || draftFallback() || { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
+  if (proposal) return { reply: 'I have proposed the job above for your confirmation.', proposal, research };
+  return ledgerFallback() || (proposeMode ? investigationBlocked() : { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true });
 }
 
 async function retry(fn, attempts = 3, delayMs = 500) {
@@ -589,10 +649,10 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
     if (outcome.proposal) {
       await store.post(thread.id, {
         role: 'bob', kind: 'proposal', content: `${outcome.proposal.title}\n\n${outcome.proposal.task_description}`,
-        payload: { message_id: message.id, proposal: outcome.proposal, main_head: checkout.head || null },
+        payload: { message_id: message.id, proposal: outcome.proposal, research: outcome.research, main_head: checkout.head || null },
       });
     }
-    await store.post(thread.id, { role: 'bob', kind: outcome.error ? 'error' : 'message', content: outcome.reply, payload: { message_id: message.id, model: outcome.model || null } });
+    await store.post(thread.id, { role: 'bob', kind: outcome.error ? 'error' : 'message', content: outcome.reply, payload: { message_id: message.id, model: outcome.model || null, research: outcome.research } });
     await store.complete(message.id, outcome.error ? 'failed' : 'done');
     await store.updateThread(thread.id, { status: 'open' });
     return outcome;
@@ -642,6 +702,6 @@ function createBuilderChatWorker({ supabase, deps, intervalMs = 2500, log = cons
 
 module.exports = {
   PROMPT_VERSION, BUILDER_CHAT_LIMITS, ACTION_CLAIM, builderChatSystemPrompt, createBuilderChatStore, ensureChatCheckout,
-  validateProposal, createBuilderChatTools, builderChatNativeTools, runBuilderChat, processBuilderChatMessage, createBuilderChatWorker,
-  isStatusQuestion, statusIntent, proposeIntent, draftProposalFromBrief, formatOwnerQueue, formatJobStatus, formatJobList,
+  validateProposal, createBuilderChatTools, builderChatNativeTools, builderChatToolSchema, runBuilderChat, processBuilderChatMessage, createBuilderChatWorker,
+  isStatusQuestion, statusIntent, proposeIntent, formatOwnerQueue, formatJobStatus, formatJobList,
 };

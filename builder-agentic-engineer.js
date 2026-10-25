@@ -684,7 +684,9 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       return result;
     },
     list_dir({ path: dir = '.' }) {
-      const { normalized, absolute } = resolveInside(workspacePath, dir || '.');
+      const { normalized, absolute } = !dir || dir === '.' || dir === './'
+        ? { normalized: '.', absolute: path.resolve(workspacePath) }
+        : resolveInside(workspacePath, dir);
       if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) return missingPath(workspacePath, 'directory', normalized);
       const entries = fs.readdirSync(absolute, { withFileTypes: true }).filter((entry) => !SKIP_DIRS.has(entry.name)).slice(0, limits.listCapEntries)
         .map((entry) => `${entry.isDirectory() ? entry.name + '/' : entry.name}`).sort();

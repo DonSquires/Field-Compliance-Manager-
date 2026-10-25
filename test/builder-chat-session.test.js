@@ -44,6 +44,8 @@ function setup(steps, extra = {}) {
   const tools = {
     search: async args => { toolCalls.push(['search', args]); return { matches: 1, results: ['apps/web/src/pages/DispatchConsolePage.css:12'] }; },
     list_jobs: async () => { toolCalls.push(['list_jobs']); return { jobs: [{ id: 'f2a6362e', title: 'Dispatch tokens', status: 'deployed' }] }; },
+    read_file: async args => { toolCalls.push(['read_file', args]); return { path: args.path, content: '1: .cctv-review { color: #fff; }' }; },
+    atlas: async args => { toolCalls.push(['atlas', args]); return { rows: [] }; },
     propose_job: args => chat.validateProposal(args),
   };
   const deps = {
@@ -60,7 +62,16 @@ const PROPOSAL = {
   title: 'CCTV review: move to shared dark tokens',
   task_description: 'Replace the hard-coded colour literals in apps/web/src/pages/CctvReviewPage.css with the existing shared dark tokens. Do not change layout or behaviour.',
   frontend_required: true, backend_required: false, rationale: 'Matches the Dispatch console token migration.',
+  findings: [{ path: 'apps/web/src/pages/CctvReviewPage.css', source_quote: '.cctv-review { color: #fff; }', observation: 'The review selector hard-codes white instead of using the shared token.' }],
+  plan: ['Replace the inspected color literal with the existing shared dark token.', 'Preserve the existing layout and exercise the review screen states.'],
+  acceptance_checks: ['Run the existing focused review component tests without deleting guards.', 'Run web lint and inspect a fixture browser render for readable contrast.'],
 };
+
+const RESEARCH = [
+  { tool: 'list_jobs', args: { limit: 25 } },
+  { tool: 'read_file', args: { path: 'apps/web/src/pages/CctvReviewPage.css', start_line: 1, end_line: 120 } },
+  { tool: 'atlas', args: { action: 'capability_map', name: 'CctvReviewPage' } },
+];
 
 test('the Builder chat prompt keeps it separate from in-app Bob and forbids claiming actions', () => {
   const prompt = chat.builderChatSystemPrompt();
@@ -93,7 +104,7 @@ test('a question is answered after a read-only tool, with the tool step recorded
 
 test('a proposed job is posted for owner confirmation and never created by the worker', async () => {
   const { store, deps } = setup([
-    { tool: 'list_jobs', args: {} },
+    ...RESEARCH,
     { tool: 'propose_job', args: PROPOSAL },
     { tool: 'reply', args: { message: 'I propose the CCTV token job above; confirm it to start.' } },
   ]);
@@ -101,22 +112,27 @@ test('a proposed job is posted for owner confirmation and never created by the w
   await chat.processBuilderChatMessage({ store, message, deps });
   const proposal = store.rows.find(row => row.kind === 'proposal');
   assert.ok(proposal, 'a proposal row is posted');
-  assert.deepEqual(proposal.payload.proposal, { ...PROPOSAL });
+  assert.deepEqual(proposal.payload.proposal, chat.validateProposal(PROPOSAL).proposal);
   assert.equal(proposal.payload.proposal.frontend_required, true);
   assert.equal(proposal.payload.job_id, undefined);
+  assert.deepEqual(proposal.payload.research, {
+    source_paths: ['apps/web/src/pages/CctvReviewPage.css'], ledger_checked: true,
+    atlas_queries: [{ action: 'capability_map', name: 'CctvReviewPage' }],
+  });
   assert.equal(store.rows.at(-1).kind, 'message');
   assert.equal(store.state.completed[message.id], 'done');
 });
 
 test('an invalid proposal is returned to the model as an error, not posted', async () => {
   const { store, model, deps } = setup([
+    ...RESEARCH,
     { tool: 'propose_job', args: { ...PROPOSAL, frontend_required: false, backend_required: false } },
     { tool: 'propose_job', args: PROPOSAL },
     { tool: 'reply', args: { message: 'Proposed.' } },
   ]);
   await chat.processBuilderChatMessage({ store, message: ownerMessage('Build it'), deps });
   assert.equal(store.rows.filter(row => row.kind === 'proposal').length, 1);
-  assert.match(model.calls[1].request.messages.at(-1).content, /frontend_required and\/or backend_required/);
+  assert.match(model.calls[4].request.messages.at(-1).content, /frontend_required and\/or backend_required/);
 });
 
 test('a reply claiming it created a job is refused once, then replaced if repeated', async () => {
@@ -139,6 +155,7 @@ test('a reply claiming it created a job is refused once, then replaced if repeat
   assert.match(finalReply, /nothing has been done/);
 
   const merged = setup([
+    ...RESEARCH,
     { tool: 'propose_job', args: PROPOSAL },
     { tool: 'reply', args: { message: 'I have merged the pull request.' } },
     { tool: 'reply', args: { message: 'I have merged the pull request.' } },
@@ -503,6 +520,7 @@ test('a requested proposal is not answered with a refusal: Bob is told to call p
   const { store, model, deps } = setup([
     { tool: 'search', args: { query: 'apply_patrol_source_updates' } },
     { tool: 'reply', args: { message: 'I cannot proceed; I do not have permission to modify the file.' } },
+    ...RESEARCH,
     { tool: 'propose_job', args: { ...PROPOSAL, title: 'Lock the patrol sync target row', frontend_required: false, backend_required: true } },
     { tool: 'reply', args: { message: 'I propose the migration above.' } },
   ]);
@@ -514,28 +532,24 @@ test('a requested proposal is not answered with a refusal: Bob is told to call p
   assert.match(store.rows.at(-1).content, /I propose the migration above/);
 });
 
-test('a model that never proposes still leaves the owner a labelled draft from the brief', async () => {
+test('a model that never proposes reports incomplete research without a fallback job card', async () => {
   const refusal = { tool: 'reply', args: { message: 'I do not have the necessary permissions to modify the file.' } };
   const { store, deps } = setup([{ tool: 'search', args: { query: 'apply_patrol_source_updates' } }, refusal, refusal]);
   const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
-  assert.equal(outcome.drafted, true);
-  const proposal = store.rows.find(row => row.kind === 'proposal').payload.proposal;
-  assert.equal(proposal.title, 'A backend race in public.apply_patrol_source_updates');
-  assert.equal(proposal.backend_required, true);
-  assert.equal(proposal.frontend_required, false, '"No UI change" is not a frontend signal');
-  assert.match(proposal.task_description, /^Please investigate and propose/);
-  assert.match(proposal.task_description, /Drafted from the owner brief/);
-  assert.match(store.rows.at(-1).content, /did not finish its own proposal/);
+  assert.equal(outcome.error, true);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
+  assert.match(store.rows.at(-1).content, /Missing successful checks: list_jobs.*read_file.*atlas/);
+  assert.equal(store.rows.at(-1).kind, 'error');
 });
 
-test('a proposal request that loops on reads is nudged to propose, then drafted', async () => {
+test('a proposal request that loops on searches is stopped without creating a draft', async () => {
   const read = { tool: 'search', args: { query: 'apply_patrol_source_updates' } };
   const { store, model, deps } = setup([read, read, read, read, read, read, read, read], { tools: undefined });
   deps.tools = { search: async () => ({ matches: 1 }), propose_job: args => chat.validateProposal(args) };
   const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
-  assert.ok(model.calls.some(call => /Enough investigation for a proposal/.test(call.request.messages.at(-1).content)));
-  assert.equal(outcome.drafted, true);
-  assert.ok(store.rows.some(row => row.kind === 'proposal'));
+  assert.ok(model.calls.some(call => /Finish focused research before proposing/.test(call.request.messages.at(-1).content)));
+  assert.equal(outcome.error, true);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
 });
 
 test('proposal requests are told apart from questions and status checks', () => {
@@ -551,24 +565,163 @@ test('explanations and negated requests are not mandatory proposals', () => {
   assert.equal(chat.proposeIntent('Can you propose a job for the dispatch spacing?'), true);
 });
 
-test('the drafted proposal honours explicit scope words and stays within proposal limits', () => {
-  const frontend = chat.draftProposalFromBrief('Propose a Builder job for frontend accessibility improvements on the roster screens.');
-  assert.equal(frontend.frontend_required, true);
-  assert.equal(frontend.backend_required, false);
-  const long = chat.draftProposalFromBrief(`Please propose a job to ${'tidy '.repeat(80)}. ${'Keep every existing behaviour. '.repeat(700)}`);
-  assert.ok(long, 'a long brief still yields a draft');
-  assert.ok(long.title.length <= 160 && !/OMITTED|…/.test(long.title));
-  assert.ok(long.task_description.length <= 8000);
-  assert.match(long.task_description, /more characters are in this Builder chat message/);
+test('structured JSON mode preserves the same required proposal and reader arguments as native tools', () => {
+  const tools = { propose_job() {}, read_file() {}, atlas() {} };
+  const schema = chat.builderChatToolSchema(tools);
+  for (const entry of chat.builderChatNativeTools(tools)) {
+    const branch = schema.oneOf.find(branch => branch.properties.tool.const === entry.function.name);
+    assert.deepEqual(branch.properties.args, entry.function.parameters);
+  }
+  const proposal = schema.oneOf.find(branch => branch.properties.tool.const === 'propose_job').properties.args;
+  assert.deepEqual(proposal.required, ['title', 'task_description', 'frontend_required', 'backend_required', 'findings', 'plan', 'acceptance_checks']);
+  assert.equal(proposal.properties.title.maxLength, 160);
+  assert.equal(proposal.properties.task_description.maxLength, 8000);
+  assert.ok(!schema.oneOf.some(branch => branch.properties.tool.enum), 'no generic argument branch bypasses the contracts');
 });
 
 test('a plain-prose refusal to a proposal request is nudged, not returned as the answer', async () => {
   const { store, model, deps } = setup([
     'I cannot proceed; I do not have permission to modify the file.',
+    ...RESEARCH,
     { tool: 'propose_job', args: { ...PROPOSAL, title: 'Lock the patrol sync target row', frontend_required: false, backend_required: true } },
     { tool: 'reply', args: { message: 'I propose the migration above.' } },
   ]);
   await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
   assert.match(model.calls[1].request.messages.at(-1).content, /owner asked you to PROPOSE a job/);
   assert.equal(store.rows.find(row => row.kind === 'proposal').payload.proposal.title, 'Lock the patrol sync target row');
+});
+
+test('search matches and claimed investigation cannot bypass the source, ledger and Atlas gate', async () => {
+  const { store, deps } = setup([
+    { tool: 'search', args: { query: 'CctvReviewPage' } },
+    { tool: 'propose_job', args: PROPOSAL },
+    { tool: 'reply', args: { message: 'I researched everything; the plan is ready.' } },
+    { tool: 'reply', args: { message: 'Here is the plan.' } },
+  ]);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Investigate and propose a Builder job'), deps });
+  assert.equal(outcome.error, true);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
+  assert.deepEqual(outcome.research.source_paths, []);
+});
+
+test('failed research cannot count as evidence and a model can repair the missing checks', async () => {
+  const { store, model, deps } = setup([
+    { tool: 'read_file', args: { path: 'missing.css' } },
+    { tool: 'atlas', args: { action: 'capability_map' } },
+    { tool: 'list_jobs', args: {} },
+    { tool: 'propose_job', args: PROPOSAL },
+    ...RESEARCH,
+    { tool: 'propose_job', args: PROPOSAL },
+    { tool: 'reply', args: { message: 'The inspected source and ledger support the proposed change.' } },
+  ]);
+  const read = deps.tools.read_file;
+  deps.tools.read_file = args => args.path === 'missing.css' ? { error: 'missing path' } : read(args);
+  const atlas = deps.tools.atlas;
+  deps.tools.atlas = args => !args.name ? { error: 'name is required' } : atlas(args);
+  const list = deps.tools.list_jobs;
+  let lists = 0;
+  deps.tools.list_jobs = args => ++lists === 1 ? { error: 'ledger unavailable' } : list(args);
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Investigate and propose a Builder job'), deps });
+  assert.match(model.calls[4].request.messages.at(-1).content, /Missing checks: list_jobs.*read_file.*atlas/);
+  assert.equal(store.rows.filter(row => row.kind === 'proposal').length, 1);
+});
+
+test('a plan must cite inspected source and may not merely copy the owner request', async () => {
+  for (const copy of [false, true]) {
+    const brief = copy ? PROPOSAL.task_description : 'Please investigate and propose a job for the CCTV review.';
+    const proposal = copy ? PROPOSAL : { ...PROPOSAL, findings: [{ ...PROPOSAL.findings[0], source_quote: 'This quote was invented, not returned by read_file.' }] };
+    const { store, deps } = setup([...RESEARCH, { tool: 'propose_job', args: proposal }]);
+    const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage(brief), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 6 } });
+    assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
+    assert.equal(outcome.proposal ?? null, null);
+    assert.ok(store.rows.some(row => row.kind === 'tool' && /Do not copy the owner request/.test(row.payload.preview)));
+  }
+});
+
+test('the model must supply findings, concrete plan and acceptance checks, not a job to investigate later', () => {
+  const { findings, plan, acceptance_checks, ...onlyBrief } = PROPOSAL;
+  assert.match(chat.validateProposal(onlyBrief).error, /findings/);
+  assert.match(chat.validateProposal({ ...PROPOSAL, plan: ['Investigate later.'] }).error, /plan and acceptance_checks/);
+  const valid = chat.validateProposal(PROPOSAL);
+  assert.match(valid.proposal.task_description, /Source findings:.*\n- apps\/web/s);
+  assert.match(valid.proposal.task_description, /Repair plan:\n1\./);
+  assert.match(valid.proposal.task_description, /Acceptance checks:\n-/);
+  assert.match(chat.validateProposal({ ...PROPOSAL, task_description: 'x'.repeat(7900) }).error, /complete proposal/);
+});
+
+test('documentation reads and directory discovery are not source investigation', async () => {
+  const { store, deps } = setup([
+    { tool: 'list_jobs', args: {} },
+    { tool: 'read_file', args: { path: 'docs/REBUILD_PLAN.md' } },
+    { tool: 'atlas', args: { action: 'capability_map', name: 'CctvReviewPage' } },
+    { tool: 'propose_job', args: { ...PROPOSAL, task_description: 'Fix the CCTV review colors based only on docs/REBUILD_PLAN.md without inspecting the actual CSS.' } },
+  ]);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Investigate and propose a Builder job'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 6 } });
+  assert.equal(outcome.error, true);
+  assert.deepEqual(outcome.research.source_paths, []);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
+});
+
+test('empty natural-language searches get a method correction and advance the model candidate', async () => {
+  const { store, model, deps } = setup([
+    ...['deployment lifecycle', 'cleanup writers', 'release deployment paths'].map(query => ({ tool: 'search', args: { query } })),
+    { tool: 'reply', args: { message: 'I need to inspect the owning source before I can diagnose this.' } },
+  ], {
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['local-primary', 'local-recovery'], installed: ['local-primary', 'local-recovery'], ready_model: 'local-primary' },
+    }),
+  });
+  deps.tools.search = async () => ({ matches: 0, results: [] });
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Why did the deployment disappear?'), deps });
+  assert.match(model.calls[1].request.messages.at(-1).content, /Do not search another natural-language paraphrase/);
+  assert.ok(store.rows.some(row => row.kind === 'status' && row.payload.reason === 'unproductive_search'));
+  assert.notEqual(model.calls[0].request.model_name, model.calls[3].request.model_name);
+});
+
+test('empty replies are corrected and never become a success-shaped Done message', async () => {
+  const { store, model, deps } = setup([
+    { tool: 'reply', args: {} },
+    { tool: 'reply', args: {} },
+  ]);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Continue the investigation'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
+  assert.equal(outcome.error, true);
+  assert.match(model.calls[1].request.messages.some(row => /reply requires a non-empty message/.test(row.content)) ? 'corrected' : '', /corrected/);
+  assert.equal(store.rows.at(-1).kind, 'error');
+  assert.doesNotMatch(store.rows.at(-1).content, /^Done\.$/);
+});
+
+test('alternating repeated reads trigger recovery even when errors are not consecutive', async () => {
+  const { store, deps } = setup([
+    ...[1, 2, 3].flatMap(() => [
+      { tool: 'read_file', args: { path: 'docker-compose.full.yml' } },
+      { tool: 'read_file', args: { path: 'deploy/vision-worker/deploy.sh' } },
+    ]),
+    { tool: 'reply', args: { message: 'The release lifecycle is still unknown.' } },
+  ], {
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['local-primary', 'local-recovery'], installed: ['local-primary', 'local-recovery'], ready_model: 'local-primary' },
+    }),
+  });
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Investigate the missing deployment file'), deps });
+  assert.ok(store.rows.some(row => row.kind === 'status' && row.payload.reason === 'repeated_tool_call'));
+});
+
+test('filename discovery finds tracked lifecycle paths without pretending to read them', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'builder-chat-discovery-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  fs.mkdirSync(path.join(dir, 'scripts'));
+  fs.writeFileSync(path.join(dir, 'scripts/release-cleanup.sh'), '#!/bin/sh\n');
+  fs.writeFileSync(path.join(dir, 'scripts/release-deploy.sh'), '#!/bin/sh\n');
+  fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'release-cleanup.sh mentioned only in content');
+  fs.writeFileSync(path.join(dir, 'untracked-release.txt'), 'not part of current main');
+  execFileSync('git', ['add', 'scripts', 'unrelated.txt'], { cwd: dir });
+  const tools = chat.createBuilderChatTools({ workspacePath: dir, supabase: null, limits: chat.BUILDER_CHAT_LIMITS });
+  assert.deepEqual(tools.find_files({ name: 'RELEASE', limit: 1 }), {
+    name: 'release', matches: 2, paths: ['scripts/release-cleanup.sh'], truncated: true,
+  });
+  assert.deepEqual(tools.find_files({ name: 'missing' }).paths, []);
+  assert.match(tools.find_files({}).error, /name must be/);
+  const schema = chat.builderChatToolSchema(tools);
+  assert.deepEqual(schema.oneOf.find(row => row.properties.tool.const === 'find_files').properties.args.required, ['name']);
 });
