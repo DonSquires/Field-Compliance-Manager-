@@ -12,14 +12,18 @@ import {
   commercialTermsFormFrom,
   commercialTermsPayload,
   commercialTermsProblem,
+  describePaymentTerms,
   formatLimit,
+  ordinalDay,
   type CommercialModel,
   type CommercialSettingsRow,
   type CommercialTermsForm,
+  type PaymentDueMode,
 } from '../lib/commercialModel';
 import './CrmAgreementCommercialTermsPanel.css';
 
 const cycleLabels = { weekly: 'Weekly', fortnightly: 'Fortnightly', monthly: 'Monthly', quarterly: 'Quarterly' } as const;
+const rateLabel = (key: string, label: string) => (key === 'callout_minimum_hours' ? label : `${label} (excl. GST)`);
 
 /** How this client is billed under the agreement, and its billing terms. Writes go through set_agreement_commercial_terms. */
 export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }: {
@@ -41,7 +45,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
     setLoadError(null);
     // ATLAS READS: crm_commercial_settings (RLS: provider or client org access)
     const { data, error: readError } = await supabase.from('crm_commercial_settings')
-      .select('commercial_model,billing_cycle,payment_terms_days,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,standing_authority_limit,updated_at')
+      .select('commercial_model,billing_cycle,payment_terms_days,payment_due_day_of_month,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,standing_authority_limit,updated_at')
       .eq('service_agreement_id', agreementId)
       .maybeSingle();
     if (readError) {
@@ -102,10 +106,11 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
       <div className="is-wide"><dt>Billing model</dt><dd><strong>{commercialModelLabel(savedModel)}</strong><small>{COMMERCIAL_MODEL_HELP[savedModel]}</small></dd></div>
       {savedModel === 'do_and_invoice' && <div className="is-wide"><dt>Standing authority limit per job</dt><dd>{saved?.standing_authority_limit != null ? <>{formatLimit(Number(saved.standing_authority_limit))}<small>A job costing more than this needs the client's approval reference in Dispatch before it is invoiced.</small></> : <>No limit<small>Every job is invoiced at actuals without asking first. Set a limit if the client caps what one job may cost.</small></>}</dd></div>}
       <div><dt>Billing cycle</dt><dd>{saved?.billing_cycle ? cycleLabels[saved.billing_cycle as keyof typeof cycleLabels] ?? saved.billing_cycle : 'Not set'}</dd></div>
-      <div><dt>Payment terms</dt><dd>{saved?.payment_terms_days != null ? `${saved.payment_terms_days} days` : 'Not set'}</dd></div>
+      <div><dt>Payment due</dt><dd>{describePaymentTerms(saved)}{saved?.payment_due_day_of_month != null && <small>October's work, invoiced early November, is due {ordinalDay(saved.payment_due_day_of_month)} November. Invoiced after that day, it is due the next month.</small>}</dd></div>
       <div><dt>Invoice email</dt><dd>{saved?.invoice_email || 'Not set'}</dd></div>
       <div><dt>Standing PO</dt><dd>{saved?.purchase_order_number || 'None'}</dd></div>
-      {RATE_FIELDS.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{rate(saved?.[key])}</dd></div>)}
+      {RATE_FIELDS.map(({ key, label }) => <div key={key}><dt>{rateLabel(key, label)}</dt><dd>{rate(saved?.[key])}</dd></div>)}
+      <div className="is-wide"><dt>GST</dt><dd>All rates and prices are before GST<small>GST (15%) is added when the invoice is created.</small></dd></div>
       {saved?.notes && <div className="is-wide"><dt>Notes</dt><dd>{saved.notes}</dd></div>}
     </dl> : <div className="agreement-setup-empty">No billing model is set. Until one is chosen, Dispatch treats callouts as Contracted work or Extra. Set it so invoices follow this client's terms.</div>)}
 
@@ -124,10 +129,14 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
       <div className="agreement-obligation-grid">
         {form.model === 'do_and_invoice' && <label className="is-wide"><span>Standing authority limit per job, excl. GST (optional)</span><input inputMode="decimal" value={form.standingAuthorityLimit} aria-describedby="commercial-limit-help" onChange={(event) => setForm({ ...form, standingAuthorityLimit: event.target.value })} placeholder="No limit" /><small id="commercial-limit-help">The most one job may cost before R&amp;M needs the client's approval. Leave blank if the client has not set a cap.</small></label>}
         <label><span>Billing cycle</span><select value={form.billingCycle} onChange={(event) => setForm({ ...form, billingCycle: event.target.value as CommercialTermsForm['billingCycle'] })}>{BILLING_CYCLES.map((cycle) => <option key={cycle} value={cycle}>{cycleLabels[cycle]}</option>)}</select></label>
-        <label><span>Payment terms (days)</span><input inputMode="numeric" required value={form.paymentTermsDays} onChange={(event) => setForm({ ...form, paymentTermsDays: event.target.value })} /></label>
+        <label><span>Payment due</span><select value={form.paymentDueMode} onChange={(event) => setForm({ ...form, paymentDueMode: event.target.value as PaymentDueMode })}><option value="day_of_next_month">On a day of the month after the work</option><option value="days_after_invoice">A number of days after the invoice date</option></select></label>
+        {form.paymentDueMode === 'day_of_next_month'
+          ? <label><span>Due day of the month (1 to 28)</span><input inputMode="numeric" required value={form.paymentDueDay} onChange={(event) => setForm({ ...form, paymentDueDay: event.target.value })} aria-describedby="commercial-due-help" /><small id="commercial-due-help">{/^\d{1,2}$/.test(form.paymentDueDay.trim()) && Number(form.paymentDueDay) >= 1 && Number(form.paymentDueDay) <= 28 ? `October's work is due ${ordinalDay(Number(form.paymentDueDay))} November.` : 'Enter a day from 1 to 28.'}</small></label>
+          : <label><span>Payment terms (days after invoice)</span><input inputMode="numeric" required value={form.paymentTermsDays} onChange={(event) => setForm({ ...form, paymentTermsDays: event.target.value })} /></label>}
         <label><span>Invoice email (optional)</span><input type="email" maxLength={320} value={form.invoiceEmail} onChange={(event) => setForm({ ...form, invoiceEmail: event.target.value })} /></label>
         <label><span>Standing PO number (optional)</span><input maxLength={120} value={form.purchaseOrderNumber} onChange={(event) => setForm({ ...form, purchaseOrderNumber: event.target.value })} /></label>
-        {RATE_FIELDS.map(({ key, label }) => <label key={key}><span>{label} (optional)</span><input inputMode="decimal" value={form.rates[key]} onChange={(event) => setForm({ ...form, rates: { ...form.rates, [key]: event.target.value } })} /></label>)}
+        <p className="is-wide agreement-extra-hint" role="note">Enter every rate and limit before GST. GST (15%) is added when the invoice is created.</p>
+        {RATE_FIELDS.map(({ key, label }) => <label key={key}><span>{rateLabel(key, label)} (optional)</span><input inputMode="decimal" value={form.rates[key]} onChange={(event) => setForm({ ...form, rates: { ...form.rates, [key]: event.target.value } })} /></label>)}
         <label className="is-wide"><span>Notes (optional)</span><textarea rows={3} maxLength={2000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       </div>
       {problem && <p className="agreement-extra-hint" role="note">{problem}</p>}

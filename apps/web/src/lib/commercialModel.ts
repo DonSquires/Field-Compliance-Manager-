@@ -105,9 +105,29 @@ export const RATE_FIELDS = [
 ] as const;
 export type RateKey = (typeof RATE_FIELDS)[number]['key'];
 
+/** How the due date is set: a day of the month after the work (R&M: the 20th), or days after the invoice date. */
+export type PaymentDueMode = 'day_of_next_month' | 'days_after_invoice';
+
+export const DEFAULT_PAYMENT_DUE_DAY = 20;
+
+export function ordinalDay(day: number): string {
+  const tens = day % 100;
+  if (tens >= 11 && tens <= 13) return `${day}th`;
+  return `${day}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[day % 10] ?? 'th'}`;
+}
+
+/** Plain words for the saved payment terms, matching invoice_due_date. */
+export function describePaymentTerms(row: { payment_due_day_of_month?: number | null; payment_terms_days?: number | null } | null | undefined): string {
+  if (row?.payment_due_day_of_month != null) return `Due on the ${ordinalDay(row.payment_due_day_of_month)} of the month after the work`;
+  if (row?.payment_terms_days != null) return `Due ${row.payment_terms_days} days after the invoice date`;
+  return 'Not set';
+}
+
 export interface CommercialTermsForm {
   model: CommercialModel | '';
   billingCycle: BillingCycle;
+  paymentDueMode: PaymentDueMode;
+  paymentDueDay: string;
   paymentTermsDays: string;
   invoiceEmail: string;
   purchaseOrderNumber: string;
@@ -121,6 +141,7 @@ export interface CommercialSettingsRow {
   commercial_model: string | null;
   billing_cycle: string | null;
   payment_terms_days: number | null;
+  payment_due_day_of_month?: number | null;
   invoice_email: string | null;
   purchase_order_number: string | null;
   notes: string | null;
@@ -137,9 +158,13 @@ const text = (value: number | string | null | undefined) => (value == null ? '' 
 
 export function commercialTermsFormFrom(row: CommercialSettingsRow | null): CommercialTermsForm {
   const cycle = row?.billing_cycle;
+  // New terms start on the usual NZ basis (20th of the month after the work); saved day-count terms are kept.
+  const dueByDays = row != null && row.payment_due_day_of_month == null;
   return {
     model: asCommercialModel(row?.commercial_model) ?? '',
     billingCycle: (BILLING_CYCLES as readonly string[]).includes(cycle ?? '') ? (cycle as BillingCycle) : 'monthly',
+    paymentDueMode: dueByDays ? 'days_after_invoice' : 'day_of_next_month',
+    paymentDueDay: text(row?.payment_due_day_of_month ?? DEFAULT_PAYMENT_DUE_DAY),
     paymentTermsDays: text(row?.payment_terms_days ?? 14),
     invoiceEmail: row?.invoice_email ?? '',
     purchaseOrderNumber: row?.purchase_order_number ?? '',
@@ -156,6 +181,10 @@ const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 /** Mirrors set_agreement_commercial_terms validation so the form explains problems before saving. */
 export function commercialTermsProblem(form: CommercialTermsForm, savedModel: CommercialModel | null, reason: string): string | null {
   if (!form.model) return 'Choose how this client is billed.';
+  if (form.paymentDueMode === 'day_of_next_month') {
+    const day = form.paymentDueDay.trim();
+    if (!/^\d{1,2}$/.test(day) || Number(day) < 1 || Number(day) > 28) return 'The payment due day must be a day of the month from 1 to 28.';
+  }
   if (!/^\d{1,3}$/.test(form.paymentTermsDays.trim()) || Number(form.paymentTermsDays) > 120) return 'Payment terms must be a whole number of days from 0 to 120.';
   const email = form.invoiceEmail.trim();
   if (email && !EMAIL_PATTERN.test(email)) return 'The invoice email is not a valid email address.';
@@ -178,6 +207,7 @@ export function commercialTermsPayload(form: CommercialTermsForm): Record<string
     standing_authority_limit: form.model === 'do_and_invoice' && limit ? Number(limit) : null,
     billing_cycle: form.billingCycle,
     payment_terms_days: Number(form.paymentTermsDays.trim()),
+    payment_due_day_of_month: form.paymentDueMode === 'day_of_next_month' ? Number(form.paymentDueDay.trim()) : null,
     invoice_email: blankToNull(form.invoiceEmail),
     purchase_order_number: blankToNull(form.purchaseOrderNumber),
     notes: blankToNull(form.notes),

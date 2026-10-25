@@ -379,3 +379,26 @@ defect found while previewing this: the unique index
 dispatch job, but completion writes Attendance and Travel as separate charge
 lines, so any job with travel could not be invoiced. The index is now
 non-unique, and the invoice loop locks the charge lines it stamps.
+
+## Ruling 2026-10-25 — invoiced monthly, due on the 20th; all prices before GST
+
+Owner ruling (Don Squires): every R&M client is invoiced monthly. A month's work
+is invoiced in the first week of the next month and is **due on the 20th of
+that month** (October work, invoiced early November, due 20 November). All
+agreed rates, prices and limits are **before GST**; GST (15%) is added when the
+invoice is created. No standing authority limit applies unless one is entered.
+
+- **Due day of the following month.** `crm_commercial_settings.payment_due_day_of_month`
+  (1–28; NULL = use `payment_terms_days` after the invoice date). Set only
+  through `set_agreement_commercial_terms` (audited).
+- **One rule for both invoices.** `invoice_due_date(invoice_date, period_end,
+  terms_days, due_day)` gives the due day of the month after the invoiced
+  period, rolled to the next month when the invoice is raised after that day.
+  `generate_crm_invoice_from_completed_work` and
+  `generate_crm_invoice_from_agreement` both use it. Before this,
+  the agreement-price invoice always set the due date 14 days out and ignored
+  the agreement terms.
+- **R&M set.** Migration `20261027090000_invoice_due_twentieth.sql` set all 19
+  R&M agreements to monthly billing, due on the 20th (audited as
+  `agreement_commercial_terms_set`). New billing terms start on the 20th in the
+  form; saved day-count terms are kept until changed.

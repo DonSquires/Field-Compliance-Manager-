@@ -11,6 +11,7 @@ import { Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { describePaymentTerms } from '../lib/commercialModel';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, CrmPrimaryContactEditor, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
@@ -132,7 +133,7 @@ interface InvoiceReadiness {
   source: 'accepted_quote' | 'commercial_rate' | 'client_approval_required' | 'missing';
   detail: string;
   billingCycle: string | null;
-  paymentTermsDays: number | null;
+  paymentTerms: string | null;
 }
 interface ConsolidatedCommercialRow {
   source_organization_id: string;
@@ -800,20 +801,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setInvoiceReadinessLoading(true); setInvoiceReadiness(null);
     const [quotesResponse, settingsResponse] = await Promise.all([
       supabase.from('quotes').select('id,quote_lines(id)').eq('service_agreement_id', agreementId).eq('status', 'accepted'),
-      supabase.from('crm_commercial_settings').select('base_rate_per_hour,billing_cycle,payment_terms_days').eq('service_agreement_id', agreementId).maybeSingle(),
+      supabase.from('crm_commercial_settings').select('base_rate_per_hour,billing_cycle,payment_terms_days,payment_due_day_of_month').eq('service_agreement_id', agreementId).maybeSingle(),
     ]);
     if (quotesResponse.error || settingsResponse.error) {
       setState((current) => ({ ...current, error: quotesResponse.error?.message ?? settingsResponse.error?.message ?? 'Invoice readiness could not be loaded.' }));
     } else {
       const quoteLineCount = ((quotesResponse.data as Array<{ quote_lines: Array<{ id: string }> | null }> | null) ?? []).reduce((count, quote) => count + (quote.quote_lines?.length ?? 0), 0);
-      const settings = settingsResponse.data as { base_rate_per_hour: number | null; billing_cycle: string; payment_terms_days: number } | null;
+      const settings = settingsResponse.data as { base_rate_per_hour: number | null; billing_cycle: string; payment_terms_days: number; payment_due_day_of_month: number | null } | null;
       setInvoiceReadiness({
         accountName: agreement.counterparty_name,
         agreementName: agreement.name,
         source: agreement.invitation_status !== 'accepted' ? 'client_approval_required' : quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
-        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)}.` : 'No accepted quote lines or commercial base rate are configured.',
+        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)} excl. GST.` : 'No accepted quote lines or commercial base rate are configured.',
         billingCycle: settings?.billing_cycle ?? null,
-        paymentTermsDays: settings?.payment_terms_days ?? null,
+        paymentTerms: settings ? describePaymentTerms(settings) : null,
       });
     }
     setInvoiceReadinessLoading(false);
@@ -1754,7 +1755,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               </select>
             </label>
             {invoiceReadinessLoading && <div className="crm-invoice-readiness">Checking agreement billing readiness.</div>}
-            {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTermsDays} day payment terms</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
+            {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTerms} · prices before GST</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
             <footer>
               <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
               <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || invoiceReadiness?.source === 'client_approval_required'}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>

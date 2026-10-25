@@ -2831,9 +2831,25 @@ live, rolled back; `schema.sql` regenerated):
   read by `commercialModel.ts`, `CrmAgreementCommercialTermsPanel` and the
   invoice/summary RPCs; new function `dispatch_job_over_standing_authority`.
 
-**Still to confirm or build.** The standing authority limit per do-and-invoice
-client (none set; owner decision); billing cycle, payment terms and rates per
-client (seeded defaults only); whether 13,333 is excluding GST (recorded as
-excluding); the recurring monthly OneFortyOne contract invoice (not
-generated); loading the rate cards into `rate_rules`; GL codes and financial
-year from the statements; the 28 TYPE/code conflicts.
+**Step H (invoiced monthly, due on the 20th; all before GST) - done 2026-10-25.**
+Owner ruling: every client is invoiced monthly; a month's work is invoiced in
+the first week of the next month and due on the 20th (October work due 20
+November); all rates and prices are before GST; no standing authority limit
+unless one is entered.
+
+- Migration `20261027090000_invoice_due_twentieth.sql` (applied live; live test
+  `supabase/tests/20261027090000_invoice_due_twentieth.sql` passes): new
+  `crm_commercial_settings.payment_due_day_of_month` (1-28), helper
+  `invoice_due_date`, used by both invoice generators. The agreement-price
+  invoice previously ignored the agreement terms (always 14 days); fixed.
+- All 19 R&M agreements set to monthly, due on the 20th (audited).
+- UI: billing terms ask "Payment due" (day of the month after the work, or
+  days after invoice) with a worked example; rates labelled excl. GST; CRM
+  invoice readiness shows the due rule and "prices before GST".
+- Confirmed: 13,333 per month is before GST. Standing authority: no limit for
+  any client unless entered.
+
+**Still to confirm or build.** Rates per client (seeded defaults only); the
+recurring monthly OneFortyOne contract invoice (not generated); loading the
+rate cards into `rate_rules`; GL codes and financial year from the statements;
+the 28 TYPE/code conflicts.
