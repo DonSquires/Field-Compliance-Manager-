@@ -2885,12 +2885,36 @@ monthly fee to $0:
 - Rates: `resolve_rate_rule` already falls back to the rules with no client
   (the standing rate card). R&M's 19 rules are all of that kind.
 - Still open:
-  - Per-client spreadsheet rates are not loaded; they need governed extraction
-    and review.
+  - Per-client spreadsheet rates: done in Step J.
   - The other fixed-price clients have no monthly fee recorded.
   - Imported log rows and FCM-native lines are shown by source so that
     transition-period double counting is visible.
 
-**Still to confirm or build.** Rates per client (seeded defaults only); loading the
-rate cards into `rate_rules`; GL codes and financial year from the statements;
-the 28 TYPE/code conflicts.
+**Step J (client rates from the invoice workbooks) - done 2026-10-29.**
+Rates were read locally from the `Invoice Spreadsheets` workbooks (formulas,
+and cost / hours or km), nothing sent externally. Migration
+`20261029090000_client_rates_from_invoice_workbooks.sql` is applied live and
+its test `supabase/tests/20261029090000_client_rates_from_invoice_workbooks.sql`
+passes live. 23 client rules, each audited with its workbook, all excl. GST:
+
+| Client | Hourly (patrol, enquiry, investigation, cordon, camera review) | Travel | From |
+|--------|------|--------|------|
+| OneFortyOne | $58.30 | standing $1.04/km already matches | 2025-04-01 |
+| STAND (PF Olsen, workbook folder PFO) | $55.00 | $0.99/km | 2025-11-01 |
+| DART (Kea Conservation Trust, Operation Lizard) | $62.50 | $0.99/km | 2025-10-01 |
+| Nelson City Council | $60.00 | $0.99/km | 2026-08-01 |
+
+- Specialist work (engineering $79.50, excavator $116.60, two-person rates)
+  and the alarm/incident callout rate stay on the standing card.
+- Clients with no workbook rate (TDC Rabbit Island and others) use the
+  standing card; parts lists (Birdhurst, Goodmans, Staples) are not rates.
+- The CRM Finance tab's "Billing rates" now says the standing card applies
+  where no client rate exists, and shows "excl. GST" and the effective date.
+- Only new work and quotes use these rates; existing lines are not repriced.
+- Not loaded, owner to confirm: private community-camera customers ($85/hr,
+  $1.26/km; no client record per customer); Raptor Rotorua one-off ($160/hr,
+  $1.09/km); OneFortyOne's $137.80, $166.60 and $135 lines (which services?);
+  OneFortyOne's pre-April-2025 $55 / $0.99 history.
+
+**Still to confirm or build.** GL codes and financial year from the
+statements; the 28 TYPE/code conflicts; the items not loaded in Step J.

@@ -420,9 +420,19 @@ fully delivered month nets to **$0**.
 How the build holds this:
 
 - **Rates.** `resolve_rate_rule` prefers a rule for the client over a rule with
-  no client, so rules with no client are the standing rate card. Per-client
-  rates from the spreadsheets are not loaded yet. They need a governed
-  extraction with review before promotion.
+  no client, so rules with no client are the standing rate card. Client rates
+  taken from R&M's invoice workbooks are loaded as client-scoped `rate_rules`
+  (migration `20261029090000_client_rates_from_invoice_workbooks.sql`, each
+  rule audited with its workbook as provenance, all excl. GST):
+  - an hourly rule carries the client **and** a service type (patrol, security
+    enquiry, investigation, cordon guard, camera review). A client-only hourly
+    rule would outrank the standing specialist rules (engineering, excavator,
+    two-person), so specialist work stays on the standing card;
+  - a per-km rule is client-wide, because dispatch resolves travel without a
+    service type;
+  - a client with no workbook rate stays on the standing card;
+  - rates price new work and quotes; existing charge lines and imported rows
+    are not repriced.
 - **Fee and work.** `get_agreement_fee_drawdown` reports each month's fee: the
   accepted quote lines, or the commercial base rate. It reports contracted work
   from three sources:
