@@ -214,14 +214,50 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
 }
 
 const LEDGER_TOOLS = ['owner_queue', 'list_jobs', 'job_status'];
-const STATUS_QUESTION = /\b(?:waiting on me|waiting for me|what(?:'s| is) (?:waiting|pending|blocked|next|left|outstanding)|my queue|owner queue|(?:job|jobs|gate|gates|approvals?|queue|build|builds|release) status|status of (?:the |my )?(?:jobs?|builds?|queue|gates?)|(?:pending|outstanding) (?:approvals?|gates?|jobs?|reviews?|prs?|pull requests?)|anything (?:waiting|pending|blocked|for me)|need(?:s)? (?:my )?(?:approval|review|decision))\b/i;
-const BUILD_REQUEST = /\b(?:fix|build|add|create|change|implement|redesign|refactor|propose|investigate|why|how does|where is|plan)\b/i;
+const OWNER_ACTION = /\b(?:waiting (?:on|for) me|what(?:'s| is) (?:waiting|pending|blocked|left|outstanding)|my queue|owner queue|(?:pending|outstanding) (?:approvals?|gates?|reviews?|prs?|pull requests?)|anything (?:waiting|pending|blocked|for me)|needs? (?:my )?(?:approval|review|decision)|what do i need to (?:do|approve|review))\b/i;
+const JOB_STATUS = /\b(?:(?:jobs?|gates?|queue|builds?|release) status|status (?:of|for) (?:the |my |this |that )?(?:jobs?|builds?|queue|gates?|release)|how (?:is|are) (?:the |my |this |that )?(?:jobs?|builds?) (?:going|doing)|where (?:is|are) (?:the |my |this |that )?(?:jobs?|builds?) (?:at|up to))\b/i;
+const JOB_REF = /\b(?:bob\/job-)?((?=[0-9a-f-]*\d)[0-9a-f]{8}[0-9a-f-]{0,28})\b/i;
+// Edit requests open with an imperative verb ("Build status badges…", "Update the job status colour");
+// investigation questions ask why/how/where about code. Neither is answered from the ledger alone.
+const IMPERATIVE = /^(?:(?:please|can you|could you|would you|bob,?|hey bob,?)\s+)*(?:fix|build|add|create|change|update|implement|redesign|refactor|propose|investigate|plan|remove|delete|rename|move|make|style|restyle|show|display|wire|replace|improve|clean|write|design|draft|migrate)\b/i;
+const INVESTIGATION = /\b(?:why|how (?:does|do))\b/i;
 
-// A status question is answered from the job ledger alone; code tools only send a small model wandering.
-function isStatusQuestion(text) {
-  const value = String(text || '');
-  return STATUS_QUESTION.test(value) && !BUILD_REQUEST.test(value.replace(STATUS_QUESTION, ' '));
+// Classifies a ledger question: owner (what needs me), job (one job by id/branch) or jobs (general status).
+function statusIntent(text) {
+  const value = String(text || '').trim();
+  if (!value || IMPERATIVE.test(value) || INVESTIGATION.test(value)) return null;
+  const ref = value.match(JOB_REF);
+  const owner = OWNER_ACTION.test(value);
+  const status = JOB_STATUS.test(value);
+  if (ref && (status || /\bstatus\b|\bwhere\b|\bhow\b|\bstuck\b|\bblocked\b|\bdone\b/i.test(value))) return { kind: 'job', job: ref[1] };
+  if (owner) return { kind: 'owner' };
+  if (status) return { kind: 'jobs' };
+  return null;
 }
+
+function isStatusQuestion(text) {
+  return statusIntent(text) !== null;
+}
+
+function formatJobStatus(result) {
+  if (!result || result.error || !result.job) return null;
+  const job = result.job;
+  const lines = [`${job.title || 'Untitled job'} (${String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}.`];
+  const steps = (result.steps || []).map(step => `${step.step}:${step.status}`).join(', ');
+  if (steps) lines.push(`Steps: ${steps}.`);
+  const pending = (result.approvals || []).filter(row => row.status === 'pending').map(row => String(row.gate || '').replace(/_/g, ' '));
+  if (pending.length) lines.push(`Waiting on your ${pending.join(', ')} in the Builder queue.`);
+  if (job.pull_request) lines.push(`Pull request: ${job.pull_request}`);
+  return lines.join('\n');
+}
+
+function formatJobList(result) {
+  if (!result || result.error || !Array.isArray(result.jobs)) return null;
+  if (!result.jobs.length) return 'The job ledger has no Builder jobs to report.';
+  return `Recent Builder jobs:\n${result.jobs.map(job => `- ${job.title || 'Untitled job'} (${String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}${job.pull_request ? ` — ${job.pull_request}` : ''}`).join('\n')}`;
+}
+
+const LEDGER_FORMATTERS = { owner_queue: queue => formatOwnerQueue(queue), job_status: formatJobStatus, list_jobs: formatJobList };
 
 function formatOwnerQueue(queue) {
   if (!queue || queue.error) return null;
@@ -268,14 +304,24 @@ function contextLine(context) {
 
 async function runBuilderChat({ store, thread, message, workspacePath, head, gateway, deps, limits = BUILDER_CHAT_LIMITS }) {
   const allTools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits });
-  const statusMode = isStatusQuestion(message.content) && typeof allTools.owner_queue === 'function';
+  const intent = statusIntent(message.content);
+  const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
+  const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
   const tools = statusMode ? Object.fromEntries(LEDGER_TOOLS.filter(name => typeof allTools[name] === 'function').map(name => [name, allTools[name]])) : allTools;
+  // The fallback is only as good as the latest ledger read, and only for the question actually asked.
   let ledgerAnswer = null;
+  const recordLedger = (tool, result) => {
+    if (!statusMode || tool !== preloadTool) return;
+    if (tool === 'job_status' && !String(result?.job?.id || '').replace(/-/g, '').startsWith(intent.job.toLowerCase().replace(/-/g, '')) && !String(result?.job?.branch || '').replace(/-/g, '').endsWith(intent.job.toLowerCase().replace(/-/g, ''))) return;
+    const formatted = LEDGER_FORMATTERS[tool]?.(result);
+    if (formatted) ledgerAnswer = formatted;
+  };
   let preloaded = null;
+  const preloadArgs = intent?.kind === 'job' ? { job: intent.job } : {};
   if (statusMode) {
-    try { preloaded = await allTools.owner_queue({}); } catch (error) { preloaded = { error: clip(error && error.message, 300) }; }
-    ledgerAnswer = formatOwnerQueue(preloaded);
-    await store.post(thread.id, { role: 'tool', kind: 'tool', content: 'owner_queue', payload: { message_id: message.id, tool: 'owner_queue', ok: !preloaded?.error, preview: clip(JSON.stringify(preloaded), 600), preloaded: true } });
+    try { preloaded = await allTools[preloadTool](preloadArgs); } catch (error) { preloaded = { error: clip(error && error.message, 300) }; }
+    recordLedger(preloadTool, preloaded);
+    await store.post(thread.id, { role: 'tool', kind: 'tool', content: `${preloadTool}${preloadArgs.job ? ` ${preloadArgs.job}` : ''}`, payload: { message_id: message.id, tool: preloadTool, ok: !preloaded?.error, preview: clip(JSON.stringify(preloaded), 600), preloaded: true } });
   }
   const ledgerFallback = () => (ledgerAnswer ? { reply: `Straight from the job ledger:\n\n${ledgerAnswer}`, proposal: null, model: null, ledger: true } : null);
   const history = await store.history(thread.id, message.seq);
@@ -293,8 +339,8 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const messages = [{ role: 'system', content: builderChatSystemPrompt() }, { role: 'user', content: task }];
   if (statusMode) {
     messages.push(
-      { role: 'assistant', content: JSON.stringify({ thought: 'This is a status question; read the owner queue.', tool: 'owner_queue', args: {} }) },
-      { role: 'user', content: clip(JSON.stringify({ tool: 'owner_queue', result: preloaded, instruction: 'STATUS QUESTION: answer from this ledger result. Only ledger tools (owner_queue, list_jobs, job_status with a job id from above) are available. Do not read code. Reply now unless one job needs job_status detail.' }), limits.readCapChars) },
+      { role: 'assistant', content: JSON.stringify({ thought: 'This is a status question; read the job ledger.', tool: preloadTool, args: preloadArgs }) },
+      { role: 'user', content: clip(JSON.stringify({ tool: preloadTool, result: preloaded, instruction: 'STATUS QUESTION: answer from this ledger result. Only ledger tools (owner_queue, list_jobs, job_status with a job id from above) are available. Do not read code. Reply now unless one job needs job_status detail.' }), limits.readCapChars) },
     );
   }
   const modelRequest = applyVibeRouting(buildModelRunRequest({
@@ -392,7 +438,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     repeated.set(key, count);
     let result;
     if (count > 2) result = { error: 'identical call already made; use the earlier result or reply' };
-    else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the owner_queue result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
+    else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the ledger result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
     else {
       executedTools++;
       try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1200) }; }
@@ -405,11 +451,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       role: 'tool', kind: 'tool', content: `${call.tool}${args.path ? ` ${args.path}` : args.query ? ` "${clip(args.query, 80)}"` : args.job ? ` ${args.job}` : ''}`,
       payload: { message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600) },
     });
+    if (!result?.error) recordLedger(call.tool, result);
     failedCalls = result?.error ? failedCalls + 1 : 0;
     if (failedCalls >= 3) {
       failedCalls = 0;
       result = { ...result, instruction: statusMode
-        ? 'Three tool calls in a row failed. The owner_queue result above already answers this status question: reply with it now.'
+        ? 'Three tool calls in a row failed. The ledger result above already answers this status question: reply with it now.'
         : 'Three tool calls in a row failed. Stop guessing: use search or list_dir to locate what you need, or reply now with what you already know.' };
     }
     messages.push({ role: 'user', content: clip(JSON.stringify({ tool: call.tool, result }), limits.readCapChars) });
@@ -490,5 +537,5 @@ function createBuilderChatWorker({ supabase, deps, intervalMs = 2500, log = cons
 module.exports = {
   PROMPT_VERSION, BUILDER_CHAT_LIMITS, ACTION_CLAIM, builderChatSystemPrompt, createBuilderChatStore, ensureChatCheckout,
   validateProposal, createBuilderChatTools, builderChatNativeTools, runBuilderChat, processBuilderChatMessage, createBuilderChatWorker,
-  isStatusQuestion, formatOwnerQueue,
+  isStatusQuestion, statusIntent, formatOwnerQueue, formatJobStatus, formatJobList,
 };

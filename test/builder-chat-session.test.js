@@ -359,9 +359,38 @@ test('a status question still gets a ledger answer when the model fails or runs 
 });
 
 test('status questions are told apart from build requests', () => {
-  for (const text of ['What is waiting on me?', 'any pending approvals?', 'job status please', "what's blocked right now"]) assert.ok(chat.isStatusQuestion(text), text);
-  for (const text of ['Fix the job status badge colour on the queue page', 'Where is the dispatch console CSS?', 'Plan a redesign of the queue']) assert.ok(!chat.isStatusQuestion(text), text);
+  for (const text of ['What is waiting on me?', 'any pending approvals?', "what's blocked right now", 'What is waiting on me for this build?', 'what do I need to approve?']) assert.equal(chat.statusIntent(text)?.kind, 'owner', text);
+  for (const text of ['job status please', 'How are the builds going?']) assert.equal(chat.statusIntent(text)?.kind, 'jobs', text);
+  assert.deepEqual(chat.statusIntent('Job status for aae6d519 please'), { kind: 'job', job: 'aae6d519' });
+  assert.deepEqual(chat.statusIntent('where is bob/job-aae6d519a0b9 up to?'), { kind: 'job', job: 'aae6d519a0b9' });
+  for (const text of ['Fix the job status badge colour on the queue page', 'Build status badges for the Builder queue', 'Update the job status badge colour',
+    'Remove the pending approvals banner', 'Rename the job status column', 'Please add a release status chip', 'Where is the dispatch console CSS?', 'Why is the build status wrong?', 'Plan a redesign of the queue']) {
+    assert.equal(chat.statusIntent(text), null, text);
+  }
   assert.match(chat.formatOwnerQueue({ approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] }), /Nothing is waiting on you/);
+});
+
+test('a job-specific status question preloads that job and falls back to its status, not the owner queue', async () => {
+  const { store, model, deps, toolCalls } = setup(Array.from({ length: 20 }, () => ({ fail: { status: 503, error: 'down' } })));
+  deps.tools.owner_queue = async () => { toolCalls.push(['owner_queue']); return { approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] }; };
+  deps.tools.job_status = async args => { toolCalls.push(['job_status', args]); return { job: { id: 'aae6d519-a0b9', title: 'CCTV tokens', status: 'frontend_implementation', autopilot: 'driving' }, steps: [{ step: 'ui_design', status: 'completed' }], approvals: [] }; };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Job status for aae6d519 please'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(toolCalls, [['job_status', { job: 'aae6d519' }]]);
+  assert.ok(model.calls.length >= 1);
+  assert.match(store.rows.at(-1).content, /CCTV tokens \(aae6d519\): frontend_implementation, autopilot driving/);
+  assert.doesNotMatch(store.rows.at(-1).content, /Nothing is waiting/);
+});
+
+test('the ledger fallback uses the latest successful read, not a failed or stale preload', async () => {
+  let reads = 0;
+  const fresh = { approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [{ id: 'bbbb1111-0000', title: 'Patrol lock', status: 'blocked' }] };
+  const { store, deps } = setup([{ tool: 'owner_queue', args: {} }, { tool: 'list_jobs', args: {} }]);
+  deps.tools.owner_queue = async () => (++reads === 1 ? { error: 'approval read failed: timeout' } : fresh);
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('What is waiting on me?'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
+  assert.equal(outcome.error, undefined);
+  assert.equal(reads, 2);
+  assert.match(store.rows.at(-1).content, /Patrol lock \(bbbb1111\): blocked/);
 });
 
 test('job_status accepts the id under the argument names small models use', async () => {
