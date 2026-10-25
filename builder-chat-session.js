@@ -179,7 +179,7 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
     // Each actionable set is queried on its own so a busy ledger cannot push a waiting item out of view.
     const [approvals, published, awaiting, blocked] = await Promise.all([
       supabase.from('builder_approvals').select('job_id, approval_type, requested_at, expires_at').eq('status', 'pending').order('requested_at').limit(LIMIT),
-      jobs().eq('status', 'release_ready').not('workspace_pull_request_url', 'is', null).order('updated_at', { ascending: false }).limit(LIMIT),
+      jobs().eq('status', 'release_ready').not('workspace_pull_request_url', 'is', null).or('autopilot_state.is.null,autopilot_state.neq.done').order('updated_at', { ascending: false }).limit(LIMIT),
       jobs().eq('autopilot_state', 'awaiting_human').order('updated_at', { ascending: false }).limit(LIMIT),
       jobs().eq('autopilot_state', 'blocked').gte('updated_at', since).order('updated_at', { ascending: false }).limit(LIMIT),
     ]);
@@ -270,7 +270,8 @@ function formatOwnerQueue(queue) {
   const awaiting = queue.awaiting_owner || [];
   if (awaiting.length) sections.push(`Jobs waiting for you:\n${awaiting.map(job => `- ${name(job)}: ${job.status}`).join('\n')}`);
   const blocked = queue.blocked_recently || [];
-  if (blocked.length) sections.push(`Blocked in the last 14 days (retry, re-scope or cancel):\n${blocked.map(job => `- ${name(job)}: ${job.status}`).join('\n')}`);
+  const SHOWN = 5;
+  if (blocked.length) sections.push(`Blocked in the last 14 days (retry, re-scope or cancel), newest first:\n${blocked.slice(0, SHOWN).map(job => `- ${name(job)}: ${job.status}`).join('\n')}${blocked.length > SHOWN ? `\n- …and ${blocked.length - SHOWN} more in the Builder queue` : ''}`);
   const merged = queue.merged_awaiting_deploy || [];
   if (merged.length) sections.push(`Merged, waiting on the release lane (no action unless it stalls): ${merged.map(name).join(', ')}`);
   if (!sections.length) return 'Nothing is waiting on you: no pending gates, pull requests, waiting or blocked jobs.';
@@ -361,6 +362,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   let proposal = null;
   let failedCalls = 0;
   const repeated = new Map();
+  if (statusMode) repeated.set(`${preloadTool}:${JSON.stringify(preloadArgs)}`, 1);
   const escalate = async (reason, detail) => {
     if (active + 1 >= candidates.length) return false;
     const previous = candidates[active];
@@ -437,6 +439,8 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     const count = (repeated.get(key) || 0) + 1;
     repeated.set(key, count);
     let result;
+    // A small model re-reading the same ledger is looping, not learning anything new: answer from it.
+    if (count > 2 && statusMode && LEDGER_TOOLS.includes(call.tool) && ledgerAnswer) break;
     if (count > 2) result = { error: 'identical call already made; use the earlier result or reply' };
     else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the ledger result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
     else {
