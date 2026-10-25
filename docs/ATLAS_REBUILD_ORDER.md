@@ -66,6 +66,13 @@ radius of any change. Screens are the last thing built, not the first.
   the safe bridge while that reconciliation is reviewed.
 - The Gitea main-branch workflow refreshes Atlas only after calibration and all
   tests pass, and skips safely when its Supabase secrets are absent.
+- GitHub `main` has the same gate: `.github/workflows/atlas-refresh.yml` runs
+  `atlas-refresh.js --apply` after "PR verification" succeeds for a push to
+  `main`, or on manual dispatch from `main`. The job is bound to the
+  `atlas-refresh` environment (deployments from `main` only), which holds its
+  own `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. It refuses any revision
+  that is no longer the current `main` head, so a rerun cannot overwrite newer
+  Atlas evidence, and it never passes `--allow-large-retirement`.
 
 ## Phase 1 — Canonical schema audit
 

@@ -1,0 +1,56 @@
+name: Atlas refresh
+
+on:
+  workflow_run:
+    workflows: [PR verification]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh live Atlas from main
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-22.04
+    environment: atlas-refresh
+    timeout-minutes: 15
+    steps:
+      - name: Refuse a stale main revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          current="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$SELECTED_SHA" ]; then
+            echo "Skipping Atlas refresh: $SELECTED_SHA is not the current main head ($current)." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Refresh Atlas tables
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ATLAS_REFRESH_SOURCE_BRANCH: main
+          ATLAS_REFRESH_SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ATLAS_REFRESH_OUTPUT_DIR: ${{ runner.temp }}/atlas
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Atlas refresh needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets." >&2
+            exit 1
+          fi
+          node scripts/atlas-refresh.js --apply
