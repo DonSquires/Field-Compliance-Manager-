@@ -2715,6 +2715,38 @@ live; behavioural test passes live under rollback).**
   now reads `agreement_extra_work_orders` and the charge-line basis. Refresh
   after merge.
 
-**Open.** Step E: record the OneFortyOne fixed monthly price (13,333 per
-Sheet2) as an accepted quote, carry basis into `finance_service_costs`
-aggregates, and review the 28 TYPE/code conflicts.
+**Step E (finance period split) - done 2026-10-25.** Migration
+`20261025120000_finance_period_billing_basis.sql` (applied live, live test
+passed, `schema.sql` regenerated):
+- One shared rule, `classify_patrol_cost_row_billing_basis` (internal, not an
+  API): workbook TYPE first, then the provider charge-code basis, else not
+  classified; flags a conflict when both disagree. `get_agreement_billing_basis_summary`
+  now uses it, so the agreement tab and finance can never disagree.
+- New read-only RPC `get_finance_pl_period_billing_basis(p_pl_period_id)`
+  (active finance administrator of the period's organisation, same gate as
+  `get_finance_pl_period_summary`). The 501 reconciled `patrol_log` lines in
+  `finance_service_costs` are **not split or rewritten**; the split is derived
+  from their linked applied source rows. Dispatch cost lines follow the job's
+  billing choice; timesheet, overhead and manual cost is shown as "other".
+  Totals reconcile to the P&L summary `total_cost` (asserted in the test).
+- Finance -> money overview: new **Contract and Extra this period** panel
+  (`FinancePeriodBillingBasisPanel`) under the dashboard, with loading,
+  error-with-retry and empty states, a split bar, notes for unclassified,
+  conflicting and unpriced amounts, and a per-agreement table that stacks on
+  small screens.
+- Live read, all periods, all agreements (recorded service cost NZ$927,867.27):
+  Contract 233,500.40; Extra 157,904.80; not classified 536,462.07 (18,772
+  rows, mostly agreements whose workbooks have no TYPE column and codes outside
+  the catalog); other 1,680.00 (one estimate line); 28 conflicts. OneFortyOne
+  alone is unchanged from the figures above.
+- Atlas: new edges to expect after refresh - `FinancePeriodBillingBasisPanel`
+  calls `get_finance_pl_period_billing_basis`, which reads
+  `finance_service_costs`, `file_import_finance_cost_rows`, `dispatch_jobs`,
+  `reference_codes`, `quotes`/`quote_lines`. Existing finance readers
+  (`calculate_cost_centre_roll`, `calculate_service_profitability_snapshot`,
+  `close_finance_pl_period`, budget variance) are untouched because the cost
+  lines are unchanged.
+
+**Open.** Record the OneFortyOne fixed monthly price (13,333 per Sheet2) as an
+accepted quote (owner decision); review the 28 TYPE/code conflicts; classify
+the non-OneFortyOne codes that sit outside the charge-code catalog.

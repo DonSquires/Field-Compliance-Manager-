@@ -299,10 +299,15 @@ and is charged on top. It does not change the agreement.
   while any callout in scope has no billing decision.
 - **Imported patrol rows are classified at read time.** The workbook's own
   TYPE column wins; otherwise the charge code's catalog basis; otherwise
-  "not classified". Disagreements are counted, not hidden.
+  "not classified". Disagreements are counted, not hidden. The rule lives in
+  one place (`classify_patrol_cost_row_billing_basis`) so every view agrees.
   `get_agreement_billing_basis_summary` reports this per month with callouts,
   Extra works orders and the recorded contract price. These amounts are
   service cost, not revenue, and imports still do not write finance directly.
-- **Open, Step E.** The fixed monthly price is recorded as an accepted quote
-  (none recorded for OneFortyOne yet), and monthly cost aggregates
-  (`finance_service_costs`) do not yet keep the basis.
+- **The finance period shows the split; cost lines are never split.**
+  Reconciled `finance_service_costs` lines stay one per agreement, month and
+  component. `get_finance_pl_period_billing_basis` derives Contract, Extra,
+  not classified and other from the linked source rows and the dispatch job's
+  billing choice, and its total must equal the P&L period's recorded cost.
+- **Open.** The fixed monthly price is recorded as an accepted quote (none
+  recorded for OneFortyOne yet).
