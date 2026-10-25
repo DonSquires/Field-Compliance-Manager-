@@ -45,13 +45,15 @@ function builderChatSystemPrompt() {
     'You talk with the platform owner about building and repairing the platform itself. This lane is separate from in-app Bob: in-app Bob (OnSpace AI chat) serves users inside the app with operational questions, research and agentic work on business records. You never do that work here and never touch tenant data.',
     'WHAT YOU CAN DO HERE:',
     '- Investigate with read-only tools on the current main: search, read_file, outline, list_dir, git_log, read_canon, atlas (live build map), live_count (row counts).',
-    '- Read the Builder job ledger: list_jobs, job_status.',
+    '- Read the Builder job ledger: owner_queue (what is waiting on the owner), list_jobs, job_status.',
     '- Plan a build and propose it with propose_job. The owner then confirms it in the UI; only that creates the job, which runs through specification, implementation and release approval gates and publishes a pull request.',
     '- For interactive, iterative edits suggest the Vibe Builder tab (chat-to-code on a live branch).',
     'RULES:',
     '- Ground every claim in a tool result from this conversation: name files, tables and jobs you actually read. Never invent tables, columns, files, job IDs or statuses. An empty search is not proof something is missing.',
     '- You cannot edit files, create or cancel jobs, approve gates, merge or deploy. Never say you did. Say "I propose" and use propose_job.',
     '- A good proposal names the user/role and job-to-be-done, the files or surfaces involved, the schema/Atlas path, acceptance checks, and what must not change. Set frontend_required/backend_required honestly.',
+    '- Answer the question asked. A status question is answered from owner_queue/list_jobs/job_status; do not read source code for it.',
+    '- Never guess file paths. If a path is missing, use did_you_mean from the error, search or list_dir. After a couple of failed calls, reply with what you know.',
     '- Ask one clarifying question with reply when the request is genuinely ambiguous; otherwise investigate and act.',
     '- Keep replies short and plain. Respond with exactly ONE JSON object per message: {"thought": string, "tool": string, "args": object}. Finish with reply {"message": string}.',
   ].join('\n');
@@ -169,6 +171,24 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
       approvals: (approvals.data || []).map(row => ({ gate: row.approval_type, status: row.status, at: row.triggered_at_status })),
     };
   };
+  tools.owner_queue = async () => {
+    const [jobs, approvals] = await Promise.all([
+      supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(100),
+      supabase.from('builder_approvals').select('job_id, approval_type, requested_at, expires_at').eq('status', 'pending').order('requested_at').limit(50),
+    ]);
+    if (jobs.error) return { error: `job ledger read failed: ${jobs.error.message}` };
+    if (approvals.error) return { error: `approval read failed: ${approvals.error.message}` };
+    const byId = new Map((jobs.data || []).map(job => [job.id, job]));
+    const pendingIds = new Set((approvals.data || []).map(row => row.job_id));
+    const recent = Date.now() - 14 * 24 * 3600_000;
+    return {
+      approval_gates: (approvals.data || []).map(row => ({ job: byId.get(row.job_id) ? jobSummary(byId.get(row.job_id)) : { id: row.job_id }, gate: row.approval_type, requested_at: row.requested_at, expires_at: row.expires_at })),
+      pull_requests_to_review: (jobs.data || []).filter(job => job.status === 'release_ready' && job.workspace_pull_request_url && !pendingIds.has(job.id)).map(jobSummary),
+      awaiting_owner: (jobs.data || []).filter(job => job.autopilot_state === 'awaiting_human' && !pendingIds.has(job.id)).map(jobSummary),
+      blocked_recently: (jobs.data || []).filter(job => job.autopilot_state === 'blocked' && Date.parse(job.updated_at) > recent).map(jobSummary),
+      note: 'approval_gates are decided in the Builder queue; pull_requests_to_review need review and merge on GitHub; blocked jobs need a decision (retry, re-scope or cancel).',
+    };
+  };
   tools.propose_job = args => validateProposal(args || {});
   return tools;
 }
@@ -177,6 +197,7 @@ function builderChatNativeTools(tools) {
   const text = { type: 'string' };
   const custom = {
     list_jobs: { description: 'List recent Builder jobs from the job ledger (newest first).', parameters: { type: 'object', properties: { status: text, limit: { type: 'integer', minimum: 1, maximum: 25 } }, additionalProperties: false } },
+    owner_queue: { description: 'Everything waiting on the owner: pending approval gates, published pull requests to review, jobs awaiting a human, and recently blocked jobs. Use for "what is waiting on me" questions.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
     job_status: { description: 'Read one Builder job with its steps and approval gates. job is an id, id prefix or bob/job-… branch.', parameters: { type: 'object', properties: { job: { type: 'string', minLength: 6 } }, required: ['job'], additionalProperties: false } },
     propose_job: {
       description: 'Propose a Builder job for the owner to confirm. Only the owner creates it. Use after investigating.',
@@ -227,6 +248,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   let executedTools = 0;
   let claimCorrected = false;
   let proposal = null;
+  let failedCalls = 0;
   const repeated = new Map();
   const escalate = async (reason, detail) => {
     if (active + 1 >= candidates.length) return false;
@@ -240,11 +262,17 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   };
   for (let turn = 1; turn <= limits.maxTurns && Date.now() - started < limits.wallBudgetMs; turn++) {
     const candidate = candidates[active];
+    // The last turn (by count or wall clock) is answer-only, so an investigation that ran long
+    // still ends with what Bob found instead of a bare timeout.
+    const final = turn === limits.maxTurns || Date.now() - started > limits.wallBudgetMs - 90_000;
+    if (final && !messages.some(entry => entry.final)) {
+      messages.push({ role: 'user', final: true, content: JSON.stringify({ instruction: 'FINAL TURN: no more tools. Call reply now with what you found so far, what is still unknown, and the next step you propose.' }) });
+    }
     const status = health?.[candidate.provider] || {};
     const maxOutput = Math.min(Number(status.max_output_tokens || 4096), status.num_ctx ? Math.floor(status.num_ctx / 2) : 4096);
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const baseRequest = providerRequest(modelRequest, candidate, null);
-    const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::chat-${turn}`, request: { ...baseRequest.request, messages: compactMessages(messages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
+    const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::chat-${turn}`, request: { ...baseRequest.request, messages: compactMessages(messages.map(({ final: _final, ...entry }) => entry), { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' || final ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       const timedOut = response.timeout === true || response.status === 408 || response.code === 'provider_timeout';
@@ -272,6 +300,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unparseable = 0;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
+    if (final && call.tool !== 'reply' && call.tool !== 'finish') break;
     if (call.tool === 'reply' || call.tool === 'finish') {
       let text = String(args.message || args.summary || call.thought || '').trim() || 'Done.';
       if (ACTION_CLAIM.test(text) && !claimCorrected) {
@@ -307,6 +336,11 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       role: 'tool', kind: 'tool', content: `${call.tool}${args.path ? ` ${args.path}` : args.query ? ` "${clip(args.query, 80)}"` : args.job ? ` ${args.job}` : ''}`,
       payload: { message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600) },
     });
+    failedCalls = result?.error ? failedCalls + 1 : 0;
+    if (failedCalls >= 3) {
+      failedCalls = 0;
+      result = { ...result, instruction: 'Three tool calls in a row failed. Stop guessing: use search or list_dir to locate what you need, or reply now with what you already know.' };
+    }
     messages.push({ role: 'user', content: clip(JSON.stringify({ tool: call.tool, result }), limits.readCapChars) });
   }
   if (proposal) return { reply: 'I have proposed the job above for your confirmation.', proposal };
