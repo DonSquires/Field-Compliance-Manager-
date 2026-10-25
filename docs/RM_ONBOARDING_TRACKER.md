@@ -2911,10 +2911,23 @@ passes live. 23 client rules, each audited with its workbook, all excl. GST:
 - The CRM Finance tab's "Billing rates" now says the standing card applies
   where no client rate exists, and shows "excl. GST" and the effective date.
 - Only new work and quotes use these rates; existing lines are not repriced.
-- Not loaded, owner to confirm: private community-camera customers ($85/hr,
-  $1.26/km; no client record per customer); Raptor Rotorua one-off ($160/hr,
-  $1.09/km); OneFortyOne's $137.80, $166.60 and $135 lines (which services?);
-  OneFortyOne's pre-April-2025 $55 / $0.99 history.
+- Owner answers 2026-10-25, migration
+  `20261029100000_private_camera_clients_and_payg_models.sql` (applied live;
+  test passes live):
+  - Private community-camera customers: new clients "Private - Barber
+    (Motueka)", "Private - Coppins", "Private - Kaiteriteri", each with an
+    accepted pay-as-you-go agreement and $85/hr + $1.26/km from 2025-12-01. The
+    "R&M Other Private Clients" umbrella gets the same rates (on file since
+    wave 2). No sites yet: the workbooks give no address.
+  - Raptor Rotorua ($160/hr) is a one-off: not loaded.
+  - OneFortyOne's $137.80 = engineer + officer ("eng+1"); $135 = engineer +
+    $55.50 second person; $166.60 (goat cull) unexplained. Ruling: two-person
+    work is one line per person. Build needed: crew billing on dispatch jobs
+    (today one officer per job).
+  - STAND, TDC, Birdhurst, Stringer, Wrattens, Thomas Bros and Taylors are pay
+    as you go (no drawdown); OneFortyOne is the only fixed-price agreement.
+- Not loaded: OneFortyOne's pre-April-2025 $55 / $0.99 history.
 
 **Still to confirm or build.** GL codes and financial year from the
-statements; the 28 TYPE/code conflicts; the items not loaded in Step J.
+statements; the 28 TYPE/code conflicts; crew (per-person) billing lines; the
+$166.60 rate; site addresses for the private camera clients.

@@ -433,6 +433,22 @@ How the build holds this:
   - a client with no workbook rate stays on the standing card;
   - rates price new work and quotes; existing charge lines and imported rows
     are not repriced.
+  - private community-camera customers each have their own client record and
+    agreement, so each is invoiced on its own ($85/hr, $1.26/km; migration
+    `20261029100000_private_camera_clients_and_payg_models.sql`). One-off jobs
+    (for example the Rotorua job at $160/hr) are priced on the job, not loaded
+    as client rates.
+- **Two-person work is separate lines (ruling 2026-10-25).** A job worked by
+  two people is billed as one line per person at that person's role rate, not
+  as one combined rate. The workbooks' $137.80 is engineer ($79.50) plus
+  officer ($58.30) ("eng+1"); $135 is engineer plus a second person at $55.50;
+  $166.60 (goat culling) is not yet explained. The build prices a dispatch job
+  for one officer today, so per-person lines need crew billing to be built;
+  until then the standing two-person rules remain.
+- **Drawdown only on a fixed fee (ruling 2026-10-25).** Pay-as-you-use work has
+  no fee to draw down. Only OneFortyOne is fixed price with Extra; STAND, TDC,
+  Birdhurst, Stringer, Wrattens, Thomas Bros and Taylors are pay as you go
+  (migration `20261029100000`, audited).
 - **Fee and work.** `get_agreement_fee_drawdown` reports each month's fee: the
   accepted quote lines, or the commercial base rate. It reports contracted work
   from three sources:
@@ -461,6 +477,6 @@ How the build holds this:
 - **No double billing.** The completed-work invoice no longer bills patrol
   visits on these agreements, because they are drawn down against the fee.
 - **OneFortyOne.** Set to `bill_as_extra` in migration
-  `20261028090000_monthly_fee_drawdown.sql`, audited. The other fixed-price
-  clients have no fee recorded, so they show "no monthly fee" until one is
-  added.
+  `20261028090000_monthly_fee_drawdown.sql`, audited. It is the only R&M
+  fixed-price agreement; the others without a fee were pay as you use and
+  were switched to `pay_as_you_go` (migration `20261029100000`).
