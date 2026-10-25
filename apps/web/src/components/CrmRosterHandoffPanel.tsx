@@ -20,7 +20,7 @@ interface AgreementLocation {
 interface WorkUnit {
   id: string;
   name: string;
-  work_unit_type: 'patrol' | 'static' | 'internal';
+  work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop';
   service_type: string;
   service_agreement_location_id: string | null;
 }

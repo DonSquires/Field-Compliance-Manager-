@@ -174,6 +174,58 @@ inferred.
 
 ### Phase B - historical labour readiness, not posted
 
+2026-10-25 continuation (local implementation; not deployed):
+
+- Removed the separate forestry-history table. Source assignments are projected
+  into the normal calendar by exact work date/officer and patrol-route/work-unit
+  link. Source time ranges are explicitly not payable hours. Canonical completed
+  labour slots show provenance in the same staff/work-unit calendars and replace
+  source cards for the same roster staff/day.
+- Planner v2 holds missing/invalid-hour and over-24-hour days as evidence,
+  resolves supported name variants/staff accounts, and uses the approved
+  non-login Relief Officer placeholder for unnamed labour. Latest rollback:
+  3,520 planned/inserted slots, 8,610.4707 hours, $275,534.94 estimated pay,
+  no second billable amount. All writes rolled back; no labour seed is live.
+  240 held groups and 3,062 evidence-only groups are not posted.
+- Owner requested Manufacturing & maintenance in Create work unit and clarified
+  that these jobs must belong to a client, linked to Workshop work orders. Added the
+  distinct `workshop` roster category, governed organisation-scoped order link,
+  provider workplace/team/cost centre, and open-order prerequisite. Order kind
+  supplies the service code; roster staffing does not change the job lead.
+  Work-order execution/invoicing stays in Workshop, not a duplicate patrol or
+  roster billing flow. The new migration is pending the governed release lane.
+- Client-only roster choices now match the RPC requirement. The empty state
+  opens client-job creation; generic internal fabrication remains available
+  separately in Workshop. Keyword classification is explicitly applied by the
+  user and resolves only active catalogue codes (digger work maps to the new
+  `earthworks` subject; orgs without it must choose manually). The usual job
+  lead comes from `workshop_settings` (seeded with Pete Crawford for R&M,
+  changed only through audited `set_workshop_default_job_lead`) and is offered
+  as an explicit choice only when that person is active in the operating
+  organisation; no automatic historical assignment, attendance or payroll is created.
+  These are local changes, not a migration/deployment or seed receipt.
+- Latest continuation verification: 32/32 fixture browser checks passed on
+  desktop/mobile (including officer Workshop, client-backed work-unit creation,
+  source-calendar placement, classification/manual overrides, missing catalogue
+  codes and unique/ambiguous/cross-organisation lead suggestions). App and
+  browser-test typechecks, 44 focused roster/classification tests and 28
+  historical-labour planner tests passed. A scoped aggregate live read found
+  exactly one non-deactivated Pete Crawford profile in R&M. The migration ledger
+  contains neither `20261029120000` nor `20261029130000`; production application,
+  labour seeding, schema regeneration and Atlas refresh are still pending.
+- Database rollback acceptance passed for creation/audit, duplicate and
+  unknown-order/workplace denial, publish/cancel without a field shift,
+  no duplicate billable amount, draft/closed-order blocking, anonymous grants
+  and unauthenticated denial. This is rollback evidence, not a live deployment
+  or an exercised-production claim. Schema regeneration and Atlas refresh follow
+  application through the production migration lane, not hand edits here.
+- Browser acceptance: 12/12 desktop/mobile checks pass for manufacturing and
+  maintenance creation, missing-order guidance, explicit RPC errors, normal
+  source-calendar placement and suppression of duplicate posted-labour cards.
+  Fixed the mobile category label to wrap rather than overflow the dialog.
+  Typecheck, 30 focused roster tests and 28 labour-planner tests pass. Browser
+  checks use synthetic fixtures, not production invocation evidence.
+
 - Added the read-only `scripts/preview-rm-patrol-labour.mjs` and its behavioural
   planner tests. Run with `--from YYYY-MM-DD --to YYYY-MM-DD --output <private
   JSON outside the repository>`. There is deliberately no `--apply`. The

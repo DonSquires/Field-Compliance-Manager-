@@ -96,7 +96,7 @@ const describeAssignment = (assignment: ModuleAssignment | undefined) => {
 interface WorkUnit {
   id: string;
   name: string;
-  work_unit_type: 'patrol' | 'static' | 'internal';
+  work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop';
   service_type: string;
   active: boolean;
   patrol_route_id: string | null;

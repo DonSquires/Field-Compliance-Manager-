@@ -1,19 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Building2, CheckCircle2, MapPin, Plus, RefreshCw, Route, Search, Settings2, Shield, Users, X } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, MapPin, Plus, RefreshCw, Route, Search, Settings2, Shield, Users, Wrench, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
 import { plainWords, workUnitTypeLabel } from '../lib/rosterWords';
 import './RosterTargetsPage.css';
-type UnitType = 'patrol' | 'static' | 'internal';
+type UnitType = 'patrol' | 'static' | 'internal' | 'workshop';
 /** Kinds of work seen in live shifts and work units; the field stays free text so an org can add its own. */
 const SERVICE_TYPE_SUGGESTIONS: Record<UnitType, string[]> = {
   patrol: ['patrol', 'noise_control', 'parking_enforcement', 'freedom_camping', 'smoke_complaints', 'alarm_response', 'general'],
   static: ['static_guarding', 'event_security', 'reception'],
   internal: ['administration', 'call_centre', 'ems_on_call', 'training', 'dispatch'],
+  workshop: ['fabrication', 'maintenance'],
 };
-const DEFAULT_SERVICE_TYPE: Record<UnitType, string> = { patrol: 'patrol', static: 'static_guarding', internal: 'administration' };
+const DEFAULT_SERVICE_TYPE: Record<UnitType, string> = { patrol: 'patrol', static: 'static_guarding', internal: 'administration', workshop: 'fabrication' };
+interface WorkshopOrderOption { id: string; order_number: string; title: string; kind: 'fabrication' | 'maintenance'; client_organization_id: string; client_name: string | null; status: string; }
 interface Unit {
   id: string;
   name: string;
@@ -26,6 +28,7 @@ interface Unit {
   workplace_id: string | null;
   team_id: string | null;
   cost_centre_id: string | null;
+  workshop_work_order_id: string | null;
   required_skill_ids: string[];
   required_skill_names: string[];
   updated_at: string;
@@ -71,6 +74,7 @@ const RosterTargetsPage: React.FC = () => {
   const [teams, setTeams] = useState<Option[]>([]);
   const [costs, setCosts] = useState<Array<Option & { code: string }>>([]);
   const [skills, setSkills] = useState<RosterSkill[]>([]);
+  const [workshopOrders, setWorkshopOrders] = useState<WorkshopOrderOption[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +94,7 @@ const RosterTargetsPage: React.FC = () => {
     costId: '',
     address: '',
     code: '',
+    workOrderId: '',
     requiredSkillIds: [] as string[],
   });
   const load = useCallback(async () => {
@@ -101,8 +106,20 @@ const RosterTargetsPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_ids,required_skill_names,updated_at').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name,boundary_verification').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code'), supabase.from('roster_skill_catalog').select('id,skill_name,skill_category').eq('organization_id', org).eq('active', true).order('skill_name')]);
-    const [a, b, c, d, e, f, g, h, i, j] = responses;
+    const responses = await Promise.all([
+      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,workshop_work_order_id,required_skill_ids,required_skill_names,updated_at').eq('organization_id', org).order('name'),
+      supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'),
+      supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'),
+      supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'),
+      supabase.from('client_sites').select('id,name,boundary_verification').eq('active', true),
+      supabase.from('location_zones').select('id,name').eq('is_active', true),
+      supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'),
+      supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'),
+      supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code'),
+      supabase.from('roster_skill_catalog').select('id,skill_name,skill_category').eq('organization_id', org).eq('active', true).order('skill_name'),
+      supabase.from('workshop_work_order_summary').select('id,order_number,title,kind,client_organization_id,client_name,status').eq('organization_id', org).not('client_organization_id', 'is', null).in('status', ['draft', 'approved', 'in_progress']).order('order_number'),
+    ]);
+    const [a, b, c, d, e, f, g, h, i, j, k] = responses;
     setUnits((a.data as Unit[]) ?? []);
     setRoutes((b.data as Option[]) ?? []);
     setLocations((c.data as AgreementLocation[]) ?? []);
@@ -113,6 +130,7 @@ const RosterTargetsPage: React.FC = () => {
     setTeams((h.data as Option[]) ?? []);
     setCosts((i.data as Array<Option & { code: string }>) ?? []);
     setSkills((j.data as RosterSkill[]) ?? []);
+    setWorkshopOrders((k.data as WorkshopOrderOption[]) ?? []);
     const failures = responses.filter((r) => r.error).map((r) => r.error?.message);
     if (failures.length) setError(failures.join(' · '));
     setLoading(false);
@@ -143,6 +161,7 @@ const RosterTargetsPage: React.FC = () => {
       costId: '',
       address: '',
       code: '',
+      workOrderId: '',
       requiredSkillIds: [],
     });
   const createUnit = async (e: React.FormEvent) => {
@@ -156,7 +175,14 @@ const RosterTargetsPage: React.FC = () => {
       return;
     }
     try {
-      const { data, error: rpcError } = await supabase.rpc('create_operating_roster_work_unit', {
+      const { data, error: rpcError } = type === 'workshop' ? await supabase.rpc('create_operating_workshop_roster_work_unit', {
+        p_operating_organization_id: activeOperatingOrganizationId,
+        p_name: form.name,
+        p_work_order_id: form.workOrderId,
+        p_workplace_id: form.workplaceId,
+        p_team_id: form.teamId || null,
+        p_cost_centre_id: form.costId || null,
+      }) : await supabase.rpc('create_operating_roster_work_unit', {
         p_operating_organization_id: activeOperatingOrganizationId,
         p_name: form.name,
         p_work_unit_type: type,
@@ -195,7 +221,9 @@ const RosterTargetsPage: React.FC = () => {
           return;
         }
       }
-      setNotice(form.requiredSkillIds.length
+      setNotice(type === 'workshop' && workshopOrders.find((order) => order.id === form.workOrderId)?.status === 'draft'
+        ? 'Manufacturing & maintenance work unit created. Approve its work order in Workshop before rostering labour.'
+        : form.requiredSkillIds.length
         ? `${workUnitTypeLabel(type)} “${form.name}” created with required skills. Staff must hold them before assignment.`
         : `${workUnitTypeLabel(type)} “${form.name}” created. You can roster shifts against it now.`);
       setDialog(null);
@@ -266,7 +294,7 @@ const RosterTargetsPage: React.FC = () => {
   const scopedModules = workflowContext.agreementId ? modules.filter((module) => module.service_agreement_id === workflowContext.agreementId) : modules;
   const matchingModules = scopedModules.filter((module) => module.service_agreement_id === scopedLocations.find((location) => location.id === form.locationId)?.service_agreement_id);
   const rosterUnit = (unit: Unit) => navigate(`/admin/roster${workflowContextQuery({ ...workflowContext, workUnitId: unit.id })}`);
-  const TYPE_TABS: Array<[UnitType, string]> = [['patrol', 'Patrol run'], ['static', 'Static post'], ['internal', 'Office / internal']];
+  const TYPE_TABS: Array<[UnitType, string]> = [['patrol', 'Patrol run'], ['static', 'Static post'], ['internal', 'Office / internal'], ['workshop', 'Manufacturing & maintenance']];
   return (
     <div className="targets-page">
       <header className="targets-header">
@@ -325,6 +353,11 @@ const RosterTargetsPage: React.FC = () => {
           <span>Office / internal</span>
           <strong>{units.filter((u) => u.work_unit_type === 'internal').length}</strong>
         </div>
+        <div>
+          <Wrench />
+          <span>Manufacturing &amp; maintenance</span>
+          <strong>{units.filter((u) => u.work_unit_type === 'workshop').length}</strong>
+        </div>
       </section>
       <div className="targets-tools">
         <label>
@@ -364,11 +397,12 @@ const RosterTargetsPage: React.FC = () => {
             <strong>{units.length === 0 ? 'No work units yet' : 'No work units match this search'}</strong>
             {units.length === 0 && (
               <>
-                <p>A work unit is what a shift covers. There are three kinds, and each comes from somewhere specific:</p>
+                <p>A work unit is what a shift covers. Each kind comes from somewhere specific:</p>
                 <ul>
                   <li><b>Patrol run</b> – built from a client agreement in Client Portfolios (the Patrol run card). Pick it here once it exists.</li>
                   <li><b>Static post</b> – a place covered by a client agreement that includes static guarding.</li>
                   <li><b>Office / internal</b> – your own workplace, team or cost centre. No client involved.</li>
+                  <li><b>Manufacturing &amp; maintenance</b> – a Workshop work order for a client job or your own internal work.</li>
                 </ul>
                 <div>
                   <button type="button" onClick={() => navigate('/admin/crm')}>Client Portfolios</button>
@@ -380,7 +414,7 @@ const RosterTargetsPage: React.FC = () => {
         ) : (
           visible.map((unit) => (
             <article id={`work-unit-${unit.id}`} className={`type-${unit.work_unit_type}${workflowContext.workUnitId === unit.id ? ' is-focused' : ''}`} key={unit.id}>
-              <span>{unit.work_unit_type === 'patrol' ? <Route /> : unit.work_unit_type === 'static' ? <Shield /> : <Building2 />}</span>
+              <span>{unit.work_unit_type === 'patrol' ? <Route /> : unit.work_unit_type === 'static' ? <Shield /> : unit.work_unit_type === 'workshop' ? <Wrench /> : <Building2 />}</span>
               <div>
                 <strong>{unit.name}</strong>
                 <small>{plainWords(unit.service_type)}</small>
@@ -405,6 +439,7 @@ const RosterTargetsPage: React.FC = () => {
                     {attendanceBlocker(unit) && <small className="targets-unit-warning" role="note"><AlertTriangle size={13} aria-hidden="true" /> {attendanceBlocker(unit)}</small>}
               </div>
               <div className="targets-unit-actions">
+                {unit.workshop_work_order_id && <button type="button" onClick={() => navigate(`/admin/workshop?workOrderId=${unit.workshop_work_order_id}`)}>Open work order</button>}
                 <button type="button" onClick={() => setSkillDialog({ unit, selectedIds: unit.required_skill_ids ?? [], requestId: crypto.randomUUID() })} aria-label={`Configure required skills for ${unit.name}`}>
                   <Settings2 size={15} />
                   Required skills
@@ -474,6 +509,7 @@ const RosterTargetsPage: React.FC = () => {
                 <X />
               </button>
             </header>
+            {error && <p role="alert">{error}</p>}
             <div className="target-type-tabs" role="tablist" aria-label="Kind of work unit">
               {TYPE_TABS.map(([v, label]) => (
                 <button
@@ -483,7 +519,7 @@ const RosterTargetsPage: React.FC = () => {
                   className={type === v ? 'is-active' : ''}
                   onClick={() => {
                     setType(v);
-                    setForm({ ...form, serviceType: DEFAULT_SERVICE_TYPE[v], routeId: '', locationId: '', moduleId: '' });
+                    setForm({ ...form, serviceType: DEFAULT_SERVICE_TYPE[v], routeId: '', locationId: '', moduleId: '', workOrderId: '' });
                   }}
                   key={v}
                 >
@@ -493,15 +529,15 @@ const RosterTargetsPage: React.FC = () => {
             </div>
             <label>
               <span>Name</span>
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={type === 'patrol' ? 'e.g. Nelson CBD night patrol' : type === 'static' ? 'e.g. Civic House front desk' : 'e.g. After-hours rosterer'} />
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={type === 'patrol' ? 'e.g. Nelson CBD night patrol' : type === 'static' ? 'e.g. Civic House front desk' : type === 'workshop' ? 'e.g. Lockbox fabrication crew' : 'e.g. After-hours rosterer'} />
             </label>
             <label>
               <span>Kind of work</span>
-              <input required list="work-unit-service-types" value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })} />
+              <input required readOnly={type === 'workshop'} list="work-unit-service-types" value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })} />
               <datalist id="work-unit-service-types">
                 {SERVICE_TYPE_SUGGESTIONS[type].map((value) => <option value={value} key={value}>{plainWords(value)}</option>)}
               </datalist>
-              <small>Used for reports and pay rules. Pick a suggestion or type your own.</small>
+              <small>{type === 'workshop' ? 'Derived from the linked work order for reports and pay rules.' : 'Used for reports and pay rules. Pick a suggestion or type your own.'}</small>
             </label>
             {skills.length ? (
               <fieldset className="targets-skill-picker">
@@ -593,10 +629,21 @@ const RosterTargetsPage: React.FC = () => {
                 )}
               </>
             ))}
-            {type === 'internal' && (workplaces.length === 0 ? (
+            {type === 'workshop' && <section aria-label="Workshop work order">
+              <p>Choose a client job for gate or lock repairs, installations, signs, digger work, manufacturing or maintenance. The work order retains the client, place or asset, materials, assigned job lead and invoice lines. Rostering staff does not reassign the job lead or invoice this time again.</p>
+              {workshopOrders.length === 0 ? <div className="targets-prereq" role="status">
+                <strong>No open work orders to link.</strong>
+                <p>Create a client work order in Workshop first, then refresh this page. Internal work is not eligible for this client-work category.</p>
+                <button type="button" onClick={() => navigate('/admin/workshop?clientJob=1')}>Open Workshop</button>
+              </div> : <label><span>Work order</span><select required value={form.workOrderId} onChange={(event) => {
+                const order = workshopOrders.find((item) => item.id === event.target.value);
+                setForm({ ...form, workOrderId: event.target.value, serviceType: order?.kind ?? 'fabrication' });
+              }}><option value="">Choose a client work order</option>{workshopOrders.map((order) => <option key={order.id} value={order.id}>{order.order_number} · {order.title} · {order.client_name ?? 'Client name unavailable'} · {plainWords(order.status)}</option>)}</select></label>}
+            </section>}
+            {(type === 'internal' || type === 'workshop') && (workplaces.length === 0 ? (
               <div className="targets-prereq" role="status">
                 <strong>No workplaces yet.</strong>
-                <p>Office and internal work is rostered against one of your own workplaces. Add one first – it only needs a name.</p>
+                <p>This work needs one of your own workplaces as its base. A maintenance visit keeps its actual client place or asset on the work order. Add a workplace first – it only needs a name.</p>
                 <button type="button" onClick={() => { reset(); setDialog('workplace'); }}>Add workplace</button>
               </div>
             ) : (
@@ -638,12 +685,12 @@ const RosterTargetsPage: React.FC = () => {
                 </div>
               </>
             ))}
-            <p>{type === 'patrol' ? 'Every stop on the run keeps its own client and contract, so billing follows the place, not the shift.' : type === 'static' ? 'The post is authorised by the client agreement that covers the place.' : 'Office and internal work belongs to your organisation. It is never billed to a client.'}</p>
+            <p>{type === 'patrol' ? 'Every stop on the run keeps its own client and contract, so billing follows the place, not the shift.' : type === 'static' ? 'The post is authorised by the client agreement that covers the place.' : type === 'workshop' ? 'Labour appears on the roster. Work starts and completes in Workshop; client billing follows the work order, not a second roster charge.' : 'Office and internal work belongs to your organisation. It is never billed to a client.'}</p>
             <footer>
               <button type="button" onClick={() => setDialog(null)}>
                 Cancel
               </button>
-              <button type="submit" disabled={busy || (type === 'patrol' && routes.length === 0) || (type === 'static' && (scopedLocations.length === 0 || (!!form.locationId && matchingModules.length === 0))) || (type === 'internal' && workplaces.length === 0)}>
+              <button type="submit" disabled={busy || (type === 'patrol' && routes.length === 0) || (type === 'static' && (scopedLocations.length === 0 || (!!form.locationId && matchingModules.length === 0))) || ((type === 'internal' || type === 'workshop') && workplaces.length === 0) || (type === 'workshop' && !form.workOrderId)}>
                 {busy ? 'Creating' : 'Create work unit'}
               </button>
             </footer>

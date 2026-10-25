@@ -57,7 +57,7 @@ export const contractedHoursWords = (start: string | null | undefined, end: stri
 /** `every day` -> `Every day` for a standalone label. */
 export const sentenceCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
 
-const WORK_UNIT_TYPE_LABELS: Record<string, string> = { patrol: 'Patrol run', static: 'Static post', internal: 'Office / internal' };
+const WORK_UNIT_TYPE_LABELS: Record<string, string> = { patrol: 'Patrol run', static: 'Static post', internal: 'Office / internal', workshop: 'Manufacturing & maintenance' };
 
 /** Work unit type code -> the words used everywhere else in the app. */
 export const workUnitTypeLabel = (type: string | null | undefined, fallback = 'Unknown'): string => (type ? WORK_UNIT_TYPE_LABELS[type] ?? plainWords(type) : fallback);

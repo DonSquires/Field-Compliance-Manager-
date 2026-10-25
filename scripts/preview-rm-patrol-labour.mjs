@@ -32,6 +32,8 @@ WITH clients AS (
   FROM raw
 ), normalized AS (
   SELECT r.kind,r.id,r.client_id,r.officer_id,r.work_date::text,r.external_ref,
+    to_char(r.happened_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS happened_at,
+    r.payload->>'patroller_raw' AS patroller_raw,
     r.payload->>'job_time_hours' AS hours,r.payload->>'job_number' AS job_number,
     coalesce(v.source_file,r.payload->>'source_file') AS source_file,
     coalesce(v.source_sha256,r.payload->>'source_sha256') AS source_sha256,
@@ -56,6 +58,18 @@ SELECT jsonb_build_object(
   'from','${from}','to','${to}','provider_organization_id','${PROVIDER}',
   'source_record_count',(SELECT count(*) FROM normalized),
   'records',coalesce((SELECT jsonb_agg(to_jsonb(n) ORDER BY kind,id) FROM normalized n),'[]'::jsonb),
+  'staff',coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'display_name',p.display_name) ORDER BY p.id)
+    FROM public.user_profiles p JOIN public.staff_profiles s ON s.id=p.id
+    WHERE (p.organization_id='${PROVIDER}'::uuid OR p.employer_organization_id='${PROVIDER}'::uuid)
+      AND p.role IN ('officer','admin_officer','admin','master')
+      AND p.display_name !~* 'automation|human test|relief officer'),'[]'::jsonb),
+  'accounts',coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'display_name',p.display_name) ORDER BY p.id)
+    FROM public.user_profiles p
+    WHERE (p.organization_id='${PROVIDER}'::uuid OR p.employer_organization_id='${PROVIDER}'::uuid)
+      AND NOT EXISTS (SELECT 1 FROM public.staff_profiles s WHERE s.id=p.id)
+      AND p.display_name !~* 'automation|human test'),'[]'::jsonb),
+  'existing_labour_slots',(SELECT count(*) FROM public.roster_slots s
+    WHERE s.organization_id='${PROVIDER}'::uuid AND s.external_refs->>'source'='rm_patrol_log_labour'),
   'outside_window',(SELECT jsonb_build_object(
     'before',count(*) FILTER(WHERE work_date<'${from}'::date),
     'after',count(*) FILTER(WHERE work_date>'${to}'::date),
@@ -70,6 +84,40 @@ SELECT jsonb_build_object(
 ROLLBACK;`;
 }
 
+export function runLinkedSql(sql, prefix = 'fcm-labour-read-') {
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), prefix));
+  try {
+    const sqlFile = path.join(temporaryDirectory, 'query.sql');
+    writeFileSync(sqlFile, sql, { mode: 0o600 });
+    const output = execFileSync(process.execPath, [
+      path.join(root, 'node_modules', 'supabase', 'dist', 'supabase.js'),
+      'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile,
+    ], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+    return JSON.parse(output);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true });
+  }
+}
+
+/** Reads the live snapshot (read-only transaction) and plans it. */
+export function loadLabourReport(from, to) {
+  const result = runLinkedSql(labourSnapshotSql(from, to));
+  const snapshot = result.rows?.[0]?.snapshot;
+  if (!snapshot || !Array.isArray(snapshot.records)
+    || snapshot.records.length !== snapshot.source_record_count) {
+    throw new Error('The linked read returned no complete snapshot');
+  }
+  const { records, staff, accounts, ...scope } = snapshot;
+  return { ...buildHistoricalPatrolLabourReport({ records, staff, accounts, asOf: snapshot.as_of }), scope };
+}
+
+export function assertPrivateOutput(outputPath) {
+  const relative = path.relative(realpathSync(root), realpathSync(path.dirname(outputPath)));
+  if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
+    throw new Error('The report contains staff/date/hour evidence: use an existing private directory outside the repository');
+  }
+}
+
 export function main(args) {
   const values = {};
   for (let index = 0; index < args.length; index += 2) {
@@ -79,35 +127,15 @@ export function main(args) {
     }
     values[key] = args[index + 1];
   }
-  const sql = labourSnapshotSql(values['--from'], values['--to']);
+  labourSnapshotSql(values['--from'], values['--to']);
   if (!values['--output']) throw new Error('--output is required for the private report');
   const outputPath = path.resolve(values['--output']);
-  const relative = path.relative(realpathSync(root), realpathSync(path.dirname(outputPath)));
-  if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
-    throw new Error('The report contains staff/date/hour evidence: use an existing private directory outside the repository');
-  }
-  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'fcm-labour-read-'));
-  try {
-    const sqlFile = path.join(temporaryDirectory, 'read.sql');
-    writeFileSync(sqlFile, sql, { mode: 0o600 });
-    const output = execFileSync(process.execPath, [
-      path.join(root, 'node_modules', 'supabase', 'dist', 'supabase.js'),
-      'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile,
-    ], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
-    const result = JSON.parse(output);
-    const snapshot = result.rows?.[0]?.snapshot;
-    if (!snapshot || !Array.isArray(snapshot.records)
-      || snapshot.records.length !== snapshot.source_record_count) {
-      throw new Error('The linked read returned no complete snapshot');
-    }
-    const { records, ...scope } = snapshot;
-    const report = { ...buildHistoricalPatrolLabourReport({ records, asOf: snapshot.as_of }), scope };
-    writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-    console.log(JSON.stringify({ mode: 'read_only', ...report.summary, scope, writes_requested: 0 }, null, 2));
-    return report;
-  } finally {
-    rmSync(temporaryDirectory, { recursive: true });
-  }
+  assertPrivateOutput(outputPath);
+  const report = loadLabourReport(values['--from'], values['--to']);
+  writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  console.log(JSON.stringify({ mode: 'read_only', ...report.summary, source_fingerprint: report.source_fingerprint,
+    scope: report.scope, writes_requested: 0 }, null, 2));
+  return report;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

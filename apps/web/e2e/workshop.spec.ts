@@ -17,7 +17,84 @@ const summaryRow = (status: string, extra: Record<string, unknown> = {}) => ({
   line_count: 2, charge_total: 440, cost_total: 235, uninvoiced_total: status === 'completed' ? 440 : 0, ...extra,
 });
 
-test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
+  await installSupabaseFixtures(page);
+  await page.route('**/rest/v1/reference_codes**', (route) => route.fulfill({ json: [
+    { id: 'subject-general', code_type: 'work_subject', code: 'general', name: 'General', sort_order: 0 },
+    { id: 'subject-lock', code_type: 'work_subject', code: 'physical_lock', name: 'Physical lock', sort_order: 1 },
+    { id: 'subject-gate', code_type: 'work_subject', code: 'gate', name: 'Gate', sort_order: 2 },
+    { id: 'subject-earthworks', code_type: 'work_subject', code: 'earthworks', name: 'Earthworks (digger / excavator)', sort_order: 3 },
+    { id: 'activity-maintenance', code_type: 'work_activity', code: 'maintenance', name: 'Maintenance', sort_order: 0 },
+    { id: 'activity-installation', code_type: 'work_activity', code: 'installation', name: 'Installation', sort_order: 1 },
+  ] }));
+});
+
+test('workshop: classification is a reviewable suggestion, not an automatic change or staff assignment', async ({ page }) => {
+  await page.route('**/rest/v1/workshop_work_order_summary**', (route) => route.fulfill({ json: [] }));
+  await signInAsAdmin(page, '/admin/workshop?clientJob=1');
+  const form = page.locator('form.workshop-card');
+  await form.getByLabel('Title').fill('Fix the gate lock');
+  await expect(form.getByLabel('What kind of job?')).toHaveValue('fabrication');
+  await expect(form.getByLabel('Assigned to')).toHaveValue('');
+  await expect(form.getByRole('button', { name: 'Choose Pete Crawford' })).toHaveCount(0);
+  await form.getByRole('button', { name: 'Use suggested classification' }).click();
+  await expect(form.getByLabel('What kind of job?')).toHaveValue('maintenance');
+  await expect(form.getByLabel('What is being worked on?')).toHaveValue('subject-lock');
+  await expect(form.getByLabel('What work is being done?')).toHaveValue('activity-maintenance');
+  await form.getByLabel('What is being worked on?').selectOption('subject-gate');
+  await form.getByLabel('Notes').fill('Digger work clearing the culvert');
+  await expect(form.getByLabel('What is being worked on?')).toHaveValue('subject-gate');
+  await form.getByLabel('Title').fill('Digger work');
+  await form.getByRole('button', { name: 'Use suggested classification' }).click();
+  await expect(form.getByLabel('What is being worked on?')).toHaveValue('subject-earthworks');
+  await expect(form.getByLabel('Client agreement (who gets billed)')).toHaveAttribute('required', '');
+});
+
+test('workshop: unavailable classification requires a catalogue choice rather than an invented code', async ({ page }) => {
+  await page.route('**/rest/v1/workshop_work_order_summary**', (route) => route.fulfill({ json: [] }));
+  await signInAsAdmin(page, '/admin/workshop');
+  await page.getByRole('button', { name: 'New work order' }).click();
+  const form = page.locator('form.workshop-card');
+  await form.getByLabel('Title').fill('Install a sign');
+  await form.getByRole('button', { name: 'Use suggested classification' }).click();
+  await expect(form.getByLabel('What is being worked on?')).toHaveValue('');
+  await expect(form.getByText(/Choose a subject from your catalogue/)).toBeVisible();
+  await expect(form.getByLabel('What is being worked on?')).toHaveAttribute('required', '');
+});
+
+for (const scenario of [
+  { name: 'configured default lead', defaultLead: 'worker-0', matches: 1, offered: true },
+  { name: 'no configured default lead', defaultLead: null, matches: 1, offered: false },
+  { name: 'default lead outside this organisation', defaultLead: 'someone-else', matches: 1, offered: false },
+]) {
+  test(`workshop: usual lead is explicit and scoped for ${scenario.name}`, async ({ page }) => {
+    await page.route('**/rest/v1/workshop_settings**', (route) => {
+      expect(new URL(route.request().url()).searchParams.get('organization_id')).toBe(`eq.${OPERATING_ORG_ID}`);
+      return route.fulfill({ json: scenario.defaultLead ? { default_job_lead_user_id: scenario.defaultLead } : null });
+    });
+    await page.route('**/rest/v1/user_profiles**', (route) => {
+      const query = new URL(route.request().url());
+      if (query.searchParams.get('select') !== 'id,display_name,email,role') return route.fallback();
+      expect(query.searchParams.get('organization_id')).toBe(`eq.${OPERATING_ORG_ID}`);
+      expect(query.searchParams.get('deactivated_at')).toBe('is.null');
+      return route.fulfill({ json: Array.from({ length: scenario.matches }, (_, index) => ({
+        id: `worker-${index}`, display_name: 'Pete Crawford', email: null, role: 'officer',
+      })) });
+    });
+    await page.route('**/rest/v1/workshop_work_order_summary**', (route) => route.fulfill({ json: [] }));
+    await signInAsAdmin(page, '/admin/workshop?clientJob=1');
+    const form = page.locator('form.workshop-card');
+    await expect(form.getByLabel('Assigned to').locator('option')).toHaveCount(scenario.matches + 1);
+    await expect(form.getByLabel('Assigned to')).toHaveValue('');
+    const suggestion = form.getByRole('button', { name: 'Choose Pete Crawford' });
+    await expect(suggestion).toHaveCount(scenario.offered ? 1 : 0);
+    if (scenario.offered) {
+      await suggestion.click();
+      await expect(form.getByLabel('Assigned to')).toHaveValue('worker-0');
+    }
+  });
+}
 
 test('workshop: a person can manually create a maintenance order for an agreed client place', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
@@ -43,6 +120,8 @@ test('workshop: a person can manually create a maintenance order for an agreed c
   await page.getByRole('button', { name: 'New work order' }).click();
   const form = page.locator('form.workshop-card').filter({ hasText: 'New work order' });
   await form.getByLabel('What kind of job?').selectOption('maintenance');
+  await form.getByLabel('What is being worked on?').selectOption('subject-gate');
+  await form.getByLabel('What work is being done?').selectOption('activity-maintenance');
   await form.getByLabel('Title').fill('Inspect north gate camera mount');
   await form.getByLabel('Client agreement (who gets billed)').selectOption('24242424-2424-4424-8424-242424242424');
   await form.getByLabel('Place').selectOption('42424242-4242-4242-8242-424242424242');
@@ -57,6 +136,8 @@ test('workshop: a person can manually create a maintenance order for an agreed c
   expect(calls[0]).toMatchObject({
     p_organization_id: OPERATING_ORG_ID,
     p_kind: 'maintenance',
+    p_work_subject_code_id: 'subject-gate',
+    p_work_activity_code_id: 'activity-maintenance',
     p_title: 'Inspect north gate camera mount',
     p_description: 'Check mounting bolts and weather seal.',
     p_client_organization_id: CLIENT_ID,

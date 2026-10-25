@@ -31,6 +31,7 @@ describe('roster plain words', () => {
     expect(workUnitTypeLabel('patrol')).toBe('Patrol run');
     expect(workUnitTypeLabel('static')).toBe('Static post');
     expect(workUnitTypeLabel('internal')).toBe('Office / internal');
+    expect(workUnitTypeLabel('workshop')).toBe('Manufacturing & maintenance');
     expect(workUnitTypeLabel(undefined)).toBe('Unknown');
   });
 
