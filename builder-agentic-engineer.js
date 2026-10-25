@@ -28,7 +28,7 @@ const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v10';
+const PROMPT_VERSION = 'agentic-engineer-v11';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -240,6 +240,14 @@ function outlineLines(text, { pattern = null, cap = 400 } = {}) {
   return { entries: candidates.map(({ index, line }) => `${index + 1}: ${line.trim().slice(0, 140)}`), total_lines: lines.length, omitted: found - candidates.length };
 }
 
+const ATLAS_RESEARCH_GUIDANCE = [
+  'ATLAS AS A RESEARCH GUIDE: use the map to choose your next useful source read, not merely to tick a proposal prerequisite.',
+  'For an implementation question, start from the affected surface/entity in the current request. Discover exact type/name with capability_map, then inspect terrain_edges and its source_file values to locate callers, writers, access controls and downstream consumers. Confirm those paths in the current checkout; do not guess filenames or read an unrelated subsystem.',
+  'Use blast_radius with the discovered name/type. Directions follow stored edges: downstream traverses source to target; upstream traverses target to source. For a component that reads a table, the table is downstream and its reader is upstream of the table. Inspect both directions as needed to find dependencies and affected consumers; do not infer impact from a direction label alone. The butterfly effect concerns potentially affected workflows, not permission to expand the task. Follow reads/writes/calls/invokes, inspect secured_by controls, and keep weak references and structural fk_reach separate from flow_reach.',
+  'Atlas can lag or under-report. Map edges are source-backed navigation evidence, not proof a live call succeeded; wired is not exercised. Cross-check the owning source and actual schema function/trigger/policy bodies. An empty map is a discovery gap, not proof of absence. Record contradictions and choose the smallest check that could disconfirm your hypothesis.',
+  'Before a change, identify expected behavior, dependencies and permissions; during, trace requests/writes/audit and errors; after, verify persisted and downstream outcomes. Use the affected paths to select focused regression tests. Do not walk the entire graph or every FK. Guidance-only questions may be answered from relevant cards/receipts without Atlas or source inspection.',
+].join('\n');
+
 function systemPrompt({ lane, limits, firewall = false }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
@@ -251,6 +259,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
     '7. DATA PATHS ARE CHECKED: a caller-scoped client (callerClient/userClient) reading a table whose row-level security admits only the service role returns no rows for a real user — the verifier fails such a patch. Before reading a table with the caller\'s client, search supabase/schema.sql for `CREATE POLICY ... ON "public"."<table>"`; if only service_role can see it, go through the path that verifies the caller and then reads with the service role (for Builder tables: callFn(\'bob-builder-control-room\', authHeader, { action: \'list\' }) as create_builder_job does).',
     '8. CONTINUATION: completed tool steps and edits are checkpointed outside your disposable worktree. When resumed, inspect git_diff and the recorded context; do not restart the investigation or undo prior work without evidence. A repair starts from its exact failed patch. Checkpointed work is not verified work: re-run checks before finish. Runner/resource failures are not instructions to rewrite product code; unmatched baseline failures remain unresolved, never proof that the patch is innocent.',
+    ATLAS_RESEARCH_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
     'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it, so Builder can re-scope. Never edit builder-path-policy.js or any guard to get around it.',
@@ -1707,4 +1716,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };

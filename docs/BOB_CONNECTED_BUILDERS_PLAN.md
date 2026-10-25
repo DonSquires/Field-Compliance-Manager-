@@ -135,6 +135,51 @@ forcing an invented repair plan.
 Gate: unsupported claims are rejected or qualified, while adequate investigations
 proceed without a human supplying the technical solution.
 
+Atlas-guided research slice (2026-10-25, pending release): Chat, Builder and Vibe
+now share navigation guidance: discover entity names, use direct edges and
+source-file evidence to choose reads, follow the relevant upstream/downstream
+blast radius, inspect security controls, and keep flow, weak references and FK
+structure distinct. A platform-canonical card makes the same method retrievable.
+This is not a task-specific repair recipe or a fixed sequence for every question.
+Simple guidance answers need no repository investigation.
+
+Stage-2 live follow-up: #222 deployed at
+`c3bac5004873ae33d6227b190b0116714d6e612c`. The actual UI acceptance retrieved
+platform-only cards through vector matching with provenance and no degradation,
+then made 13 unrelated source reads and failed instead of answering the guidance
+question. Vector reachability is proven; semantic usefulness and completion are
+not. The selected cancelled job was present in background context, but its causal
+role in the drift is unproven.
+
+Two bounded, non-persistent private-model probes tested current-request framing
+and a tool-result reminder. Both still failed: the first wandered into guessed
+investigation UI files; the second repeatedly read canon. The latter also used
+explicit keyword degradation after private embedding failed and retrieved less
+relevant cards. Each used a 180-second investigation budget and 35-second turn
+deadline, not the production defaults; neither is a successful end-to-end test.
+Provider recovery hit the existing local-serving guard; it was not weakened.
+A third probe loaded all three changed runtime modules into the isolated process,
+including the shared Atlas lesson (the first two used the deployed engineer/Vibe
+imports). It also failed after repeated canon reads and provider recovery.
+The protocol fix constrains the actual final structured schema, rather than
+only removing native tools. Regression tests cover ordinary/proposal final
+schemas, current-request priority, and the shared Atlas lesson. These changes
+must not be reported as a proven fix for model task focus or the original repair.
+
+Pre-release validation: 1,722 runtime tests passed with nine existing skips
+using four concurrent test files. An initial unconstrained run failed its
+control-plane startup fixture; that fixture passed in isolation and in the
+bounded full run. The prompt-version assertion was updated for Vibe v17.
+The new 2,313-character card fits Chat's 2,500-character per-card limit.
+Schema cross-check of `bob_atlas_flow_reach` confirms direction means stored
+edge traversal, not business impact: downstream is source-to-target and upstream
+reverses it. In particular, a table reader is upstream of its table. The shared
+lesson and card teach that distinction rather than equating downstream with
+every affected consumer. The focused follow-up suite passed 108 tests.
+Migration inventory reports 712 unique versions; Atlas generation was dry-run
+only (1,517 capabilities, 8,788 edges). Release and live acceptance remain
+separate evidence gates.
+
 ### 4. Cooperating execution modes
 
 Extend existing task/session/job records only where necessary. Handoffs preserve
