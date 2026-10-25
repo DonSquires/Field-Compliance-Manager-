@@ -279,7 +279,9 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     else if (checkpoint && !current) reason = 'previously_linked_record_missing';
     else if (current && checkpoint && (checkpoint.record_id !== current.id || checkpoint.kind !== kind
       || checkpoint.source_file !== row.payload.source_file || checkpoint.source_sheet !== row.payload.source_sheet)) reason = 'checkpoint_identity_mismatch';
-    else if (current && checkpoint && checkpoint.record_fingerprint !== recordFingerprint(current.record)) reason = 'fcm_record_changed_since_last_sync';
+    else if (current && checkpoint && (typeof checkpoint.record_matches_state_after === 'boolean'
+      ? !checkpoint.record_matches_state_after
+      : checkpoint.record_fingerprint !== recordFingerprint(current.record))) reason = 'fcm_record_changed_since_last_sync';
     if (reason) {
       actions.push({ ...action, operation: 'hold', reason, ...(current ? { record_id: current.id } : {}) });
     } else if (!current) {
@@ -293,9 +295,10 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     } else if (!checkpoint) {
       actions.push({ ...action, operation: 'hold', reason: 'initial_difference_requires_review', record_id: current.id });
     } else if (checkpoint.source_fingerprint === sourceFingerprint) {
-      // Source and record both match the last sync; a reviewed Update overlay is why they differ.
-      if (checkpoint.record_fingerprint !== checkpoint.source_fingerprint) {
-        actions.push({ ...action, operation: 'unchanged', record_id: current.id, update_overlay: true });
+      // Persisted state is authoritative when storage rounded a source number or applied an overlay.
+      if (checkpoint.record_matches_state_after === true || checkpoint.record_fingerprint !== checkpoint.source_fingerprint) {
+        actions.push({ ...action, operation: 'unchanged', record_id: current.id,
+          ...(checkpoint.record_fingerprint !== checkpoint.source_fingerprint ? { update_overlay: true } : {}) });
       } else {
         actions.push({ ...action, operation: 'hold', reason: 'source_and_record_checkpoint_disagree', record_id: current.id });
       }
@@ -331,7 +334,7 @@ export function previewReconciliation(sourcePlan, baseline, { canonicalPlan = nu
     throw new Error('Source and baseline client organization must match');
   }
   const managedFields = [...new Set([...sourcePlan.observations, ...sourcePlan.events]
-    .concat(sheetUpdatePlan?.events ?? []).flatMap(row => Object.keys(row.payload ?? {})))];
+    .flatMap(row => Object.keys(row.payload ?? {})))];
   const existing = [];
   for (const [kind, rows] of [['observation', baseline.observations], ['event', baseline.events]]) {
     for (const row of rows) {
@@ -470,13 +473,15 @@ export async function loadLinkedBaseline(sourcePlan, providerOrganizationId, que
   const baseline = { organization_id: clientId, observations: [], events: [],
     eligible_officer_ids: scope[0].scope.eligible_officer_ids, checkpoints: [], sync_history: syncHistory,
     superseded_refs: [], sheet_copies: [] };
-  // A current source version means FCM equalled that source row when it was recorded, so its
-  // source fingerprint is also the record fingerprint the local plan compares against.
+  // Compare the full persisted state just as the update RPC does; source fingerprints can
+  // retain unrounded numbers while database columns store a fixed numeric precision.
   const checkpointSql = (syncHistory ? `,
         'checkpoints', (SELECT coalesce(jsonb_agg(jsonb_build_object(
           'external_ref',v.external_ref,'record_id',v.record_id,'kind',v.record_kind,
           'source_file',v.source_file,'source_sheet',v.source_sheet,'source_fingerprint',v.source_fingerprint,
-          'record_fingerprint',coalesce(to_jsonb(v)->>'record_fingerprint',v.source_fingerprint))),'[]'::jsonb)
+          'record_fingerprint',coalesce(to_jsonb(v)->>'record_fingerprint',v.source_fingerprint),
+          'record_matches_state_after',public.patrol_source_record_state(v.record_kind,v.record_id)
+            IS NOT DISTINCT FROM v.state_after)),'[]'::jsonb)
           FROM public.patrol_import_record_versions v JOIN requested r ON v.external_ref=r.ref
           WHERE v.client_organization_id='${clientId}'::uuid
             AND v.provider_organization_id='${providerOrganizationId}'::uuid AND v.is_current)` : '')
@@ -807,9 +812,15 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
   const { chunks, proposal_count: proposalCount, counts } = buildSyncChunks(sourcePlan, plan, {
     chunkSize, sheetUpdatePlan, includeProposals: !sheetUpdatePlan && !evidenceOnly,
   });
+  const planHoldReasons = {};
+  for (const action of plan.actions) {
+    if (action.operation === 'hold') planHoldReasons[action.reason] = (planHoldReasons[action.reason] ?? 0) + 1;
+  }
+  const idleStatus = plan.summary.hold ? 'source_rows_held' : 'no_source_changes';
   const report = { mode: commit ? 'apply' : 'dry_run', committed: false, attempt, plan_summary: plan.summary,
+    plan_hold_reasons: planHoldReasons,
     requested: counts, batch_id: null, results: [] };
-  if (!chunks.length && !commit) return { ...report, status: 'no_source_changes', summary: summarizeSyncResults([]) };
+  if (!chunks.length && !commit) return { ...report, status: idleStatus, summary: summarizeSyncResults([]) };
 
   const actorRows = await readQuery(`SELECT import_actor_id FROM public.import_source_profiles
     WHERE organization_id='${providerOrganizationId}'::uuid AND profile_code='${batch.manifest.source_profile}' AND active;`);
@@ -873,7 +884,7 @@ ${statements.join('\n')}
 COMMIT;`);
   };
   if (!chunks.length) {
-    if (!batchId && !dartUpdateBatchId) return { ...report, status: 'no_source_changes', summary: summarizeSyncResults([]) };
+    if (!batchId && !dartUpdateBatchId) return { ...report, status: idleStatus, summary: summarizeSyncResults([]) };
     await finalizeBatches([], true);
     return { ...report, committed: true, batch_id: batchId, dart_update_batch_id: dartUpdateBatchId,
       status: 'receipt_recovered', summary: summarizeSyncResults([]) };
@@ -950,7 +961,8 @@ async function runApply(argument) {
     evidenceOnly: process.argv.includes('--evidence-only') });
   await writeFile(output, JSON.stringify(report), { mode: 0o600 });
   console.log(JSON.stringify({ mode: report.mode, status: report.status, committed: report.committed,
-    plan_summary: report.plan_summary, requested: report.requested, summary: report.summary }));
+    plan_summary: report.plan_summary, plan_hold_reasons: report.plan_hold_reasons,
+    requested: report.requested, summary: report.summary }));
 }
 
 async function main() {
@@ -964,16 +976,26 @@ async function main() {
   }
   const output = path.resolve(argument('--output'));
   const inputs = [argument('--source-plan'), ...(linked ? [] : [argument('--baseline')]),
+    ...['--canonical-plan', '--sheet-update-plan'].filter(flag => process.argv.includes(flag)).map(argument),
     ...(process.argv.includes('--previous-source-plan') ? [argument('--previous-source-plan')] : [])].map(value => path.resolve(value));
   const samePath = input => process.platform === 'win32' ? input.toLowerCase() === output.toLowerCase() : input === output;
   if (path.extname(output).toLowerCase() !== '.json' || inputs.some(samePath)) {
     throw new Error('The report must be a separate JSON file, never an input or source workbook');
   }
   const sourcePlan = JSON.parse((await readFile(argument('--source-plan'), 'utf8')).replace(/^\uFEFF/, ''));
+  const canonicalPlan = process.argv.includes('--canonical-plan')
+    ? JSON.parse((await readFile(argument('--canonical-plan'), 'utf8')).replace(/^\uFEFF/, '')) : null;
+  const sheetUpdatePlan = process.argv.includes('--sheet-update-plan')
+    ? JSON.parse((await readFile(argument('--sheet-update-plan'), 'utf8')).replace(/^\uFEFF/, '')) : null;
+  const copySheets = process.argv.flatMap((value, index) =>
+    value === '--supersede-copies-sheet' ? [process.argv[index + 1]] : []);
+  if (sheetUpdatePlan && !copySheets.includes(sheetUpdatePlan.source_sheet)) {
+    throw new Error('DART Update reconciliation must load the approved worksheet copies');
+  }
   const baseline = linked
-    ? await loadLinkedBaseline(sourcePlan, argument('--provider-org-id'), linkedQuery)
+    ? await loadLinkedBaseline(sourcePlan, argument('--provider-org-id'), linkedQuery, { copySheets })
     : JSON.parse((await readFile(argument('--baseline'), 'utf8')).replace(/^\uFEFF/, ''));
-  const result = previewReconciliation(sourcePlan, baseline);
+  const result = previewReconciliation(sourcePlan, baseline, { canonicalPlan, sheetUpdatePlan });
   const previousSourcePlan = process.argv.includes('--previous-source-plan')
     ? JSON.parse((await readFile(argument('--previous-source-plan'), 'utf8')).replace(/^\uFEFF/, '')) : null;
   if (previousSourcePlan) result.source_changes = compareSourcePlans(sourcePlan, previousSourcePlan);

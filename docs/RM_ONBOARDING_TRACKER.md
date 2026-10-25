@@ -90,14 +90,14 @@ inferred.
 - Existing events are unchanged. Step B reclassifies them through a governed
   correction with versions and audit.
 
-### Step B - source corrections and paired Update rows: rollback-verified, not applied
+### Step B - source corrections and paired Update rows: applied; resync verified
 
 - Owner-approved Update scope: 304 one-to-one copies update their canonical
   2025 event and archive the copy atomically. Twelve copies colliding across
   three canonical targets and seven unmatched copies remain untouched. The
   official matcher was checked against the private source plans: 304 distinct
   canonical targets, 12 ambiguous holds, seven unmatched holds.
-- Draft migration/test
+- Migration/test
   `20261029110000_patrol_legacy_correction_and_supersede.sql` passed the linked
   SQL behavioral truth table inside a rolled-back transaction. Coverage includes
   provenance, canonical job/cost/hour preservation, archive/replay, mismatched
@@ -134,9 +134,36 @@ inferred.
   transaction; 2025 dry run 681 corrections / 304 `updated_and_superseded` /
   19 planner holds / 0 proposals; 2026 dry run 1,105 corrections / 0 holds /
   0 proposals.
-- Focused importer/reconciliation tests: 41/41 passing. No production
-  correction, migration apply, commit, deployment or Atlas refresh has occurred
-  for Step B. Final reviewed scope and release approval are still required.
+- Owner approved the bounded release and committed corrections. PR #215 merged
+  as `4e59ec0c`; the VPS release lane applied migration `20261029110000`.
+  Generated catalog PR #218 merged as `647251ef`, and the next lane tick
+  completed with matching schema and its Atlas refresh. No direct main push
+  or local production migration writer was used.
+- Committed batches (all finalised as `needs_review`, the import receipt state):
+  - 2025 `e54ccb0e-926a-46cb-81e8-98458c11ad0e`: 681 corrections;
+  - Update `7b8417db-5752-4c2b-bd35-4e27e474f8f9`: 304 paired updates/archives;
+  - 2026 `613f25be-ddb8-4c66-80c3-0ba2575a45b5`: 1,105 corrections.
+  Read-only verification found 1,786 correction audit entries, 304 paired
+  audit entries and 304 archived copies. All three receipts record zero
+  direct finance/workshop writes and have zero staged proposals.
+- Post-commit replay exposed two planner bugs, not changes to the saved
+  canonical records: an Update-only `charge_code_unresolved` key polluted
+  every 2025 comparison, and floating-point distance artifacts differed from
+  stored numeric precision on four rows in each year. The fix uses the same
+  canonical field set on both sides and compares the complete current record
+  to the version's `state_after`, exactly as the server update RPC does.
+  Source fingerprints/history remain unchanged; genuine FCM edits still hold.
+  Read-only preview now honors the same Update/copy inputs as the sync runner,
+  and runner reports include planner hold reasons rather than presenting a
+  held-only run as `no_source_changes`.
+- Verified against live records with the resync fix: 2025 has 681 unchanged
+  canonical records plus the original 12 ambiguous / seven unmatched holds;
+  2026 has 1,105 unchanged records and no holds. Both runner checks request
+  zero writes. Every current canonical version exactly matches its saved
+  `state_after`. Focused importer/reconciliation tests: 45/45 passing.
+  The resync fix still needs its PR release. Catalog-head CI has a runtime
+  failure under investigation; web types/build/tests and browser jobs passed,
+  so the protected GitHub Atlas refresh was skipped, not completed.
 - Rostering follows source reconciliation, not this correction transaction:
   forestry patrol pay is $32/hour; historical hours sum `job_time_hours` per
   officer/day. Unattributed jobs use the approved Relief Officer (No Name)
