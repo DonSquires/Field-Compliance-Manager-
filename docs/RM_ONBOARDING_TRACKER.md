@@ -67,7 +67,9 @@ material recorded with its calibre.
 
 Owner decisions: build all five steps in order (A codes, B legacy correction
 and supersede, C animal outcomes, D stations, E finance), each as a reviewed
-PR. The 2025 sheet is canonical for the 681 overlapping visits. Sites 1-11 are
+PR. Later owner clarification keeps the 2025 and 2026 records separate; do not
+supersede one year with the other. Only uniquely matched `Update 251215` copies
+may update and archive against the 2025 canonical records. Sites 1-11 are
 mixed traps and cameras. Bait quantities are not recorded yet, so none are
 inferred.
 
@@ -87,6 +89,43 @@ inferred.
   now carry species.
 - Existing events are unchanged. Step B reclassifies them through a governed
   correction with versions and audit.
+
+### Step B - source corrections and paired Update rows: rollback-verified, not applied
+
+- Owner-approved Update scope: 304 one-to-one copies update their canonical
+  2025 event and archive the copy atomically. Twelve copies colliding across
+  three canonical targets and seven unmatched copies remain untouched. The
+  official matcher was checked against the private source plans: 304 distinct
+  canonical targets, 12 ambiguous holds, seven unmatched holds.
+- Draft migration/test
+  `20261029110000_patrol_legacy_correction_and_supersede.sql` passed the linked
+  SQL behavioral truth table inside a rolled-back transaction. Coverage includes
+  provenance, canonical job/cost/hour preservation, archive/replay, mismatched
+  status holds, dependent-record holds, and no consequential proposal, finance,
+  roster, timesheet or payroll records for the test organisations.
+- Official rollback-only 2025 run: 681 legacy corrections, including the
+  canonical correction for each of the 304 paired Update actions; 304
+  `updated_and_superseded` results; 19 planner holds. No inserts or proposals.
+- Official rollback-only 2026 run: 1,105 legacy corrections, no supersedes,
+  inserts or proposals. The source-faithful reparse retains narratives and
+  status; it has the same workbook and derivative hashes as the earlier plan.
+  Jobs 793, 982 and 1068 correct to 43, 43 and 48 km with the original erroneous
+  formula values and Start-row provenance retained.
+- `reconcile-plan.mjs --apply ... --evidence-only` explicitly suppresses
+  consequential proposals without suppressing source narratives/status. Use it
+  for standalone correction runs as well as the paired Update run (which
+  already suppresses proposals). `--apply` without `--commit` rolls back;
+  `--preview-migration` is prohibited with `--commit`. Do not use
+  `--canonical-plan` to collapse the separate year sheets.
+- Focused importer/reconciliation tests: 37/37 passing. No production
+  correction, migration apply, commit, deployment or Atlas refresh has occurred
+  for Step B. Final reviewed scope and release approval are still required.
+- Rostering follows source reconciliation, not this correction transaction:
+  forestry patrol pay is $32/hour; historical hours sum `job_time_hours` per
+  officer/day. Unattributed jobs use the approved Relief Officer (No Name)
+  identity. Engineer pay is $55/hour, distinct from the $79.50 client charge;
+  digger hours/travel are equipment use, not labour. The $166.60 service amount
+  includes time, travel and ammunition, not a per-person pay rate.
 
 ## PATROL SOURCE ROW SYNC (2026-10-25) - APPLIED (PR #189), LEGACY CORRECTION IS STEP B
 
@@ -138,14 +177,14 @@ fcm as well so we need to know if a row was updated."
   - `occurred_at`: 1,362 events one hour late, all in NZDT months; NZST months
     match. The legacy importer applied a fixed +12 offset.
   - `distance_km`: never populated by the legacy importer.
-  - `status`: legacy stored the activity label in `status`; the current
-    importer classifies it as a work activity code and leaves status empty.
+  - `status`: narrative-disabled preview plans leave status empty. A
+    source-faithful correction must opt into narratives/status and suppress
+    proposals separately; the fresh Step B preview above verifies this.
   - 20 current payload keys (provenance, classification, cost) are absent.
-- All 681 `DART2025` visits also appear identically in the `2026` sheet, so
-  FCM holds them twice (`DART2025` and `DART2026` refs). Reports and invoices
-  covering Oct 2025 - Jan 2026 may double count.
-- Nothing is applied until the owner decides how legacy rows are re-baselined
-  and which sheet owns the overlapping visits.
+- Earlier comparison identified 681 matching visits across `DART2025` and
+  `DART2026` references. Matching is not authority to supersede: the later owner
+  ruling keeps both year sheets distinct. The Update-copy scope and fresh
+  correction evidence above replace the earlier cross-year supersede proposal.
 
 ## IMPORT AUTOMATION RESUMPTION (2026-10-25) - RECONCILIATION GATE OPEN
 

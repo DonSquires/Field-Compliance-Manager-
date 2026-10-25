@@ -42,7 +42,13 @@ test('narrative persistence and consequential proposals require explicit opt-in'
   assert.match(importer, /status: includeNarratives \?/);
   assert.match(importer, /if \(includeNarratives\) \{\s*proposalsBatch\.push/);
   assert.match(importer, /proposal_generation: includeNarratives \? 'enabled'/);
-  assert.match(importer, /distance_km: importedNumber\(r\[col\.jobKms\]\)/);
+  assert.match(importer, /const jobKms = leg \? leg\.kms : dayResetKms !== null \? dayResetKms : sourceKms;/);
+  assert.match(importer, /job_kms_source_value:/);
+  assert.match(importer, /job_kms_correction: kmCorrection/);
+  assert.match(importer, /formula_skipped_start_row/);
+  assert.match(importer, /distance_source: col\.jobKms === -1 \? null : kmCorrection/);
+  assert.match(importer, /day_reset_km_corrections/);
+  assert.match(importer, /distance_km: jobKms/);
 });
 
 test('imports use governed batch RPCs with linked-CLI fallback and strict dates', () => {
