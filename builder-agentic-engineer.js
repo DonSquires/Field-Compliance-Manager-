@@ -477,7 +477,7 @@ function isEnvelopePatch(text) {
 const ENVELOPE_EOF = Symbol('end-of-file');
 // When old_text misses, show the model the real text where its first recognisable line sits, so the
 // retry copies verbatim instead of guessing again (Vibe 11f20384: four guessed misses in a row).
-function closestSourceSpan(current, needle, maxLines = 30) {
+function closestSourceSpan(current, needle, maxLines = 30, maxChars = 4000) {
   const fileLines = current.split('\n');
   const trimmedFile = fileLines.map((line) => line.trim());
   const needleLines = needle.split('\n');
@@ -487,10 +487,21 @@ function closestSourceSpan(current, needle, maxLines = 30) {
     const hits = [];
     for (let line = 0; line < trimmedFile.length && hits.length < 2; line++) if (trimmedFile[line] === probe) hits.push(line);
     if (hits.length !== 1) continue;
-    const start = Math.max(0, hits[0] - index);
-    const end = Math.min(fileLines.length, start + Math.min(maxLines, needleLines.length + 4));
-    const content = fileLines.slice(start, end).map((line, offset) => `${start + offset + 1}: ${line}`).join('\n');
-    return { start_line: start + 1, end_line: end, content: content.length > 4000 ? `${content.slice(0, 4000)}…` : content };
+    const anchor = hits[0];
+    // The window always contains the anchor line, even when it sits deep inside a long old_text.
+    const start = Math.max(0, anchor - index, anchor - (maxLines - 1));
+    const end = Math.min(fileLines.length, start + Math.min(maxLines, needleLines.length + 4), anchor + maxLines);
+    const numbered = fileLines.slice(start, end).map((line, offset) => `${start + offset + 1}: ${line}`);
+    let content = numbered.join('\n');
+    if (content.length > maxChars) {
+      // Keep whole lines up to and including the anchor; without the anchor the hint would mislead.
+      const upToAnchor = numbered.slice(0, anchor - start + 1).join('\n');
+      if (upToAnchor.length > maxChars) return null;
+      let kept = anchor - start + 1;
+      while (kept < numbered.length && numbered.slice(0, kept + 1).join('\n').length <= maxChars) kept++;
+      content = numbered.slice(0, kept).join('\n');
+    }
+    return { start_line: start + 1, matched_line: anchor + 1, end_line: start + content.split('\n').length, content };
   }
   return null;
 }
@@ -772,7 +783,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
         const closest = closestSourceSpan(current, needle);
         if (closest) {
           return {
-            error: `old_text not found in ${normalized}, but one of its lines is at line ${closest.start_line}. The real text there is in closest_match (line numbers are not part of the file): copy old_text verbatim from it.`,
+            error: `old_text not found in ${normalized}, but one of its lines matches source line ${closest.matched_line}. closest_match holds the real text of lines ${closest.start_line}-${closest.end_line} (line numbers are not part of the file): copy old_text verbatim from it.`,
             closest_match: closest,
           };
         }
