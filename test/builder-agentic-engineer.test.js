@@ -1344,3 +1344,32 @@ test('atlas and live_count give Bob live terrain and aggregate checks without te
   assert.match((await tools.live_count({ table: 'vehicles; drop table x' })).error, /plain public table/);
   assert.match((await tools.live_count({ table: 'vehicles', column: 'a,b' })).error, /plain column/);
 });
+
+test('a provider timeout escalates at once instead of spending two more turn budgets', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'f1ee1f1ee1f1ee1f1ee1f1ee1f1ee1f1', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+  const step = { id: 'step-timeout', builder_mode: 'backend_engineer' };
+  const seen = [];
+  const callModel = async ({ modelRequest }) => {
+    seen.push(modelRequest.provider);
+    if (modelRequest.provider === 'gpu_workstation') return { ok: false, status: 408, error: 'model gateway timed out', timeout: true };
+    const script = [
+      { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+    ];
+    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(seen.filter(p => p !== 'gpu_workstation').length - 1, script.length - 1)]), model: 'gpt-5.4' } };
+  };
+  const previousAuthorRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
+  process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,openai';
+  let result;
+  try {
+    result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
+  } finally {
+    if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
+  }
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'openai']);
+});

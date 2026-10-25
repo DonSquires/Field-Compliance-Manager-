@@ -829,7 +829,19 @@ async function runConversation({ store, session, message, workspacePath, branch,
         continue;
       }
       unavailable++;
-      if (active + 1 < candidates.length && (unavailable >= 2 || [413, 429].includes(response.status))) { active++; unavailable = 0; turn--; continue; }
+      // A timeout already cost the owner a full turn budget of silence; never spend a second one on the
+      // same provider when another candidate exists, and say why the model changed.
+      const timedOut = response.timeout === true || response.status === 408;
+      if (active + 1 < candidates.length && (timedOut || unavailable >= 2 || [413, 429].includes(response.status))) {
+        const previous = candidates[active];
+        active++; unavailable = 0; turn--;
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `${previous.provider}/${previous.model} ${timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`}; switching to ${candidates[active].provider}/${candidates[active].model}.`,
+          payload: { message_id: message.id, reason: timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: candidates[active].provider === 'ollama_cloud' },
+        });
+        continue;
+      }
       if (unavailable >= 3) return { reply: `The model stopped responding (${clip(response.error, 200)}). Your branch keeps whatever was done so far; send another message to continue.`, error: true, tools };
       turn--;
       await new Promise(resolve => setTimeout(resolve, 1500 * unavailable));
