@@ -69,7 +69,7 @@ async function page(queryFactory) {
   }
 }
 
-async function loadVisibleOrganizationIds(service, providerOrganizationId) {
+export async function loadVisibleOrganizationIds(service, providerOrganizationId) {
   const ids = new Set([providerOrganizationId]);
   const descendants = await service.rpc('get_descendant_organizations', { p_root_id: providerOrganizationId });
   if (!descendants.error && Array.isArray(descendants.data)) {
@@ -86,7 +86,7 @@ async function loadVisibleOrganizationIds(service, providerOrganizationId) {
   return [...ids];
 }
 
-async function loadTargets(service, organizationIds) {
+export async function loadTargets(service, organizationIds) {
   const [targets, sites, zones, locations] = await Promise.all([
     page(() => service
       .from('observations')
@@ -110,6 +110,38 @@ async function loadTargets(service, organizationIds) {
   return { targets, byMinute };
 }
 
+// Classifies one source photo: unsupported, unnamed (no structured date/time), unmatched,
+// ambiguous, missing, or a single exact observation match ready to attach.
+export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName = null) {
+  const extension = extname(relativePath).toLowerCase();
+  if (!/^photos[\\/]/i.test(relativePath) || !SUPPORTED_EXTENSIONS.has(extension)) return { status: 'unsupported' };
+  const parsed = parsePhotoName(fileName ?? relativePath);
+  if (!parsed) return { status: 'unnamed' };
+  const match = matchPhotoTarget(parsed, relativePath, byMinute);
+  if (match.status === 'unmatched' || match.status === 'ambiguous') return { status: match.status };
+  const localPath = sourcePath(sourceRoot, relativePath);
+  try {
+    await access(localPath);
+  } catch {
+    return { status: 'missing' };
+  }
+  const capturedAt = aucklandInstant(parsed);
+  if (!capturedAt) return { status: 'ambiguous' };
+  return {
+    status: 'matched',
+    row: {
+      relativePath,
+      localPath,
+      parsed,
+      observationId: match.target.id,
+      organizationId: match.target.organization_id,
+      plate: parsed.plate ?? normalizePlate(match.target.plate_number),
+      matchType: match.matchType,
+      capturedAt,
+    },
+  };
+}
+
 async function matchPhotos(inventoryPath, sourceRoot, byMinute) {
   const matched = [];
   let supportedPhotos = 0;
@@ -126,48 +158,104 @@ async function matchPhotos(inventoryPath, sourceRoot, byMinute) {
     if (!line.trim()) continue;
     const row = JSON.parse(line);
     const relativePath = String(row.relative_path ?? '');
-    const extension = extname(relativePath).toLowerCase();
-    if (!/^photos[\\/]/i.test(relativePath) || !SUPPORTED_EXTENSIONS.has(extension)) continue;
+    const result = await classifyPhoto(relativePath, sourceRoot, byMinute, row.file_name ?? null);
+    if (result.status === 'unsupported') continue;
     supportedPhotos += 1;
-    const parsed = parsePhotoName(row.file_name ?? relativePath);
-    if (!parsed) continue;
+    if (result.status === 'unnamed') continue;
     namedPhotos += 1;
-    const match = matchPhotoTarget(parsed, relativePath, byMinute);
-    if (match.status === 'unmatched') {
+    if (result.status === 'unmatched' || result.status === 'missing') {
       unmatched += 1;
       continue;
     }
-    if (match.status === 'ambiguous') {
+    if (result.status === 'ambiguous') {
       ambiguous += 1;
       continue;
     }
-    const key = `${relativePath}:${match.target.id}`;
+    const key = `${relativePath}:${result.row.observationId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const localPath = sourcePath(sourceRoot, relativePath);
-    try {
-      await access(localPath);
-    } catch {
-      unmatched += 1;
-      continue;
-    }
-    const capturedAt = aucklandInstant(parsed);
-    if (!capturedAt) {
-      ambiguous += 1;
-      continue;
-    }
-    matched.push({
-      relativePath,
-      localPath,
-      parsed,
-      observationId: match.target.id,
-      organizationId: match.target.organization_id,
-      plate: parsed.plate ?? normalizePlate(match.target.plate_number),
-      matchType: match.matchType,
-      capturedAt,
-    });
+    matched.push(result.row);
   }
   return { matched, supportedPhotos, namedPhotos, unmatched, ambiguous };
+}
+
+// Uploads (or reuses) one matched photo and attaches it through the governed RPC.
+// Returns the evidence hash and storage path so callers can record a per-photo receipt.
+export async function attachMatchedPhoto(service, governed, row) {
+  const bytes = await readFile(row.localPath);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const existing = await service
+    .from('evidence_items')
+    .select('id,storage_path')
+    .eq('organization_id', row.organizationId)
+    .eq('evidence_kind', 'photo')
+    .eq('sha256_hash', sha256)
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  let destination = existing.data?.storage_path || storagePath(row, sha256);
+  let uploadedThisRun = false;
+  let reused = false;
+  let alreadyLinked = false;
+  if (existing.data?.storage_path) {
+    reused = true;
+    const support = await service
+      .from('observation_supporting_evidence')
+      .select('id')
+      .eq('organization_id', row.organizationId)
+      .eq('observation_id', row.observationId)
+      .eq('evidence_kind', 'external_photo')
+      .eq('storage_path', destination)
+      .limit(1)
+      .maybeSingle();
+    if (support.error) throw support.error;
+    alreadyLinked = Boolean(support.data);
+  } else {
+    const upload = await governed.storage.from('bob-uploads').upload(
+      destination,
+      new Blob([bytes], { type: mimeType(row.localPath) }),
+      { upsert: false, contentType: mimeType(row.localPath) },
+    );
+    const existed = Boolean(upload.error && /already exists|duplicate/i.test(upload.error.message));
+    if (upload.error && !existed) throw upload.error;
+    if (existed) reused = true;
+    else uploadedThisRun = true;
+  }
+
+  const sourceReference = `local://rm/remsec-documents/${row.relativePath.replaceAll('\\', '/')}`;
+  const description = `Approved working-file photo${row.plate ? ` for ${row.plate}` : ''}`;
+  const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}`;
+  const result = await governed.rpc('attach_external_photo_to_record', {
+    p_record_kind: 'observation',
+    p_record_id: row.observationId,
+    p_storage_path: destination,
+    p_sha256: sha256,
+    p_description: description,
+    p_source_note: sourceNote,
+    p_original_name: basename(row.relativePath),
+    p_captured_at: row.capturedAt,
+  });
+  if (result.error) {
+    if (uploadedThisRun) await governed.storage.from('bob-uploads').remove([destination]);
+    throw new Error(`${row.relativePath}: ${result.error.message}`);
+  }
+  const registered = await service
+    .from('evidence_items')
+    .select('storage_path')
+    .eq('organization_id', row.organizationId)
+    .eq('evidence_kind', 'photo')
+    .eq('sha256_hash', sha256)
+    .limit(1)
+    .single();
+  if (registered.error) throw registered.error;
+  let discardedDuplicateUpload = false;
+  if (uploadedThisRun && registered.data.storage_path !== destination) {
+    await governed.storage.from('bob-uploads').remove([destination]);
+    destination = registered.data.storage_path;
+    discardedDuplicateUpload = true;
+  }
+  return { sha256, storage_path: destination, uploaded: uploadedThisRun && !discardedDuplicateUpload,
+    reused, already_linked: alreadyLinked, discarded_duplicate_upload: discardedDuplicateUpload };
 }
 
 async function runWorkers(rows, concurrency, worker) {
@@ -238,79 +326,12 @@ async function main() {
   let alreadyLinked = 0;
   const observationHashPairs = new Set();
   await runWorkers(selected, concurrency, async (row) => {
-    const bytes = await readFile(row.localPath);
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    observationHashPairs.add(`${row.observationId}:${sha256}`);
-    const existing = await service
-      .from('evidence_items')
-      .select('id,storage_path')
-      .eq('organization_id', row.organizationId)
-      .eq('evidence_kind', 'photo')
-      .eq('sha256_hash', sha256)
-      .limit(1)
-      .maybeSingle();
-    if (existing.error) throw existing.error;
-    let destination = existing.data?.storage_path || storagePath(row, sha256);
-    let uploadedThisRun = false;
-    if (existing.data?.storage_path) {
-      reused += 1;
-      const support = await service
-        .from('observation_supporting_evidence')
-        .select('id')
-        .eq('organization_id', row.organizationId)
-        .eq('observation_id', row.observationId)
-        .eq('evidence_kind', 'external_photo')
-        .eq('storage_path', destination)
-        .limit(1)
-        .maybeSingle();
-      if (support.error) throw support.error;
-      if (support.data) alreadyLinked += 1;
-    } else {
-      const upload = await governed.storage.from('bob-uploads').upload(
-        destination,
-        new Blob([bytes], { type: mimeType(row.localPath) }),
-        { upsert: false, contentType: mimeType(row.localPath) },
-      );
-      const existed = Boolean(upload.error && /already exists|duplicate/i.test(upload.error.message));
-      if (upload.error && !existed) throw upload.error;
-      if (existed) reused += 1;
-      else {
-        uploaded += 1;
-        uploadedThisRun = true;
-      }
-    }
-
-    const sourceReference = `local://rm/remsec-documents/${row.relativePath.replaceAll('\\', '/')}`;
-    const description = `Approved working-file photo${row.plate ? ` for ${row.plate}` : ''}`;
-    const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}`;
-    const result = await governed.rpc('attach_external_photo_to_record', {
-      p_record_kind: 'observation',
-      p_record_id: row.observationId,
-      p_storage_path: destination,
-      p_sha256: sha256,
-      p_description: description,
-      p_source_note: sourceNote,
-      p_original_name: basename(row.relativePath),
-      p_captured_at: row.capturedAt,
-    });
-    if (result.error) {
-      if (uploadedThisRun) await governed.storage.from('bob-uploads').remove([destination]);
-      throw new Error(`${row.relativePath}: ${result.error.message}`);
-    }
-    const registered = await service
-      .from('evidence_items')
-      .select('storage_path')
-      .eq('organization_id', row.organizationId)
-      .eq('evidence_kind', 'photo')
-      .eq('sha256_hash', sha256)
-      .limit(1)
-      .single();
-    if (registered.error) throw registered.error;
-    if (uploadedThisRun && registered.data.storage_path !== destination) {
-      await governed.storage.from('bob-uploads').remove([destination]);
-      destination = registered.data.storage_path;
-      discardedDuplicateUploads += 1;
-    }
+    const outcome = await attachMatchedPhoto(service, governed, row);
+    observationHashPairs.add(`${row.observationId}:${outcome.sha256}`);
+    if (outcome.uploaded) uploaded += 1;
+    if (outcome.reused) reused += 1;
+    if (outcome.already_linked) alreadyLinked += 1;
+    if (outcome.discarded_duplicate_upload) discardedDuplicateUploads += 1;
     attached += 1;
   });
 

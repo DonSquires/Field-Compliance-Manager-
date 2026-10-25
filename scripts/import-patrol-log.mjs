@@ -100,7 +100,7 @@ function parseCsv(text) {
 function workbookCellText(cell) {
   const value = cell.type === ExcelJS.ValueType.Formula ? cell.result : cell.value;
   if (value === null || value === undefined) return '';
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
   if (typeof value === 'object') return cell.text ?? '';
   return String(value);
 }

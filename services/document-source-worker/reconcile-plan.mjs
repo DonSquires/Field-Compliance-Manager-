@@ -908,7 +908,7 @@ COMMIT;`);
     status: 'completed', summary: summarizeSyncResults(results), results };
 }
 
-function cliQuery(sql) {
+export function cliQuery(sql) {
   const directory = mkdtempSync(path.join(tmpdir(), 'fcm-reconcile-'));
   try {
     const input = path.join(directory, 'query.sql');
@@ -924,7 +924,7 @@ function cliQuery(sql) {
   }
 }
 
-function linkedQuery(sql) {
+export function linkedQuery(sql) {
   return cliQuery(`BEGIN READ ONLY;\n${sql}\nROLLBACK;`);
 }
 
