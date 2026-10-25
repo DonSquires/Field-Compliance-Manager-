@@ -73,6 +73,7 @@ test('linked baselines load current source versions as checkpoints only when syn
       record_id: RECORD, kind: 'event', source_file: 'source.xlsx', source_sheet: 'DATA', source_fingerprint: 'f'.repeat(64) }] } }];
   });
   assert.ok(queries[1].includes('patrol_import_record_versions') && queries[1].includes('v.is_current'));
+  assert.match(queries[1], /'record_matches_state_after',public\.patrol_source_record_state\(v\.record_kind,v\.record_id\)\s+IS NOT DISTINCT FROM v\.state_after/);
   assert.ok(queries[1].includes(PROVIDER) && queries[1].includes(CLIENT));
   assert.equal(baseline.checkpoints[0].record_fingerprint, 'f'.repeat(64));
   assert.equal(baseline.sync_history, true);
@@ -508,6 +509,92 @@ test('an applied DART Update overlay resyncs as unchanged; a later source edit t
   const action = held.actions.find(row => row.external_ref === canonical.external_ref);
   assert.equal(action.operation, 'hold');
   assert.equal(action.reason, 'update_overlay_review_required');
+});
+
+test('Update-only payload fields do not change canonical fingerprints before or after the paired import', async () => {
+  const { previewReconciliation } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  updatePlan.events[0].payload.charge_code_unresolved = true;
+  const first = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical)], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  const pair = first.actions.find(action => action.operation === 'update_and_supersede');
+  assert.ok(pair);
+  const { live, checkpoint } = appliedOverlay(canonical, pair);
+  const baseline = { organization_id: CLIENT, observations: [], events: [live], checkpoints: [checkpoint], sheet_copies: [] };
+  const withUpdate = previewReconciliation(canonicalPlan, baseline, { sheetUpdatePlan: updatePlan });
+  assert.deepEqual(withUpdate, previewReconciliation(canonicalPlan, baseline));
+  assert.equal(withUpdate.summary.unchanged, 1);
+  assert.equal(withUpdate.summary.hold, 0);
+});
+
+test('stored-state equality handles database distance rounding while retaining source and manual-edit protection', async () => {
+  const { buildReconciliationPlan, previewReconciliation } = await load();
+  for (const [sourceDistance, storedDistance] of [[2.3999999999999986, 2.4], [1.6000000000000014, 1.6],
+    [8.200000000000003, 8.2], [0.7999999999999972, 0.8]]) {
+    const row = sourceRow(29, { distance_km: sourceDistance });
+    const plan = sourcePlan([row]);
+    const fingerprint = buildReconciliationPlan({ sourcePlan: plan, existing: [] }).actions[0].source_fingerprint;
+    const live = liveEvent({ ...row, distance_km: storedDistance });
+    const checkpoint = { external_ref: row.external_ref, record_id: RECORD, kind: 'event',
+      source_file: 'source.xlsx', source_sheet: 'DATA', source_fingerprint: fingerprint,
+      record_fingerprint: fingerprint, record_matches_state_after: true };
+    const baseline = { organization_id: CLIENT, observations: [], events: [live], checkpoints: [checkpoint] };
+    assert.equal(previewReconciliation(plan, baseline).actions[0].operation, 'unchanged');
+    const editedSource = sourcePlan([{ ...row, distance_km: 6 }]);
+    const edit = previewReconciliation(editedSource, baseline).actions[0];
+    assert.equal(edit.operation, 'update');
+    assert.equal(edit.prior_source_fingerprint, fingerprint);
+    assert.equal(edit.desired.distance_km, 6);
+
+    const changedInFcm = { ...baseline, checkpoints: [{ ...checkpoint, record_matches_state_after: false }] };
+    assert.equal(previewReconciliation(plan, changedInFcm).actions[0].reason, 'fcm_record_changed_since_last_sync');
+    assert.equal(previewReconciliation(editedSource, changedInFcm).actions[0].reason, 'fcm_record_changed_since_last_sync');
+  }
+});
+
+test('unchanged logical fields cannot mask a full-state checkpoint mismatch and held-only runs report reasons', async () => {
+  const { runSourceSync, buildReconciliationPlan } = await load();
+  const row = sourceRow(1);
+  const plan = sourcePlan([row]);
+  const fingerprint = buildReconciliationPlan({ sourcePlan: plan, existing: [] }).actions[0].source_fingerprint;
+  const harness = syncHarness({ existingEvents: [liveEvent(row)], checkpoints: [{ external_ref: row.external_ref,
+    record_id: RECORD, kind: 'event', source_file: 'source.xlsx', source_sheet: 'DATA',
+    source_fingerprint: fingerprint, record_matches_state_after: false }] });
+  const report = await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery });
+  assert.equal(report.status, 'source_rows_held');
+  assert.deepEqual(report.plan_hold_reasons, { fcm_record_changed_since_last_sync: 1 });
+  assert.equal(report.plan_summary.hold, 1);
+  assert.equal(harness.writes.length, 0);
+});
+
+test('read-only CLI honors the Update plan and worksheet-copy inputs without overwriting an input', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = require('node:fs');
+  const { execFileSync, spawnSync } = require('node:child_process');
+  const path = require('node:path');
+  const directory = mkdtempSync(path.join(require('node:os').tmpdir(), 'fcm-reconcile-test-'));
+  try {
+    const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+    const input = path.join(directory, 'source.json');
+    const update = path.join(directory, 'update.json');
+    const baseline = path.join(directory, 'baseline.json');
+    const output = path.join(directory, 'report.json');
+    writeFileSync(input, JSON.stringify(canonicalPlan));
+    writeFileSync(update, JSON.stringify(updatePlan));
+    writeFileSync(baseline, JSON.stringify({ organization_id: CLIENT, observations: [],
+      events: [legacyLive(canonical)], sheet_copies: [copyLive] }));
+    const args = [path.resolve('services', 'document-source-worker', 'reconcile-plan.mjs'), '--source-plan', input,
+      '--baseline', baseline, '--sheet-update-plan', update, '--supersede-copies-sheet', 'Update 251215'];
+    execFileSync(process.execPath, [...args, '--output', output], { stdio: 'pipe' });
+    const report = JSON.parse(readFileSync(output));
+    assert.equal(report.summary.update_and_supersede, 1);
+    const refused = spawnSync(process.execPath, [...args, '--output', update], { encoding: 'utf8' });
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /separate JSON file/);
+    assert.deepEqual(JSON.parse(readFileSync(update)), updatePlan);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('a DART Update pairing that repeats a canonical or copy is refused even across chunks', async () => {
