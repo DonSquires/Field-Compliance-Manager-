@@ -216,9 +216,10 @@ test('nginx backups are kept outside sites-enabled so nginx never loads a duplic
 
 test('release lane heals out-of-band nginx drift every tick and keeps the drifted copy', (t) => {
   const { execFileSync } = require('node:child_process');
-  const lane = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-release-lane.sh'), 'utf8');
-  const fn = lane.slice(lane.indexOf('heal_nginx_drift() {'), lane.indexOf('\nheal_nginx_drift\n'));
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const fn = lane.slice(lane.indexOf('NGINX_SHA_FILE='), lane.indexOf('\nheal_nginx_drift\n'));
   assert.ok(lane.indexOf('\nheal_nginx_drift\n') < lane.indexOf('if [[ "$HEAD_SHA" == "$DEPLOYED_SHA" ]]; then exit 0; fi'), 'drift heal must run before the no-new-release exit');
+  assert.match(lane, /nginx sites installed at \$SHA8"\); printf '%s\\n' "\$HEAD_SHA" > "\$NGINX_SHA_FILE"/);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-nginx-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -227,31 +228,58 @@ test('release lane heals out-of-band nginx drift every tick and keeps the drifte
   const bin = path.join(root, 'bin');
   const state = path.join(root, 'state');
   for (const dir of [repo, sites, bin, state, path.join(repo, 'deploy/bob-vps/nginx')]) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(repo, 'deploy/bob-vps/nginx/bob.example'), 'managed\n');
+  const site = path.join(repo, 'deploy/bob-vps/nginx/bob.example');
   const g = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' }).trim();
-  g('init', '-q'); g('add', '.'); g('commit', '-qm', 'managed');
-  const sha = g('rev-parse', 'HEAD');
+  g('init', '-q');
+  fs.writeFileSync(site, 'managed v1\n'); g('add', '.'); g('commit', '-qm', 'v1');
+  const deployed = g('rev-parse', 'HEAD');
+  fs.writeFileSync(site, 'managed v2\n'); g('commit', '-qam', 'v2');
+  const installed = g('rev-parse', 'HEAD');
   fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const run = (nginxExit) => {
     fs.writeFileSync(path.join(bin, 'nginx'), `#!/bin/sh\nexit ${nginxExit}\n`, { mode: 0o755 });
     return execFileSync('bash', ['-c', `set -euo pipefail\nlog() { echo "$*"; }\n${fn}\nheal_nginx_drift`], {
       encoding: 'utf8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODE: 'live', REPO_DIR: repo, DEPLOYED_SHA: sha, STATE_DIR: state, BOB_RELEASE_NGINX_SITES_DIR: sites },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODE: 'live', REPO_DIR: repo, DEPLOYED_SHA: deployed, STATE_DIR: state, BOB_RELEASE_NGINX_SITES_DIR: sites },
     });
   };
   const live = path.join(sites, 'bob.example');
+  const drift = path.join(state, 'nginx-drift');
 
-  fs.writeFileSync(live, 'managed\n');
+  // Without nginx_sha the deployed release is the reference.
+  fs.writeFileSync(live, 'managed v1\n');
+  assert.equal(run(0), '');
+
+  // A release installed v2 and then failed later: v2 is the reference, never reverted to deployed v1.
+  fs.writeFileSync(path.join(state, 'nginx_sha'), `${installed}\n`);
+  fs.writeFileSync(live, 'managed v2\n');
   assert.equal(run(0), '');
 
   fs.writeFileSync(live, 'hand edit\n');
   assert.match(run(0), /nginx drift healed/);
-  assert.equal(fs.readFileSync(live, 'utf8'), 'managed\n');
-  const kept = fs.readdirSync(path.join(state, 'nginx-drift'));
+  assert.equal(fs.readFileSync(live, 'utf8'), 'managed v2\n');
+  const kept = fs.readdirSync(drift);
   assert.equal(kept.length, 1);
-  assert.equal(fs.readFileSync(path.join(state, 'nginx-drift', kept[0]), 'utf8'), 'hand edit\n');
+  assert.equal(fs.readFileSync(path.join(drift, kept[0]), 'utf8'), 'hand edit\n');
 
   fs.writeFileSync(live, 'hand edit\n');
   assert.match(run(1), /failed nginx -t/);
   assert.equal(fs.readFileSync(live, 'utf8'), 'hand edit\n');
+
+  // A deleted site is drift; a failed nginx -t restores the absence.
+  fs.rmSync(live);
+  assert.match(run(1), /failed nginx -t/);
+  assert.equal(fs.existsSync(live), false);
+  assert.match(run(0), /nginx drift healed/);
+  assert.equal(fs.readFileSync(live, 'utf8'), 'managed v2\n');
+
+  // A dangling link is drift; a failed nginx -t puts the same link back.
+  fs.rmSync(live);
+  fs.symlinkSync(path.join(root, 'missing-target'), live);
+  assert.match(run(1), /failed nginx -t/);
+  assert.equal(fs.readlinkSync(live), path.join(root, 'missing-target'));
+  assert.match(run(0), /nginx drift healed/);
+  assert.equal(fs.lstatSync(live).isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(live, 'utf8'), 'managed v2\n');
+  assert.deepEqual(fs.readdirSync(drift).filter((f) => /\.(restore|absent)$/.test(f)), []);
 });

@@ -86,33 +86,48 @@ if [[ -z "$DEPLOYED_SHA" ]]; then log "no baseline release known; refusing to gu
 
 # 2b. Heal out-of-band nginx drift on every tick. A hand edit repointed bob.fcmanager.co.nz at a
 #     legacy host service and every Builder relay returned 404 for a day (2026-10-24); the lane
-#     only reinstalled sites when a commit touched them. The drifted copy is kept for review.
+#     only reinstalled sites when a commit touched them. The reference is the last revision whose
+#     sites were installed successfully (nginx_sha), not deployed_sha: a release that installs nginx
+#     and then fails a later step must not have its new routes reverted here. A missing or dangling
+#     site counts as drift; the drifted state (content, link or absence) is kept for review/rollback.
+NGINX_SHA_FILE="$STATE_DIR/nginx_sha"
 heal_nginx_drift() {
   [[ "$MODE" == "live" ]] || return 0
   command -v nginx >/dev/null 2>&1 || return 0
-  local name managed live drift_dir="$STATE_DIR/nginx-drift" healed=() sites="${BOB_RELEASE_NGINX_SITES_DIR:-/etc/nginx/sites-enabled}"
-  for name in $(git -C "$REPO_DIR" ls-tree --name-only "$DEPLOYED_SHA" deploy/bob-vps/nginx/ 2>/dev/null | xargs -r -n1 basename); do
+  local ref name managed live stamp drift_dir="$STATE_DIR/nginx-drift" healed=() sites="${BOB_RELEASE_NGINX_SITES_DIR:-/etc/nginx/sites-enabled}"
+  ref="$(cat "$NGINX_SHA_FILE" 2>/dev/null || true)"
+  git -C "$REPO_DIR" rev-parse --verify -q "${ref:-x}^{commit}" >/dev/null || ref="$DEPLOYED_SHA"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  for name in $(git -C "$REPO_DIR" ls-tree --name-only "$ref" deploy/bob-vps/nginx/ 2>/dev/null | xargs -r -n1 basename); do
     live="$sites/$name"
-    [[ -f "$live" ]] || continue
     managed="$(mktemp)"
-    git -C "$REPO_DIR" show "$DEPLOYED_SHA:deploy/bob-vps/nginx/$name" > "$managed" 2>/dev/null || { rm -f "$managed"; continue; }
-    if ! cmp -s "$managed" "$live"; then
+    git -C "$REPO_DIR" show "$ref:deploy/bob-vps/nginx/$name" > "$managed" 2>/dev/null || { rm -f "$managed"; continue; }
+    if [[ ! -e "$live" ]] || ! cmp -s "$managed" "$live"; then
       mkdir -p "$drift_dir"
-      cp -pL "$live" "$drift_dir/$name.$(date -u +%Y%m%dT%H%M%SZ)"
-      cp -pL "$live" "$drift_dir/$name.restore"
+      rm -f "$drift_dir/$name.restore" "$drift_dir/$name.absent"
+      if [[ -L "$live" || -e "$live" ]]; then
+        cp -P "$live" "$drift_dir/$name.restore"
+        [[ -e "$live" ]] && cp -pL "$live" "$drift_dir/$name.$stamp"
+      else
+        : > "$drift_dir/$name.absent"
+      fi
+      rm -f "$live"
       install -m 644 "$managed" "$live" && healed+=("$name")
     fi
     rm -f "$managed"
   done
   [[ ${#healed[@]} -gt 0 ]] || return 0
   if nginx -t >/dev/null 2>&1 && systemctl reload nginx; then
-    log "nginx drift healed to ${DEPLOYED_SHA:0:8}: ${healed[*]} (drifted copies in $drift_dir)"
+    log "nginx drift healed to ${ref:0:8}: ${healed[*]} (drifted copies in $drift_dir)"
   else
-    for name in "${healed[@]}"; do cp -p "$drift_dir/$name.restore" "$sites/$name"; done
+    for name in "${healed[@]}"; do
+      rm -f "$sites/$name"
+      [[ -L "$drift_dir/$name.restore" || -e "$drift_dir/$name.restore" ]] && cp -P "$drift_dir/$name.restore" "$sites/$name"
+    done
     systemctl reload nginx || true
-    log "nginx drift detected in ${healed[*]} but the managed site failed nginx -t; drifted copy left live, a person must look"
+    log "nginx drift detected in ${healed[*]} but the managed site at ${ref:0:8} failed nginx -t; drifted state restored, a person must look"
   fi
-  rm -f "$drift_dir"/*.restore
+  rm -f "$drift_dir"/*.restore "$drift_dir"/*.absent
 }
 heal_nginx_drift
 
@@ -303,7 +318,7 @@ for target in "${TARGETS[@]:-}"; do
         [[ -f "$live" ]] && cp -p "$live" "$nginx_backup/$(basename "$site")"
         install -m 644 "$site" "$live" || nginx_ok=false
       done
-      if $nginx_ok && nginx -t >/dev/null 2>&1 && systemctl reload nginx; then RESULTS+=("nginx sites installed at $SHA8")
+      if $nginx_ok && nginx -t >/dev/null 2>&1 && systemctl reload nginx; then RESULTS+=("nginx sites installed at $SHA8"); printf '%s\n' "$HEAD_SHA" > "$NGINX_SHA_FILE"
       else
         for site in deploy/bob-vps/nginx/*; do
           b="$nginx_backup/$(basename "$site")"; live="/etc/nginx/sites-enabled/$(basename "$site")"
