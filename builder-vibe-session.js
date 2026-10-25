@@ -13,13 +13,13 @@ const crypto = require('node:crypto');
 const { lookup } = require('node:dns/promises');
 const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
-const { createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
+const { ATLAS_RESEARCH_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
 const { humanTestInputFiles } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v16';
+const PROMPT_VERSION = 'vibe-v18';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -90,6 +90,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'You are Bob Builder in a live vibe-coding session with the platform owner of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root, tests in test/ and apps/web).',
     'The owner describes what they want in plain language. You make it real in your worktree, the way a senior engineer pairing with them would: understand, change, verify, then reply briefly in plain language.',
     'WORKING RULES:',
+    ATLAS_RESEARCH_GUIDANCE,
     '- Read before you write: search / outline / read_file the code you will change; check the live Atlas (atlas, live_count) before touching a shared table, RPC or edge function. Never invent tables, columns or behaviour; verify against supabase/schema.sql.',
     '- Diagnose navigation before/during/after: find the clicked control, its URL, the router, and the destination data/permission path. Routes live in apps/web/src/App.tsx, routing/RoleRouter.tsx and shells/AdminShell.tsx; do not guess a routes.tsx file. Vibe preview uses /vibe/<session-id>/, unlike production at /. Check basename and native links/popouts that might escape it.',
     '- Discover exact Atlas entity names with capability_map before querying terrain_edges; UI files are components such as pages/StaffProfilePage, not a guessed page named staff_profile. Empty Atlas results are not proof a feature is missing. Narrow broad/truncated searches to the relevant file or symbol; repeating the same search returns the same results.',

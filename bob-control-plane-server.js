@@ -1445,8 +1445,16 @@ async function route(req, res, body) {
   }
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
     if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
-    const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
-    return json(res, result.status, result.body);
+    const controller = new AbortController();
+    const cancelOnDisconnect = () => { if (!res.writableEnded) controller.abort(); };
+    res.once('close', cancelOnDisconnect);
+    try {
+      const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig, signal: controller.signal });
+      if (!res.destroyed) return json(res, result.status, result.body);
+    } finally {
+      res.removeListener('close', cancelOnDisconnect);
+    }
+    return;
   }
   // Bob's terminal on the owner's laptop (Tailscale-only Windows OpenSSH; owner toggles it). The
   // laptop registers itself (bob_laptop_link) when the owner runs laptop-tailscale.ps1; env pins win.
