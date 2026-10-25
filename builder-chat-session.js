@@ -344,11 +344,14 @@ const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|wi
 const INFORMATIONAL = /^\s*(?:how|what|why|when|where|which|who|is|are|does|do|did|should|would it)\b/i;
 const ADDRESSED_REQUEST = /\b(?:can|could|would|will) you\b|\bplease\b/i;
 function proposeIntent(text) {
-  const value = String(text || '');
-  const requested = value.split(/[.!?;\n]+|\b(?:but|however|instead)\b(?!\s+of\b)/i)
-    .some(clause => PROPOSE_REQUEST.test(clause) && !PROPOSE_NEGATED.test(clause));
-  if (!requested) return false;
-  return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
+  const value = String(text || '').replace(/,\s*however\s*,/gi, ' ');
+  return value.split(/[.!?;\n]+|\b(?:but|however|instead)\b(?!\s+of\b)|,\s*(?:just|please)\s+/i)
+    .some(clause => {
+      const request = clause.trim().replace(/^please\s+/i, '');
+      if (/^(?:explain|describe|tell me|show me how|walk me through|help me understand)\b/i.test(request)) return false;
+      return PROPOSE_REQUEST.test(request) && !PROPOSE_NEGATED.test(request)
+        && (!INFORMATIONAL.test(request) || ADDRESSED_REQUEST.test(request));
+    });
 }
 
 // Classifies a ledger question: owner (what needs me), job (one job by id/branch) or jobs (general status).
