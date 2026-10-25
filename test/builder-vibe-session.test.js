@@ -845,6 +845,10 @@ test('Vibe can recover from a repeated broad search without disabling its loop g
   assert.match(vibe.vibeSystemPrompt(), /React hooks may only be called at the top level/);
   assert.match(vibe.vibeSystemPrompt(), /Preserve existing tests and imports/);
   assert.match(vibe.vibeSystemPrompt(), /run tool forces NODE_ENV=test/);
+  assert.match(vibe.vibeSystemPrompt(), /map each failing assertion to the changed code path/);
+  assert.match(vibe.vibeSystemPrompt(), /Do not rerun an unchanged full walk/);
+  assert.match(vibe.vibeSystemPrompt(), /claim it is pre-existing without reproducing it on the pinned base/);
+  assert.match(vibe.vibeSystemPrompt(), /passing focused test does not erase a failed browser walk/);
 });
 
 test('continuation receives prior answers, failures, successful edits and committed files', async () => {
