@@ -482,6 +482,84 @@ export type Database = {
           },
         ]
       }
+      agreement_extra_work_orders: {
+        Row: {
+          authority_kind: string
+          authority_reference: string | null
+          charge_code: string | null
+          created_at: string
+          created_by: string
+          end_reason: string | null
+          ends_on: string | null
+          id: string
+          organization_id: string
+          rate_note: string | null
+          reference: string
+          review_on: string | null
+          scope: string
+          service_agreement_id: string
+          starts_on: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          authority_kind: string
+          authority_reference?: string | null
+          charge_code?: string | null
+          created_at?: string
+          created_by: string
+          end_reason?: string | null
+          ends_on?: string | null
+          id?: string
+          organization_id: string
+          rate_note?: string | null
+          reference: string
+          review_on?: string | null
+          scope: string
+          service_agreement_id: string
+          starts_on: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          authority_kind?: string
+          authority_reference?: string | null
+          charge_code?: string | null
+          created_at?: string
+          created_by?: string
+          end_reason?: string | null
+          ends_on?: string | null
+          id?: string
+          organization_id?: string
+          rate_note?: string | null
+          reference?: string
+          review_on?: string | null
+          scope?: string
+          service_agreement_id?: string
+          starts_on?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agreement_extra_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agreement_extra_work_orders_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agreement_obligations: {
         Row: {
           active: boolean
@@ -4136,6 +4214,95 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      builder_chat_messages: {
+        Row: {
+          claimed_at: string | null
+          client_request_id: string | null
+          completed_at: string | null
+          content: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          payload: Json
+          role: string
+          seq: number
+          status: string | null
+          thread_id: string
+        }
+        Insert: {
+          claimed_at?: string | null
+          client_request_id?: string | null
+          completed_at?: string | null
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          payload?: Json
+          role: string
+          seq?: never
+          status?: string | null
+          thread_id: string
+        }
+        Update: {
+          claimed_at?: string | null
+          client_request_id?: string | null
+          completed_at?: string | null
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          payload?: Json
+          role?: string
+          seq?: never
+          status?: string | null
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_chat_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "builder_chat_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_chat_threads: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          created_by: string
+          id: string
+          last_activity_at: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          last_activity_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          last_activity_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       builder_job_steps: {
         Row: {
@@ -8588,11 +8755,13 @@ export type Database = {
       }
       dispatch_job_charge_lines: {
         Row: {
+          billing_basis: string | null
           client_organization_id: string | null
           created_at: string
           day_category: string | null
           description: string
           distance_km: number | null
+          extra_work_order_id: string | null
           id: string
           invoice_line_item_id: string | null
           line_total: number
@@ -8606,11 +8775,13 @@ export type Database = {
           unit_rate: number
         }
         Insert: {
+          billing_basis?: string | null
           client_organization_id?: string | null
           created_at?: string
           day_category?: string | null
           description: string
           distance_km?: number | null
+          extra_work_order_id?: string | null
           id?: string
           invoice_line_item_id?: string | null
           line_total?: number
@@ -8624,11 +8795,13 @@ export type Database = {
           unit_rate?: number
         }
         Update: {
+          billing_basis?: string | null
           client_organization_id?: string | null
           created_at?: string
           day_category?: string | null
           description?: string
           distance_km?: number | null
+          extra_work_order_id?: string | null
           id?: string
           invoice_line_item_id?: string | null
           line_total?: number
@@ -8647,6 +8820,13 @@ export type Database = {
             columns: ["client_organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_extra_work_order_id_fkey"
+            columns: ["extra_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "agreement_extra_work_orders"
             referencedColumns: ["id"]
           },
           {
@@ -8907,6 +9087,9 @@ export type Database = {
           acknowledged_at: string | null
           adhoc_inserted_at: string | null
           assigned_officer_id: string | null
+          billing_basis: string | null
+          billing_basis_set_at: string | null
+          billing_basis_set_by: string | null
           briefing_notes: string | null
           client_request_id: string | null
           client_site_id: string | null
@@ -8916,6 +9099,7 @@ export type Database = {
           dispatched_at: string | null
           en_route_at: string | null
           expected_dwell_minutes: number
+          extra_work_order_id: string | null
           harmed_party_address: string | null
           harmed_party_site_id: string | null
           id: string
@@ -8949,6 +9133,9 @@ export type Database = {
           acknowledged_at?: string | null
           adhoc_inserted_at?: string | null
           assigned_officer_id?: string | null
+          billing_basis?: string | null
+          billing_basis_set_at?: string | null
+          billing_basis_set_by?: string | null
           briefing_notes?: string | null
           client_request_id?: string | null
           client_site_id?: string | null
@@ -8958,6 +9145,7 @@ export type Database = {
           dispatched_at?: string | null
           en_route_at?: string | null
           expected_dwell_minutes?: number
+          extra_work_order_id?: string | null
           harmed_party_address?: string | null
           harmed_party_site_id?: string | null
           id?: string
@@ -8991,6 +9179,9 @@ export type Database = {
           acknowledged_at?: string | null
           adhoc_inserted_at?: string | null
           assigned_officer_id?: string | null
+          billing_basis?: string | null
+          billing_basis_set_at?: string | null
+          billing_basis_set_by?: string | null
           briefing_notes?: string | null
           client_request_id?: string | null
           client_site_id?: string | null
@@ -9000,6 +9191,7 @@ export type Database = {
           dispatched_at?: string | null
           en_route_at?: string | null
           expected_dwell_minutes?: number
+          extra_work_order_id?: string | null
           harmed_party_address?: string | null
           harmed_party_site_id?: string | null
           id?: string
@@ -9049,6 +9241,13 @@ export type Database = {
             columns: ["dispatch_resource_id"]
             isOneToOne: false
             referencedRelation: "dispatch_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_extra_work_order_id_fkey"
+            columns: ["extra_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "agreement_extra_work_orders"
             referencedColumns: ["id"]
           },
           {
@@ -22802,6 +23001,103 @@ export type Database = {
           },
         ]
       }
+      patrol_import_record_versions: {
+        Row: {
+          applied_at: string
+          applied_by: string
+          batch_id: string
+          change_kind: string
+          changed_fields: string[]
+          client_organization_id: string
+          derivative_sha256: string
+          external_ref: string
+          id: string
+          is_current: boolean
+          provider_organization_id: string
+          record_id: string
+          record_kind: string
+          source_file: string
+          source_fingerprint: string
+          source_profile: string
+          source_row: number
+          source_sha256: string
+          source_sheet: string | null
+          state_after: Json
+          state_before: Json | null
+          version_no: number
+        }
+        Insert: {
+          applied_at?: string
+          applied_by: string
+          batch_id: string
+          change_kind: string
+          changed_fields?: string[]
+          client_organization_id: string
+          derivative_sha256: string
+          external_ref: string
+          id?: string
+          is_current?: boolean
+          provider_organization_id: string
+          record_id: string
+          record_kind: string
+          source_file: string
+          source_fingerprint: string
+          source_profile: string
+          source_row: number
+          source_sha256: string
+          source_sheet?: string | null
+          state_after: Json
+          state_before?: Json | null
+          version_no: number
+        }
+        Update: {
+          applied_at?: string
+          applied_by?: string
+          batch_id?: string
+          change_kind?: string
+          changed_fields?: string[]
+          client_organization_id?: string
+          derivative_sha256?: string
+          external_ref?: string
+          id?: string
+          is_current?: boolean
+          provider_organization_id?: string
+          record_id?: string
+          record_kind?: string
+          source_file?: string
+          source_fingerprint?: string
+          source_profile?: string
+          source_row?: number
+          source_sha256?: string
+          source_sheet?: string | null
+          state_after?: Json
+          state_before?: Json | null
+          version_no?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patrol_import_record_versions_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "file_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_import_record_versions_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_import_record_versions_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       patrol_route_checkpoints: {
         Row: {
           created_at: string
@@ -34293,6 +34589,20 @@ export type Database = {
             Returns: string
           }
       address_match_key: { Args: { p_address: string }; Returns: string }
+      adopt_patrol_source_baseline: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_provider_organization_id: string
+          p_records: Json
+        }
+        Returns: {
+          detail: string
+          external_ref: string
+          outcome: string
+          record_id: string
+        }[]
+      }
       advance_dispatch_job_status: {
         Args: {
           p_expected_status: string
@@ -34502,6 +34812,20 @@ export type Database = {
           proposal_id: string
         }[]
       }
+      apply_patrol_source_updates: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_provider_organization_id: string
+          p_updates: Json
+        }
+        Returns: {
+          detail: string
+          external_ref: string
+          outcome: string
+          record_id: string
+        }[]
+      }
       apply_site_brief_promotion_proposal: {
         Args: {
           p_cost_centre_id?: string
@@ -34693,6 +35017,9 @@ export type Database = {
           acknowledged_at: string | null
           adhoc_inserted_at: string | null
           assigned_officer_id: string | null
+          billing_basis: string | null
+          billing_basis_set_at: string | null
+          billing_basis_set_by: string | null
           briefing_notes: string | null
           client_request_id: string | null
           client_site_id: string | null
@@ -34702,6 +35029,7 @@ export type Database = {
           dispatched_at: string | null
           en_route_at: string | null
           expected_dwell_minutes: number
+          extra_work_order_id: string | null
           harmed_party_address: string | null
           harmed_party_site_id: string | null
           id: string
@@ -35897,6 +36225,57 @@ export type Database = {
         }
       }
       builder_cancel_terminal_approvals: { Args: never; Returns: number }
+      builder_chat_claim_next: {
+        Args: never
+        Returns: {
+          claimed_at: string | null
+          client_request_id: string | null
+          completed_at: string | null
+          content: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          payload: Json
+          role: string
+          seq: number
+          status: string | null
+          thread_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "builder_chat_messages"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      builder_chat_record_job: {
+        Args: { p_job_id: string; p_message_id: string }
+        Returns: undefined
+      }
+      builder_chat_release_proposal: {
+        Args: { p_message_id: string; p_token: string }
+        Returns: undefined
+      }
+      builder_chat_require_owner: { Args: never; Returns: string }
+      builder_chat_reserve_proposal: {
+        Args: { p_message_id: string; p_token: string }
+        Returns: boolean
+      }
+      builder_chat_send: {
+        Args: {
+          p_client_request_id?: string
+          p_content: string
+          p_context?: Json
+          p_thread_id: string
+        }
+        Returns: string
+      }
+      builder_chat_thread_close: {
+        Args: { p_thread_id: string }
+        Returns: undefined
+      }
+      builder_chat_thread_open: { Args: { p_title?: string }; Returns: string }
       builder_claim_aggregate_security_review: {
         Args: {
           _expected_target_sha: string
@@ -38033,6 +38412,10 @@ export type Database = {
         Args: { p_candidates: Json }
         Returns: Json
       }
+      charge_catalog_group_members: {
+        Args: { p_root: string }
+        Returns: string[]
+      }
       check_invite_rate_limit: {
         Args: { p_caller_id: string; p_target_org_id: string }
         Returns: boolean
@@ -38146,6 +38529,15 @@ export type Database = {
         Returns: {
           overnight_date: string
           scan_window: string
+        }[]
+      }
+      classify_patrol_cost_row_billing_basis: {
+        Args: { p_provider_organization_id: string; p_source_values: Json }
+        Returns: {
+          basis: string
+          code_basis: string
+          conflict: boolean
+          sheet_basis: string
         }[]
       }
       close_finance_pl_period: {
@@ -40862,6 +41254,10 @@ export type Database = {
         Returns: boolean
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
+      get_agreement_billing_basis_summary: {
+        Args: { p_from?: string; p_service_agreement_id: string; p_to?: string }
+        Returns: Json
+      }
       get_agreement_service_delivery: {
         Args: {
           p_agreement_id: string
@@ -41210,6 +41606,10 @@ export type Database = {
         Returns: Json
       }
       get_finance_owner_brief: { Args: never; Returns: Json }
+      get_finance_pl_period_billing_basis: {
+        Args: { p_pl_period_id: string }
+        Returns: Json
+      }
       get_finance_pl_period_summary: {
         Args: { p_pl_period_id: string }
         Returns: {
@@ -42249,6 +42649,26 @@ export type Database = {
           p_notes?: string
           p_reason?: string
           p_shift_id: string
+        }
+        Returns: Json
+      }
+      manage_agreement_extra_work_order: {
+        Args: {
+          p_action: string
+          p_agreement_id: string
+          p_authority_kind?: string
+          p_authority_reference?: string
+          p_charge_code?: string
+          p_client_request_id: string
+          p_ends_on?: string
+          p_expected_updated_at?: string
+          p_order_id?: string
+          p_rate_note?: string
+          p_reason?: string
+          p_review_on?: string
+          p_scope?: string
+          p_starts_on?: string
+          p_title?: string
         }
         Returns: Json
       }
@@ -43333,6 +43753,9 @@ export type Database = {
           acknowledged_at: string | null
           adhoc_inserted_at: string | null
           assigned_officer_id: string | null
+          billing_basis: string | null
+          billing_basis_set_at: string | null
+          billing_basis_set_by: string | null
           briefing_notes: string | null
           client_request_id: string | null
           client_site_id: string | null
@@ -43342,6 +43765,7 @@ export type Database = {
           dispatched_at: string | null
           en_route_at: string | null
           expected_dwell_minutes: number
+          extra_work_order_id: string | null
           harmed_party_address: string | null
           harmed_party_site_id: string | null
           id: string
@@ -44836,6 +45260,55 @@ export type Database = {
       }
       org_access_allowed: { Args: { target_org_id: string }; Returns: boolean }
       org_default_level: { Args: { p_type: string }; Returns: number }
+      patrol_source_assert_row_provenance: {
+        Args: {
+          p_batch: Database["public"]["Tables"]["file_import_batches"]["Row"]
+          p_item: Json
+        }
+        Returns: Json
+      }
+      patrol_source_record_state: {
+        Args: { p_kind: string; p_record_id: string }
+        Returns: Json
+      }
+      patrol_source_state_diff: {
+        Args: { p_after: Json; p_before: Json }
+        Returns: string[]
+      }
+      patrol_source_sync_batch: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_provider_organization_id: string
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       patrol_window_bounds: {
         Args: {
           p_shift_date: string
@@ -46299,6 +46772,10 @@ export type Database = {
           clean_rows: number
           raw_rows: number
         }[]
+      }
+      refresh_group_charge_catalog: {
+        Args: { p_root: string }
+        Returns: number
       }
       register_bob_video_attachment_for_review: {
         Args: { p_attachment_id: string }
@@ -48474,6 +48951,15 @@ export type Database = {
         Args: { p_note?: string; p_password: string; p_pfx_base64: string }
         Returns: Json
       }
+      set_dispatch_job_billing_basis: {
+        Args: {
+          p_billing_basis: string
+          p_extra_work_order_id?: string
+          p_job_id: string
+          p_reason?: string
+        }
+        Returns: Json
+      }
       set_dispatch_job_harmed_party: {
         Args: {
           p_client_request_id: string
@@ -49979,6 +50465,10 @@ export type Database = {
       }
       sweep_slow_builder_job_notifications: {
         Args: { p_after_minutes?: number; p_now?: string }
+        Returns: number
+      }
+      sync_group_charge_catalog: {
+        Args: { p_source: string; p_target: string }
         Returns: number
       }
       sync_my_profile_email: { Args: never; Returns: string }
