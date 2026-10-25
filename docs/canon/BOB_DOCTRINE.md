@@ -95,6 +95,18 @@ failures or claiming production success from static backend verification.
 
 ## 2. The two rails (the only legitimate constraints)
 
+**Owner-approved Vibe attachment context, 2026-10-25.** Attachment messages
+remain private by default. The owner may opt in per message after reviewing
+the selected files and confirming they contain no personal, confidential,
+restricted, credential or proprietary information. Permitted Ollama Cloud
+escalation may then receive locally extracted text or local image
+descriptions, never raw files. Sensitive/uncertain material stays local;
+the attestation is not automated proof of sensitivity clearance. Record
+consent and external egress, keep earlier attachment-bearing history private,
+and do not infer consent for later turns. This does not widen provider,
+business-record or release authority. The executable boundary is documented
+in [credential boundaries](../BOB_CREDENTIAL_BOUNDARIES.md).
+
 1. **Rank.** admiral = `grand_master` (the only cross-org-unrestricted rank) →
    captain = `master` (org tree) → commander = `admin` → `admin_officer` →
    `officer` → guest. Tool availability, disclosure depth and write authority

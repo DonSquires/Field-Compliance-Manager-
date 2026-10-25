@@ -476,12 +476,81 @@ test('owner-approved Ollama Cloud recovers loops in JSON mode and redacts earlie
   });
   const routed = vibe.applyVibeRouting({}, { allowCloud: false });
   assert.deepEqual(routed.chain, ['gpu_workstation', 'ollama']);
-  attached.store.history = async () => [{ seq: 1, role: 'owner', kind: 'message', content: 'earlier', payload: { attachment_context: [{ context: 'private screenshot' }] } }];
+  attached.store.history = async () => [
+    { seq: 1, role: 'owner', kind: 'message', content: 'earlier', payload: { external_attachment_consent: true, attachment_context: [{ context: 'private screenshot' }] } },
+    { seq: 2, role: 'bob', kind: 'message', content: 'A paraphrase of private screenshot detail.', payload: {} },
+  ];
+  attached.store.recentExecution = async () => [{ seq: 3, kind: 'tool', content: 'private screenshot output', payload: { ok: true, preview: 'prior confidential extraction' } }];
   await vibe.processVibeMessage({ store: attached.store, message: ownerMessage('look again'), deps: attached.deps });
   assert.equal(attached.model.calls[0].provider, 'ollama_cloud');
   const sent = JSON.stringify(attached.model.calls[0].request.messages);
   assert.doesNotMatch(sent, /private screenshot/);
+  assert.doesNotMatch(sent, /prior confidential extraction/);
   assert.match(sent, /earlier attachment analysis withheld/);
+});
+
+test('current attachment context reaches Ollama Cloud only after per-message owner opt-in', async () => {
+  const health = async () => ({
+    gpu_workstation: { configured: true, healthy: true, models: ['local-primary'], installed: ['local-primary'], ready_model: 'local-primary' },
+    ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+  });
+  const attachmentId = '2b3c4d5e-0000-4000-8000-000000000002';
+  const attachment = {
+    id: attachmentId, session_id: SESSION_ID, uploaded_by: 'owner-uuid',
+    file_name: 'non-sensitive-ui-note.txt', file_type: 'text/plain',
+    file_size_bytes: 80, storage_bucket: 'bob-uploads',
+    storage_path: `desktop/owner-uuid/vibe/${SESSION_ID}/${attachmentId}-non-sensitive-ui-note.txt`,
+    extraction_status: 'extracted', extracted_text: 'The non-sensitive preview heading is clipped.',
+    sha256: 'a'.repeat(64),
+  };
+  const prepare = async (consent, withHistory = false) => {
+    const repeated = { thought: withHistory ? 'earlier private attachment marker' : 'inspect', tool: 'list_dir', args: { path: 'apps/web/src/' } };
+    const { store, deps, model } = setup([
+      ...(consent === true ? [repeated, repeated, repeated, repeated] : [{ tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }]),
+      { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"cloud"' } },
+      { thought: 'reply', tool: 'reply', args: { message: 'Updated and verified.' } },
+    ], { fetchHealth: health, allowCloud: true });
+    store.state.session.created_by = 'owner-uuid';
+    const message = ownerMessage('Fix the attached non-sensitive preview issue.');
+    message.payload.attachment_ids = [attachmentId];
+    message.payload.external_attachment_consent = consent;
+    store.attachments = async (sessionId, ids) => {
+      assert.equal(sessionId, SESSION_ID);
+      assert.deepEqual(ids, [attachmentId]);
+      return [attachment];
+    };
+    store.updateOwnerPayload = async (_messageId, payload) => { message.payload = payload; };
+    if (withHistory) {
+      store.history = async () => [{ seq: 1, role: 'owner', kind: 'message', content: 'Earlier question', payload: { attachment_context: [{ context: 'earlier private attachment marker' }] } }];
+    }
+    const outcome = await vibe.processVibeMessage({ store, message, deps });
+    assert.equal(outcome.error, undefined);
+    return { store, model };
+  };
+
+  const optedIn = await prepare(true);
+  const cloudCall = optedIn.model.calls.find(call => call.provider === 'ollama_cloud');
+  assert.ok(cloudCall, 'an explicitly approved attachment turn may use the configured cloud fallback');
+  assert.match(JSON.stringify(cloudCall.request.messages), /The non-sensitive preview heading is clipped/);
+  assert.ok(optedIn.store.state.rows.some(row => /owner-approved non-sensitive attachment context/.test(row.content)));
+  const receipt = optedIn.store.state.rows.find(row => row.payload?.tool_protocol === 'json' && row.payload.external_egress);
+  assert.deepEqual(receipt.payload.attachment_context_ids, [attachmentId]);
+  assert.equal(receipt.payload.raw_attachments_sent, false);
+  assert.ok(optedIn.store.state.rows.some(row => row.payload?.stage === 'external_egress' && row.payload.attachment_context_ids.includes(attachmentId)));
+
+  const withHistory = await prepare(true, true);
+  const historicalPrivateCall = withHistory.model.calls.find(call => call.provider !== 'ollama_cloud');
+  assert.match(JSON.stringify(historicalPrivateCall.request.messages), /earlier private attachment marker/);
+  for (const call of withHistory.model.calls.filter(call => call.provider === 'ollama_cloud')) {
+    assert.doesNotMatch(JSON.stringify(call.request.messages), /earlier private attachment marker/);
+    assert.match(JSON.stringify(call.request.messages), /The non-sensitive preview heading is clipped/);
+  }
+
+  for (const consent of [false, undefined, 'true']) {
+    const localOnly = await prepare(consent);
+    assert.ok(localOnly.model.calls.length > 0);
+    assert.ok(localOnly.model.calls.every(call => call.provider !== 'ollama_cloud'));
+  }
 });
 
 test('a prose promise with no executed tool is never handed off and escalates to a stronger model', async () => {

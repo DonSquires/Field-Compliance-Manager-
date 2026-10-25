@@ -53,10 +53,27 @@ under these egress controls:
 - It is off unless the control plane sets `BOB_VIBE_ALLOW_OLLAMA_CLOUD=true`.
 - It is reached only after the private candidates: when they are unavailable,
   or as the single repeated-tool-call recovery.
-- A turn whose current message carries attachments stays local-only. When
-  earlier messages carried attachments, the Ollama Cloud opening packet
-  replaces their analysis with a withheld marker; attachment bytes and
-  descriptions never leave private compute.
+- Attachment-bearing messages are local-only by default. Under the owner's
+  2026-10-25 opt-in ruling, the owner may attest, for that message only, that
+  the selected files contain no personal, confidential, restricted, credential
+  or proprietary information. Only then may their locally extracted text or
+  local image descriptions accompany an otherwise permitted Ollama Cloud
+  escalation. Raw attachment bytes never leave private compute.
+- The attestation is a human classification decision, not an automated
+  sensitivity certification. Sensitive or uncertain content must stay local;
+  do not opt in until it has been reviewed/redacted. The checkbox defaults off,
+  resets when the attachment selection changes and after sending, and never
+  authorizes a different message or a different provider.
+- The owner-only `builder_vibe_send_with_attachments_opt_in` RPC records the
+  choice, actor, timestamp, policy version and attachment IDs on the queued
+  message. A request-id replay cannot change consent. The worker records the
+  attachment-context IDs and `raw_attachments_sent: false` with cloud use.
+- Earlier attachment context is never authorized by the current opt-in.
+  When history contains attachments, earlier conversation, execution logs
+  and pre-cloud model/tool exchanges are withheld from the cloud packet to
+  avoid forwarding paraphrased private analysis. Private models retain that
+  history. Consent does not authorize promoting any source into business
+  records or changing record access.
 - Ollama Cloud receives structured JSON requests, never native tool
   definitions, and each escalation posts a session status with
   `external_egress: true`.

@@ -132,6 +132,8 @@
 .vibe-composer__attachments button { flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--vibe-text); cursor: pointer; }
 .vibe-composer__attachments button:disabled { opacity: 0.5; cursor: not-allowed; }
 .vibe-composer__notice { flex: 1 0 100%; margin: 0; color: var(--vibe-muted); font-size: 0.7rem; }
+.vibe-composer__egress { flex: 1 0 100%; display: flex; align-items: flex-start; gap: 8px; color: var(--vibe-muted); font-size: 0.75rem; line-height: 1.45; cursor: pointer; }
+.vibe-composer__egress input { flex: none; margin: 2px 0 0; accent-color: var(--vibe-accent); }
 
 .vibe-preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .vibe-preview__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--vibe-line); }

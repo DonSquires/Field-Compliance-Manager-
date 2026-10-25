@@ -42,9 +42,30 @@ test('Vibe teaches workflow evidence, test-data provenance and the correct brows
   assert.match(prompt, /text values start with "Bob Test"/);
   assert.match(prompt, /identified by ID, tenant and run provenance/);
   assert.match(prompt, /"unwired" means no registered caller, not missing database EXECUTE grants/);
+  assert.match(prompt, /Visual baselines are only for a screenshot mismatch reported by a visual Playwright assertion/);
+  assert.match(prompt, /list the snapshot directory and copy the exact existing PNG path/);
+  assert.match(prompt, /do not call the tool again until exact eligible paths are verified/);
+  assert.match(prompt, /only after a visual assertion reports a mismatch on an intentionally changed spec/);
   const config = fs.readFileSync(path.join(__dirname, '../apps/web/vite.config.ts'), 'utf8');
   assert.match(config, /exclude: \[\.\.\.configDefaults.exclude, 'e2e\/\*\*'\]/);
   const spec = fs.readFileSync(path.join(__dirname, '../apps/web/e2e/dr-bob-human-test.spec.ts'), 'utf8');
   assert.match(spec, /import \{ expect, test \} from '@playwright\/test'/);
   assert.doesNotMatch(spec, /process\.env\.VITEST|let test: any|Intentionally left empty/);
+});
+
+test('Vibe teaches per-message non-sensitive attachment consent without authorizing raw files', () => {
+  const prompt = vibeSystemPrompt();
+  assert.match(prompt, /owner explicitly opts in on that message/);
+  assert.match(prompt, /no personal, confidential, restricted, credential, or proprietary information/);
+  assert.match(prompt, /never raw attachment bytes/);
+  const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025130000_builder_vibe_attachment_cloud_opt_in.sql'), 'utf8');
+  assert.match(sql, /public\.builder_vibe_require_owner\(\)/);
+  assert.match(sql, /created_by = v_user AND status <> 'closed'\s+FOR UPDATE/);
+  assert.match(sql, /coalesce\(p_allow_ollama_cloud, false\)/);
+  assert.match(sql, /Request id was already used with different attachment consent/);
+  assert.match(sql, /AND NOT \(payload \? 'external_attachment_consent'\)/);
+  assert.match(sql, /'policy_version', 'non_sensitive_context_v1'/);
+  assert.match(sql, /'actor_user_id', v_user/);
+  assert.match(sql, /'recorded_at', now\(\)/);
+  assert.match(sql, /FROM PUBLIC, anon/);
 });

@@ -164,6 +164,11 @@ function MessageBlock({ message }: { message: VibeMessage }) {
         {attachments.length > 0 && <ul className="vibe-msg__attachments">{attachments.map((attachment) => (
           <li key={attachment.id}>{attachment.file_type.startsWith('image/') ? <ImageIcon size={13} /> : <FileText size={13} />}<span>{attachment.file_name}</span></li>
         ))}</ul>}
+        {owner && attachments.length > 0 && <span className="vibe-msg__state">
+          {message.payload.external_attachment_consent === true
+            ? 'Attachment context: Ollama Cloud permitted for this message; raw files stay private.'
+            : 'Attachment context: local models only.'}
+        </span>}
         {attachmentContext.length > 0 && <details className="vibe-msg__attachment-context">
           <summary>Local attachment analysis</summary>
           {attachmentContext.map((item, index) => <p key={`${item.file_name || 'attachment'}-${index}`}>{item.context}</p>)}
@@ -187,6 +192,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingVibeAttachment[]>([]);
+  const [allowCloudAttachments, setAllowCloudAttachments] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<'chat' | 'preview'>('chat');
   const threadEnd = useRef<HTMLDivElement | null>(null);
@@ -287,6 +293,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
       staged.push({ id: crypto.randomUUID(), file, fileType, status: 'staged' });
     }
     setError(null);
+    setAllowCloudAttachments(false);
     setAttachments(current => [...current, ...staged]);
   };
 
@@ -347,6 +354,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
       if (deleteError) throw deleteError;
     }
     setAttachments(current => current.filter(item => item.id !== attachment.id));
+    setAllowCloudAttachments(false);
   });
 
   const send = (action: 'message' | 'ship' | 'revert', text = '') => {
@@ -363,15 +371,17 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
           }
         }
         const content = text || (ready.length ? 'Please inspect the attached files and use them as context.' : '');
-        const { error: sendError } = await supabase.rpc('builder_vibe_send_with_attachments', {
+        const { error: sendError } = await supabase.rpc('builder_vibe_send_with_attachments_opt_in', {
           p_session_id: selected.id,
           p_content: content,
           p_client_request_id: requestId(),
           p_attachment_ids: ready.map(item => item.id),
+          p_allow_ollama_cloud: allowCloudAttachments,
         });
         if (sendError) throw sendError;
         setDraft('');
         setAttachments([]);
+        setAllowCloudAttachments(false);
         if (fileInput.current) fileInput.current.value = '';
         return;
       }
@@ -494,6 +504,17 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                   </li>
                 ))}
               </ul>}
+              {attachments.length > 0 && <label className="vibe-composer__egress">
+                <input
+                  type="checkbox"
+                  checked={allowCloudAttachments}
+                  onChange={(event) => setAllowCloudAttachments(event.target.checked)}
+                  disabled={Boolean(busy)}
+                />
+                <span>
+                  Allow this message’s locally extracted text or screenshot description to be sent to Ollama Cloud if private models cannot complete the task. I confirm these attachments contain no personal, confidential, restricted, credential, or proprietary information.
+                </span>
+              </label>}
               <label htmlFor="vibe-input" className="vibe-sr-only">Tell Bob what to build</label>
               <textarea
                 id="vibe-input"
@@ -507,7 +528,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
               />
               <button type="button" className="vibe-btn" onClick={() => fileInput.current?.click()} disabled={selected.status === 'closed' || attachments.length >= VIBE_MAX_FILES || Boolean(busy)} aria-label="Attach screenshot or document"><Paperclip size={15} />Attach</button>
               <button type="submit" className="vibe-btn vibe-btn--primary" disabled={(!draft.trim() && !attachments.length) || Boolean(busy)} aria-label="Send"><Send size={15} />Send</button>
-              <p className="vibe-composer__notice">Private session files only · images are analyzed on local Ollama · documents are text-extracted · nothing is registered as a business record.</p>
+              <p className="vibe-composer__notice">Private session files · images are analyzed locally · documents are text-extracted locally · raw attachment bytes are never sent to Ollama Cloud · nothing is registered as a business record.</p>
             </form>
           </>
         )}

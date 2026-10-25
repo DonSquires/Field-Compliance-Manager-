@@ -72,7 +72,7 @@ it('shows starters for an owner with no sessions and opens a session from one', 
   await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_vibe_session_open', expect.objectContaining({ p_title: expect.any(String) })));
 });
 
-it('uploads a document privately, extracts text, and sends its session-scoped reference', async () => {
+it.each([false, true])('uploads privately and records per-message attachment cloud consent %s', async (allowCloud) => {
   wireRealtime();
   const sessionId = '1a2b3c4d-0000-4000-8000-000000000001';
   rpc.mockImplementation(async (name: string) => {
@@ -93,14 +93,24 @@ it('uploads a document privately, extracts text, and sends its session-scoped re
   const input = await screen.findByRole('textbox', { name: 'Tell Bob what to build' });
   const file = new File(['sample pdf'], 'error.pdf', { type: 'application/pdf' });
   fireEvent.change(screen.getByLabelText('Attach screenshots or documents'), { target: { files: [file] } });
+  const consent = screen.getByRole('checkbox', { name: /Allow this message/ });
+  expect((consent as HTMLInputElement).checked).toBe(false);
+  if (allowCloud) fireEvent.click(consent);
   fireEvent.change(input, { target: { value: 'Please investigate this error' } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_vibe_send_with_attachments', expect.objectContaining({
+  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_vibe_send_with_attachments_opt_in', expect.objectContaining({
     p_session_id: sessionId,
     p_content: 'Please investigate this error',
     p_attachment_ids: [expect.any(String)],
+    p_allow_ollama_cloud: allowCloud,
   })));
+  await waitFor(() => expect(screen.queryByRole('checkbox', { name: /Allow this message/ })).toBeNull());
+  fireEvent.change(screen.getByLabelText('Attach screenshots or documents'), { target: { files: [file] } });
+  expect((screen.getByRole('checkbox', { name: /Allow this message/ }) as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole('checkbox', { name: /Allow this message/ }));
+  fireEvent.change(screen.getByLabelText('Attach screenshots or documents'), { target: { files: [new File(['extra'], 'extra.txt', { type: 'text/plain' })] } });
+  expect((screen.getByRole('checkbox', { name: /Allow this message/ }) as HTMLInputElement).checked).toBe(false);
   expect(upload).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^desktop/owner-id/vibe/${sessionId}/`)), file, expect.objectContaining({ contentType: 'application/pdf', upsert: false }));
   expect(rpc).toHaveBeenCalledWith('builder_vibe_attachment_register', expect.objectContaining({
     p_session_id: sessionId,
