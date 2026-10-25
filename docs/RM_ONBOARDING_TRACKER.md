@@ -2656,3 +2656,36 @@ service-role write was used.
   readiness read models, then rolled back; zero verification receipts persisted.
   The post-release Atlas refresh added the missing UI-to-RPC edge and a second
   refresh reported zero capability, edge, or retirement changes.
+
+## OneFortyOne contract versus Extra, and Extra works orders (2026-10-25)
+
+**Evidence searched (R&M corpus).** OFO Security Proposal 2021, Tasman Pine
+proposal, Security Packages, Pest Control Proposal (hourly per person, per km,
+ammunition extra), RMSI update, Public Hunting 2024 ("vetting and
+patrolling/camera work is on-charged to OFO each month") and Public Hunting
+Locks. No signed contract and no written Contract/Extra split was found.
+
+**Working source of truth.** The OFO workbook `List` sheet, column 16: 51
+Contract, 217 Extra and 1 N/A codes, already loaded as
+`reference_codes.external_refs.billing_basis`. `Sheet2` tracks a fixed monthly
+price. The 2026 log shows Friday lock-off (41358, 42061) and Monday lock-on
+(41320, 42034) for hunter access, all Extra. Owner ruling: 42063 Lock Replace
+and Gate Open/Closed stay Contract (regular security role). No code changes.
+
+**Built (migration `20261025004211_agreement_extra_work_orders.sql`, applied
+live; behavioural test passes live under rollback).**
+- `agreement_extra_work_orders` and `manage_agreement_extra_work_order`
+  (create/update/end, idempotent, optimistic concurrency, audited, provider
+  admins only, references EW-001 per agreement).
+- `dispatch_jobs.billing_basis` / `extra_work_order_id` and
+  `set_dispatch_job_billing_basis`. Direct writes are blocked by trigger;
+  charge lines inherit the basis.
+- UI: Client Portfolios -> agreement setup -> **Extra works** tab (list with
+  status, authorise/edit/end with reason, empty and error states). Dispatch
+  Console: Billing choice (Extra default, Contracted, Decide later) and Extra
+  works order picker on job creation; basis chip in the job list; Billing
+  section in the job dialog to set or change with a reason.
+
+**Open.** Step E: billing basis for imported patrol charges, fixed monthly
+price versus Contract lines, and the basis for the 153 derived codes
+(proposal: default Extra, awaiting owner).

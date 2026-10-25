@@ -834,3 +834,13 @@
 .admin-shell[data-theme='light'] .dispatch-console-form-note {
   color: #58675f;
 }
+/* Billing basis: Extra is charged on top of the contract price; Contract is in the monthly price. */
+.dispatch-billing-chip { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; vertical-align: middle; }
+.dispatch-billing-chip.is-extra { background: #4b3721; color: #ffe1b5; }
+.dispatch-billing-chip.is-contract { background: #1e3a33; color: #c9f4e9; }
+.dispatch-billing-chip.is-unset { border: 1px dashed #8aa0a8; color: #c6d8df; background: transparent; }
+.dispatch-billing-panel p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dispatch-billing-panel .dispatch-billing-chip { margin-left: 0; }
+.admin-shell[data-theme='light'] .dispatch-billing-chip.is-extra { color: #6b4210; background: #fbefd9; }
+.admin-shell[data-theme='light'] .dispatch-billing-chip.is-contract { color: #1f5a4b; background: #e3f3ee; }
+.admin-shell[data-theme='light'] .dispatch-billing-chip.is-unset { color: #485851; border-color: #8a9a93; }

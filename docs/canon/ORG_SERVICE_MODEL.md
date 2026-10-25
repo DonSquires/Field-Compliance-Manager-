@@ -243,7 +243,7 @@ required. Delivery schedules may be written directly
 (`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
 both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.
 
-## Ruling 2026-10-25 � Mainland Pest Control under R&M; group charge catalog
+## Ruling 2026-10-25 — Mainland Pest Control under R&M; group charge catalog
 
 Owner choice `mainland_parent=true`: Mainland Pest Control, an R&M
 subsidiary, has `parent_organization_id` = R&M (migration
@@ -258,3 +258,34 @@ numbering) is owned by R&M and copied to R&M's tree (including Mainland) and
 to the client side of every active operational agreement whose provider is in
 that tree. New children and new agreements receive it by trigger. Ending an
 agreement removes nothing. It is not a platform-wide template.
+
+## Ruling 2026-10-25 — Extra work outside the contract: Extra works orders, not variations
+
+A provider's operational agreement sets the contracted scope and, where agreed,
+a fixed monthly price. Work the client asks for outside that scope is **Extra**
+and is charged on top. It does not change the agreement.
+
+- **One-off Extra (dispatch).** A dispatcher classifies each dispatch job as
+  `contract` or `extra` (`dispatch_jobs.billing_basis`, NULL = not yet
+  classified) through `set_dispatch_job_billing_basis`. Non-routine jobs sent
+  by dispatch default to Extra in the console. Changing an existing
+  classification needs a reason; every change is audited; an invoiced job is
+  corrected by credit note, not reclassified. Charge lines inherit the job's
+  basis.
+- **Temporary or ongoing Extra (agreement level).** An **Extra works order**
+  (`agreement_extra_work_orders`, managed only through
+  `manage_agreement_extra_work_order`) records what the client asked for, how
+  it was authorised (written, purchase order, verbal with a note, standing
+  instruction), its term, and an optional review date and default charge code.
+  It hangs off the base agreement, so jobs stay on the agreement that owns the
+  place. An Extra job may be linked to an order in force on the job's day.
+- **Not a variation.** An Extra works order never changes covered places,
+  modules, obligations or price. When Extra work becomes a permanent part of
+  the service, vary the agreement and end the order.
+- **OneFortyOne codes.** Lock replacement (42063) and gate open/closed remain
+  Contract: they are part of the regular security role. The OFO schedule's
+  Extra codes (for example Friday 41358/42061 and Monday 41320/42034 for
+  hunter access) stay Extra.
+- **Open, Step E.** Billing basis for imported patrol rows, and how Contract
+  lines reconcile with a fixed monthly price, are decided in the patrol
+  finance step. Imports do not write finance directly.

@@ -28,6 +28,8 @@ import {
   shiftHealthBadge,
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
+import { BillingBasisChip, BillingBasisFields, DispatchJobBillingPanel, saveJobBillingBasis, useExtraWorkOrders, type BillingBasis, type BillingChoice } from '../components/DispatchBillingBasis';
+import { localToday } from '../lib/agreementTerm';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { findNearestAvailableUnit } from '../lib/dispatch/nearestUnit';
 import { resolveAddressCandidates } from '../lib/locationAddress';
@@ -92,6 +94,9 @@ interface DispatchJob {
   enRouteAt?: string | null;
   onSceneAt?: string | null;
   completedAt?: string | null;
+  serviceAgreementId: string | null;
+  billingBasis: BillingBasis | null;
+  extraWorkOrderId: string | null;
 }
 
 interface ClientSite {
@@ -165,7 +170,7 @@ const DispatchJobList: React.FC<{ jobs: DispatchJob[]; onOpen: (jobId: string) =
     <table className="dispatch-job-list">
       <thead><tr><th>Priority</th><th>Job</th><th>Place</th><th>Status</th><th>Assigned to</th><th>Respond by</th></tr></thead>
       <tbody>{jobs.length === 0 ? <tr><td colSpan={6} className="dispatch-job-list-empty">No active jobs</td></tr> : jobs.map((job) => <tr key={job.id} className={`priority-${job.priority} ${job.slaBreached ? 'is-sla-breached' : ''}`} onClick={() => onOpen(job.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onOpen(job.id); }}>
-        <td><span className="dispatch-job-list-priority">{job.priority}</span></td><td>{JOB_TYPES.find((type) => type.id === job.jobType)?.label ?? job.jobType.replaceAll('_', ' ')}</td><td><strong>{job.siteName}</strong><small>{job.siteAddress ?? 'Address or route point not recorded'}</small></td><td>{JOB_STATUS_LABELS[job.status]}</td><td>{job.resourceName ?? 'Unassigned'}</td><td>{job.slaRespondBy ? new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : 'Not set'}</td>
+        <td><span className="dispatch-job-list-priority">{job.priority}</span></td><td>{JOB_TYPES.find((type) => type.id === job.jobType)?.label ?? job.jobType.replaceAll('_', ' ')} <BillingBasisChip job={job} /></td><td><strong>{job.siteName}</strong><small>{job.siteAddress ?? 'Address or route point not recorded'}</small></td><td>{JOB_STATUS_LABELS[job.status]}</td><td>{job.resourceName ?? 'Unassigned'}</td><td>{job.slaRespondBy ? new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : 'Not set'}</td>
       </tr>)}</tbody>
     </table>
   </div>
@@ -313,6 +318,8 @@ const DispatchConsolePage: React.FC = () => {
   const [formAlarmSignalType, setFormAlarmSignalType] = useState<AlarmSignalType>('burglary');
   const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => localDateTimeValue(new Date()));
   const [formZoneId, setFormZoneId] = useState<string>('');
+  const [formBilling, setFormBilling] = useState<BillingChoice>('extra');
+  const [formExtraOrderId, setFormExtraOrderId] = useState('');
   // Harmed party (complainant) for dual-place jobs: place on the job, identity behind the guarded RPC.
   const [formComplainantAddress, setFormComplainantAddress] = useState('');
   const [resolvedComplainant, setResolvedComplainant] = useState<{ label: string; lat: number; lng: number } | null>(null);
@@ -327,6 +334,8 @@ const DispatchConsolePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [operatorBusy, setOperatorBusy] = useState(false);
   const [runsheetAction, setRunsheetAction] = useState<RunsheetActionDraft | null>(null);
+
+  const { orders: agreementExtraOrders } = useExtraWorkOrders(selectedAgreement?.id);
 
   // State: Phase D (Billing rates)
   const [billingRules, setBillingRules] = useState<DispatchBillingRule[]>([]);
@@ -452,6 +461,9 @@ const DispatchConsolePage: React.FC = () => {
           enRouteAt: j.en_route_at ?? null,
           onSceneAt: j.on_scene_at ?? null,
           completedAt: j.completed_at ?? null,
+          serviceAgreementId: j.service_agreement_id ?? null,
+          billingBasis: j.billing_basis ?? null,
+          extraWorkOrderId: j.extra_work_order_id ?? null,
         }));
         setJobs(formatted);
         // ATLAS READS: alarm_events (one per alarm-response job; recorded by record_alarm_signal)
@@ -741,6 +753,11 @@ const DispatchConsolePage: React.FC = () => {
         else if (complainantAddress && !formComplainantSiteId && !harmedPartyReceipt?.out_harmed_party_site_id) setWarning('Job created. The complainant address was not resolved to coordinates, so attendance there will be recorded by time only.');
       }
 
+      if (formBilling !== 'unset') {
+        const { error: billingError } = await saveJobBillingBasis((data as Array<{ id: string }>)[0].id, formBilling, formExtraOrderId, null);
+        if (billingError) setWarning(`Job created, but its billing was not set: ${billingError.message}. Open the job and set billing before it is invoiced.`);
+      }
+
       setShowNewJob(false);
       setFormJobType('alarm_response');
       setFormPriority('high');
@@ -758,6 +775,8 @@ const DispatchConsolePage: React.FC = () => {
       setFormAlarmSignalType('burglary');
       setFormAlarmReceivedAt(localDateTimeValue(new Date()));
       setFormZoneId('');
+      setFormBilling('extra');
+      setFormExtraOrderId('');
       setFormComplainantAddress('');
       setResolvedComplainant(null);
       setFormComplainantSiteId('');
@@ -773,7 +792,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formDirectOfficerId, formWorkUnitId, dispatchWorkUnits, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formDirectOfficerId, formWorkUnitId, dispatchWorkUnits, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt, formBilling, formExtraOrderId]);
 
   const resolveComplainantLocation = useCallback(async () => {
     try {
@@ -1253,6 +1272,8 @@ const DispatchConsolePage: React.FC = () => {
           <div><strong>Expected attendance</strong><span>{selectedJob.expectedDwellMinutes ?? 5} minutes · {selectedJob.timingSource?.replaceAll('_', ' ') ?? 'dispatch default'}</span></div>
         </div>
 
+        <DispatchJobBillingPanel job={selectedJob} onSaved={async (message) => { setNotice(message); await loadPhaseA(); }} />
+
         <section className="dispatch-job-dialog-detail">
           <h3>Response so far</h3>
           {(() => {
@@ -1555,6 +1576,8 @@ const DispatchConsolePage: React.FC = () => {
         <label className="dispatch-console-form-label">Briefing Notes</label>
         <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
       </div>
+
+      <BillingBasisFields idPrefix="dispatch-new-job" choice={formBilling} orderId={formExtraOrderId} orders={agreementExtraOrders} day={localToday()} onChange={(next) => { setFormBilling(next.choice); setFormExtraOrderId(next.orderId); }} />
 
       {resolvedRate && (
         <div className="dispatch-console-rate-banner">
