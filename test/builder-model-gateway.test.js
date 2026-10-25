@@ -482,6 +482,60 @@ test('caller cancellation aborts generation or response body and releases the lo
   }
 });
 
+test('caller cancellation covers health and capability probes without caching cancelled results', async () => {
+  for (const phase of ['health-fetch', 'health-body', 'capability-fetch', 'capability-body', 'openai-body']) {
+    const c = createModelGatewayConfig({
+      OLLAMA_BASE_URL: `http://preflight-${phase}.local:11434`,
+      BOB_OLLAMA_MODELS: 'preflight-model',
+      OPENAI_BASE_URL: `https://preflight-${phase}.example/v1`,
+      OPENAI_API_KEY: 'fixture', BOB_OPENAI_MODELS: 'preflight-model',
+    });
+    const input = request({
+      provider: phase === 'openai-body' ? 'openai' : 'ollama', model: 'preflight-model',
+      ...(phase.startsWith('capability') ? {
+        builder_mode: 'builder_chat',
+        tools: [{ type: 'function', function: { name: 'reply', description: 'Answer', parameters: { type: 'object' } } }],
+      } : {}),
+    });
+    const controller = new AbortController();
+    let reached;
+    const started = new Promise(resolve => { reached = resolve; });
+    let upstreamAborted = false;
+    const stalledFetch = async (url, options) => {
+      if (phase.startsWith('capability') && url.endsWith('/api/tags')) {
+        return { ok: true, json: async () => ({ models: [{ name: 'preflight-model' }] }) };
+      }
+      const wait = () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          upstreamAborted = true;
+          reject(Object.assign(new Error('cancelled preflight'), { name: 'AbortError' }));
+        }, { once: true });
+        reached();
+      });
+      return phase.endsWith('fetch') ? wait() : { ok: true, json: wait };
+    };
+    const running = invokeBuilderModel({ input, config: c, fetchImpl: stalledFetch, signal: controller.signal });
+    await started;
+    controller.abort();
+    assert.equal((await running).body.code, 'request_cancelled', phase);
+    assert.equal(upstreamAborted, true, phase);
+    const calls = [];
+    const recovered = await invokeBuilderModel({
+      input, config: c, fetchImpl: async url => {
+        calls.push(url);
+        return { ok: true, json: async () => url.endsWith('/api/tags')
+          ? { models: [{ name: 'preflight-model' }] }
+          : url.endsWith('/models') ? { data: [{ id: 'preflight-model' }] }
+            : url.endsWith('/api/show') ? { capabilities: [] }
+              : { message: { content: 'recovered' }, choices: [{ message: { content: 'recovered' } }] } };
+      },
+    });
+    assert.equal(recovered.status, 200, phase);
+    const probePath = phase.startsWith('capability') ? '/api/show' : phase === 'openai-body' ? '/models' : '/api/tags';
+    assert.ok(calls.some(url => url.endsWith(probePath)), `${phase}: cancelled probe must not populate cache`);
+  }
+});
+
 test('an already cancelled caller does not probe or invoke a model', async () => {
   const controller = new AbortController();
   controller.abort();

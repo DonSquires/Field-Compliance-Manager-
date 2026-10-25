@@ -40,16 +40,21 @@ const toolCapabilityCache = new Map();
 const healthKey = (name, provider) => JSON.stringify([name, provider.baseUrl]);
 const toolCapabilityKey = (provider, model) => JSON.stringify([provider.baseUrl, model]);
 
-async function nativeToolCapability(provider, model, fetchImpl) {
+async function nativeToolCapability(provider, model, fetchImpl, signal) {
+  signal?.throwIfAborted();
   const key = toolCapabilityKey(provider, model);
   const cached = toolCapabilityCache.get(key);
   if (cached && cached.until > Date.now()) return cached;
   const response = await fetchImpl(`${provider.baseUrl}/api/show`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(provider) },
-    body: JSON.stringify({ model }), signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+    body: JSON.stringify({ model }), signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS)])
+      : AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
   });
+  signal?.throwIfAborted();
   if (!response.ok) throw new Error(`model capability probe returned ${response.status}`);
   const data = await response.json();
+  signal?.throwIfAborted();
   if (!Array.isArray(data?.capabilities)) throw new Error('model capability probe omitted capabilities');
   const supported = data.capabilities.includes('tools');
   const capability = { supported, reason: supported ? null : 'model does not declare native tool support', until: Date.now() + 5 * 60_000 };
@@ -113,7 +118,11 @@ function promptFitsProvider(input, providerConfig) {
   return estimateTokens(promptLength(input)) + outputBudget + 512 <= providerConfig.numCtx;
 }
 
-async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
+async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now, signal } = {}) {
+  signal?.throwIfAborted();
+  const probeSignal = timeout => signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+    : AbortSignal.timeout(timeout);
   const providerConfig = config[name];
   if (!providerConfig) return { name, configured: false, healthy: false, installed: [] };
   const cacheKey = healthKey(name, providerConfig);
@@ -124,10 +133,11 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
     // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
     let installed = [];
     try {
-      const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: { Authorization: `Bearer ${providerConfig.apiKey}` }, signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS * 3) });
+      const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: { Authorization: `Bearer ${providerConfig.apiKey}` }, signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3) });
       const data = response.ok ? await response.json().catch(() => null) : null;
       installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
-    } catch { installed = []; }
+    } catch { signal?.throwIfAborted(); installed = []; }
+    signal?.throwIfAborted();
     healthCache.set(cacheKey, { healthy: true, installed, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
     return { name, configured: true, healthy: true, installed, cached: false };
   }
@@ -139,7 +149,7 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   let installed = [];
   let modelSizes = {};
   try {
-    const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { headers: authHeaders(providerConfig), signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
+    const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { headers: authHeaders(providerConfig), signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS) });
     healthy = response.ok;
     const data = healthy ? await response.json().catch(() => null) : null;
     installed = Array.isArray(data?.models) ? data.models.map(model => String(model.name || model.model || '')).filter(Boolean) : [];
@@ -147,8 +157,10 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
       .filter(model => typeof model.size === 'number' && Number.isFinite(model.size) && model.size > 0)
       .map(model => [String(model.name || model.model || ''), model.size]));
   } catch {
+    signal?.throwIfAborted();
     healthy = false;
   }
+  signal?.throwIfAborted();
   healthCache.set(cacheKey, { healthy, installed, model_sizes: modelSizes, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
   return { name, configured: true, healthy, installed, model_sizes: modelSizes, cached: false };
 }
@@ -356,7 +368,14 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   if (!promptFitsProvider(input, providerConfig)) {
     return { status: 413, body: { error: `prompt exceeds the ${input.provider} context window (${providerConfig.numCtx} tokens)`, code: 'context_exceeded' } };
   }
-  const probe = await probeProvider(config, input.provider, { fetchImpl });
+  let probe;
+  try {
+    probe = await probeProvider(config, input.provider, { fetchImpl, signal });
+  } catch (error) {
+    if (signal?.aborted) return cancelled();
+    throw error;
+  }
+  if (signal?.aborted) return cancelled();
   if (probe.reason === 'quota_exhausted') return { status: 429, body: { error: `${input.provider} account has no remaining quota or credits; skipped until it is topped up`, code: 'provider_quota' } };
   if (OLLAMA_API_KINDS.has(providerConfig.kind) && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
   const eligible = eligibleLocalModels(providerConfig, probe);
@@ -370,10 +389,11 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   let toolProtocolReason = null;
   if (input.tools) {
     try {
-      const capability = await nativeToolCapability(providerConfig, model, fetchImpl);
+      const capability = await nativeToolCapability(providerConfig, model, fetchImpl, signal);
       nativeTools = capability.supported;
       toolProtocolReason = capability.reason;
     } catch (error) {
+      if (signal?.aborted) return cancelled();
       return { status: 503, body: { error: `native tool capability could not be verified: ${String(error.message).slice(0, 150)}`, code: 'native_tool_capability_unavailable' } };
     }
   }
