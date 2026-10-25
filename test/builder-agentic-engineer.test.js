@@ -982,6 +982,13 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \+ b/);
   assert.deepEqual(tools.__changedFiles(), ['lib/sum.js']);
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found[\s\S]*use search[\s\S]*read_file/);
+  const edited = fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8');
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'function sum(a, b) {\n  const total = a - b;\n  return total;\n}\n');
+  const near = tools.replace_in_file({ path: 'lib/sum.js', old_text: '  const total = a - b;\n  return totl;', new_text: 'x' });
+  assert.match(near.error, /old_text not found in lib\/sum\.js, but one of its lines is at line 2/);
+  assert.equal(near.closest_match.start_line, 2);
+  assert.match(near.closest_match.content, /^2:   const total = a - b;\n3:   return total;/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), edited);
   const reflowed = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +\n  b', new_text: 'a * b' });
   assert.equal(reflowed.matched, 'whitespace_normalized');
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \* b/);

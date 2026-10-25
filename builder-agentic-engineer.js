@@ -475,6 +475,26 @@ function isEnvelopePatch(text) {
 }
 
 const ENVELOPE_EOF = Symbol('end-of-file');
+// When old_text misses, show the model the real text where its first recognisable line sits, so the
+// retry copies verbatim instead of guessing again (Vibe 11f20384: four guessed misses in a row).
+function closestSourceSpan(current, needle, maxLines = 30) {
+  const fileLines = current.split('\n');
+  const trimmedFile = fileLines.map((line) => line.trim());
+  const needleLines = needle.split('\n');
+  for (let index = 0; index < needleLines.length; index++) {
+    const probe = needleLines[index].trim();
+    if (probe.length < 8) continue;
+    const hits = [];
+    for (let line = 0; line < trimmedFile.length && hits.length < 2; line++) if (trimmedFile[line] === probe) hits.push(line);
+    if (hits.length !== 1) continue;
+    const start = Math.max(0, hits[0] - index);
+    const end = Math.min(fileLines.length, start + Math.min(maxLines, needleLines.length + 4));
+    const content = fileLines.slice(start, end).map((line, offset) => `${start + offset + 1}: ${line}`).join('\n');
+    return { start_line: start + 1, end_line: end, content: content.length > 4000 ? `${content.slice(0, 4000)}…` : content };
+  }
+  return null;
+}
+
 const NO_OP_EDIT = 'no-op edit refused: new_text produces exactly the current file, so nothing changed. read_file the exact lines you need to change and send the real new text.';
 
 function parseEnvelopePatch(text) {
@@ -749,6 +769,13 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
           return { path: normalized, replaced: spans.length, bytes: Buffer.byteLength(updated), matched: prefixed ? 'line_numbers_and_whitespace_normalized' : 'whitespace_normalized' };
         }
         if (spans.length > 1) return { error: `old_text matches ${spans.length} places in ${normalized} after whitespace normalization; include more surrounding text to make it unique, or pass all=true` };
+        const closest = closestSourceSpan(current, needle);
+        if (closest) {
+          return {
+            error: `old_text not found in ${normalized}, but one of its lines is at line ${closest.start_line}. The real text there is in closest_match (line numbers are not part of the file): copy old_text verbatim from it.`,
+            closest_match: closest,
+          };
+        }
         return {
           error: `old_text not found in ${normalized}. Do not retry guessed source text: use search for a real nearby symbol/class, then read_file that exact line range and copy old_text verbatim.`,
         };
