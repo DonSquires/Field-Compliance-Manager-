@@ -8,6 +8,41 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Builder chat investigation gate, owner correction 2026-10-25 (prepared, not deployed):
+
+- Before: live UI research requests exhausted their model turns and produced
+  actionable proposals copied from the owner's message, despite incomplete
+  source investigation. One such job was created by the supervising engineer;
+  the owner rejected this shortcut and that job was cancelled through the UI.
+- During: remove automatic brief-to-proposal drafting. Require successful
+  source-file, job-ledger and Atlas reads before accepting a model proposal,
+  cite inspected source in the plan, and persist the research receipt. Failed
+  reads, search matches and documentation alone do not satisfy source inspection.
+  Structured JSON carries the same argument contracts as native tools.
+  Repeated tool failures or empty searches advance the configured model chain
+  with the existing evidence; they do not create a replacement job.
+  A live follow-up also reproduced an empty reply rendered as "Done." and
+  `list_dir(".")` rejected as unsafe. Empty replies now fail explicitly;
+  root-directory discovery is allowed without relaxing file/write path guards.
+  Add bounded tracked-path discovery (`find_files`) so chat can locate lifecycle
+  files without confusing literal content search with filename search.
+  Require model-authored source findings with quotes verified against actual
+  reads, concrete repair steps and acceptance checks. Append these to the job
+  description rather than accepting a job whose only plan is to investigate later.
+- After: an incomplete investigation reports a failure and its missing checks,
+  with no Create job card. Runtime guidance teaches literal search, source
+  tracing, argument repair and the live-host access boundary. Synthetic tests
+  must pass before release; successful live UI investigation and a model-authored
+  plan remain required. This does not grant VPS shell access or claim the missing
+  release has been restored.
+- Private-model diagnostic: the changed modules were loaded in a separate VPS
+  process with cloud routing disabled, read-only repository/Atlas/ledger tools
+  and an in-memory chat store. No production modules were replaced and no job
+  was created. The final test switched from qwen2.5-coder:7b to qwen3:8b after
+  repeated reads, but did not complete a valid source-grounded plan. It correctly
+  returned an explicit incomplete-investigation error without a proposal. This
+  proves the refusal boundary, not autonomous repair readiness.
+
 GitHub support automation, expanded owner decision 2026-10-24:
 
 - The owner subsequently lifted the GitHub-specific restrictions and
