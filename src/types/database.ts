@@ -27446,6 +27446,7 @@ export type Database = {
           updated_at: string
           work_unit_type: string
           workplace_id: string | null
+          workshop_work_order_id: string | null
         }
         Insert: {
           active?: boolean
@@ -27466,6 +27467,7 @@ export type Database = {
           updated_at?: string
           work_unit_type: string
           workplace_id?: string | null
+          workshop_work_order_id?: string | null
         }
         Update: {
           active?: boolean
@@ -27486,6 +27488,7 @@ export type Database = {
           updated_at?: string
           work_unit_type?: string
           workplace_id?: string | null
+          workshop_work_order_id?: string | null
         }
         Relationships: [
           {
@@ -27550,6 +27553,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organization_workplaces"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_workshop_order_fkey"
+            columns: ["organization_id", "workshop_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_work_order_summary"
+            referencedColumns: ["organization_id", "id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_workshop_order_fkey"
+            columns: ["organization_id", "workshop_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_work_orders"
+            referencedColumns: ["organization_id", "id"]
           },
         ]
       }
@@ -32948,6 +32965,49 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workshop_settings: {
+        Row: {
+          default_job_lead_user_id: string | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          default_job_lead_user_id?: string | null
+          organization_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          default_job_lead_user_id?: string | null
+          organization_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_settings_default_job_lead_user_id_fkey"
+            columns: ["default_job_lead_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -39922,6 +39982,44 @@ export type Database = {
           updated_at: string
           work_unit_type: string
           workplace_id: string | null
+          workshop_work_order_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_operating_workshop_roster_work_unit: {
+        Args: {
+          p_cost_centre_id?: string
+          p_name: string
+          p_operating_organization_id: string
+          p_team_id?: string
+          p_work_order_id: string
+          p_workplace_id: string
+        }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+          workshop_work_order_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -40204,6 +40302,7 @@ export type Database = {
           updated_at: string
           work_unit_type: string
           workplace_id: string | null
+          workshop_work_order_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -42529,6 +42628,15 @@ export type Database = {
       identity_role_level: { Args: { p_role: string }; Returns: number }
       import_approved_freedom_places: {
         Args: { p_places: Json }
+        Returns: Json
+      }
+      import_historical_patrol_labour_slots: {
+        Args: {
+          p_client_request_id: string
+          p_organization_id: string
+          p_report_fingerprint: string
+          p_slots: Json
+        }
         Returns: Json
       }
       import_human_authored_trespass_notice: {
@@ -44972,6 +45080,7 @@ export type Database = {
           updated_at: string
           work_unit_type: string
           workplace_id: string | null
+          workshop_work_order_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -49554,6 +49663,21 @@ export type Database = {
           p_vehicle_id: string
         }
         Returns: undefined
+      }
+      set_workshop_default_job_lead: {
+        Args: { p_organization_id: string; p_user_id: string }
+        Returns: {
+          default_job_lead_user_id: string | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_zone_geometry:
         | {
