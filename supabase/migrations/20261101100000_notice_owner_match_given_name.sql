@@ -6,10 +6,12 @@
 -- show an innocent person as trespassed or warned.
 --
 -- Names are now compared word by word (whitespace-separated words, letters only, so
--- Smith-Jones and O'Connor stay one family name). The family name is the last word of two or
--- more letters and is excluded by position on both sides. The owner matches only when the
--- notice gives no given name, or one of its given names equals one of the owner's, is a
--- one-letter initial of it, or shares a 3+ letter prefix with it (Chris / Christopher).
+-- Smith-Jones and O'Connor stay one family name), with leading titles stripped on both sides.
+-- The family name is the last word of two or more letters and is excluded by position on both
+-- sides. The owner matches only when the notice gives no given name, or the first given name on
+-- the notice equals one of the owner's given names, is a one-letter initial of it, or shares a
+-- 3+ letter prefix with it (Chris / Christopher; a notice using the owner's middle name still
+-- matches). A shared particle (de, van) or middle name after a different first name does not.
 -- Anything else, including a family name whose word boundaries differ, falls through to the
 -- unique exact-name match, then to a person verified by the notice itself; the import links
 -- that person to the vehicle as an associated person, and genuine spelling duplicates are
@@ -203,7 +205,9 @@ BEGIN
           SELECT array_agg(word.token ORDER BY word.ord) AS tokens
           FROM (
             SELECT regexp_replace(raw.token, '[^[:alpha:]]+', '', 'g') AS token, raw.ord
-            FROM unnest(regexp_split_to_array(lower(coalesce(person.display_name, '')), '\s+'))
+            FROM unnest(regexp_split_to_array(
+              lower(regexp_replace(coalesce(person.display_name, ''), '^\s*(mr|mrs|ms|miss|mx|dr)\.?\s+', '', 'i')),
+              '\s+'))
               WITH ORDINALITY AS raw(token, ord)
           ) word
           WHERE word.token <> ''
@@ -216,26 +220,27 @@ BEGIN
             OR check_row.vehicle_snapshot->>'owner_only_review' = 'true')
           AND v_surname = ANY (owner_name.tokens)
           -- A shared family name on the plate is not enough: a family member named on the notice is a
-          -- different person. The owner matches only when the notice gives no given name, or one of its
-          -- given names equals one of the owner's, is a one-letter initial of it, or shares a 3+ letter
-          -- prefix with it. The owner's family name is excluded by position, so Thomas Thomas keeps its
-          -- given name and an owner recorded only by initial cannot claim a full given name.
+          -- different person. The owner matches only when the notice gives no given name, or the first
+          -- given name on the notice equals one of the owner's given names, is a one-letter initial of
+          -- it, or shares a 3+ letter prefix with it. Titles are stripped and the owner's family name is
+          -- excluded by position, so Thomas Thomas keeps its given name, an owner recorded only by
+          -- initial cannot claim a full given name, and a shared particle (de, van) or middle name
+          -- after a different first name never passes as agreement.
           AND (
             cardinality(v_given) = 0
             OR EXISTS (
               SELECT 1
-              FROM unnest(v_given) AS notice_given(token)
-              CROSS JOIN unnest(owner_name.tokens) WITH ORDINALITY AS owner_given(token, ord)
+              FROM unnest(owner_name.tokens) WITH ORDINALITY AS owner_given(token, ord)
               WHERE owner_given.ord <> (
                   SELECT max(owner_family.ord)
                   FROM unnest(owner_name.tokens) WITH ORDINALITY AS owner_family(token, ord)
                   WHERE owner_family.token = v_surname)
                 AND (
-                  owner_given.token = notice_given.token
-                  OR (length(notice_given.token) = 1 AND left(owner_given.token, 1) = notice_given.token)
-                  OR (least(length(owner_given.token), length(notice_given.token)) >= 3
-                    AND (starts_with(owner_given.token, notice_given.token)
-                      OR starts_with(notice_given.token, owner_given.token)))
+                  owner_given.token = v_given[1]
+                  OR (length(v_given[1]) = 1 AND left(owner_given.token, 1) = v_given[1])
+                  OR (least(length(owner_given.token), length(v_given[1])) >= 3
+                    AND (starts_with(owner_given.token, v_given[1])
+                      OR starts_with(v_given[1], owner_given.token)))
                 )
             )
           ));
