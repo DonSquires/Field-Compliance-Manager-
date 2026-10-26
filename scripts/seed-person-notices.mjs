@@ -6,8 +6,9 @@
  * R&M's documents are the source of truth until R&M operate in FCM. Each notice
  * is filed under the landowner client organisation and linked to the shared
  * canonical person through the governed import_person_notice RPC: the NZTA
- * registered owner of the vehicle the notice names (surname must agree), a
- * unique exact name, or a new person verified by the notice itself. A person
+ * registered owner of the vehicle the notice names (surname must agree and any
+ * given name must match, be an initial of, or share a 3+ letter prefix with the
+ * owner's), a unique exact name, or a new person verified by the notice itself. A person
  * named with a vehicle they did not own at the time (often a company vehicle)
  * is recorded against that vehicle as an associated person (record_vehicle_person).
  *
