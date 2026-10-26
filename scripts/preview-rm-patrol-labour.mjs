@@ -93,7 +93,9 @@ export function runLinkedSql(sql, prefix = 'fcm-labour-read-') {
       path.join(root, 'node_modules', 'supabase', 'dist', 'supabase.js'),
       'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile,
     ], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
-    return JSON.parse(output);
+    const result = JSON.parse(output);
+    // Agent sessions get a { boundary, rows, warning } envelope; unattended runs get the bare array.
+    return Array.isArray(result) ? { rows: result } : result;
   } finally {
     rmSync(temporaryDirectory, { recursive: true });
   }
@@ -102,7 +104,7 @@ export function runLinkedSql(sql, prefix = 'fcm-labour-read-') {
 /** Reads the live snapshot (read-only transaction) and plans it. */
 export function loadLabourReport(from, to) {
   const result = runLinkedSql(labourSnapshotSql(from, to));
-  const snapshot = (Array.isArray(result) ? result : result?.rows)?.[0]?.snapshot;
+  const snapshot = result.rows?.[0]?.snapshot;
   if (!snapshot || !Array.isArray(snapshot.records)
     || snapshot.records.length !== snapshot.source_record_count) {
     throw new Error('The linked read returned no complete snapshot');
