@@ -110,3 +110,12 @@ test('buildPlan drops duplicate text and letters that restate a register entry',
   assert.equal(plan.summary.excluded.cctv_video, 1);
   assert.match(plan.notices.find((n) => n.name === 'Alex Sample').import_key, /^rm-notice:[0-9a-f]{32}$/);
 });
+
+test('generated notice PL/pgSQL closes every IF block', async () => {
+  const { noticesSql } = await load();
+  const body = noticesSql([]).split('DO $seed$').slice(1).map((part) => part.split('$seed$')[0]).join('\n');
+  const closes = (body.match(/\bEND IF;/g) || []).length;
+  const opens = (body.match(/(?<![A-Z_])IF\b/g) || []).length - closes;
+  assert.ok(opens > 0);
+  assert.equal(opens, closes);
+});

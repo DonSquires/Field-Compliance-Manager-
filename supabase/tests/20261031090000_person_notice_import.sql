@@ -250,6 +250,31 @@ BEGIN
            FROM public.notices WHERE import_key = 'notice-test:permit-refusal')
   );
 
+  v_error := NULL;
+  BEGIN
+    PERFORM public.import_person_notice(
+      p_organization_id => v_client,
+      p_notice_type => 'contact_request',
+      p_status => 'issued',
+      p_issued_at => '2026-05-02T09:00:00+13:00',
+      p_subject_display_name => 'Alex Letter',
+      p_source_document_name => 'Contact request letter',
+      p_source_reference => 'local://fixture/contact-request',
+      p_source_sha256 => repeat('f', 64),
+      p_import_key => 'notice-test:contact-request-expiry',
+      p_expires_at => '2027-05-02T09:00:00+13:00',
+      p_title => 'Contact request',
+      p_issued_date_basis => 'document'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    v_error := SQLERRM;
+  END;
+  PERFORM pg_temp.check(
+    'a letter cannot be given an expiry date',
+    v_error = 'Letters do not expire'
+      AND NOT EXISTS (SELECT 1 FROM public.notices WHERE import_key = 'notice-test:contact-request-expiry')
+  );
+
   PERFORM pg_temp.as_user(v_officer);
   v_error := NULL;
   BEGIN

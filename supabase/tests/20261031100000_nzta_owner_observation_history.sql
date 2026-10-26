@@ -56,6 +56,9 @@ DECLARE
   v_person_b uuid := gen_random_uuid();
   v_person_c uuid := gen_random_uuid();
   v_person_d uuid := gen_random_uuid();
+  v_person_e uuid := gen_random_uuid();
+  v_legacy_link uuid := gen_random_uuid();
+  v_history_links uuid[];
   v_document_a uuid;
   v_document_b uuid;
   v_document_c uuid;
@@ -75,7 +78,8 @@ BEGIN
   VALUES (v_person_a, v_org, 'History Owner A ' || left(v_person_a::text, 8), 'manual_review_required', '{}'::jsonb),
     (v_person_b, v_org, 'History Owner B ' || left(v_person_b::text, 8), 'manual_review_required', '{}'::jsonb),
     (v_person_c, v_org, 'History Owner C ' || left(v_person_c::text, 8), 'manual_review_required', '{}'::jsonb),
-    (v_person_d, v_org, 'History Owner D ' || left(v_person_d::text, 8), 'manual_review_required', '{}'::jsonb);
+    (v_person_d, v_org, 'History Owner D ' || left(v_person_d::text, 8), 'manual_review_required', '{}'::jsonb),
+    (v_person_e, v_org, 'Legacy Owner E ' || left(v_person_e::text, 8), 'manual_review_required', '{}'::jsonb);
   INSERT INTO public.bob_conversations(id, organization_id, user_id, module_key, title)
   VALUES (v_conversation, v_org, v_admin, 'operations', 'NZTA owner history test');
 
@@ -198,6 +202,43 @@ BEGIN
   PERFORM pg_temp.check(
     'non-administrator cannot synchronize protected owner identity',
     v_error = 'Vehicle owner identity administrator access required'
+  );
+
+  -- A hand-entered NZTA owner with no source time, for a person never seen in a check on this vehicle.
+  PERFORM pg_temp.as_admin();
+  INSERT INTO public.entity_links(id, organization_id, from_type, from_id, to_type, to_id, relationship, evidence, active, created_by)
+  VALUES (v_legacy_link, v_org, 'person', public.ensure_canonical_person_for_record(v_person_e), 'vehicle', v_vehicle,
+    'registered_owner', jsonb_build_object('source', 'nzta_mvr', 'person_record_id', v_person_e), true, v_admin);
+  PERFORM pg_temp.as_user(v_admin);
+  PERFORM public.sync_nzta_registered_owner_history(v_org, v_vehicle);
+  PERFORM pg_temp.as_admin();
+  PERFORM pg_temp.check(
+    'unmatched hand-entered owner becomes a visible previous owner, not a hidden one',
+    (SELECT NOT active AND ends_at IS NOT NULL
+       AND NOT coalesce((evidence->>'superseded_by_reconciliation')::boolean, false)
+     FROM public.entity_links WHERE id = v_legacy_link)
+    AND (SELECT count(*) = 1 FROM public.entity_links
+         WHERE organization_id = v_org AND to_id = v_vehicle AND relationship = 'registered_owner' AND active
+           AND from_id = public.ensure_canonical_person_for_record(v_person_b))
+  );
+  SELECT array_agg(id) INTO v_history_links FROM public.entity_links
+  WHERE organization_id = v_org AND to_id = v_vehicle AND relationship = 'registered_owner'
+    AND NOT active AND evidence ? 'nzta_owner_history_first_check_id'
+    AND NOT coalesce((evidence->>'superseded_by_reconciliation')::boolean, false);
+
+  PERFORM pg_temp.as_user(v_admin);
+  PERFORM pg_temp.check(
+    'identity-authorised reader sees previous owners with their NZTA end times',
+    (SELECT count(*) = 2 FROM public.get_vehicle_owner_links(v_org, v_vehicle)
+     WHERE link_id = ANY(v_history_links) AND ended_at IS NOT NULL AND source_checked_at IS NOT NULL)
+    AND EXISTS (SELECT 1 FROM public.get_vehicle_owner_links(v_org, v_vehicle) WHERE link_id = v_legacy_link)
+  );
+
+  PERFORM pg_temp.as_user(v_officer);
+  PERFORM pg_temp.check(
+    'reader without identity access gets no NZTA check time through ended_at',
+    (SELECT count(*) = 2 FROM public.get_vehicle_owner_links(v_org, v_vehicle)
+     WHERE link_id = ANY(v_history_links) AND ended_at IS NULL AND source_checked_at IS NULL)
   );
 END $$;
 
