@@ -44,6 +44,55 @@ test('runtime planner selects product, UX, and implementation work from durable 
   assert.equal(planBuilderAction(backendOnly).type, 'continue_backend_only');
 });
 
+test('a confirmed correction reopens a required skipped lane before planning the next author', async () => {
+  const original = snapshot('implementation_pending', {
+    job: { frontend_required: true, backend_required: true, code_review_revision: { approval_id: 'cancelled-review' } },
+  });
+  original.steps.find(step => step.step_id === 'frontend_implementation').status = 'skipped';
+  const corrected = {
+    ...original,
+    steps: original.steps.map(step => step.step_id === 'frontend_implementation' ? { ...step, status: 'pending' } : step),
+  };
+  let reads = 0;
+  const calls = [];
+  let frontendInput;
+  const result = await advanceBuilderJob({
+    supabase: { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === 'builder_recover_expired_worker_runs') return { data: [], error: null };
+      if (name === 'builder_account_verifier_recoveries') return { data: 0, error: null };
+      return { data: { reopened: ['frontend_implementation'] }, error: null };
+    } },
+    gateway: {}, jobId: 'job-1', context: {},
+    loadSnapshot: async () => (++reads === 1 ? original : corrected),
+    handlers: { frontend: async input => { frontendInput = input; return { success: true }; } },
+  });
+  assert.equal(result.advanced, true);
+  assert.equal(result.action.type, 'run_frontend');
+  assert.equal(frontendInput.step.step_id, 'frontend_implementation');
+  assert.equal(reads, 2, 'planning uses the durable reopened step');
+  assert.deepEqual(calls.map(call => call.name), [
+    'builder_recover_expired_worker_runs',
+    'builder_account_verifier_recoveries',
+    'builder_reopen_required_implementation_lanes',
+  ]);
+  assert.deepEqual(calls.at(-1).args, { _job_id: 'job-1' });
+});
+
+test('runtime does not route around a required lane when recovery was not persisted', async () => {
+  const state = snapshot('implementation_pending', {
+    job: { frontend_required: true, backend_required: true, code_review_revision: { approval_id: 'cancelled-review' } },
+  });
+  state.steps.find(step => step.step_id === 'frontend_implementation').status = 'skipped';
+  await assert.rejects(advanceBuilderJob({
+    supabase: { rpc: async name => name === 'builder_account_verifier_recoveries'
+      ? { data: 0, error: null } : { data: [], error: null } },
+    gateway: {}, jobId: 'job-1', context: {},
+    loadSnapshot: async () => state,
+    handlers: { backend: async () => { assert.fail('backend must not bypass the required frontend lane'); } },
+  }), /Required implementation lane recovery was not persisted: frontend_implementation/);
+});
+
 test('runtime planner advances security, optional review, and release in order', () => {
   assert.equal(planBuilderAction(snapshot('testing')).type, 'run_security_review');
   const review = snapshot('security_review');

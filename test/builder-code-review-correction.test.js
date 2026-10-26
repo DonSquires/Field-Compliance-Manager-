@@ -51,6 +51,31 @@ test('agentic correction receives the verified retained patch, not the completed
   assert.equal(result.patch_artifact.id, 'corrected');
 });
 
+test('a lane reopened by the correction authors from the pinned target; other missing or bad seeds still fail', async () => {
+  const frontend = { id: 'frontend-step', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer' };
+  const reopened = { ...job, code_review_revision: { ...revision, reopened_required_lanes: ['frontend_implementation'] } };
+  assert.equal(await loadCodeReviewSeed(db(), reopened, frontend), null);
+  assert.equal(await loadCodeReviewSeed(db(), reopened, { ...frontend, step_id: undefined }), null);
+  await assert.rejects(loadCodeReviewSeed(db(), job, frontend), /no seed/);
+  await assert.rejects(loadCodeReviewSeed(db({ checksum: '0'.repeat(64) }), reopened, step), /integrity/);
+  assert.equal((await loadCodeReviewSeed(db(), reopened, step)).artifact_id, 'old-patch');
+
+  let input;
+  const generate = agenticGenerator('frontend', { workspaceRoot: '/ws' }, {
+    runEngineer: async value => { input = value; return { ok: true, patch_artifact: { id: 'fresh-frontend' } }; },
+  });
+  const result = await generate({ supabase: db(), job: reopened, step: frontend });
+  assert.equal(input.seedPatch, null);
+  assert.deepEqual(input.job.code_review_revision.reopened_required_lanes, ['frontend_implementation']);
+  assert.equal(result.patch_artifact.id, 'fresh-frontend');
+  assert.match(JSON.parse(taskPacket({ job: reopened, lane: 'frontend' })).reopened_required_lane, /no previous change in this lane/);
+  assert.equal(JSON.parse(taskPacket({ job: reopened, lane: 'backend' })).reopened_required_lane, undefined);
+  assert.equal(JSON.parse(taskPacket({ job, lane: 'frontend' })).reopened_required_lane, undefined);
+  await assert.rejects(agenticGenerator('frontend', { workspaceRoot: '/ws' }, {
+    runEngineer: async () => ({ ok: true }),
+  })({ supabase: db(), job, step: frontend }), /no seed/);
+});
+
 test('superseded implementation runs cannot enter fresh security, review or release evidence', () => {
   const state = {
     job: { id: 'job', status: 'implementation_pending' },

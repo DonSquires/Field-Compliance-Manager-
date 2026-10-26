@@ -105,6 +105,47 @@ The governed release subsequently completed at
 the durable pointer advanced, Atlas refreshed and the live catalog matched.
 A fresh production login explicitly confirmed `Approve` was disabled.
 
+The first owner-confirmed implementation correction after that release exposed
+a separate same-job routing defect. Production showed both implementation
+lanes required, but the frontend step remained `skipped`; the coordinator then
+selected backend authoring, whose lane guard correctly refused the approved
+frontend files. The whole-job gate blocked all six outcomes, and the proposed
+replacement contained no changed files or acceptance tests. Direct source and
+live evidence showed the original failed turn's same-message receipt and error
+were already persisted, so this repair can remain within the approved UI/test
+scope.
+
+The correction RPC currently preserves skipped implementation steps. The
+follow-up therefore adds a service-only, idempotent recovery before planning:
+only a required lane skipped on the same job after a confirmed human
+implementation correction is returned to pending. Optional skipped lanes and
+attempt counts remain unchanged. The coordinator reloads durable state before
+choosing an author. Because production showed the frontend was originally
+skipped through the cross-lane no-change path, reopening alone could repeat the
+same skip. Both the shared JS skip helper and `builder_skip_implementation_step`
+now refuse to skip a lane listed in the current correction's
+`reopened_required_lanes`; an honest no-change instead parks as a
+non-retryable generation failure that names the reopened-lane rule for human
+direction. A real PostgreSQL mutation check failed when that SQL guard was
+removed. Because a skipped lane never produced a reviewed patch, the correction
+has no `seed_patch_ids` entry for it; `loadCodeReviewSeed()` now returns no seed
+only for a lane in `reopened_required_lanes`, so that author starts from the
+pinned target while every other missing, foreign or corrupt seed still fails.
+This is not approval or a scope change; the normal whole-job
+acceptance and human-review gates still apply. The original job remains
+unapproved and must be corrected and independently verified again after this
+routing fix is released.
+
+Review of #251 found that the bounded snapshot projection could keep
+`passed:true` after replacing a missing requirement ID with `null` or truncating
+duplicate/overlong IDs into a misleading covered row. SQL approval still blocked
+that receipt, but the UI could have offered Approve. Both the control-room
+projection and `acceptanceCoverage()` now treat a passing receipt as supplied
+only when every requirement ID is a nonblank, unique string of at most 100
+characters, matching the bound the projection displays. Projection-to-parser
+tests cover missing, blank, non-string, duplicate, overlong and
+truncation-collision IDs; removing either guard fails them.
+
 Recovery release evidence: #244 and generated-catalog #246 deployed as
 `a15f081019f7afff54250fd2b14f4669a0b6e3e8`, with healthy runtime, matching
 schema, refreshed Atlas, successful production Vercel and all three main CI

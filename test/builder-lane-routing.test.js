@@ -34,6 +34,25 @@ test('explicit sibling routing and the observed protected-lane response reach th
   assert.equal(crossLaneNoChange({ no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx' }, 'backend_engineer'), true);
 });
 
+test('a required lane reopened by a confirmed correction cannot be skipped again and parks for human direction', async () => {
+  const { recordGenerationFailure } = require('../builder-generation-failure');
+  const calls = [];
+  const job = { id: 'job', code_review_revision: { approval_id: 'review', reopened_required_lanes: ['frontend_implementation'] } };
+  const input = { job, step: { id: 'front', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer' },
+    siblingCompleted: true, supabase: { rpc: async (name, args) => { calls.push({ name, args }); return { error: null }; } } };
+  const generation = { no_change: true, no_change_lane: 'backend', no_change_file: 'builder-chat-session.js', error: 'The fix belongs in builder-chat-session.js' };
+  assert.equal(await skipLaneWithNothingToDo(input, generation), false);
+  assert.equal(await skipLaneWithNothingToDo({ ...input, step: { id: 'front', builder_mode: 'frontend_engineer' } }, generation), false);
+  await recordGenerationFailure(input, generation, 'generation');
+  assert.deepEqual(calls.map(call => call.name), ['builder_record_generation_failure']);
+  assert.equal(calls[0].args._retryable, false);
+  assert.match(calls[0].args._reason, /^generation: Required lane reopened by the confirmed correction cannot be skipped; human direction is required\. Author: The fix belongs/);
+
+  const backend = { ...input, step: { id: 'back', step_id: 'backend_implementation', builder_mode: 'backend_engineer' } };
+  assert.equal(await skipLaneWithNothingToDo(backend, { no_change: true, no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx', error: 'web only' }), true);
+  assert.equal(calls.at(-1).name, 'builder_skip_implementation_step');
+});
+
 test('retained recovery seed is freshly verified before frontend completion; verification failure cannot skip', async () => {
   const { runFrontendImplementation } = require('../builder-frontend-orchestrator');
   for (const success of [true, false]) {

@@ -439,7 +439,28 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
 async function advanceBuilderJob({ supabase, gateway, jobId, context, handlers, loadSnapshot = loadBuilderRuntimeSnapshot }) {
   await recoverExpiredWorkerRuns(supabase);
   await accountVerifierRecoveries(supabase, jobId);
-  const snapshot = await loadSnapshot(supabase, jobId);
+  let snapshot = await loadSnapshot(supabase, jobId);
+  const correction = snapshot.job.code_review_revision;
+  const requiredSkippedIds = snapshot.steps.filter(step =>
+    step.status === 'skipped' && (
+      (step.step_id === 'frontend_implementation' && snapshot.job.frontend_required === true)
+      || (step.step_id === 'backend_implementation' && snapshot.job.backend_required === true)
+    )).map(step => step.step_id);
+  if (snapshot.job.status === 'implementation_pending' && correction?.approval_id
+    && !Array.isArray(correction.reopened_required_lanes) && requiredSkippedIds.length) {
+    if (!supabase || typeof supabase.rpc !== 'function') {
+      throw new Error('Required implementation lanes cannot be recovered without the Builder service client');
+    }
+    const { error } = await supabase.rpc('builder_reopen_required_implementation_lanes', { _job_id: jobId });
+    if (error) throw new Error(`Required implementation lanes could not be reopened: ${error.message}`);
+    const reopenedSnapshot = await loadSnapshot(supabase, jobId);
+    const stillSkipped = requiredSkippedIds.filter(stepId =>
+      reopenedSnapshot.steps.find(step => step.step_id === stepId)?.status !== 'pending');
+    if (stillSkipped.length) {
+      throw new Error(`Required implementation lane recovery was not persisted: ${stillSkipped.join(', ')}`);
+    }
+    snapshot = reopenedSnapshot;
+  }
   const action = planBuilderAction(snapshot);
   if (snapshot.job.status === 'security_review' && byStep(snapshot, 'code_review')?.status === 'blocked') {
     const report = await (handlers?.acceptance || checkImplementationAcceptance)({ supabase, snapshot });

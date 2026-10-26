@@ -26,7 +26,7 @@ const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/f
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
-const { crossLaneNoChange } = require('./builder-generation-failure');
+const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generation-failure');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
 const PROMPT_VERSION = 'agentic-engineer-v15';
@@ -303,6 +303,9 @@ function taskPacket(input) {
     lane,
     approved_product_specification: specification ?? null,
     confirmed_code_review_corrections: job.code_review_revision ?? undefined,
+    reopened_required_lane: !seeded && reopenedRequiredLane(job, { step_id: `${lane}_implementation` })
+      ? 'The owner\'s confirmed correction reopened this required lane after an earlier attempt skipped it as another lane\'s work. There is no previous change in this lane: build this lane\'s share of the approved delivery requirements from the pinned target, with tests. Answering that the work belongs to another lane or that nothing needs to change is not accepted and parks the job for the owner.'
+      : undefined,
     ui_design_plan: lane === 'frontend' ? uxPlan ?? null : undefined,
     repository_build_map: repositoryContext ?? null,
     live_context: liveContext ?? null,
