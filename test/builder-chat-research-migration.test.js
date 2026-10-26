@@ -10,6 +10,8 @@ const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/2
 const pmMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025170000_builder_chat_cloud_pm.sql'), 'utf8');
 const memoryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025171000_builder_chat_self_memory.sql'), 'utf8');
 
+if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-chat-revision-migration.test');
+
 test('PM RPC adds immutable purpose/summary approval without exposing browser write grants', () => {
   assert.match(pmMigration, /p_purpose NOT IN \('pm', 'qa', 'technical_review'\)/);
   assert.match(pmMigration, /char_length\(p_evidence_summary\) > 6000/);

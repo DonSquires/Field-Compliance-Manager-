@@ -138,3 +138,50 @@ test('PM investigation card requires owner confirmation and retains a persisted 
     expect(effects).toEqual(['reserve', 'create', 'record']);
     expect(errors).toEqual([]);
 });
+
+test('existing-job revision needs confirmation, never creates another job and survives reload', async ({ page, isMobile }) => {
+  const errors = monitorBrowserErrors(page);
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  const cardId = '77777777-7777-4777-8777-777777777777';
+  const receipt = '88888888-8888-4888-8888-888888888888';
+  let confirmed = 0;
+  await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: THREAD }] }));
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/rest/v1/builder_chat_messages*', route => route.fulfill({ json: [{
+    id: 'review-message', seq: 1, thread_id: THREAD, role: 'owner', kind: 'message', status: 'done',
+    content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z', payload: {},
+  }, {
+    id: cardId, seq: 2, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
+    content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z',
+    payload: { message_id: 'review-message', revision: { job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
+      ...(confirmed ? { revision_receipt: receipt } : {}) },
+  }] }));
+  await page.route('**/rest/v1/rpc/builder_chat_request_spec_revision', route => {
+    expect(route.request().postDataJSON()).toEqual({ p_message_id: cardId });
+    confirmed++;
+    return route.fulfill({ json: receipt });
+  });
+  await page.route('**/functions/v1/bob-builder-control-room', route => {
+    expect(route.request().postDataJSON().action).not.toBe('create');
+    return route.fulfill({ json: { projects: [], jobs: [] } });
+  });
+  const open = async () => {
+    await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+    if (isMobile) await page.getByRole('button', { name: 'Bob Builder', exact: true }).click();
+    return page.getByRole('region', { name: 'Bob Builder chat', exact: true });
+  };
+  await signInAsAdmin(page, '/admin/builder');
+  const chat = await open();
+  await expect(chat.getByText('Revise specification before implementation')).toBeVisible();
+  expect(confirmed).toBe(0);
+  await expect(chat.getByRole('button', { name: 'Create job', exact: true })).toHaveCount(0);
+  await chat.getByRole('button', { name: 'Request specification revision', exact: true }).click();
+  await expect(chat.getByText(`Revision requested · Receipt: ${receipt}`)).toBeVisible();
+  await page.reload();
+  const restored = await open();
+  await expect(restored.getByText(`Revision requested · Receipt: ${receipt}`)).toBeVisible();
+  await expect(restored.getByRole('button', { name: 'Request specification revision', exact: true })).toHaveCount(0);
+  expect(await restored.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(confirmed).toBe(1);
+  expect(errors).toEqual([]);
+});

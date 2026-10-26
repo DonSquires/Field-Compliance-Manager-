@@ -75,6 +75,18 @@ entries privately in the owner UI. Selecting an excerpt copies it to the
 reviewed summary and invalidates packet approval; nothing is automatically
 sent to cloud, promoted to knowledge or copied from tenant conversation.
 
+PM specification-revision follow-up (2026-10-26): the cloud model supplies
+only a job UUID from the approved packet and bounded feedback. A server-side
+read verifies the accepted handoff in the same thread and pins its pending
+specification approval/target; no private specification or job history is
+returned to cloud. The original approved human message is attached verbatim.
+An authenticated owner confirms the card via
+`builder_chat_request_spec_revision`; service-role and anonymous execution
+are not granted. That transaction records a replay-safe audit receipt,
+supersedes the reviewed artifact, cancels the old pending approval and
+returns the same idle job to analysis. It cannot approve implementation,
+change the immutable task/target, reset attempt counts or create a new job.
+
 ### Builder chat public research (owner decision, 2026-10-25)
 
 Builder chat's explicit public-research mode uses only server-side Ollama Cloud

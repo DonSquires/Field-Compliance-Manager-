@@ -74,6 +74,22 @@ engineering implementation does not waive the source-inspected repair-plan
 gate or authorize private material to cloud. Vibe dispatch is not connected by
 this slice; independent QA remains advisory.
 
+**Same-job review feedback implementation, 2026-10-26:** the UI acceptance
+test exposed that creating a job did not let PM Chat coordinate its revision.
+The native `request_builder_spec_revision` prepares a confirmation card for an
+accepted handoff in the same chat thread, bound to the current pending
+specification approval and pinned target. Owner confirmation records an audit
+receipt, cancels that pending approval without approving implementation,
+marks the reviewed artifact superseded (retaining its content), and returns
+the same job's analyst step to pending with review feedback. The immutable
+original task, job identity, target, attempt count and later gates remain.
+Only idle initial specification review is supported; moved gates, running work
+and unrelated jobs are refused explicitly. Repeating confirmation returns the
+same receipt, not another job or reset. The analyst receives the confirmed
+feedback as reported review, not a source-verified diagnosis. This is a narrow
+engineering continuation of the existing connected-delivery direction, not a
+new right to approve, merge, deploy or transfer private evidence to cloud.
+
 Governed handoff and live acceptance remain separate delivery gates. The isolated
 cloud packet is an interim transport/reasoning slice, not the PM's target
 capability ceiling. It must not be presented as complete autonomous investigation

@@ -763,6 +763,12 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
         payload: { message_id: message.id, proposal: outcome.proposal, research: outcome.research, main_head: checkout.head || null },
       });
     }
+    if (outcome.revision) {
+      await store.post(thread.id, {
+        role: 'bob', kind: 'proposal', content: outcome.revision.feedback,
+        payload: { message_id: message.id, revision: outcome.revision, research: outcome.research },
+      });
+    }
     await store.post(thread.id, { role: 'bob', kind: outcome.error ? 'error' : 'message', content: outcome.reply, payload: { message_id: message.id, model: outcome.model || null, research: outcome.research } });
     await store.complete(message.id, outcome.error ? 'failed' : 'done');
     await store.updateThread(thread.id, { status: 'open' });

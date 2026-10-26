@@ -39,6 +39,56 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Same-job specification feedback (2026-10-26)
+
+PR #234 deployed as `637775a1`; actual UI message
+`38b4ae77-764d-480b-9488-4b10ea6a6e5d` produced a Bob-authored investigation.
+Owner UI confirmation created job `d29aaf78-8bb1-4d87-9913-9705dd8767fa`
+with a persisted receipt and pinned revision. This proves handoff, not repair.
+Builder reached specification review after rejected local and cloud output and
+an accepted paid-model result; Builder's routing was unchanged by Chat's fixed
+cloud policy. The specification treated a legacy send-path Atlas lead as a
+required fix while leaving the actual failure path unresolved. It was not
+approved by the supervising engineer at that observation. Its empty
+`research_evidence` array is NOT itself proof of absent
+source inspection: that field represents public-web citations.
+
+Follow-up observation, 2026-10-26: the job subsequently advanced through its
+existing autopilot policy. Its audit records a bot clearing specification
+review at `08:06:35Z` on the requester's standing chat instruction; this is not
+a new human approval. The production UI and scoped records show product
+analysis, UI design and frontend implementation completed, with backend
+authoring active and no deployment receipt. The frontend worker's verified
+manifest names only `BuilderResearchComposer.tsx` and its test so far; that
+does not establish a repair of the reported late-answer failure.
+
+The new revision path is deliberately restricted to pending, idle initial
+specification review. It must reject this now-advanced job rather than rewind
+approved execution. Its successful live revision acceptance on this original
+job is therefore no longer available; completed-job feedback and later-stage
+coordination remain separate gaps. Continue following the existing execution
+and its review/release evidence without creating a duplicate or claiming repair.
+
+UI review request `0aee4d07-4d9f-43df-aa21-01fde105e561` exposed the next gap:
+PM could draft review text but could not deliver it to the existing job.
+Connect a native same-thread specification-revision card to an authenticated
+owner confirmation RPC, retaining job identity and immutable task. Bind the
+pending approval and target, preserve superseded artifacts and audit history,
+keep attempts, reject active/later-stage work, and consume confirmed feedback
+in the analyst's next prompt. No new job or implementation approval is created.
+Confirmation waits for its originating PM turn to finish; a failed turn calls
+for a fresh card. Separately bounded revision feedback survives all 100
+supported ordinary constraints. Untouched scope-skipped steps are allowed,
+but started/completed downstream work still blocks a rewind. Disposable
+PostgreSQL checks cover fullstack, frontend-only and backend-only initial
+layouts; UI regression checks cover card-before-source-completion ordering.
+Acceptance requires real PostgreSQL authorization/state/replay tests, native
+tool and UI tests, responsive confirmation/receipt reload tests, protected
+release, then actual UI feedback on an eligible initial-review job. The
+original job now permits only moved-gate refusal testing, not successful
+revision acceptance. Regenerating a
+specification does not prove its evidence or the repair is adequate.
+
 ### PM investigation handoff follow-up (2026-10-25)
 
 Production UI test: a simple partial-success error report produced an advisory
