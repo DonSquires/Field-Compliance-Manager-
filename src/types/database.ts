@@ -4499,6 +4499,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -4547,6 +4548,7 @@ export type Database = {
           branch_name?: string | null
           code_review_artifact_id?: string | null
           code_review_mode?: string
+          code_review_revision?: Json | null
           code_review_status?: string
           created_at?: string
           created_by?: string | null
@@ -4595,6 +4597,7 @@ export type Database = {
           branch_name?: string | null
           code_review_artifact_id?: string | null
           code_review_mode?: string
+          code_review_revision?: Json | null
           code_review_status?: string
           created_at?: string
           created_by?: string | null
@@ -35908,6 +35911,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -35997,6 +36001,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36054,6 +36059,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36129,6 +36135,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36186,6 +36193,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36243,6 +36251,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36304,6 +36313,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36361,6 +36371,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36422,6 +36433,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36479,6 +36491,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36560,6 +36573,10 @@ export type Database = {
           p_memory_type?: string
           p_message_id: string
         }
+        Returns: string
+      }
+      builder_chat_request_code_changes: {
+        Args: { p_message_id: string }
         Returns: string
       }
       builder_chat_request_spec_revision: {
@@ -36700,6 +36717,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36832,6 +36850,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36889,6 +36908,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -36955,6 +36975,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37019,6 +37040,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37088,6 +37110,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37159,6 +37182,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37216,6 +37240,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37273,6 +37298,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37371,6 +37397,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37434,6 +37461,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37499,6 +37527,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37577,6 +37606,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37671,6 +37701,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37732,6 +37763,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37789,6 +37821,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -37850,6 +37883,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -38142,6 +38176,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -38204,6 +38239,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -38261,6 +38297,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
@@ -38323,6 +38360,7 @@ export type Database = {
           branch_name: string | null
           code_review_artifact_id: string | null
           code_review_mode: string
+          code_review_revision: Json | null
           code_review_status: string
           created_at: string
           created_by: string | null
