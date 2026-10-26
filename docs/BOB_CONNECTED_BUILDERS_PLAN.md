@@ -49,8 +49,25 @@ Builder reached specification review after rejected local and cloud output and
 an accepted paid-model result; Builder's routing was unchanged by Chat's fixed
 cloud policy. The specification treated a legacy send-path Atlas lead as a
 required fix while leaving the actual failure path unresolved. It was not
-approved. Its empty `research_evidence` array is NOT itself proof of absent
+approved by the supervising engineer at that observation. Its empty
+`research_evidence` array is NOT itself proof of absent
 source inspection: that field represents public-web citations.
+
+Follow-up observation, 2026-10-26: the job subsequently advanced through its
+existing autopilot policy. Its audit records a bot clearing specification
+review at `08:06:35Z` on the requester's standing chat instruction; this is not
+a new human approval. The production UI and scoped records show product
+analysis, UI design and frontend implementation completed, with backend
+authoring active and no deployment receipt. The frontend worker's verified
+manifest names only `BuilderResearchComposer.tsx` and its test so far; that
+does not establish a repair of the reported late-answer failure.
+
+The new revision path is deliberately restricted to pending, idle initial
+specification review. It must reject this now-advanced job rather than rewind
+approved execution. Its successful live revision acceptance on this original
+job is therefore no longer available; completed-job feedback and later-stage
+coordination remain separate gaps. Continue following the existing execution
+and its review/release evidence without creating a duplicate or claiming repair.
 
 UI review request `0aee4d07-4d9f-43df-aa21-01fde105e561` exposed the next gap:
 PM could draft review text but could not deliver it to the existing job.
