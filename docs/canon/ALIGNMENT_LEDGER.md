@@ -504,17 +504,20 @@ NZTA checks for the historical import:
   users with `can_access_vehicle_owner_identity`; ambiguous or unread evidence
   remains held rather than being promoted into canonical records.
 
-**Owner matching (migration `20261101100000`).** A shared plate and family name
-is not enough to attribute a notice to the registered owner: a family member
-named on the notice is a different person. The notice's family name must be the
+**Owner matching (migration `20261101100000`).** A notice whose plate is on
+file is attributed to the vehicle's registered owner at the notice date only
+when the names agree; a shared family name alone does not attribute a named
+family member's notice to the owner. The notice's family name must be the
 owner's family name (the last word of two or more letters on both sides, titles
-stripped), and the notice's first given name must equal the owner's first given
-name, be its initial or share a 3+ letter prefix with it, or exactly equal one
-of the owner's middle names. Names carrying a generational suffix (Jr, Sr, II
-to IV) are never matched to the owner. Anything else falls through to a unique
-exact-name match, then to a person verified by the notice itself, linked to the
-vehicle as an associated person; genuine spelling duplicates are joined with the
-governed Merge records action.
+stripped). When the notice also gives a given name, its first given name must
+equal the owner's first given name, be its initial or share a 3+ letter prefix
+with it, or exactly equal one of the owner's middle names; a notice that names
+only a surname (for example "Mr Alder") still resolves to the registered owner
+with that family name. Names carrying a generational suffix (Jr, Sr, II to IV)
+are never matched to the owner. A notice that fails these checks falls through
+to a unique exact-name match, then to a person verified by the notice itself,
+linked to the vehicle as an associated person; genuine spelling duplicates are
+joined with the governed Merge records action.
 
 **Live state (verified read-only 2026-10-27).** Migrations `20261031090000`,
 `20261031100000`, `20261031110000` and `20261101100000` are applied and
