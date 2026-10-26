@@ -1,0 +1,74 @@
+.person-search-page { display: grid; gap: 16px; }
+
+.person-search-register { display: grid; gap: 8px; }
+.person-search-register-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.person-search-register-head h2 { margin: 0; font-size: 16px; }
+
+.person-search-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.person-search-form input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 15px;
+}
+
+.person-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.person-search-result {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary, #fff);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.person-search-result span { font-size: 13px; color: var(--color-text-secondary); }
+.person-search-result.has-notice { border-left: 4px solid var(--color-danger, #dc2626); }
+.person-search-result.is-selected { outline: 2px solid var(--color-primary, #3b82f6); outline-offset: 1px; }
+.person-search-result:focus-visible { outline: 2px solid var(--color-primary, #3b82f6); outline-offset: 2px; }
+
+.person-search-profile { display: grid; gap: 16px; }
+.person-search-profile h2, .person-search-profile h3 { margin: 0 0 8px; }
+.person-search-profile h3 { font-size: 15px; }
+.person-search-profile p { margin: 4px 0; }
+
+.person-notice-list, .person-vehicle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.person-notice {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+}
+.person-notice > div { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
+.person-notice p { font-size: 13px; color: var(--color-text-secondary); }
+.person-notice.is-in_force { border-left: 4px solid var(--color-danger, #dc2626); }
+.person-notice.is-expiring_soon { border-left: 4px solid var(--color-warning, #d97706); }
+.person-notice.is-expired { border-left: 4px solid var(--color-text-secondary, #6b7280); }
+
+.person-notice-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  color: var(--color-text-secondary, #6b7280);
+}
+.person-notice-badge.is-in_force { color: var(--color-danger, #dc2626); }
+.person-notice-badge.is-expiring_soon { color: var(--color-warning, #b45309); }
+
+.person-vehicle-plate { font-family: var(--font-mono); }

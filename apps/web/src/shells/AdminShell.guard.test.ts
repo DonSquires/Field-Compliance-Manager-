@@ -106,9 +106,11 @@ describe('AdminShell access and routing boundaries', () => {
   });
 
   it('uses the same module entitlement for direct routes, desktop and mobile navigation, and shortcuts', () => {
-    expect(source).toContain('canAccessFieldOpsArea(requestedArea, moduleCheck)');
+    expect(source).toContain('canAccessFieldOpsArea(requestedArea, moduleCheck, profile?.role)');
     expect(source).toContain('(!item.area || isFieldOpsAreaEnabled(item.area))');
     expect(source).toContain("isFieldOpsAreaEnabled('vehicle-search')");
+    expect(source).toContain("isFieldOpsAreaEnabled('person-search')");
+    expect(source).toContain("case 'person-search':");
     expect(source).toContain('.filter((tab) => isPageEnabled(tab.id as AdminPage))');
   });
 

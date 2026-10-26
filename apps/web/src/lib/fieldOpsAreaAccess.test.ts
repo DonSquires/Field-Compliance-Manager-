@@ -10,6 +10,14 @@ describe('Field Operations area entitlement', () => {
     expect(canAccessFieldOpsArea('officer-activity', () => false)).toBe(true);
   });
 
+  it('restricts person search to operations roles', () => {
+    for (const role of ['grand_master', 'master', 'admin', 'admin_officer']) {
+      expect(canAccessFieldOpsArea('person-search', () => true, role)).toBe(true);
+    }
+    expect(canAccessFieldOpsArea('person-search', () => true, 'officer')).toBe(false);
+    expect(canAccessFieldOpsArea('person-search', () => true)).toBe(false);
+  });
+
   it('allows a workspace when any supported module is enabled', () => {
     expect(canAccessFieldOpsArea('patrol', (moduleKey) => moduleKey === 'static_guarding')).toBe(true);
     expect(canAccessFieldOpsArea('breach-review', (moduleKey) => moduleKey === 'parking_enforcement')).toBe(true);

@@ -49,6 +49,7 @@ import {
   Settings,
     Tags,
   Shield,
+  UserSearch,
   Users,
   Wrench,
   Gauge,
@@ -120,6 +121,7 @@ const LiveMapPage = React.lazy(() => import('../pages/LiveMapPage'));
 const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerActivityTimelinePage'));
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
+const PersonSearchPage = React.lazy(() => import('../pages/PersonSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
 const InvestigationPage = React.lazy(() => import('../pages/InvestigationPage'));
 const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
@@ -491,9 +493,9 @@ const AdminShell: React.FC = () => {
   }, []);
 
   const isFieldOpsAreaEnabled = useCallback((area: FieldOpsSubArea) => {
-    if (modulesStatus === 'loading') return area !== 'welfare-alerts';
-    return canAccessFieldOpsArea(area, isModuleEnabled);
-  }, [isModuleEnabled, modulesStatus]);
+    if (modulesStatus === 'loading') return area !== 'welfare-alerts' && canAccessFieldOpsArea(area, () => true, profile?.role);
+    return canAccessFieldOpsArea(area, isModuleEnabled, profile?.role);
+  }, [isModuleEnabled, modulesStatus, profile?.role]);
 
   useEffect(() => {
     // The module gate is evaluated only once the tenant's subscription state is known. While it is
@@ -516,7 +518,7 @@ const AdminShell: React.FC = () => {
     }
 
     if (redirectTarget) {
-      if (redirectTarget.fieldOpsSubArea && !canAccessFieldOpsArea(redirectTarget.fieldOpsSubArea, moduleCheck)) {
+      if (redirectTarget.fieldOpsSubArea && !canAccessFieldOpsArea(redirectTarget.fieldOpsSubArea, moduleCheck, profile?.role)) {
         const areaNotice = modulesStatus === 'error'
           ? deniedNotice
           : 'This operational area is not enabled for your current organisation.';
@@ -554,7 +556,7 @@ const AdminShell: React.FC = () => {
           if (requestedArea) navigate('/admin/field-ops', { replace: true });
           return;
         }
-        if (!canAccessFieldOpsArea(requestedArea, moduleCheck)) {
+        if (!canAccessFieldOpsArea(requestedArea, moduleCheck, profile?.role)) {
           const areaNotice = modulesStatus === 'error'
             ? deniedNotice
             : 'This operational area is not enabled for your current organisation.';
@@ -794,6 +796,8 @@ const AdminShell: React.FC = () => {
             return <BreachReviewPage />;
           case 'vehicle-search':
             return <VehicleSearchPage />;
+      case 'person-search':
+        return <PersonSearchPage />;
           case 'observation-search':
             return <ObservationSearchPage />;
           case 'field-reports':
@@ -970,6 +974,9 @@ const AdminShell: React.FC = () => {
               </button>}
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-shell-icon" onClick={() => openVehicleSearchPopout()} title="Open vehicle search in its own window" aria-label="Open vehicle search in its own window">
                 <ExternalLink size={17} aria-hidden="true" />
+              </button>}
+              {isFieldOpsAreaEnabled('person-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('person-search')} aria-label="Open person search">
+                <UserSearch size={17} aria-hidden="true" /><span>Person search</span>
               </button>}
               <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
