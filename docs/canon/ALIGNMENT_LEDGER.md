@@ -486,6 +486,29 @@ Rulings, and how the build honours them:
   check history remain additionally restricted by
   `can_access_vehicle_owner_identity`.
 
+### 2026-10-31 — Historical notice expiry and NZTA owner observations
+
+The owner confirmed the existing notice-expiry rules and the interpretation of
+NZTA checks for the historical import:
+
+- **Expiry.** Trespass and warning notices use an explicit register expiry
+  when one is recorded; otherwise they expire two years after issue. Permit
+  refusal and contact request letters remain correspondence and do not create
+  an entry restriction.
+- **Owner history.** NZTA source-check dates establish when an owner was
+  observed, not a legal transfer date. The latest source-time observation is
+  the current registered-owner link; earlier observations remain as previous
+  links. A shared-vehicle conflict may confirm the person evidence while
+  keeping conflicting mechanical vehicle facts pending review.
+- **Evidence boundary.** NZTA identity and owner metadata stay restricted to
+  users with `can_access_vehicle_owner_identity`; ambiguous or unread evidence
+  remains held rather than being promoted into canonical records.
+
+The import, history reconciliation, person-search display and focused SQL tests
+are prepared in migrations `20261031090000` and `20261031100000`. They remain
+pending release and live verification; this ruling does not claim that records
+have been imported or that the migrations are deployed.
+
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
 > "We should only have 1 person canonical record, 1 vehicle canonical record and

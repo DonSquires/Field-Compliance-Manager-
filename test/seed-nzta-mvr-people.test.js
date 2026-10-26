@@ -42,12 +42,14 @@ test('binds an upload to the cached screenshot digest and size', async () => {
   assert.equal(screenshotContentMatches(bytes, { ...expected, sha: '0'.repeat(64) }), false);
 });
 
-test('leaves shared-vehicle conflicts in the existing pending-review path', async () => {
+test('confirms the person on shared-vehicle conflicts while holding vehicle facts for review', async () => {
   const { screenshotsSql } = await load();
   const sql = screenshotsSql([], { dryRun: false });
   assert.equal((sql.match(/public\.review_nzta_mvr_identity_evidence/g) || []).length, 1);
-  assert.doesNotMatch(sql, /approved_vehicle_facts_held/);
-  assert.match(sql, /EXCEPTION WHEN OTHERS THEN\s+v_outcome := 'held_for_review'/);
+  assert.equal((sql.match(/public\.review_nzta_mvr_owner_evidence/g) || []).length, 3);
+  assert.match(sql, /EXCEPTION WHEN OTHERS THEN\s+IF SQLERRM IN \(/);
+  assert.match(sql, /v_outcome := 'owner_approved_vehicle_facts_pending'/);
+  assert.match(sql, /ELSE\s+RAISE;\s+END IF;/);
 });
 
 test('parses staff-typed screenshot names and rejects impossible dates', async () => {
@@ -132,4 +134,21 @@ test('apply payload runs screenshots oldest first and keeps PII out of person ke
   assert.match(storagePathFor('11111111-1111-4111-8111-111111111111', 'c'.repeat(64), '.png'),
     /^org\/e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13\/identity\/f1c00000-0000-4000-8000-000000000001\/submission-11111111-1111-4111-8111-111111111111\/nzta-c{16}\.png$/);
   assert.match(screenshotsSql([], { dryRun: true }), /IF NOT EXISTS \(SELECT 1 FROM storage\.objects WHERE bucket_id = 'identity-evidence' AND name = v_path\)/);
+});
+
+// Structural guard only; the authoritative check compiles these blocks on disposable PostgreSQL.
+function plpgsqlIfBalance(sql) {
+  const body = sql.split('DO $seed$').slice(1).map((part) => part.split('$seed$')[0]).join('\n');
+  const closes = (body.match(/\bEND IF;/g) || []).length;
+  const all = (body.match(/(?<![A-Z_])IF\b/g) || []).length;
+  return { opens: all - closes, closes };
+}
+
+test('generated seed PL/pgSQL closes every IF block', async () => {
+  const { peopleSql, screenshotsSql } = await load();
+  for (const sql of [peopleSql([]), screenshotsSql([], { dryRun: true }), screenshotsSql([], { dryRun: false })]) {
+    const { opens, closes } = plpgsqlIfBalance(sql);
+    assert.ok(opens > 0);
+    assert.equal(opens, closes);
+  }
 });

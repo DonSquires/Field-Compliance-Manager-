@@ -21,6 +21,8 @@ export interface PersonVehicle {
   colour: string | null;
   relationship: string | null;
   since: string | null;
+  source: string | null;
+  source_checked_at: string | null;
 }
 
 export interface PersonNzta {

@@ -25,6 +25,7 @@ export interface VehiclePersonLink {
   recorded_at: string;
   recorded_by_name: string | null;
   ended_at: string | null;
+  source_checked_at: string | null;
 }
 
 interface NztaCheck {
@@ -192,6 +193,7 @@ export const VehicleOwnerPanel: React.FC<{
       <div className="vehicle-owner__meta">{[link.phone, link.email].filter(Boolean).join(' · ') || 'No contact details recorded'}</div>
       <div className="vehicle-owner__meta">{link.address || link.locality || 'No address recorded'}</div>
       <small>{SOURCE_LABEL[link.source ?? ''] ?? 'Source not recorded'}{link.basis ? ` · ${link.basis}` : ''} · recorded {new Date(link.recorded_at).toLocaleDateString('en-NZ')} by {link.recorded_by_name ?? 'staff'}
+        {link.source_checked_at ? ` · NZTA observation ${new Date(link.source_checked_at).toLocaleDateString('en-NZ')} (not a transfer date)` : ''}
         {!observationId && link.observation_ids?.length ? ` · seen at ${link.observation_ids.length} sighting${link.observation_ids.length === 1 ? '' : 's'}` : ''}</small>
       {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
       <div className="vehicle-owner__actions">
@@ -229,7 +231,11 @@ export const VehicleOwnerPanel: React.FC<{
         ? <p>{observationId ? 'No one has been recorded at this sighting.' : 'No owner, driver or associated person recorded by your organisation.'}</p>
         : active.map(card)}
       {canView && past.length > 0 && <details><summary>Previous links ({past.length})</summary>
-        <ul>{past.map((link) => <li key={link.link_id}>{link.display_name ?? 'Unnamed person'} · {ROLE_LABEL[link.relationship]} · until {link.ended_at ? new Date(link.ended_at).toLocaleDateString('en-NZ') : '—'}{link.nzta_restricted ? ' · NZTA restricted' : ''}</li>)}</ul>
+        <ul>{past.map((link) => <li key={link.link_id}>{link.display_name ?? 'Unnamed person'} · {ROLE_LABEL[link.relationship]}
+          {link.source === 'nzta_mvr' && link.source_checked_at
+            ? ` · observed ${new Date(link.source_checked_at).toLocaleDateString('en-NZ')}; superseded by NZTA check ${link.ended_at ? new Date(link.ended_at).toLocaleDateString('en-NZ') : 'date unavailable'} (not transfer dates)`
+            : ` · until ${link.ended_at ? new Date(link.ended_at).toLocaleDateString('en-NZ') : '—'}`}
+          {link.nzta_restricted ? ' · NZTA restricted' : ''}</li>)}</ul>
       </details>}
       {checks.length > 0 && <details><summary>NZTA register checks ({checks.length})</summary>
         <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>

@@ -20,7 +20,10 @@ const person = (overrides: Record<string, unknown> = {}) => ({
     notice_number: 'T-1', status: 'issued', issued_at: '2025-11-01T00:00:00Z', expires_at: '2027-11-01T00:00:00Z',
     expiry_state: 'in_force', location_name: 'North Block',
   }],
-  vehicles: [{ canonical_vehicle_id: 'vehicle-1', plate_number: 'ABC123', make: 'Toyota', model: 'Hilux', colour: 'White', relationship: 'observed_with', since: null }],
+  vehicles: [{
+    canonical_vehicle_id: 'vehicle-1', plate_number: 'ABC123', make: 'Toyota', model: 'Hilux', colour: 'White',
+    relationship: 'observed_with', since: null, source: null, source_checked_at: null,
+  }],
   nzta_authorised: false,
   nzta: null,
   ...overrides,
@@ -49,7 +52,8 @@ describe('person search', () => {
     expect(rpc).toHaveBeenCalledWith('search_people', { p_query: 'Test Person', p_limit: 25 });
     expect(screen.getByTestId('safety').textContent).toBe('person-1');
     expect(screen.getByText('ABC123')).toBeTruthy();
-    expect(screen.queryByText(/NZTA register details/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'NZTA register details' })).toBeNull();
+    expect(screen.getByText(/NZTA register details are restricted/)).toBeTruthy();
   });
 
   it('only shows NZTA details to authorised users and validates short queries', async () => {
@@ -57,12 +61,13 @@ describe('person search', () => {
       ? { data: [], error: null }
       : { data: [person({ nzta_authorised: true, nzta: { address: '1 Example Road', last_checked_at: '2026-01-02T00:00:00Z', checks: [] } })], error: null });
     render(<PersonSearchPage />);
-    fireEvent.change(screen.getByLabelText('Name search'), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByText('Enter at least two letters or numbers of a name.')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Name search'), { target: { value: 'test' } });
+    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    expect(await screen.findByText('NZTA register details (restricted)')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'NZTA register details' })).toBeTruthy();
+    expect(screen.getByText(/lawful purposes/)).toBeTruthy();
     expect(screen.getByText(/1 Example Road/)).toBeTruthy();
   });
 
@@ -93,5 +98,51 @@ describe('person search', () => {
     expect(noticeTypeLabel('trespass')).toBe('Trespass notice');
     expect(noticeTypeLabel('permit_refusal')).toBe('Permit refusal letter');
     expect(noticeTypeLabel('contact_request')).toBe('Contact request letter');
+  });
+
+  it('filters matches and labels NZTA owner dates as observations, not transfer dates', async () => {
+    rpc.mockImplementation(async (name: string) => name === 'get_notice_expiry_register'
+      ? { data: [], error: null }
+      : { data: [
+        person({ vehicles: [{
+          canonical_vehicle_id: 'vehicle-1', plate_number: 'ABC123', make: 'Toyota', model: 'Hilux',
+          colour: 'White', relationship: 'registered_owner', since: '2025-01-01T00:00:00Z',
+          source: 'nzta_mvr', source_checked_at: '2026-01-02T00:00:00Z',
+        }] }),
+        person({
+          canonical_person_id: 'person-2',
+          display_name: 'Second Person',
+          notices: [],
+          vehicles: [],
+          has_notice_in_force: false,
+        }),
+      ], error: null });
+    render(<PersonSearchPage />);
+    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByRole('button', { name: /Second Person/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Linked vehicle/ }));
+    expect(screen.getByRole('button', { name: /Test Person/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Second Person/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Test Person/ }));
+    expect(await screen.findByText(/NZTA observation 02 Jan 2026 \(not a legal transfer date\)/)).toBeTruthy();
+  });
+
+  it('keeps the last successful expiry queue visible after a refresh failure', async () => {
+    const defaultRpc = rpc.getMockImplementation();
+    let registerCalls = 0;
+    rpc.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === 'get_notice_expiry_register') {
+        registerCalls += 1;
+        if (registerCalls > 1) return { data: null, error: { message: 'Unavailable' } };
+      }
+      return defaultRpc?.(name, args);
+    });
+    render(<PersonSearchPage />);
+    expect(await screen.findByText('Expiring soon')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh queue' }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByText('Test Person')).toBeTruthy();
+    expect(screen.getByText(/Showing the last successful results/)).toBeTruthy();
   });
 });
