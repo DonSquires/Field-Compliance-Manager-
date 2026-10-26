@@ -125,7 +125,7 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
   };
   return <fieldset className="bchat-research" disabled={busy}>
     <legend>{pmMode ? 'Cloud PM / QA' : 'Public cloud research'}</legend>
-    <p>{pmMode ? 'One purpose-assigned Ollama Cloud model, no VPS/laptop inference or automatic fallback. Chat investigates and prepares advisory briefs; Builder and Vibe implement.' : 'Ollama Cloud first, no metered providers.'} Only this approved packet; no previous chat, selected job or private repository context.</p>
+    <p>{pmMode ? 'One purpose-assigned Ollama Cloud model, no VPS/laptop inference or automatic fallback. Chat assesses reports and can prepare a Bob Builder investigation card for owner confirmation; Builder and Vibe implement.' : 'Ollama Cloud first, no metered providers.'} Only this approved packet; no previous chat, selected job or private repository context.</p>
     {pmMode && <>
       <label>Purpose and model<select value={purpose} onChange={event => { setPurpose(event.target.value); changed(); }}>
         <option value="pm">PM, investigation planning and visual review · Kimi K2.7 Code</option>
@@ -139,7 +139,7 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
         setEvidenceSummary(summary);
         changed();
       }} />
-      <small>Include only redacted facts you approve for cloud transfer, their provenance and unknowns. No sensitive source, tenant records, secrets or raw diagnostics. This is reported evidence, not independent verification. Handoff briefs do not create or start jobs.</small>
+      <small>Include only redacted facts you approve for cloud transfer, their provenance and unknowns. No sensitive source, tenant records, secrets or raw diagnostics. This is reported evidence, not independent verification. A written brief does not send work; confirm Create job on an investigation card to hand it to Bob Builder.</small>
       <small>Current stage: no automatic private evidence collection or conversation carry-over. The PM should identify the next authorized collection task, not ask you to diagnose code. The reviewed packet is the only context for this turn.</small>
     </>}
     <label><input type="checkbox" checked={webSearch} onChange={event => { setWebSearch(event.target.checked); changed(); }} /> Search the public web</label>

@@ -10,6 +10,8 @@ export interface BuilderChatProposal {
   frontend_required: boolean;
   backend_required: boolean;
   rationale?: string;
+  handoff_kind?: 'investigation';
+  source_message_id?: string;
 }
 
 export interface BuilderChatMessage {
@@ -41,7 +43,7 @@ const MESSAGE_FIELDS = 'id, seq, thread_id, role, kind, content, payload, status
 const STARTERS = [
   'How should we investigate an issue before handing it to a builder?',
   'Help me assess the reported blocker in my evidence summary.',
-  'Prepare an advisory Vibe handoff brief using my reviewed evidence.',
+  'Send this reported issue to Bob Builder for investigation and a fix.',
 ];
 
 function errorText(error: unknown): string {
@@ -84,7 +86,10 @@ export function chatContext(context: Record<string, unknown>): Record<string, st
 export function proposalFrom(message: BuilderChatMessage): BuilderChatProposal | null {
   const raw = message.payload.proposal as Partial<BuilderChatProposal> | undefined;
   if (!raw || typeof raw.title !== 'string' || typeof raw.task_description !== 'string') return null;
-  return { title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined };
+  return {
+    title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined,
+    ...(raw.handoff_kind === 'investigation' ? { handoff_kind: raw.handoff_kind, source_message_id: typeof raw.source_message_id === 'string' ? raw.source_message_id : undefined } : {}),
+  };
 }
 
 /**
@@ -136,11 +141,12 @@ function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingEl
   const scope = [proposal.frontend_required && 'Frontend', proposal.backend_required && 'Backend'].filter(Boolean).join(' + ');
   return (
     <article className="bchat-proposal" aria-label={`Proposed Builder job: ${proposal.title}`}>
-      <header><span>Proposed job · {scope}</span><h3>{proposal.title}</h3></header>
+      <header><span>{proposal.handoff_kind === 'investigation' ? 'Investigation handoff · Bob Builder' : 'Proposed job'} · {scope}</span><h3>{proposal.title}</h3></header>
+      {proposal.handoff_kind === 'investigation' && <p>Reported issue, not a verified repair plan. Builder must investigate and pass normal gates before implementing a fix.</p>}
       <p className="bchat-proposal__task">{proposal.task_description}</p>
       {proposal.rationale && <p className="bchat-proposal__why">{proposal.rationale}</p>}
       {jobId
-        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /> Job created{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
+        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Job created</span><span>Receipt: {jobId}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
         : <div className="bchat-proposal__actions"><span>{settings ? `Creates with: ${settings}. ` : ''}Nothing runs until you create it.</span><button type="button" onClick={onCreate} disabled={busy || creatingElsewhere} title={creatingElsewhere ? 'This job is being created from another tab or window' : undefined}>{busy || creatingElsewhere ? <Loader2 size={14} className="bchat-spin" /> : <Bot size={14} />} {creatingElsewhere ? 'Creating…' : 'Create job'}</button></div>}
     </article>
   );
@@ -302,7 +308,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
             {(access === 'checking' || loading) && <div className="bchat__state" role="status"><Loader2 size={16} className="bchat-spin" /> Loading Builder chat…</div>}
             {!loading && access === 'allowed' && items.length === 0 && (
               <div className="bchat__empty">
-                <p>Bob is your technical PM and QA lead. This cloud stage answers questions and reviews approved evidence; autonomous private investigation and connected builder handoff are not yet wired. Builder and Vibe do the implementation. Private history and selected-job context are not sent to cloud.</p>
+                <p>Bob is your technical PM and QA lead. He can assess your report and prepare a Bob Builder investigation handoff for you to confirm here. Builder investigates and implements through its normal gates; Vibe dispatch and automatic private collection are not connected here. Private history and selected-job context are not sent to cloud.</p>
                 <ul>{STARTERS.map(starter => <li key={starter}><button type="button" onClick={() => setDraft(starter)}>{starter}</button></li>)}</ul>
               </div>
             )}

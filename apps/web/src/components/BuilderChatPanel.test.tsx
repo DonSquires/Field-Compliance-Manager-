@@ -108,6 +108,20 @@ it('shows an accepted proposal as created with a way to open the job', async () 
   fireEvent.click(await screen.findByRole('button', { name: 'Open job' }));
   expect(onOpenJob).toHaveBeenCalledWith('job-9');
   expect(screen.queryByRole('button', { name: 'Create job' })).toBeNull();
+  expect(screen.getByText('Receipt: job-9')).toBeTruthy();
+});
+
+it('labels a PM investigation distinctly and retains the same confirmation and receipt path', async () => {
+  const proposal = { ...PROPOSAL, handoff_kind: 'investigation', source_message_id: 'owner-report' };
+  wire({ messages: [row('p', 2, 'bob', 'proposal', 'Investigate report', { proposal })] });
+  const onCreateJob = vi.fn(async () => 'investigation-job');
+  render(<BuilderChatPanel context={{}} onCreateJob={onCreateJob} />);
+  expect(await screen.findByText(/Investigation handoff · Bob Builder/)).toBeTruthy();
+  expect(screen.getByText(/Reported issue, not a verified repair plan/)).toBeTruthy();
+  expect(onCreateJob).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create job' }));
+  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_chat_record_job', { p_message_id: 'p', p_job_id: 'investigation-job' }));
+  expect(onCreateJob).toHaveBeenCalledWith(proposal);
 });
 
 it('surfaces a failed job creation instead of marking the proposal accepted', async () => {

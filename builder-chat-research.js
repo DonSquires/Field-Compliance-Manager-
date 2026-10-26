@@ -219,9 +219,21 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
           { role: 'user', content: JSON.stringify({ question: message.content, ...(pm ? { purpose: message.payload.pm_purpose, role: pm.label } : {}), sources }), ...(images.length ? { images } : {}) },
         ], options: { temperature: 0.1, num_predict: 3000 },
       };
-      const { result, memoryReceipts } = pm
-        ? await pmChatWithMemory({ api, request, supabase, message, post })
+      const { result, memoryReceipts, proposal } = pm
+        ? await pmChatWithMemory({ api, request, supabase, message, post, sources, allowHandoff: message.payload.pm_purpose !== 'qa' })
         : { result: await api('chat', request, 90_000), memoryReceipts: [] };
+      if (proposal) return {
+        proposal, model,
+        reply: 'I prepared an investigation handoff for Bob Builder. Confirm Create job on the card to send it through the existing governed workflow. No job exists yet. Builder must establish the cause and pass its normal gates before implementing a fix; this is not a verified repair plan.',
+        research: {
+          provider: 'ollama_cloud', policy_version: consent.policy_version, purpose: message.payload.pm_purpose,
+          model, prompt_version: PM_PROMPT_VERSION, history_withheld: true, fallback_allowed: false,
+          evidence_summary_sha256: consent.evidence_summary_sha256, memory_receipts: [],
+          sources: sources.map(({ content: _content, ...source }) => source), claims: [],
+          handoff_kind: 'investigation', source_message_id: message.id,
+          raw_documents_sent: false, raw_images_sent: images.length,
+        },
+      };
       let answer;
       const responseText = (result.message?.content || '').trim();
       if (pm && !sources.length) answer = { summary: responseText, claims: [] };

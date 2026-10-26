@@ -39,6 +39,38 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### PM investigation handoff follow-up (2026-10-25)
+
+Production UI test: a simple partial-success error report produced an advisory
+brief but no dispatched work; Bob explicitly reported no dispatch tool. The
+detailed diary-related report also failed the unreceipted-memory-claim guard;
+its generated text was not retained, so the exact guard failure remains unknown.
+
+Connect an optional native `propose_builder_investigation` tool to the existing
+proposal card, owner reservation, control-room Create job and recorded job ID.
+No parallel job system or service-role job creation is added. Match a report
+quote to the approved current packet; carry hypotheses, unknowns, focused
+investigation and acceptance checks, not fabricated source findings. Label this
+as an investigation, not a researched repair plan. Builder must independently
+check source/schema/Atlas/duplicate work and satisfy existing specification,
+review and release gates before fixing anything. The PM tool prepares a card;
+only owner confirmation creates work. Vibe dispatch and automatic private
+evidence collection remain unconnected.
+
+Acceptance gate: focused runtime/UI tests, desktop/mobile confirmation and
+receipt workflow, protected PR release, then a fresh actual user report through
+production UI. Bob must author the handoff, the owner must confirm it in the UI,
+and a persisted job ID must prove acceptance; a written brief is insufficient.
+Monitor Builder's outcome without supplying the repair solution or claiming a
+created job proves the fix.
+
+Review corrections: short report quotes require normalized whole-report
+equality below 15 characters, so a complete "Fix HTTP 500" is valid without
+accepting short fragments. Approved, checksum-validated extracted document
+text can supply the report quote; retain its source ID, attachment ID and hash
+in the handoff. Web text and model image observations are not user-report
+substitutes. No additional file or private context is loaded by this validation.
+
 ### Fixed cloud PM/QA packet slice (owner decision 2026-10-25)
 
 Builder Chat is the technical PM/investigator/QA lead, not the coding agent.

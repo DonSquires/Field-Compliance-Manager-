@@ -14,6 +14,7 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
     submissions.push(route.request().postDataJSON());
     await route.fulfill({ json: '44444444-4444-4444-8444-444444444444' });
   });
+
   const uploads: string[] = [];
   await page.route('**/storage/v1/object/bob-uploads/**', async route => {
     uploads.push(route.request().url());
@@ -69,4 +70,71 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
   await expect(input).toHaveValue('');
   await expect(approval).not.toBeChecked();
   expect(errors).toEqual([]);
+});
+
+test('PM investigation card requires owner confirmation and retains a persisted job receipt after reload', async ({ page, isMobile }) => {
+    const errors = monitorBrowserErrors(page);
+    await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+    const jobId = '55555555-5555-4555-8555-555555555555';
+    const proposalId = '66666666-6666-4666-8666-666666666666';
+    const proposal = {
+      title: 'Investigate: Partial-success feedback',
+      task_description: 'INVESTIGATION HANDOFF - not a source-verified repair plan. Inspect the reported partial-success feedback and safe retries using synthetic fixtures.',
+      frontend_required: true, backend_required: true, handoff_kind: 'investigation', source_message_id: 'owner-report',
+    };
+    let accepted = false;
+    const effects: string[] = [];
+    await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: THREAD }] }));
+    await page.route('**/rest/v1/builder_chat_messages*', route => route.fulfill({ json: [{
+      id: proposalId, seq: 1, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
+      content: proposal.title, created_at: '2026-10-25T00:00:00Z',
+      payload: { proposal, ...(accepted ? { job_id: jobId } : {}) },
+    }] }));
+    await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+    await page.route('**/rest/v1/rpc/builder_chat_reserve_proposal', route => {
+      effects.push('reserve');
+      expect(route.request().postDataJSON().p_message_id).toBe(proposalId);
+      return route.fulfill({ json: true });
+    });
+    await page.route('**/rest/v1/rpc/builder_chat_record_job', route => {
+      effects.push('record');
+      expect(route.request().postDataJSON()).toEqual({ p_message_id: proposalId, p_job_id: jobId });
+      accepted = true;
+      return route.fulfill({ json: null });
+    });
+    await page.route('**/functions/v1/bob-builder-control-room', route => {
+      const body = route.request().postDataJSON();
+      if (body.action === 'create') {
+        effects.push('create');
+        expect(body).toMatchObject({
+          task_description: proposal.task_description, frontend_required: true, backend_required: true,
+          requested_action: 'prepare_change', target_environment: 'development', target_sha: 'main',
+        });
+        return route.fulfill({ json: { job: { id: jobId } } });
+      }
+      if (body.action === 'list') return route.fulfill({ json: { projects: [{
+        id: 'test-project', organization_id: 'test-org', name: 'FCM fixture',
+      }], jobs: [] } });
+      return route.fulfill({ json: { job: null, steps: [], approvals: [], artifacts: [], events: [] } });
+    });
+    const open = async () => {
+      await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+      if (isMobile) await page.getByRole('button', { name: 'Bob Builder', exact: true }).click();
+      return page.getByRole('region', { name: 'Bob Builder chat', exact: true });
+    };
+    await signInAsAdmin(page, '/admin/builder');
+    const chat = await open();
+    await expect(chat.getByText(/Investigation handoff · Bob Builder/)).toBeVisible();
+    await expect(chat.getByText(/Reported issue, not a verified repair plan/)).toBeVisible();
+    expect(effects).toEqual([]);
+    expect(await chat.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await chat.getByRole('button', { name: 'Create job', exact: true }).click();
+    await expect.poll(() => effects).toEqual(['reserve', 'create', 'record']);
+    await page.reload();
+    const restored = await open();
+    await expect(restored.getByText(`Receipt: ${jobId}`, { exact: true })).toBeVisible();
+    await expect(restored.getByRole('button', { name: 'Create job', exact: true })).toHaveCount(0);
+    expect(await restored.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(effects).toEqual(['reserve', 'create', 'record']);
+    expect(errors).toEqual([]);
 });

@@ -35,7 +35,7 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
     if (endpoint === 'web_search') return Response.json({ results: searchResults || [{ url: SOURCE.url }] });
     if (body.model === failedModel) return new Response('', { status: 503 });
     const response = result(body);
-    return Response.json({ message: { content: typeof response === 'string' ? response : JSON.stringify(response) }, done_reason: doneReason });
+    return Response.json({ message: response?.tool_calls ? response : { content: typeof response === 'string' ? response : JSON.stringify(response) }, done_reason: doneReason });
   };
   return {
     calls, rows, fetchImpl,
@@ -313,4 +313,41 @@ test('normal PM dispatch bypasses private checkout, gateway, history and proposa
   assert.ok(!posted.some(row => row.kind === 'proposal'));
   assert.equal(posted.at(-1).payload.model, 'kimi-k2.7-code');
   assert.equal(posted.at(-1).payload.research.purpose, 'pm');
+});
+
+test('PM investigation handoff persists a confirmable card, not a dispatched job or fabricated repair', async () => {
+  const msg = pmMessage();
+  const f = fixture({ result: () => ({ content: '', tool_calls: [{ function: {
+    name: 'propose_builder_investigation',
+    arguments: {
+      title: 'Reported Compose behavior', report_quote: msg.content,
+      assessment: 'The reported configuration behavior needs investigation before selecting a repair.',
+      investigation_steps: ['Inspect the owning source and current schema path.', 'Reproduce the report using synthetic configuration.'],
+      acceptance_checks: ['Verify the expected configuration behavior after the fix.', 'Verify existing valid configuration remains supported.'],
+      unknowns: 'The cause and affected paths have not been independently checked.',
+      frontend_required: false, backend_required: true,
+    },
+  } }] }) });
+  const posted = [];
+  const completions = [];
+  const store = {
+    thread: async () => THREAD, updateThread: async () => {},
+    complete: async (...args) => completions.push(args),
+    post: async (_id, row) => posted.push(row),
+    history: async () => assert.fail('No private history'),
+  };
+  const outcome = await processBuilderChatMessage({ store, message: msg, deps: {
+    resolveHead: () => assert.fail('No private checkout'),
+    supabase: { rpc: () => assert.fail('No automatic job or diary write') },
+    research: { env: ENV, fetchImpl: f.fetchImpl },
+  } });
+  assert.equal(outcome.error, undefined);
+  const card = posted.find(row => row.kind === 'proposal');
+  assert.equal(card.payload.proposal.handoff_kind, 'investigation');
+  assert.equal(card.payload.proposal.source_message_id, msg.id);
+  assert.equal(card.payload.job_id, undefined);
+  assert.equal(card.payload.main_head, null);
+  assert.match(outcome.reply, /No job exists yet/);
+  assert.equal(f.calls.filter(call => call.url.endsWith('/chat')).length, 1);
+  assert.deepEqual(completions, [[msg.id, 'done']]);
 });
