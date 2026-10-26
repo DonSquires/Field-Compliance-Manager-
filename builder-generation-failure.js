@@ -32,8 +32,8 @@ function crossLaneNoChange(generation, mode) {
   const detail = reason.toLowerCase();
   if (!ownLane) return false;
   const sibling = ownLane === 'frontend' ? 'backend' : 'frontend';
-  const files = reason.match(/(?:[a-z0-9_.-]+\/)*[a-z0-9_.-]+\.(?:[cm]?[jt]sx?|sql|css|html)\b/gi) || [];
-  if (!files.some(file => laneAllows(sibling, file))) return false;
+  const files = (reason.match(/[^\s`"'<>()[\]{},;]+/g) || []).map(token => token.replace(/[.:!?]+$/, ''));
+  if (!files.some(file => /\.(?:[cm]?[jt]sx?|sql|css|html)$/.test(file) && laneAllows(sibling, file))) return false;
   if (ownLane && detail.includes('protected lane boundary:')) {
     return detail.includes(`(${sibling} lane)`) && detail.includes(`restricted to`)
       && detail.includes(`${ownLane} files`);

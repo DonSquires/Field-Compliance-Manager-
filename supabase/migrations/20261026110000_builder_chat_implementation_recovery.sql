@@ -67,7 +67,7 @@ BEGIN
     OR (SELECT count(*) FROM public.builder_job_steps WHERE job_id = v_job.id AND status = 'failed') <> 1
     OR EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = v_job.id AND status = 'running')
     OR EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = v_job.id
-      AND step_id IN ('frontend_implementation', 'backend_implementation') AND id <> v_step.id AND status NOT IN ('pending', 'skipped'))
+      AND step_id IN ('frontend_implementation', 'backend_implementation') AND id <> v_step.id AND status <> 'pending')
     OR EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = v_job.id
       AND step_id IN ('test_suite', 'security_review', 'code_review', 'release_prep')
       AND (status <> 'pending' OR started_at IS NOT NULL OR completed_at IS NOT NULL))
@@ -111,3 +111,20 @@ END;
 $$;
 REVOKE EXECUTE ON FUNCTION public.builder_chat_recover_implementation(uuid) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.builder_chat_recover_implementation(uuid) TO authenticated;
+
+DO $patch$
+DECLARE
+  v_definition text := pg_get_functiondef('public.builder_skip_implementation_step(uuid,uuid,text,text)'::regprocedure);
+  v_anchor text := '_next_status := CASE';
+  v_replacement text := 'IF _reason LIKE ''Nothing to change in this lane; author evidence says%'' AND NOT EXISTS (
+    SELECT 1 FROM public.builder_job_steps WHERE job_id = _job_id
+      AND builder_mode = _sibling_mode AND status IN (''pending'', ''completed'')
+  ) THEN RAISE EXCEPTION ''Destination implementation lane is unavailable; explicit scope authorization is required''; END IF;
+  _next_status := CASE';
+BEGIN
+  IF length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) THEN
+    RAISE EXCEPTION 'Implementation skip changed; review destination-state guard before applying';
+  END IF;
+  EXECUTE replace(v_definition, v_anchor, v_replacement);
+END;
+$patch$;

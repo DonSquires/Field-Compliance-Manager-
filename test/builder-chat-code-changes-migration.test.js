@@ -8,6 +8,8 @@ const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026101500_builder_chat_code_changes.sql'), 'utf8');
 const cycleMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026103000_builder_correction_verification_cycles.sql'), 'utf8');
 const recoveryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026110000_builder_chat_implementation_recovery.sql'), 'utf8');
+const skipSql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260830181000_builder_implementation_skip.sql'), 'utf8');
+const skipFunction = skipSql.slice(skipSql.indexOf('CREATE OR REPLACE FUNCTION'), skipSql.indexOf('$$;') + 3);
 
 test('code corrections preserve immutable task/target/attempts and have owner-only execution', () => {
   assert.match(migration, /builder_chat_require_owner/);
@@ -73,6 +75,9 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       PERFORM expect_error(command,'changed or is published'); UPDATE builder_jobs SET updated_at=now() WHERE id=job_id;
       UPDATE builder_job_steps SET error='repair: verification failed' WHERE id=step_id;
       PERFORM expect_error(command,'idle author failure'); UPDATE builder_job_steps SET error='generation: lane boundary' WHERE id=step_id;
+      UPDATE builder_job_steps b SET status='skipped' WHERE b.job_id=job_id AND b.step_id='backend_implementation';
+      PERFORM expect_error(command,'idle author failure');
+      UPDATE builder_job_steps b SET status='pending' WHERE b.job_id=job_id AND b.step_id='backend_implementation';
       INSERT INTO builder_model_runs(job_id,status) VALUES(job_id,'running'); PERFORM expect_error(command,'idle author failure');
       DELETE FROM builder_model_runs WHERE builder_model_runs.job_id=job_id AND status='running';
       INSERT INTO builder_worker_runs(job_id,status) VALUES(job_id,'running'); PERFORM expect_error(command,'idle author failure');
@@ -102,6 +107,31 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         OR has_function_privilege('service_role','builder_chat_recover_implementation(uuid)','EXECUTE')
         OR NOT has_function_privilege('authenticated','builder_chat_recover_implementation(uuid)','EXECUTE')
         THEN RAISE EXCEPTION 'Wrong recovery execute grants'; END IF;
+    END $f$;
+    SELECT set_config('test.role','service_role',false);
+    DO $f$
+    DECLARE j uuid:=gen_random_uuid(); f uuid:=gen_random_uuid(); b uuid:=gen_random_uuid();
+      command text;
+    BEGIN
+      INSERT INTO builder_jobs(id,status) VALUES(j,'implementation_pending');
+      INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status)
+        VALUES(f,j,'frontend_implementation','frontend_engineer','pending'),
+          (b,j,'backend_implementation','backend_engineer','skipped');
+      command:=format('SELECT builder_skip_implementation_step(%L,%L,%L,%L)',j,f,'frontend_engineer',
+        'Nothing to change in this lane; author evidence says this fix belongs to the backend lane.');
+      PERFORM expect_error(command,'Destination implementation lane is unavailable');
+      IF (SELECT status FROM builder_job_steps WHERE id=f)<>'pending'
+        OR (SELECT status FROM builder_jobs WHERE id=j)<>'implementation_pending'
+        THEN RAISE EXCEPTION 'Refused redirect changed state'; END IF;
+      DELETE FROM builder_job_steps WHERE id=b;
+      PERFORM expect_error(command,'Destination implementation lane is unavailable');
+      INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status)
+        VALUES(b,j,'backend_implementation','backend_engineer','pending');
+      EXECUTE command;
+      IF (SELECT status FROM builder_job_steps WHERE id=f)<>'skipped'
+        OR (SELECT status FROM builder_job_steps WHERE id=b)<>'pending'
+        OR (SELECT status FROM builder_jobs WHERE id=j)<>'implementation_pending'
+        THEN RAISE EXCEPTION 'Available sibling was not left runnable'; END IF;
     END $f$;
   `;
   try {
@@ -337,7 +367,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-        input: fixture + migration + recoveryMigration + reviewFunctions + checks + recoveryChecks + cycleFixture
+        input: fixture + migration + skipFunction + recoveryMigration + reviewFunctions + checks + recoveryChecks + cycleFixture
           + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });

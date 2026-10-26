@@ -368,8 +368,38 @@ test('owner-confirmed recovery invalidates a failed checkpoint and preserves str
       callModel: async ({ modelRequest }) => {
         const packet = JSON.parse(modelRequest.request.messages[1].content);
         assert.deepEqual(packet.confirmed_code_review_corrections, recovery);
+        assert.doesNotMatch(JSON.stringify(modelRequest.request.messages), /Resumed from a durable checkpoint/);
         throw new Error('fresh recovered author reached model');
       } }), /fresh recovered author reached model/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test('recovered seeded lane retains its unchanged patch for fresh verification instead of skipping or claiming acceptance', async () => {
+  const repo = makeRepo();
+  const seed = 'diff --git a/apps/web/src/app.tsx b/apps/web/src/app.tsx\n--- a/apps/web/src/app.tsx\n+++ b/apps/web/src/app.tsx\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n';
+  try {
+    const model = fakeModel([{ tool: 'finish', args: {
+      no_change_reason: 'No additional frontend changes: the remaining repair belongs in lib/sum.js.',
+      no_change_lane: 'backend', no_change_file: 'lib/sum.js',
+    } }]);
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'seedrecovery001', organization_id: 'org', target_sha: repo.sha,
+        task_description: 'Fix the reported late failure', code_review_revision: { approval_id: 'review', recovery_id: 'recovery' } },
+      step: { id: 'step' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+      seedPatch: { text: seed, artifact_id: 'reviewed-seed' }, callModel: model.callModel,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(model.seen.length, 1);
+    assert.match(result.proposal.patch, /\+export const a = 2/);
+    assert.equal(result.proposal.retained_seed_artifact_id, 'reviewed-seed');
+    assert.deepEqual(result.proposal.changed_files, ['apps/web/src/app.tsx']);
+    assert.deepEqual(result.proposal.acceptance_evidence, []);
+    assert.deepEqual(result.proposal.verified_runs, []);
+    assert.match(result.proposal.tests_not_run_reason, /must freshly verify/);
+    assert.equal(result.no_change, false, 'retained patch goes to the normal worker, not the skip path');
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }

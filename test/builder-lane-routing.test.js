@@ -26,7 +26,29 @@ test('explicit sibling routing and the observed protected-lane response reach th
     { no_change: true, error: 'Protected lane boundary: file is protected; no authorized lane' },
     { no_change: true, error: 'builder-chat-session.js is outside the backend lane' },
     { no_change: true, error: 'Dockerfile is outside the frontend lane' },
+    { no_change: true, error: 'node_modules/@supabase/supabase-js/dist/main/index.js is outside the frontend lane' },
+    { no_change: true, error: '`/tmp/private.js` is outside the frontend lane' },
+    { no_change: true, error: '`../outside.js` is outside the frontend lane' },
   ]) assert.equal(await skipLaneWithNothingToDo(input, generation), false);
   assert.equal(calls.length, 2);
   assert.equal(crossLaneNoChange({ no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx' }, 'backend_engineer'), true);
+});
+
+test('retained recovery seed is freshly verified before frontend completion; verification failure cannot skip', async () => {
+  const { runFrontendImplementation } = require('../builder-frontend-orchestrator');
+  for (const success of [true, false]) {
+    const calls = [];
+    const result = await runFrontendImplementation({
+      supabase: { rpc: () => assert.fail('seeded no-change must not skip or count generation failure') },
+      job: { id: 'job' }, step: { id: 'front', builder_mode: 'frontend_engineer' },
+      generate: async () => ({ ok: true, patch_artifact: { id: 'fresh-retained-proposal' },
+        proposal: { retained_seed_artifact_id: 'reviewed-seed', acceptance_evidence: [] } }),
+      handoff: async input => { calls.push(input.patchArtifact.id); return { success, artifacts: [{ id: 'fresh-verification' }] }; },
+      reloadStep: async () => ({ retryable: false }),
+    });
+    assert.deepEqual(calls, ['fresh-retained-proposal']);
+    assert.equal(result.success, success);
+    if (success) assert.deepEqual(result.verification_artifacts, [{ id: 'fresh-verification' }]);
+    else assert.equal(result.phase, 'verification');
+  }
 });

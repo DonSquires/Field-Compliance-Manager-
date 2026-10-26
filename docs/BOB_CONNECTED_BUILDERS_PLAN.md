@@ -63,6 +63,15 @@ preserved job/target/seeds/attempts. Eighteen UI tests, six desktop/mobile
 confirmation-and-reload workflows, web/browser type checks and production build
 passed. None of these are production recovery or underlying repair acceptance.
 
+PR #244 review corrections: a recovered lane with an unchanged nonempty seed
+must retain it as a new proposal and freshly verify it, not fail explanation-only
+finish or discard it through a skip. Retention makes no new acceptance claim;
+the sibling repair and whole-job review remain outstanding. Routing now checks
+complete reported paths (including scoped packages), not permissive suffixes.
+The audited skip RPC atomically refuses absent/skipped/unavailable destination
+lanes; recovery also requires the sibling pending rather than scope-skipped.
+The checkpoint regression explicitly rejects saved-continuation messages.
+
 Release #239 and generated catalog #240 completed as
 `586980876e2d56fbf7b7450e3097d94a23d89210`: durable pointer, healthy runtime,
 matching live schema and Vercel success verified. The original partial-success
