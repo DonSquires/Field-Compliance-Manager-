@@ -28,3 +28,12 @@ test('person search and notice expiry RPCs enforce the operations-role boundary'
     assert.match(definition, /deactivated_at IS NULL\s+AND role IN \('grand_master', 'master', 'admin', 'admin_officer'\)/);
   }
 });
+
+test('preserves owner-identity access on protected person-to-vehicle relationships', () => {
+  assert.match(migration, /link\.relationship NOT IN \('owner', 'registered_owner', 'driver', 'associated_person'\)\s+OR link\.organization_id = ANY \(v_identity_orgs\)/);
+});
+
+test('calculates notice days using Auckland dates for both operands', () => {
+  assert.match(migration, /\(notice\.expires_at AT TIME ZONE 'Pacific\/Auckland'\)::date\s+- \(clock_timestamp\(\) AT TIME ZONE 'Pacific\/Auckland'\)::date/);
+  assert.doesNotMatch(migration, /notice\.expires_at::date/);
+});

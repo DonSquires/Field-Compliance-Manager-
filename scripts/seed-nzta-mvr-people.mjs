@@ -140,8 +140,16 @@ function readJsonLines(file) {
   });
 }
 
+export function completedOcrPaths(entries) {
+  return new Set(entries.filter((entry) => !entry.error && /^[0-9a-f]{64}$/.test(entry.sha256 ?? '')).map((entry) => entry.path));
+}
+
+export function screenshotContentMatches(bytes, screenshot) {
+  return bytes.length === screenshot.size && createHash('sha256').update(bytes).digest('hex') === screenshot.sha;
+}
+
 async function runOcr({ roots, cache, limit, workers }) {
-  const done = new Set(readJsonLines(cache).map((entry) => entry.path));
+  const done = completedOcrPaths(readJsonLines(cache));
   const pending = listScreenshots(roots).filter((file) => !done.has(file.path)).slice(0, limit);
   let next = 0;
   let completed = 0;
@@ -364,19 +372,9 @@ BEGIN
         v_outcome := 'held_newer_vehicle_check';
       ELSE
         BEGIN
-          BEGIN
-            v_result := public.review_nzta_mvr_identity_evidence(v_doc, 'approve',
-              (s->'approved') || jsonb_build_object('query_completed_at', v_query), '${SOURCE_RULING}');
-            v_outcome := 'approved';
-          EXCEPTION WHEN OTHERS THEN
-            IF SQLERRM NOT LIKE 'Shared canonical vehicle facts require grand master review%' THEN RAISE; END IF;
-            -- Shared-vehicle facts stay behind the grand master gate; the person link still stands.
-            v_result := public.review_nzta_mvr_identity_evidence(v_doc, 'approve',
-              ((s->'approved') - ARRAY['vehicle_make','vehicle_model','vehicle_year','vehicle_colour','rego_expiry','wof_expiry'])
-                || jsonb_build_object('query_completed_at', v_query),
-              '${SOURCE_RULING} Shared vehicle facts left for grand master review.');
-            v_outcome := 'approved_vehicle_facts_held';
-          END;
+          v_result := public.review_nzta_mvr_identity_evidence(v_doc, 'approve',
+            (s->'approved') || jsonb_build_object('query_completed_at', v_query), '${SOURCE_RULING}');
+          v_outcome := 'approved';
           v_vehicle := (v_result->>'canonical_vehicle_id')::uuid;
           IF (s->>'current_owner')::boolean AND NOT EXISTS (
             SELECT 1 FROM public.vehicle_identity_checks c
@@ -458,7 +456,12 @@ async function runApply({ plan, commit, limitPeople, report }) {
     const batches = chunk(people, 25);
     for (const batch of batches) {
       const batchKeys = new Set(batch.map((person) => person.key_hash));
-      const batchScreenshots = screenshots.filter((shot) => batchKeys.has(shot.key_hash));
+      const batchScreenshots = screenshots.filter((shot) => {
+        if (!batchKeys.has(shot.key_hash)) return false;
+        if (screenshotContentMatches(readFileSync(shot.path), shot)) return true;
+        resultRows.push({ sha: shot.sha, outcome: 'held_source_changed', error: 'Screenshot differs from the OCR cache; invalidate its cache entry and rerun OCR.' });
+        return false;
+      });
       const rows = cliQuery(`BEGIN;\n${CLAIMS}\n${peopleSql(batch)}\n${screenshotsSql(batchScreenshots.map(strip), { dryRun: true })}
 SELECT jsonb_build_object('people', (SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]') FROM nzta_seed_people p),
   'results', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]') FROM nzta_seed_results r)) AS out;\nROLLBACK;`);
@@ -488,7 +491,12 @@ ROLLBACK;`).map((row) => row.sha));
       for (const shot of batch) {
         const personRecordId = personByKey.get(shot.key_hash);
         if (!personRecordId || present.has(shot.sha)) { ready.push({ ...strip(shot), person_record_id: personRecordId ?? null }); continue; }
-        const { error } = await storage.upload(storagePathFor(personRecordId, shot.sha, shot.extension), readFileSync(shot.path),
+        const bytes = readFileSync(shot.path);
+        if (!screenshotContentMatches(bytes, shot)) {
+          resultRows.push({ sha: shot.sha, outcome: 'held_source_changed', error: 'Screenshot differs from the OCR cache; invalidate its cache entry and rerun OCR.' });
+          continue;
+        }
+        const { error } = await storage.upload(storagePathFor(personRecordId, shot.sha, shot.extension), bytes,
           { contentType: shot.file_type, upsert: false });
         if (error && !/exists/i.test(error.message)) { resultRows.push({ sha: shot.sha, outcome: 'upload_failed', error: error.message.slice(0, 200) }); continue; }
         ready.push({ ...strip(shot), person_record_id: personRecordId });

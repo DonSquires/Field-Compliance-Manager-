@@ -472,8 +472,10 @@ Rulings, and how the build honours them:
   reviewer (2026-10-26); anything unread or inconsistent is held. People are
   filed under the provider (R&M) and projected to `canonical_people`; the
   registered-owner edge is written through the governed vehicle-person path, and
-  facts on a vehicle shared with another organisation stay held behind the
-  existing grand-master gate. NZTA address and check history are returned only
+  a document containing conflicting facts on a shared vehicle stays pending
+  behind the existing grand-master review gate rather than being approved with
+  those facts silently omitted. NZTA address, check history and protected
+  owner/driver vehicle relationships are returned only
   to users holding `can_access_vehicle_owner_identity`.
 - **Notices follow the NZTA person source.** R&M trespass and warning notices
   are to be associated with canonical people and used with the existing expiry

@@ -109,7 +109,7 @@ const PersonSearchPage: React.FC = () => {
                 <tbody>{register.map((row) => (
                   <tr key={row.notice_id}>
                     <td>{row.person_display_name
-                      ? <button type="button" className="btn btn-secondary" onClick={() => openFromRegister(row)}>{row.person_display_name}</button>
+                      ? <button type="button" className="btn btn-secondary" disabled={searching} onClick={() => openFromRegister(row)}>{row.person_display_name}</button>
                       : 'Person not linked'}</td>
                     <td>{noticeTypeLabel(row.notice_type)}{row.notice_number ? ` ${row.notice_number}` : ''}</td>
                     <td>{row.organization_name}</td>

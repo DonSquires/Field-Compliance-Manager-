@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import PersonSearchPage from './PersonSearchPage';
 import { describeDaysRemaining, noticeStillBarsEntry, noticeTypeLabel, personSearchQueryIsValid } from '../lib/personSearch';
 
@@ -20,7 +20,7 @@ const person = (overrides: Record<string, unknown> = {}) => ({
     notice_number: 'T-1', status: 'issued', issued_at: '2025-11-01T00:00:00Z', expires_at: '2027-11-01T00:00:00Z',
     expiry_state: 'in_force', location_name: 'North Block',
   }],
-  vehicles: [{ canonical_vehicle_id: 'vehicle-1', plate_number: 'ABC123', make: 'Toyota', model: 'Hilux', colour: 'White', relationship: 'registered_owner', since: null }],
+  vehicles: [{ canonical_vehicle_id: 'vehicle-1', plate_number: 'ABC123', make: 'Toyota', model: 'Hilux', colour: 'White', relationship: 'observed_with', since: null }],
   nzta_authorised: false,
   nzta: null,
   ...overrides,
@@ -64,6 +64,21 @@ describe('person search', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByText('NZTA register details (restricted)')).toBeTruthy();
     expect(screen.getByText(/1 Example Road/)).toBeTruthy();
+  });
+
+  it('blocks register lookups while a person search is in flight', async () => {
+    let completeSearch!: (value: { data: ReturnType<typeof person>[]; error: null }) => void;
+    const pending = new Promise<{ data: ReturnType<typeof person>[]; error: null }>((resolve) => { completeSearch = resolve; });
+    const defaultRpc = rpc.getMockImplementation();
+    rpc.mockImplementation((name: string) => name === 'search_people' ? pending : defaultRpc?.(name));
+    render(<PersonSearchPage />);
+    const button = await screen.findByRole('button', { name: 'Test Person' });
+    fireEvent.click(button);
+    expect(button.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(button);
+    expect(rpc.mock.calls.filter(([name]) => name === 'search_people')).toHaveLength(1);
+    await act(async () => { completeSearch({ data: [person()], error: null }); });
+    expect(button.hasAttribute('disabled')).toBe(false);
   });
 
   it('describes expiry consistently', () => {

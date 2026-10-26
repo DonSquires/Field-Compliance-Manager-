@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 
 const load = () => import('../scripts/seed-nzta-mvr-people.mjs');
 
@@ -19,6 +20,34 @@ const shot = (overrides = {}) => ({
     vehicle_make: 'Toyota',
   },
   ...overrides,
+});
+
+test('retries failed OCR entries instead of treating them as completed', async () => {
+  const { completedOcrPaths } = await load();
+  const completed = completedOcrPaths([
+    { path: 'failed.png', error: 'temporary OCR failure' },
+    { path: 'partial.png' },
+    { path: 'good.png', sha256: 'a'.repeat(64) },
+  ]);
+  assert.deepEqual([...completed], ['good.png']);
+});
+
+test('binds an upload to the cached screenshot digest and size', async () => {
+  const { screenshotContentMatches } = await load();
+  const bytes = Buffer.from('fixture screenshot');
+  const expected = { size: bytes.length, sha: createHash('sha256').update(bytes).digest('hex') };
+  assert.equal(screenshotContentMatches(bytes, expected), true);
+  assert.equal(screenshotContentMatches(Buffer.from('changed screenshot'), expected), false);
+  assert.equal(screenshotContentMatches(bytes, { ...expected, size: bytes.length + 1 }), false);
+  assert.equal(screenshotContentMatches(bytes, { ...expected, sha: '0'.repeat(64) }), false);
+});
+
+test('leaves shared-vehicle conflicts in the existing pending-review path', async () => {
+  const { screenshotsSql } = await load();
+  const sql = screenshotsSql([], { dryRun: false });
+  assert.equal((sql.match(/public\.review_nzta_mvr_identity_evidence/g) || []).length, 1);
+  assert.doesNotMatch(sql, /approved_vehicle_facts_held/);
+  assert.match(sql, /EXCEPTION WHEN OTHERS THEN\s+v_outcome := 'held_for_review'/);
 });
 
 test('parses staff-typed screenshot names and rejects impossible dates', async () => {

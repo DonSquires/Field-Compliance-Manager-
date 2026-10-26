@@ -124,6 +124,8 @@ BEGIN
       JOIN public.canonical_vehicles vehicle ON vehicle.id = link.to_id
       WHERE link.from_type = 'person' AND link.from_id = r.id AND link.to_type = 'vehicle'
         AND link.active AND link.organization_id = ANY (v_orgs)
+        AND (link.relationship NOT IN ('owner', 'registered_owner', 'driver', 'associated_person')
+          OR link.organization_id = ANY (v_identity_orgs))
     ), '[]'::jsonb),
     'nzta_authorised', cardinality(v_identity_orgs) > 0,
     'nzta', CASE WHEN cardinality(v_identity_orgs) = 0 THEN NULL ELSE (
@@ -198,7 +200,8 @@ BEGIN
   SELECT notice.id, notice.organization_id, org.name, notice.notice_type, notice.notice_number,
     notice.issued_at, notice.expires_at,
     public.notice_expiry_state(notice.status, notice.expires_at, v_window),
-    (notice.expires_at::date - (clock_timestamp() AT TIME ZONE 'Pacific/Auckland')::date)::integer,
+    ((notice.expires_at AT TIME ZONE 'Pacific/Auckland')::date
+      - (clock_timestamp() AT TIME ZONE 'Pacific/Auckland')::date)::integer,
     person.id, person.display_name, place.name
   FROM public.notices notice
   JOIN public.organizations org ON org.id = notice.organization_id
