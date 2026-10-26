@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
+const { reopenedRequiredLane } = require('./builder-generation-failure');
 
 async function downloadVerifiedArtifact(supabase, artifactId, jobId, expectedType, { allowSuperseded = false } = {}) {
   const { data: artifact, error } = await supabase.from('builder_artifacts')
@@ -28,6 +29,9 @@ async function downloadVerifiedArtifact(supabase, artifactId, jobId, expectedTyp
 async function loadCodeReviewSeed(supabase, job, step) {
   if (!job.code_review_revision) return null;
   const artifactId = job.code_review_revision.seed_patch_ids?.[step.step_id];
+  // A lane reopened by this correction was skipped before review, so it has no reviewed patch and
+  // authors from the pinned target.
+  if (!artifactId && reopenedRequiredLane(job, step)) return null;
   if (!artifactId) throw new Error('Confirmed code review correction has no seed for this implementation lane');
   const downloaded = await downloadVerifiedArtifact(supabase, artifactId, job.id, 'code_implementation', { allowSuperseded: true });
   if (downloaded.artifact.step_id !== step.id) throw new Error('Correction seed belongs to a different implementation step');

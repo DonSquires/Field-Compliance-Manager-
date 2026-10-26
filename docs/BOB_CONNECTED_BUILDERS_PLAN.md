@@ -127,7 +127,11 @@ now refuse to skip a lane listed in the current correction's
 `reopened_required_lanes`; an honest no-change instead parks as a
 non-retryable generation failure that names the reopened-lane rule for human
 direction. A real PostgreSQL mutation check failed when that SQL guard was
-removed. This is not approval or a scope change; the normal whole-job
+removed. Because a skipped lane never produced a reviewed patch, the correction
+has no `seed_patch_ids` entry for it; `loadCodeReviewSeed()` now returns no seed
+only for a lane in `reopened_required_lanes`, so that author starts from the
+pinned target while every other missing, foreign or corrupt seed still fails.
+This is not approval or a scope change; the normal whole-job
 acceptance and human-review gates still apply. The original job remains
 unapproved and must be corrected and independently verified again after this
 routing fix is released.
