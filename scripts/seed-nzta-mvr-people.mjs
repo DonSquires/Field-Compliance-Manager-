@@ -12,6 +12,12 @@
  *           approved screenshots into people (normalised name + address).
  *   --apply Write approved people through the governed identity chain as the
  *           R&M import actor. Rolled back unless --commit.
+ *   --reextract  Re-run the field extractor over cached raw OCR text (--output).
+ *   --repair-names  Correct seeded people named after the Motochek page heading
+ *           through the governed rename and merge RPCs. Rolled back unless
+ *           --commit; --plan-only prints the plan; organisation owners and
+ *           NZTA-withheld owners stay untouched unless --rename-organisations
+ *           and --rename-withheld (owner ruling 2026-10-27: rename both).
  *
  * Reports print counts only. The cache and plan stay outside the repository.
  */
@@ -85,11 +91,14 @@ export function classifyScreenshot(entry) {
   const reasons = [];
   const fields = entry.fields || {};
   if (!entry.parsed) reasons.push('file_name_not_parsed');
-  if (!fields.display_name) reasons.push('name_not_read');
+  if (entry.name_verification?.status === 'owner_withheld') reasons.push('owner_withheld_by_nzta');
+  else if (!fields.display_name) reasons.push('name_not_read');
   if (!fields.query_completed_at) reasons.push('query_date_not_read');
   const plateMatch = entry.parsed ? confirmPlate(entry.parsed.plate, entry.plate_verification) : null;
   if (entry.parsed && !plateMatch) reasons.push('plate_not_confirmed_by_ocr');
   if (fields.display_name && ORGANISATION_NAME.test(fields.display_name)) reasons.push('registered_to_organisation');
+  else if (fields.registered_to_company === true) reasons.push('registered_to_organisation');
+  if (entry.name_verification?.status === 'variants_disagree') reasons.push('name_ocr_disagreement');
   if (fields.query_completed_at && fields.query_completed_at.slice(0, 10) > new Date().toISOString().slice(0, 10)) reasons.push('query_date_in_future');
   return { decision: reasons.length === 0 ? 'approve' : 'hold', reasons, plate: entry.parsed?.plate ?? null, plate_match: plateMatch };
 }
@@ -119,12 +128,24 @@ function sha256(file) {
 
 const execFileAsync = promisify(execFile);
 
+/** Extract the cached fields from the raw OCR passes; kept separate so a fixed extractor can re-read the cache. */
+export function extractEntry(variants) {
+  const { fields, identifier_verification: verification } = extractIdentityFieldsConsensus(variants, 'nzta_mvr_record');
+  if (fields.vehicle_colour) fields.vehicle_colour = cleanColour(fields.vehicle_colour);
+  return {
+    fields,
+    plate_verification: verification?.plate_number ?? null,
+    name_verification: verification?.display_name ?? null,
+  };
+}
+
 // Asynchronous so the --workers slots genuinely overlap.
 async function ocrInContainer(file, slot) {
   const remote = `/tmp/nzta-ocr-${process.pid}-${slot}${path.extname(file).toLowerCase()}`;
   await execFileAsync('docker', ['cp', file, `${CONTAINER}:${remote}`]);
   try {
-    return await Promise.all([6, 11].map(async (psm) => (await execFileAsync('docker', ['exec', CONTAINER, 'tesseract', remote, 'stdout', '--psm', String(psm)], {
+    // One OpenMP thread per tesseract process: parallelism comes from --workers, not oversubscribed threads.
+    return await Promise.all([6, 11].map(async (psm) => (await execFileAsync('docker', ['exec', '-e', 'OMP_THREAD_LIMIT=1', CONTAINER, 'tesseract', remote, 'stdout', '--psm', String(psm)], {
       encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
     })).stdout));
   } finally {
@@ -160,11 +181,9 @@ async function runOcr({ roots, cache, limit, workers }) {
       const file = pending[next++];
       try {
         const variants = await ocrInContainer(file.path, slot);
-        const { fields, identifier_verification: verification } = extractIdentityFieldsConsensus(variants, 'nzta_mvr_record');
-        if (fields.vehicle_colour) fields.vehicle_colour = cleanColour(fields.vehicle_colour);
         appendFileSync(cache, `${JSON.stringify({
           path: file.path, name: file.name, size: file.size, parsed: file.parsed, sha256: await sha256(file.path),
-          fields, plate_verification: verification?.plate_number ?? null, ocr_at: new Date().toISOString(),
+          ...extractEntry(variants), ocr_variants: variants, ocr_at: new Date().toISOString(),
         })}\n`);
         completed += 1;
       } catch (error) {
@@ -284,6 +303,18 @@ BEGIN
   FOR r IN SELECT * FROM jsonb_array_elements(${dollarQuote(JSON.stringify(people), 'seed_people')}) LOOP
     BEGIN
       v_person := NULL; v_created := false;
+      -- The person already holding one of these screenshots wins: keys and names can change after a repair.
+      SELECT d.person_record_id INTO v_person
+      FROM public.evidence_items e
+      JOIN public.person_identity_documents d ON d.evidence_item_id = e.id AND d.organization_id = e.organization_id
+      JOIN public.person_records p ON p.id = d.person_record_id
+      WHERE e.organization_id = '${RM_ORGANIZATION_ID}'::uuid AND e.module_key = 'identity_registry'
+        AND d.document_kind = 'nzta_mvr_record'
+        AND e.sha256_hash IN (SELECT jsonb_array_elements_text(coalesce(r->'shas', '[]'::jsonb)))
+        AND NOT (p.metadata ? 'merged_into_person_record_id') AND NOT (p.metadata ? 'resolved_into_person_record_id')
+      ORDER BY p.created_at, p.id
+      LIMIT 1;
+      IF v_person IS NULL THEN
       SELECT d.person_record_id INTO v_person
       FROM public.person_identity_documents d
       JOIN public.person_records p ON p.id = d.person_record_id
@@ -295,6 +326,7 @@ BEGIN
             AND regexp_replace(lower(p.display_name), '[^a-z0-9]+', '', 'g') = r->>'name_compact'))
       ORDER BY d.created_at
       LIMIT 1;
+      END IF;
       IF v_person IS NULL THEN
         SELECT person_record_id INTO v_person FROM nzta_seed_people WHERE key_hash = r->>'key_hash' AND person_record_id IS NOT NULL;
       END IF;
@@ -465,6 +497,7 @@ export function applyPayload(plan, { limitPeople } = {}) {
       display_name: String(person.display_name).trim(),
       name_compact: String(person.display_name).toLowerCase().replace(/[^a-z0-9]+/g, ''),
       address_compact: normaliseAddress(shot.fields.physical_address),
+      shas: person.screenshots.map((entry) => entry.sha256),
     };
   });
   const keys = new Map(plan.people.slice(0, people.length).map((person, index) => [person, people[index].key_hash]));
@@ -491,9 +524,9 @@ export function applyPayload(plan, { limitPeople } = {}) {
 const strip = ({ path: _path, ...rest }) => rest;
 const chunk = (items, size) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 
-async function runApply({ plan, commit, limitPeople, report }) {
+async function seedCliQuery() {
   const { cliQuery: rawQuery } = await import('../services/document-source-worker/reconcile-plan.mjs');
-  const cliQuery = (sql) => {
+  return (sql) => {
     try { return rawQuery(sql); } catch (error) {
       // Postgres echoes the failing line, which can quote seed data; keep the full text in a local file only.
       const text = String(error.stderr || '') + String(error.stdout || '') + String(error.message);
@@ -502,6 +535,10 @@ async function runApply({ plan, commit, limitPeople, report }) {
       throw new Error(message.slice(0, 300));
     }
   };
+}
+
+async function runApply({ plan, commit, limitPeople, report }) {
+  const cliQuery = await seedCliQuery();
   const { people, screenshots } = applyPayload(plan, { limitPeople });
   let peopleRows;
   let resultRows;
@@ -581,6 +618,254 @@ SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]') AS out FROM nzta_seed_results r;\n
   return summary;
 }
 
+/** Matches the Motochek page heading that the first seed stored as every owner's name. */
+export const HEADING_NAME = /^\s*details\s*\(\s*\d+\s+registered\s+persons?\s*\)\s*$/i;
+const HEADING_NAME_SQL = '^\\s*details\\s*\\(\\s*\\d+\\s+registered\\s+persons?\\s*\\)\\s*$';
+const ownerKey = (value) => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+const compactName = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const REPAIR_RENAME_REASON = 'NZTA owner-name correction: the first R&M NZTA seed stored the Motochek heading '
+  + '"Current registered person details (N registered persons)" as the owner name. The corrected name is the '
+  + '"Current registered person" field read by two OCR passes of the same private source screenshot(s). '
+  + 'Repaired by scripts/seed-nzta-mvr-people.mjs --repair-names.';
+const REPAIR_MERGE_REASON = 'Same NZTA registered owner (same name, and the same street address and postcode or the same vehicle, '
+  + 'on the source screenshots) was split across seed records by the heading-as-name defect. Merged by '
+  + 'scripts/seed-nzta-mvr-people.mjs --repair-names.';
+export const ORGANISATION_OWNER_CATEGORY = 'Registered vehicle owner (organisation)';
+export const WITHHELD_OWNER_NAME = 'Owner withheld by NZTA';
+export const WITHHELD_OWNER_CATEGORY = 'Registered vehicle owner (withheld by NZTA)';
+
+/**
+ * The postcode Motochek prints on the line after the physical street address. The extractor keeps only the
+ * street line, so two owners with the same name and street in different towns would otherwise look alike.
+ */
+export function physicalPostcode(variants) {
+  for (const text of variants ?? []) {
+    const lines = String(text || '').replace(/\r/g, '').split('\n');
+    const index = lines.findIndex((line) => /physical\s+address\s*[:;.]?/i.test(line));
+    if (index < 0) continue;
+    // Row reading: street on the label line, then suburb and town/postcode, each with right-column text after it.
+    // Column reading: a bare label, then the address block on the lines below until the next label.
+    const bare = /physical\s+address\s*[:;.]?\s*$/i.test(lines[index]);
+    for (const line of lines.slice(index + 1, index + (bare ? 7 : 4))) {
+      if (/(?:mailing|postal)\s+address/i.test(line) || (bare && line.includes(':'))) break;
+      const postcode = /^\s*(?:RD\s*\d{1,2}\s+)?\p{L}[^\d:]*?\s(\d{4})(?![\d,])/u.exec(line)?.[1];
+      if (postcode) return postcode;
+    }
+  }
+  return null;
+}
+
+function ownerReading(entry) {
+  const readings = (entry.name_verification?.readings ?? []).map((reading) => reading.value).filter(Boolean);
+  if (readings.length === 0 && entry.fields?.display_name) readings.push(entry.fields.display_name);
+  return {
+    keys: new Set(readings.map(ownerKey).filter(Boolean)),
+    organisation: entry.fields?.registered_to_company === true || readings.some((value) => ORGANISATION_NAME.test(value)),
+    withheld: entry.name_verification?.status === 'owner_withheld',
+  };
+}
+
+/**
+ * Plan the correction of seeded people named after the page heading. Each live person is renamed only
+ * when every readable screenshot it holds names the same owner; people whose screenshots name different
+ * owners are reported, never split. Renamed people sharing a name and address (or plate) are merged.
+ */
+export function planNameRepair(entries, liveRows, { renameOrganisations = false, renameWithheld = false } = {}) {
+  const bySha = new Map();
+  for (const entry of entries) if (!entry.error && entry.sha256 && !bySha.has(entry.sha256)) bySha.set(entry.sha256, entry);
+  const persons = new Map();
+  for (const row of liveRows) {
+    const person = persons.get(row.person_record_id) ?? { ...row, shas: [] };
+    person.shas.push(row.sha);
+    persons.set(row.person_record_id, person);
+  }
+  const statuses = {};
+  const candidates = [];
+  const withheldGroups = [];
+  let shasWithoutCache = 0;
+  for (const person of persons.values()) {
+    const shots = person.shas.map((sha) => bySha.get(sha)).filter(Boolean);
+    shasWithoutCache += person.shas.length - shots.length;
+    const named = shots.map((entry) => ({ entry, reading: ownerReading(entry) })).filter((item) => item.reading.keys.size > 0);
+    let status;
+    let common = [];
+    // A person is corrected only from all of its own evidence; a screenshot missing from the OCR cache could name someone else.
+    if (shots.length < person.shas.length) status = 'incomplete_cache';
+    else if (named.length === 0) {
+      const allWithheld = shots.length === person.shas.length && shots.every((entry) => ownerReading(entry).withheld);
+      status = allWithheld ? 'owner_withheld_only' : 'unreadable';
+      if (allWithheld && renameWithheld && person.heading_name) {
+        withheldGroups.push([{ kind: 'rename', person_record_id: person.person_record_id, display_name: WITHHELD_OWNER_NAME,
+          category: WITHHELD_OWNER_CATEGORY }]);
+      }
+    }
+    else {
+      common = [...named[0].reading.keys].filter((key) => named.every((item) => item.reading.keys.has(key)));
+      if (common.length === 0) status = 'mixed_owners';
+      // Two spellings survive every screenshot: picking one would be a guess, so hold it for a reviewer.
+      else if (common.length > 1) status = 'name_spelling_unresolved';
+      else if (named.some((item) => item.reading.organisation)) status = renameOrganisations ? 'organisation' : 'organisation_held';
+      else status = 'person';
+    }
+    if (status === 'person' || status === 'organisation') {
+      // Prefer the newest screenshot whose consensus name is one of the agreed spellings.
+      const ordered = [...named].sort((left, right) => String(right.entry.fields?.query_completed_at ?? '')
+        .localeCompare(String(left.entry.fields?.query_completed_at ?? '')));
+      const chosen = ordered.find((item) => common.includes(ownerKey(item.entry.fields?.display_name)))?.entry.fields.display_name
+        ?? ordered[0].entry.name_verification.readings.find((reading) => common.includes(ownerKey(reading.value))).value;
+      const eligible = person.heading_name || person.name_compact === compactName(chosen);
+      if (!eligible) status = 'kept_existing_name';
+      else {
+        // The street line alone repeats across towns, so an address key needs the postcode too; otherwise only
+        // the same name on the same vehicle links two seed records.
+        const keys = named.map(({ entry }) => {
+          const address = normaliseAddress(entry.fields?.physical_address);
+          const postcode = address ? physicalPostcode(entry.ocr_variants) : null;
+          if (address && postcode) return `${normaliseName(chosen)}|${address}|${postcode}`;
+          const plate = String(entry.parsed?.plate ?? '').trim().toUpperCase();
+          return plate ? `${normaliseName(chosen)}|plate:${plate}` : null;
+        }).filter(Boolean);
+        candidates.push({ person, display_name: String(chosen).trim(), organisation: status === 'organisation', keys });
+      }
+    }
+    statuses[status] = (statuses[status] ?? 0) + 1;
+  }
+  // Union people that share a name+address (or name+plate) key.
+  const parent = new Map(candidates.map((candidate) => [candidate, candidate]));
+  const find = (node) => (parent.get(node) === node ? node : find(parent.get(node)));
+  const byKey = new Map();
+  for (const candidate of candidates) {
+    for (const key of candidate.keys) {
+      if (byKey.has(key)) parent.set(find(candidate), find(byKey.get(key)));
+      else byKey.set(key, candidate);
+    }
+  }
+  const components = new Map();
+  for (const candidate of candidates) {
+    const root = find(candidate);
+    components.set(root, [...(components.get(root) ?? []), candidate]);
+  }
+  const groups = [];
+  for (const members of components.values()) {
+    members.sort((left, right) => Number(right.person.review_state === 'verified') - Number(left.person.review_state === 'verified')
+      || String(left.person.person_created_at).localeCompare(String(right.person.person_created_at))
+      || left.person.person_record_id.localeCompare(right.person.person_record_id));
+    const [target] = members;
+    const actions = members.filter((member) => member.person.name_compact !== compactName(target.display_name))
+      .map((member) => ({ kind: 'rename', person_record_id: member.person.person_record_id, display_name: target.display_name,
+        ...(target.organisation ? { category: ORGANISATION_OWNER_CATEGORY } : {}) }));
+    for (const member of members.slice(1)) {
+      actions.push({ kind: 'merge', source: member.person.person_record_id, target: target.person.person_record_id,
+        display_name: target.display_name, name_compact: compactName(target.display_name) });
+    }
+    if (actions.length > 0) groups.push(actions);
+  }
+  groups.push(...withheldGroups);
+  const actions = groups.flat();
+  return {
+    summary: {
+      live_people: persons.size,
+      live_screenshots: liveRows.length,
+      screenshots_without_cache: shasWithoutCache,
+      people_by_status: statuses,
+      renames: actions.filter((action) => action.kind === 'rename').length,
+      merges: actions.filter((action) => action.kind === 'merge').length,
+    },
+    groups,
+  };
+}
+
+export function liveSeedRowsSql() {
+  return `BEGIN READ ONLY;
+SELECT coalesce(jsonb_agg(jsonb_build_object('sha', e.sha256_hash, 'person_record_id', p.id, 'person_created_at', p.created_at,
+  'review_state', p.review_state, 'heading_name', p.display_name ~* '${HEADING_NAME_SQL}',
+  'name_compact', regexp_replace(lower(p.display_name), '[^a-z0-9]+', '', 'g'))), '[]'::jsonb) AS out
+FROM public.evidence_items e
+JOIN public.person_identity_documents d ON d.evidence_item_id = e.id AND d.organization_id = e.organization_id
+JOIN public.person_records p ON p.id = d.person_record_id AND p.organization_id = e.organization_id
+WHERE e.organization_id = '${RM_ORGANIZATION_ID}'::uuid AND e.module_key = 'identity_registry'
+  AND d.document_kind = 'nzta_mvr_record'
+  AND NOT (p.metadata ? 'merged_into_person_record_id') AND NOT (p.metadata ? 'resolved_into_person_record_id');
+ROLLBACK;`;
+}
+
+/** Governed rename and merge calls; each action is guarded so a re-run is a no-op. */
+export function repairSql(actions) {
+  return `CREATE TEMP TABLE IF NOT EXISTS nzta_repair_results (seq integer PRIMARY KEY, kind text, person_record_id uuid, outcome text, error text);
+DO $repair$
+DECLARE a jsonb; v_seq integer := coalesce((SELECT max(seq) FROM nzta_repair_results), 0); v_name text; v_target_name text;
+  v_merged_into text; v_outcome text; v_error text;
+BEGIN
+  FOR a IN SELECT * FROM jsonb_array_elements(${dollarQuote(JSON.stringify(actions), 'repair_actions')}) LOOP
+    v_seq := v_seq + 1; v_outcome := NULL; v_error := NULL;
+    BEGIN
+      IF a->>'kind' = 'rename' THEN
+        -- Lock before the guard so a concurrent correction cannot slip between the check and the governed update.
+        SELECT display_name, metadata->>'merged_into_person_record_id' INTO v_name, v_merged_into FROM public.person_records
+        WHERE id = (a->>'person_record_id')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid FOR UPDATE;
+        IF v_name IS NULL OR v_merged_into IS NOT NULL THEN v_outcome := 'skipped_missing_or_merged';
+        ELSIF v_name = a->>'display_name' THEN v_outcome := 'already_named';
+        ELSIF v_name !~* '${HEADING_NAME_SQL}' THEN v_outcome := 'skipped_not_heading_name';
+        ELSE
+          PERFORM public.manage_identity_person_record('${RM_ORGANIZATION_ID}'::uuid, (a->>'person_record_id')::uuid, 'update',
+            jsonb_strip_nulls(jsonb_build_object('display_name', a->>'display_name', 'category', a->>'category')), '${REPAIR_RENAME_REASON}');
+          v_outcome := 'renamed';
+        END IF;
+      ELSE
+        -- Source then target: the same lock order merge_person_records uses.
+        SELECT display_name, metadata->>'merged_into_person_record_id' INTO v_name, v_merged_into FROM public.person_records
+        WHERE id = (a->>'source')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid FOR UPDATE;
+        SELECT display_name INTO v_target_name FROM public.person_records
+        WHERE id = (a->>'target')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid AND NOT (metadata ? 'merged_into_person_record_id')
+        FOR UPDATE;
+        IF v_merged_into = a->>'target' THEN v_outcome := 'already_merged';
+        ELSIF regexp_replace(lower(coalesce(v_name, '')), '[^a-z0-9]+', '', 'g') <> (a->>'name_compact')
+          OR regexp_replace(lower(coalesce(v_target_name, '')), '[^a-z0-9]+', '', 'g') <> (a->>'name_compact') THEN v_outcome := 'skipped_name_mismatch';
+        ELSE
+          PERFORM public.merge_person_records('${RM_ORGANIZATION_ID}'::uuid, (a->>'source')::uuid, (a->>'target')::uuid,
+            '${REPAIR_MERGE_REASON}', a->>'display_name');
+          v_outcome := 'merged';
+        END IF;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_outcome := 'failed'; v_error := left(SQLERRM, 200);
+    END;
+    INSERT INTO nzta_repair_results VALUES (v_seq, a->>'kind', coalesce((a->>'person_record_id')::uuid, (a->>'source')::uuid), v_outcome, v_error);
+  END LOOP;
+END $repair$;`;
+}
+
+async function runRepair({ entries, commit, renameOrganisations, renameWithheld, report }) {
+  const cliQuery = await seedCliQuery();
+  const liveRows = cliQuery(liveSeedRowsSql())[0].out;
+  const plan = planNameRepair(entries, liveRows, { renameOrganisations, renameWithheld });
+  const results = [];
+  // A group's renames and merges share one transaction so the merge guards see the new names.
+  const batches = [];
+  for (const group of plan.groups) {
+    const last = batches.at(-1);
+    if (last && last.length + group.length <= 60) last.push(...group);
+    else batches.push([...group]);
+  }
+  for (const batch of batches) {
+    const rows = cliQuery(`BEGIN;\n${CLAIMS}\n${repairSql(batch)}
+SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.seq), '[]'::jsonb) AS out FROM nzta_repair_results r;\n${commit ? 'COMMIT' : 'ROLLBACK'};`);
+    results.push(...rows[0].out);
+    console.log(`${commit ? 'repaired' : 'dry-run checked'} ${results.length}/${plan.groups.flat().length} actions`);
+  }
+  const tally = results.reduce((counts, row) => {
+    const key = `${row.kind}:${row.outcome}`;
+    return { ...counts, [key]: (counts[key] ?? 0) + 1 };
+  }, {});
+  const errors = results.filter((row) => row.error).reduce((counts, row) => ({ ...counts, [row.error]: (counts[row.error] ?? 0) + 1 }), {});
+  const summary = { mode: commit ? 'committed' : 'dry_run_rolled_back', ...plan.summary, outcomes: tally, errors };
+  if (report) {
+    if (path.resolve(report).startsWith(path.resolve('.'))) throw new Error('The repair report must live outside the repository');
+    writeFileSync(report, JSON.stringify({ summary, results }, null, 2));
+  }
+  return summary;
+}
+
 async function main() {
   const cache = argument('--cache');
   if (!cache) throw new Error('Use --cache <local jsonl outside the repository> with --ocr, --plan or --apply');
@@ -589,8 +874,17 @@ async function main() {
     const roots = (argument('--roots') ?? '').split(';').filter(Boolean);
     if (roots.length === 0 || roots.some((root) => !existsSync(root))) throw new Error('--roots "<folder>;<folder>" must list existing screenshot folders');
     const limit = Number(argument('--limit') ?? 100000);
-    const workers = Math.min(Math.max(Number(argument('--workers') ?? 3), 1), 8);
+    const workers = Math.min(Math.max(Number(argument('--workers') ?? 3), 1), 16);
     console.log(JSON.stringify(await runOcr({ roots, cache, limit, workers })));
+    return;
+  }
+  if (process.argv.includes('--reextract')) {
+    const output = argument('--output');
+    if (!output || path.resolve(output).startsWith(path.resolve('.'))) throw new Error('--reextract needs --output <local jsonl outside the repository>');
+    const entries = readJsonLines(cache);
+    const rewritten = entries.map((entry) => (Array.isArray(entry.ocr_variants) ? { ...entry, ...extractEntry(entry.ocr_variants) } : entry));
+    writeFileSync(output, rewritten.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+    console.log(JSON.stringify({ entries: entries.length, reextracted: entries.filter((entry) => Array.isArray(entry.ocr_variants)).length }));
     return;
   }
   if (process.argv.includes('--plan')) {
@@ -609,7 +903,24 @@ async function main() {
     console.log(JSON.stringify(await runApply({ plan, commit: process.argv.includes('--commit'), limitPeople, report: argument('--report') }), null, 2));
     return;
   }
-  throw new Error('Choose --ocr, --plan or --apply');
+  if (process.argv.includes('--repair-names')) {
+    const options = { commit: process.argv.includes('--commit'), renameOrganisations: process.argv.includes('--rename-organisations'),
+      renameWithheld: process.argv.includes('--rename-withheld') };
+    if (process.argv.includes('--plan-only')) {
+      const cliQuery = await seedCliQuery();
+      const plan = planNameRepair(readJsonLines(cache), cliQuery(liveSeedRowsSql())[0].out, options);
+      const report = argument('--report');
+      if (report) {
+        if (path.resolve(report).startsWith(path.resolve('.'))) throw new Error('The repair plan must live outside the repository');
+        writeFileSync(report, JSON.stringify(plan, null, 2));
+      }
+      console.log(JSON.stringify(plan.summary, null, 2));
+      return;
+    }
+    console.log(JSON.stringify(await runRepair({ entries: readJsonLines(cache), ...options, report: argument('--report') }), null, 2));
+    return;
+  }
+  throw new Error('Choose --ocr, --reextract, --plan, --repair-names or --apply');
 }
 
 if (import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('seed-nzta-mvr-people.mjs')) {

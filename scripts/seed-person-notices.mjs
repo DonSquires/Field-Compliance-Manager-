@@ -7,7 +7,9 @@
  * is filed under the landowner client organisation and linked to the shared
  * canonical person through the governed import_person_notice RPC: the NZTA
  * registered owner of the vehicle the notice names (surname must agree), a
- * unique exact name, or a new person verified by the notice itself.
+ * unique exact name, or a new person verified by the notice itself. A person
+ * named with a vehicle they did not own at the time (often a company vehicle)
+ * is recorded against that vehicle as an associated person (record_vehicle_person).
  *
  *   --scan  inventory the R&M folders, hash every file and extract text locally
  *           (Word XML, PyMuPDF, tesseract in the local inference container).
@@ -454,7 +456,8 @@ export function noticesSql(notices) {
     issued_basis: notice.issuedBasis === 'register' ? 'register' : notice.issuedBasis === 'document_created' ? 'document_created' : 'document',
     document_name: path.basename(notice.relative), reference: `local://rm/remsec-documents/${notice.relative}`, sha: notice.sha256,
   }));
-  return `CREATE TEMP TABLE IF NOT EXISTS notice_seed_results (import_key text, outcome text, match_basis text, canonical_person_id uuid, error text);
+  return `CREATE TEMP TABLE IF NOT EXISTS notice_seed_results (import_key text, outcome text, match_basis text, canonical_person_id uuid, error text,
+  vehicle_link text);
 DO $seed$
 DECLARE
   v_client jsonb;
@@ -462,6 +465,9 @@ DECLARE
   v_id uuid;
   v_row jsonb;
   v_result jsonb;
+  v_vehicle uuid;
+  v_person_record uuid;
+  v_link text;
 BEGIN
   FOR v_client IN SELECT * FROM jsonb_array_elements(${dollarQuote(JSON.stringify(clients), 'seed_clients')}) LOOP
     v_id := nullif(v_client->>'id', '')::uuid;
@@ -484,14 +490,55 @@ BEGIN
         p_plate_number => v_row->>'plate', p_subject_address => v_row->>'address', p_notice_number => v_row->>'notice_number',
         p_legal_basis => v_row->>'legal_basis', p_area => v_row->>'area', p_title => v_row->>'title',
         p_source_author => v_row->>'author', p_issued_date_basis => v_row->>'issued_basis');
+      v_link := NULL;
+      -- Owner ruling 2026-10-27: a person named on a notice with a vehicle they do not own (often a company
+      -- vehicle) is recorded against that vehicle as an associated person, through the governed path.
+      IF v_row->>'plate' IS NOT NULL AND v_result->>'canonical_person_id' IS NOT NULL
+         AND coalesce(v_result->>'match_basis', '') <> 'vehicle_registered_owner_at_notice' THEN
+        BEGIN
+          SELECT vehicle.id INTO v_vehicle FROM public.canonical_vehicles vehicle
+          WHERE regexp_replace(upper(vehicle.plate_number), '[^A-Z0-9]', '', 'g') = v_row->>'plate'
+          ORDER BY vehicle.created_at LIMIT 1;
+          IF v_vehicle IS NULL THEN
+            v_link := 'plate_not_on_file';
+          ELSIF EXISTS (
+            SELECT 1 FROM public.entity_links link
+            WHERE link.organization_id = '${RM_ORGANIZATION_ID}'::uuid AND link.from_type = 'person'
+              AND link.from_id = (v_result->>'canonical_person_id')::uuid AND link.to_type = 'vehicle'
+              AND link.to_id = v_vehicle AND link.active
+          ) THEN
+            v_link := 'already_linked';
+          ELSE
+            SELECT record.id INTO v_person_record
+            FROM public.canonical_person_links person_link
+            JOIN public.person_records record ON record.id = person_link.source_id
+            WHERE person_link.canonical_person_id = (v_result->>'canonical_person_id')::uuid
+              AND person_link.source_table = 'person_records'
+              AND record.organization_id = '${RM_ORGANIZATION_ID}'::uuid
+              AND NOT (record.metadata ? 'merged_into_person_record_id')
+            ORDER BY record.created_at LIMIT 1;
+            IF v_person_record IS NULL THEN
+              v_link := 'no_rm_person_record';
+            ELSE
+              PERFORM public.record_vehicle_person('${RM_ORGANIZATION_ID}'::uuid, v_vehicle, v_person_record, NULL,
+                'associated_person', 'other',
+                'Named with this vehicle on an R&M ' || replace(v_row->>'kind', '_', ' ') || ' (' || (v_row->>'document_name')
+                  || ', issued ' || (v_row->>'issued') || ')');
+              v_link := 'linked_associated_person';
+            END IF;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN
+          v_link := 'link_error: ' || left(SQLERRM, 120);
+        END;
+      END IF;
       INSERT INTO notice_seed_results VALUES (v_row->>'import_key',
         CASE WHEN (v_result->>'inserted')::boolean THEN 'imported' ELSE 'already_present' END,
-        v_result->>'match_basis', (v_result->>'canonical_person_id')::uuid, NULL);
+        v_result->>'match_basis', (v_result->>'canonical_person_id')::uuid, NULL, v_link);
     EXCEPTION WHEN OTHERS THEN
       INSERT INTO notice_seed_results VALUES (v_row->>'import_key',
         CASE WHEN SQLERRM LIKE 'Ambiguous person%' THEN 'held_ambiguous_person'
              WHEN SQLERRM LIKE 'A given name and family name%' THEN 'held_name_incomplete' ELSE 'error' END,
-        NULL, NULL, left(SQLERRM, 200));
+        NULL, NULL, left(SQLERRM, 200), NULL);
     END;
   END LOOP;
 END
@@ -530,7 +577,7 @@ async function runApply({ plan, commit, limit, report }) {
   const tally = (field) => results.reduce((counts, row) => ({ ...counts, [row[field] ?? 'none']: (counts[row[field] ?? 'none'] ?? 0) + 1 }), {});
   const summary = {
     mode: commit ? 'committed' : 'dry_run_rolled_back', planned: notices.length,
-    outcomes: tally('outcome'), match_basis: tally('match_basis'),
+    outcomes: tally('outcome'), match_basis: tally('match_basis'), vehicle_links: tally('vehicle_link'),
     errors: results.filter((row) => row.outcome === 'error').reduce((counts, row) => ({ ...counts, [row.error]: (counts[row.error] ?? 0) + 1 }), {}),
   };
   if (report) writeFileSync(outsideRepo(report, 'apply report'), JSON.stringify({ summary, results }, null, 2));

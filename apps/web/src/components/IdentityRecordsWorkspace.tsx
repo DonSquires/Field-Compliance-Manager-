@@ -459,6 +459,9 @@ function personForm(person: PersonRecord): PersonForm {
   };
 }
 
+// The first R&M NZTA seed proposed the Motochek page heading as the owner name; never prefill it.
+const NZTA_HEADING_NAME = /^\s*details\s*\(\s*\d+\s+registered\s+persons?\s*\)\s*$/i;
+
 function proposedPersonForm(
   current: PersonForm,
   proposed: Record<string, unknown>,
@@ -467,6 +470,8 @@ function proposedPersonForm(
   const values = Object.fromEntries(
     Object.entries(proposed).filter(([, value]) => typeof value === "string"),
   );
+  if (NZTA_HEADING_NAME.test(String(values.display_name ?? "")))
+    delete values.display_name;
   if (typeof proposed.expiry_date === "string") {
     if (documentKind === "driver_licence")
       values.driver_licence_expiry = proposed.expiry_date;
@@ -475,11 +480,14 @@ function proposedPersonForm(
     if (documentKind === "security_licence")
       values.security_licence_expiry = proposed.expiry_date;
   }
-  return {
+  const form = {
     ...current,
     ...values,
     person_vehicle_match_confirmed: false,
   } as PersonForm;
+  // The record itself may still carry the heading from the first seed; leave the name for the reviewer to enter.
+  if (NZTA_HEADING_NAME.test(form.display_name ?? "")) form.display_name = "";
+  return form;
 }
 
 function vehicleForm(vehicle: VehicleRecord): VehicleForm {
