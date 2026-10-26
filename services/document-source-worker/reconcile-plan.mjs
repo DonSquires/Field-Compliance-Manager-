@@ -254,6 +254,9 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     const sourceFingerprint = recordFingerprint(desired);
     const action = { external_ref: row.external_ref, kind, source_fingerprint: sourceFingerprint };
     const legacy = Boolean(current && !checkpoint && current.kind === kind && current.source_file === null && current.source_sheet === null);
+    // Imported earlier from this same workbook and sheet, but before source history was recorded.
+    const unversioned = Boolean(current && !checkpoint && current.kind === kind
+      && current.source_file === row.payload?.source_file && current.source_sheet === row.payload?.source_sheet);
     if (superseded.has(row.external_ref)) {
       actions.push({ ...action, operation: 'superseded' });
       continue;
@@ -289,8 +292,9 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     } else if (recordFingerprint(current.record) === sourceFingerprint) {
       actions.push({ ...action, operation: 'unchanged', record_id: current.id,
         ...(checkpoint ? {} : { baseline_required: true }) });
-    } else if (legacy && kind === 'event') {
-      // Pre-provenance import: the server corrects only known legacy artifacts and holds anything else.
+    } else if (legacy || unversioned) {
+      // Source truth (owner ruling 2026-10-30): the server corrects only the known importer artifacts
+      // and holds anything else.
       actions.push({ ...action, operation: 'legacy_correct', record_id: current.id, desired });
     } else if (!checkpoint) {
       actions.push({ ...action, operation: 'hold', reason: 'initial_difference_requires_review', record_id: current.id });

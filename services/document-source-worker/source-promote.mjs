@@ -126,9 +126,14 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
       continue;
     }
     const match = await classify(entry.relative_path);
+    // Owner ruling: photos outside the structured "YYMMDD HHMM[SS] [rego]" naming are ignored.
+    if (match.status === 'unnamed' || match.status === 'unsupported') {
+      results.push({ ...base, status: 'ignored', reason: match.status === 'unnamed' ? 'filename_not_structured' : 'unsupported_image_type' });
+      continue;
+    }
     if (match.status !== 'matched') {
-      const reason = { unsupported: 'unsupported_image_type', unnamed: 'filename_not_structured',
-        unmatched: 'no_exact_record_match', ambiguous: 'ambiguous_record_match', missing: 'source_missing' }[match.status];
+      const reason = { unmatched: 'no_exact_record_match', ambiguous: 'ambiguous_record_match',
+        missing: 'source_missing' }[match.status];
       results.push({ ...base, status: 'held', reason: reason ?? 'unclassified' });
       continue;
     }
@@ -141,7 +146,11 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
       continue;
     }
     attachments += 1;
-    const outcome = await attach(match.row);
+    const outcome = await attach({ ...match.row, fileInfo: entry });
+    if (outcome.held) {
+      results.push({ ...base, status: 'held', reason: outcome.held });
+      continue;
+    }
     nextReceipts[entry.relative_path] = { key, sha256: outcome.sha256, receipt_id: `evidence:${outcome.storage_path}` };
     results.push({ ...base, status: 'applied', reused: outcome.reused, already_linked: outcome.already_linked });
   }
@@ -277,6 +286,30 @@ function runNode(args) {
   });
 }
 
+// Calls one governed RPC as the configured import identity inside a single transaction.
+// Returns the supabase-js { data, error } shape so callers treat it like a signed-in client.
+export async function importActorRpc(query, actorId, name, args) {
+  if (!/^[a-z_]+$/.test(name) || !/^[0-9a-f-]{36}$/i.test(actorId)) throw new Error('Invalid governed RPC call');
+  const json = JSON.stringify(args);
+  if (json.includes('$rpc_args$')) throw new Error('RPC arguments must not contain their SQL delimiter');
+  const named = Object.keys(args).map(key => {
+    if (!/^p_[a-z0-9_]+$/.test(key)) throw new Error(`Invalid RPC argument ${key}`);
+    // Schema convention: *_id parameters are uuid and *_at parameters are timestamptz.
+    const type = key.endsWith('_id') ? 'uuid' : key.endsWith('_at') ? 'timestamptz' : 'text';
+    return `${key} => (SELECT (a->>'${key}')::${type} FROM args)`;
+  });
+  try {
+    const rows = query(`BEGIN;
+set local request.jwt.claim.sub = '${actorId}';
+WITH args AS (SELECT $rpc_args$${json}$rpc_args$::jsonb AS a)
+SELECT to_jsonb(public.${name}(${named.join(', ')})) AS result;
+COMMIT;`);
+    return { data: rows?.[0]?.result ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: { message: describeError(error) } };
+  }
+}
+
 export async function linkedDeps({ root, map }) {
   const { cliQuery, linkedQuery, runSourceSync } = await import('./reconcile-plan.mjs');
   return {
@@ -303,24 +336,25 @@ export async function linkedDeps({ root, map }) {
       readQuery: linkedQuery, writeQuery: cliQuery, commit, evidenceOnly: true }),
     photoDeps: async ({ commit }) => {
       const { createClient } = await import('@supabase/supabase-js');
-      const { validatePhotoImportEnvironment } = await import('../../scripts/rm-photo-import-config.mjs');
       const photo = await import('../../scripts/import-approved-rm-vehicle-history.mjs');
-      const { SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: serviceRole,
-        RM_PHOTO_IMPORT_ACTOR_EMAIL: actorEmail, RM_PHOTO_IMPORT_ACTOR_PASSWORD: actorPassword } = process.env;
-      validatePhotoImportEnvironment({ apply: commit, url, serviceRole, actorEmail, actorPassword });
+      const { SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: serviceRole } = process.env;
+      if (!url || !serviceRole) throw new Error('Supabase URL and service role are required for scoped photo matching');
       const service = createClient(url, serviceRole, { auth: { persistSession: false } });
+      // Attachments run as the source profile's configured import identity, the same governed
+      // actor the record writer uses, so every evidence link carries that actor's audit receipt.
       let governed = null;
       if (commit) {
-        governed = createClient(url, serviceRole, { auth: { persistSession: false } });
-        const { error } = await governed.auth.signInWithPassword({ email: actorEmail, password: actorPassword });
-        if (error) throw new Error('Dedicated photo importer authentication failed');
+        const actors = linkedQuery(`SELECT import_actor_id FROM public.import_source_profiles
+          WHERE organization_id='${map.provider_organization_id}'::uuid AND profile_code='rm_patrol_log' AND active;`);
+        const actorId = actors?.length === 1 ? actors[0].import_actor_id : null;
+        if (!/^[0-9a-f-]{36}$/i.test(actorId ?? '')) throw new Error('The R&M source profile has no configured import identity');
+        governed = { storage: service.storage, rpc: async (name, args) => importActorRpc(cliQuery, actorId, name, args) };
       }
       const organizationIds = await photo.loadVisibleOrganizationIds(service, map.provider_organization_id);
-      const { byMinute } = await photo.loadTargets(service, organizationIds);
+      const { byMinute, eventsByMinute } = await photo.loadTargets(service, organizationIds, { includePatrolEvents: true });
       return {
-        classify: relativePath => photo.classifyPhoto(relativePath, root, byMinute),
+        classify: relativePath => photo.classifyPhoto(relativePath, root, byMinute, null, eventsByMinute),
         attach: row => photo.attachMatchedPhoto(service, governed, row),
-        close: async () => { if (governed) await governed.auth.signOut(); },
       };
     },
   };
@@ -332,12 +366,25 @@ async function main() {
   const statePath = argument('--state') ?? process.env.SOURCE_SYNC_STATE_PATH?.trim();
   const reportPath = argument('--report');
   if (!root || !statePath || !reportPath || path.extname(reportPath).toLowerCase() !== '.json') {
-    throw new Error('Use --root <R&M documents> --state <scanner state json> --report <report json> [--commit] [--photos] [--recheck-holds] [--photo-limit n] [--only <workbook name fragment>]');
+    throw new Error('Use --root <R&M documents> --state <scanner state json> --report <report json> [--commit] [--photos] [--recheck-holds] [--photo-limit n] [--only <workbook name fragment> [--max-new-rows n]]');
   }
   const photoLimit = Number(argument('--photo-limit') ?? 500);
   if (!Number.isInteger(photoLimit) || photoLimit < 0 || photoLimit > 5000) throw new Error('--photo-limit must be 0-5000');
   const mapPath = argument('--map') ?? path.join(REPO_ROOT, 'services', 'document-source-worker', 'rm-patrol-source-map.json');
   const map = validateSourceMap(JSON.parse(await readFile(mapPath, 'utf8')));
+  // One-off, owner-approved catch-ups only: raises the reviewed per-sheet change limit for this run.
+  const maxNewRows = argument('--max-new-rows');
+  if (maxNewRows !== undefined) {
+    const limit = Number(maxNewRows);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 2000) throw new Error('--max-new-rows must be 1-2000');
+    const only = argument('--only')?.toLowerCase();
+    const selected = only ? Object.keys(map.workbooks)
+      .filter(name => `${WORKBOOK_FOLDER}${name}`.toLowerCase().includes(only)) : [];
+    if (selected.length !== 1) {
+      throw new Error(`--max-new-rows requires --only to select exactly one mapped workbook (matched ${selected.length})`);
+    }
+    map.max_new_rows_per_sheet = limit;
+  }
   const report = await runPromotion({ root, statePath: path.resolve(statePath), map, deps: await linkedDeps({ root, map }),
     commit: process.argv.includes('--commit'), includePhotos: process.argv.includes('--photos'),
     recheckHolds: process.argv.includes('--recheck-holds'), photoLimit, only: argument('--only') ?? null });

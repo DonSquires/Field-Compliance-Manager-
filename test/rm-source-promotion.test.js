@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  promotePhotos, promoteWorkbookVersion, recordOutcomes, runPromotion, serverRefusal, validateSourceMap,
+  promotePhotos, promoteWorkbookVersion, recordOutcomes, runPromotion, serverRefusal, validateSourceMap, importActorRpc,
 } from '../services/document-source-worker/source-promote.mjs';
 import { loadSyncState } from '../services/document-source-worker/source-sync.mjs';
 
@@ -113,12 +113,13 @@ test('photos attach only on a unique match, only when committing, and are never 
   const attached = [];
   const attach = async row => { attached.push(row); return { sha256: SHA, storage_path: 'org/x/photo.jpg' }; };
   const preview = await promotePhotos({ entries, classify, attach, commit: false, limit: 5 });
-  assert.deepEqual(preview.results.map(item => item.status), ['previewed', 'held', 'held']);
+  assert.deepEqual(preview.results.map(item => item.status), ['previewed', 'held', 'ignored']);
   assert.deepEqual(preview.results.slice(1).map(item => item.reason), ['ambiguous_record_match', 'filename_not_structured']);
   assert.deepEqual(preview.receipts, {});
   assert.equal(attached.length, 0);
   const applied = await promotePhotos({ entries, classify, attach, commit: true, limit: 5 });
   assert.equal(applied.results[0].status, 'applied');
+  assert.deepEqual(attached[0].fileInfo, entries[0]);
   assert.deepEqual(applied.receipts['Photos/a.jpg'], { key: '10:t1', sha256: SHA, receipt_id: 'evidence:org/x/photo.jpg' });
   classified.length = 0;
   const again = await promotePhotos({ entries: entries.slice(0, 1), receipts: applied.receipts, classify, attach, commit: true, limit: 5 });
@@ -174,4 +175,39 @@ test('a dry run end to end leaves every source version pending', async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('governed photo RPCs run as the import identity with typed, delimiter-safe arguments', async () => {
+  const actor = 'f1c00000-0000-4000-8000-000000000001';
+  let sql = '';
+  const ok = await importActorRpc(text => { sql = text; return [{ result: 'evidence-id' }]; }, actor,
+    'attach_external_photo_to_record', { p_record_kind: 'location_event', p_record_id: actor, p_captured_at: '2026-01-01T00:00:00Z' });
+  assert.deepEqual(ok, { data: 'evidence-id', error: null });
+  assert.match(sql, /set local request\.jwt\.claim\.sub = 'f1c00000-0000-4000-8000-000000000001'/);
+  assert.match(sql, /p_record_id => \(SELECT \(a->>'p_record_id'\)::uuid FROM args\)/);
+  assert.match(sql, /p_captured_at => \(SELECT \(a->>'p_captured_at'\)::timestamptz FROM args\)/);
+  assert.match(sql, /p_record_kind => \(SELECT \(a->>'p_record_kind'\)::text FROM args\)/);
+  const refused = await importActorRpc(() => { throw new Error('ERROR:  P0001: Record not found'); }, actor,
+    'attach_external_photo_to_record', { p_record_kind: 'observation' });
+  assert.equal(refused.data, null);
+  assert.match(refused.error.message, /Record not found/);
+  await assert.rejects(() => importActorRpc(() => [], actor, 'x; drop table y', {}), /Invalid governed RPC call/);
+  await assert.rejects(() => importActorRpc(() => [], actor, 'f', { p_note: '$rpc_args$' }), /delimiter/);
+  const hashed = await importActorRpc(text => { sql = text; return [{ result: 'evidence-id' }]; }, actor,
+    'attach_external_photo_to_record', { p_sha256: 'a'.repeat(64) });
+  assert.equal(hashed.error, null);
+  assert.match(sql, /p_sha256 => \(SELECT \(a->>'p_sha256'\)::text FROM args\)/);
+  await assert.rejects(() => importActorRpc(() => [], actor, 'f', { 'p_x;drop': 1 }), /Invalid RPC argument/);
+});
+
+test('a photo the attach step holds gets a visible hold, not an applied receipt', async () => {
+  const { results, receipts } = await promotePhotos({
+    entries: [{ relative_path: 'Photos/a.jpg', size_bytes: 1, modified_at: '2026-01-01T00:00:00.000Z' }],
+    classify: async () => ({ status: 'matched', row: { matchType: 'event_minute' } }),
+    attach: async () => ({ held: 'photo_already_attached_to_other_record', sha256: 'a'.repeat(64) }),
+    commit: true, limit: 10,
+  });
+  assert.deepEqual(results, [{ source_relative_path: 'Photos/a.jpg', status: 'held',
+    reason: 'photo_already_attached_to_other_record' }]);
+  assert.deepEqual(receipts, {});
 });
