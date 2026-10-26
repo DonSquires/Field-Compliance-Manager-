@@ -6,6 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026101500_builder_chat_code_changes.sql'), 'utf8');
+const cycleMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026103000_builder_correction_verification_cycles.sql'), 'utf8');
 
 test('code corrections preserve immutable task/target/attempts and have owner-only execution', () => {
   assert.match(migration, /builder_chat_require_owner/);
@@ -68,6 +69,72 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         assert.ok(start >= 0, symbol);
         return schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
       }).join('\n');
+    const claimFunctions = ['builder_claim_frontend_worker', 'builder_claim_backend_worker'].map(symbol => {
+      const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${symbol}"(`);
+      assert.ok(start >= 0, symbol);
+      return schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
+    }).join('\n');
+    const cycleFixture = `
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
+      ALTER TABLE builder_artifacts ADD COLUMN checksum text;
+      ALTER TABLE builder_model_runs ADD COLUMN step_id uuid,
+        ADD COLUMN input_artifact_ids uuid[], ADD COLUMN output_artifact_ids uuid[];
+      ALTER TABLE builder_worker_runs ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+        ADD COLUMN runner_id text, ADD COLUMN worker_isolation_level text,
+        ADD COLUMN command text, ADD COLUMN command_args text[], ADD COLUMN environment_variables_snapshot jsonb,
+        ADD COLUMN idempotency_key text, ADD COLUMN lease_token_hash text, ADD COLUMN lease_expires_at timestamptz,
+        ADD COLUMN heartbeat_at timestamptz, ADD COLUMN started_at timestamptz, ADD COLUMN completed_at timestamptz,
+        ADD COLUMN updated_at timestamptz, ADD COLUMN timeout_seconds integer;
+      CREATE UNIQUE INDEX ON builder_worker_runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+    `;
+    const cycleChecks = `
+      SELECT set_config('test.role','service_role',false);
+      DO $f$
+      #variable_conflict use_variable
+      <<cycleChecks>>
+      DECLARE lane text; job_id uuid; step_id uuid; patch_id uuid; source_id uuid; spec_id uuid;
+        org_id uuid:=gen_random_uuid(); result jsonb; original_key text; original_run uuid; cycle_id uuid;
+        previous_count integer; cycle integer; claim text;
+      BEGIN
+      FOREACH lane IN ARRAY ARRAY['frontend','backend'] LOOP
+        job_id:=gen_random_uuid(); step_id:=gen_random_uuid(); patch_id:=gen_random_uuid();
+        source_id:=gen_random_uuid(); spec_id:=gen_random_uuid();
+        INSERT INTO builder_jobs(id,organization_id,status,target_sha)
+          VALUES(job_id,org_id,'implementation_pending',repeat('b',40));
+        INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status,attempt_count)
+          VALUES(step_id,job_id,lane||'_implementation',lane||'_engineer','pending',0),
+          (source_id,job_id,'source',CASE lane WHEN 'frontend' THEN 'ux_designer' ELSE 'product_analyst' END,'completed',1);
+        INSERT INTO builder_artifacts(id,job_id,step_id,artifact_type,status,checksum)
+          VALUES(patch_id,job_id,step_id,'code_implementation','final','identical-checksum'),
+          (spec_id,job_id,source_id,CASE lane WHEN 'frontend' THEN 'ui_design_plan' ELSE 'product_specification' END,'final','source-checksum');
+        INSERT INTO builder_model_runs(job_id,step_id,status,input_artifact_ids,output_artifact_ids)
+          VALUES(job_id,step_id,'completed',ARRAY[spec_id],ARRAY[patch_id]);
+        claim:=format('SELECT builder_claim_%s_worker(%L,%L,%L,%L,%L)',lane,job_id,step_id,patch_id,'test-runner',repeat('b',40));
+        EXECUTE claim INTO result;
+        original_run:=(result->>'run_id')::uuid;
+        original_key:=job_id::text||'::'||step_id::text||'::'||repeat('b',40)||'::identical-checksum';
+        IF (SELECT idempotency_key FROM builder_worker_runs WHERE id=original_run) IS DISTINCT FROM original_key
+          THEN RAISE EXCEPTION 'Non-correction key changed'; END IF;
+        FOR cycle IN 1..3 LOOP
+          UPDATE builder_worker_runs SET status='completed' WHERE id=(result->>'run_id')::uuid;
+          UPDATE builder_jobs SET status='implementation_pending' WHERE id=job_id;
+          UPDATE builder_job_steps SET status='pending' WHERE id=step_id;
+          SELECT count(*) INTO previous_count FROM builder_worker_runs WHERE builder_worker_runs.job_id=cycleChecks.job_id;
+          PERFORM expect_error(claim,'already verified');
+          cycle_id:=gen_random_uuid();
+          UPDATE builder_jobs SET code_review_revision=jsonb_build_object('approval_id',cycle_id) WHERE id=job_id;
+          EXECUTE claim INTO result;
+          IF (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=cycleChecks.job_id)<>previous_count+1
+            OR (SELECT status FROM builder_worker_runs WHERE id=original_run)<>'completed'
+            OR (SELECT idempotency_key FROM builder_worker_runs WHERE id=(result->>'run_id')::uuid)
+              IS DISTINCT FROM original_key||'::correction::'||cycle_id::text
+            THEN RAISE EXCEPTION 'Correction did not preserve history and claim a fresh cycle'; END IF;
+        END LOOP;
+        UPDATE builder_worker_runs SET status='completed' WHERE id=(result->>'run_id')::uuid;
+      END LOOP;
+      END $f$;
+    `;
     const checks = `
       CREATE TRIGGER review_policy BEFORE UPDATE OF status ON builder_job_steps
         FOR EACH ROW EXECUTE FUNCTION builder_enforce_release_review_policy();
@@ -178,7 +245,8 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-        input: fixture + migration + reviewFunctions + checks, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+        input: fixture + migration + reviewFunctions + checks + cycleFixture + claimFunctions + cycleMigration + cycleChecks,
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) { throw new Error(`PostgreSQL correction checks failed: ${error.stderr || error.message}`); }
   } finally {

@@ -73,6 +73,15 @@ build passed. Real Ollama Cloud Kimi K2.7 Code selected
 no-write probe. These are pre-release checks, not production feedback delivery
 or a working underlying repair.
 
+PR #241 review follow-up: worker images must include the shared artifact reader
+and patch-envelope parser at their original module paths. Frontend and backend
+verification keys now include the confirmed correction approval ID while
+preserving the original key for jobs without corrections. Actual PostgreSQL
+checks exercise both real claim functions across three byte-identical
+correction cycles: each cycle creates a fresh run, completed history remains,
+and duplicate verification within the same cycle is still rejected. This
+closes a fresh-verification blocker, not the underlying user-reported repair.
+
 ### Same-job specification feedback (2026-10-26)
 
 PR #234 deployed as `637775a1`; actual UI message
