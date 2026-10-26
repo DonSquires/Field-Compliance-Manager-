@@ -36563,6 +36563,10 @@ export type Database = {
         Args: { p_job_id: string; p_message_id: string }
         Returns: undefined
       }
+      builder_chat_recover_implementation: {
+        Args: { p_message_id: string }
+        Returns: string
+      }
       builder_chat_release_proposal: {
         Args: { p_message_id: string; p_token: string }
         Returns: undefined
