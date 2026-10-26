@@ -39,6 +39,31 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Same-job specification feedback (2026-10-26)
+
+PR #234 deployed as `637775a1`; actual UI message
+`38b4ae77-764d-480b-9488-4b10ea6a6e5d` produced a Bob-authored investigation.
+Owner UI confirmation created job `d29aaf78-8bb1-4d87-9913-9705dd8767fa`
+with a persisted receipt and pinned revision. This proves handoff, not repair.
+Builder reached specification review after rejected local and cloud output and
+an accepted paid-model result; Builder's routing was unchanged by Chat's fixed
+cloud policy. The specification treated a legacy send-path Atlas lead as a
+required fix while leaving the actual failure path unresolved. It was not
+approved. Its empty `research_evidence` array is NOT itself proof of absent
+source inspection: that field represents public-web citations.
+
+UI review request `0aee4d07-4d9f-43df-aa21-01fde105e561` exposed the next gap:
+PM could draft review text but could not deliver it to the existing job.
+Connect a native same-thread specification-revision card to an authenticated
+owner confirmation RPC, retaining job identity and immutable task. Bind the
+pending approval and target, preserve superseded artifacts and audit history,
+keep attempts, reject active/later-stage work, and consume confirmed feedback
+in the analyst's next prompt. No new job or implementation approval is created.
+Acceptance requires real PostgreSQL authorization/state/replay tests, native
+tool and UI tests, responsive confirmation/receipt reload tests, protected
+release, then actual UI feedback on the original job. Regenerating a
+specification does not prove its evidence or the repair is adequate.
+
 ### PM investigation handoff follow-up (2026-10-25)
 
 Production UI test: a simple partial-success error report produced an advisory

@@ -132,3 +132,36 @@ it('surfaces a failed job creation instead of marking the proposal accepted', as
   expect(rpc.mock.calls.map(call => call[0])).not.toContain('builder_chat_record_job');
   expect(rpc).toHaveBeenCalledWith('builder_chat_release_proposal', expect.objectContaining({ p_message_id: 'p' }));
 });
+
+it('confirms an existing-job revision separately from job creation and shows its real receipt', async () => {
+  wire({ messages: [row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+    revision: { job_id: 'existing-job', feedback: 'Verify the current workflow before approving implementation.' },
+  })] });
+  const prior = rpc.getMockImplementation()!;
+  rpc.mockImplementation(async (name: string, args: unknown) => name === 'builder_chat_request_spec_revision'
+    ? { data: 'audit-receipt', error: null } : prior(name, args));
+  const create = vi.fn();
+  render(<BuilderChatPanel context={{}} onCreateJob={create} />);
+  const confirm = await screen.findByRole('button', { name: 'Request specification revision' });
+  expect(rpc.mock.calls.some(call => call[0] === 'builder_chat_request_spec_revision')).toBe(false);
+  fireEvent.click(confirm);
+  expect(await screen.findByText('Revision requested · Receipt: audit-receipt')).toBeTruthy();
+  expect(rpc).toHaveBeenCalledWith('builder_chat_request_spec_revision', { p_message_id: 'revision-card' });
+  expect(create).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Request specification revision' })).toBeNull();
+});
+
+it('shows a moved-gate error without claiming a revision was sent or creating a job', async () => {
+  wire({ messages: [row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+    revision: { job_id: 'existing-job', feedback: 'Revisit the report before implementation.' },
+  })] });
+  const prior = rpc.getMockImplementation()!;
+  rpc.mockImplementation(async (name: string, args: unknown) => name === 'builder_chat_request_spec_revision'
+    ? { data: null, error: { message: 'Specification review has moved; prepare a fresh revision' } } : prior(name, args));
+  const create = vi.fn();
+  render(<BuilderChatPanel context={{}} onCreateJob={create} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Request specification revision' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/has moved/);
+  expect(screen.queryByText(/Revision requested · Receipt/)).toBeNull();
+  expect(create).not.toHaveBeenCalled();
+});

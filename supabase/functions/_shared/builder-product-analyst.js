@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext, mainHealthEvidenceConflict } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v15';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v16';
 
 // Repository paths may live under any tracked top-level directory (deploy/, Build-Plan/) or at the
 // repository root (builder-autopilot.js). Format is checked here; existence is checked against the
@@ -298,6 +298,8 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'You are the Product Analyst for Field Compliance Manager.',
     'Produce a grounded implementation specification, not code.',
     'Use only the supplied task and repository context.',
+    'The current user job defines scope. Atlas is a map, not evidence: use gap/edge lists as leads, never turn an unrelated or legacy gap into a required fix. Confirm the actual reported workflow before choosing a repair path. A file inventory proves existence, not source inspection or live behavior; mark missing checks and cause as unknown rather than describing hypotheses as facts.',
+    'Confirmed owner revision feedback in constraints must be addressed explicitly in the revised specification. It is reported review, not proof of its suggested cause. research_evidence contains supplied public-web citations; an empty array alone does not establish whether repository source was inspected.',
     'Never invent schema, users, integrations, policies, or completed behavior.',
     'Describe expected versus present behavior before, during, and after the workflow.',
     'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
@@ -516,7 +518,16 @@ async function runProductAnalyst({
   const prompts = buildProductAnalystPrompt({
     taskDescription: job.task_description,
     repositoryContext,
-    constraints
+    constraints: [
+      ...constraints,
+      ...(typeof started.step?.input_context?.specification_revision?.feedback === 'string'
+        ? [`Owner requested specification revision on this same job (reported review, not verified cause): ${JSON.stringify({
+          feedback: started.step.input_context.specification_revision.feedback.slice(0, 4000),
+          human_report: typeof started.step.input_context.specification_revision.review_quote === 'string'
+            ? started.step.input_context.specification_revision.review_quote.slice(0, 2000) : null,
+        })}`]
+        : []),
+    ]
   });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
