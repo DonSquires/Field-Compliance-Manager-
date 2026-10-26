@@ -123,7 +123,7 @@ test('agentic author records a durable session and per-turn heartbeat before fin
   assert.deepEqual(writes[2].value.usage_metadata, { output_tokens: 40, phase: 'authored', turns: 3 });
 });
 
-test('required source scope and admitted partial handoffs fail closed', () => {
+test('required source scope and admitted partial handoffs fail closed', async t => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const { createBranchWorkspace } = require('../builder-branch-workspace');
@@ -140,7 +140,7 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     args: { summary: 'Implemented the first structural slice but did not complete the required layout.', tests: [], follow_ups: ['Complete layout.css'] }
   });
 
-  test('approved delivery requirements require changed-file acceptance evidence', () => {
+  await t.test('approved delivery requirements require changed-file acceptance evidence', () => {
     const specification = {
       delivery_requirements: [
         { id: 'DR-1', outcome: 'Responsive workspace', evidence: 'Mobile check', source_scope: ['apps/web/src/layout.css'] },
@@ -231,7 +231,7 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css provides the layout' },
     { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx provides the updated application' }
   ]);
-  fs.rmSync(repo.root, { recursive: true, force: true });
+  fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 function makeRepo() {

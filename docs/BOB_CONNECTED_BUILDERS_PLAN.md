@@ -102,6 +102,20 @@ pending again. The UI recorded the correction event and still showed not
 deployed. This proves durable same-job feedback delivery, not Builder
 consumption, a corrected patch, fresh verification or the underlying repair.
 
+The first correction cycle subsequently completed fresh frontend/backend
+verification and security and reached a new human review. It remains
+unapproved: UI inspection showed the backend still calls the real reader with
+the owner sequence while its replacement test uses a different range-reader
+contract. Independent UI QA turn
+`6fd6723e-86fa-411e-a38a-4477bb9f41ee` advised against approval based on
+these human-reviewed observations. Passing checks did not prove the repair.
+
+PR #243 verification also reproduced a separate existing agentic-test cleanup
+failure on retry. Owner approved a narrow test-only follow-up: explicitly await
+the nested acceptance test and bound retries for transient temporary Git
+directory removal. Assertions, production code and CI failure handling remain
+unchanged.
+
 ### Same-job specification feedback (2026-10-26)
 
 PR #234 deployed as `637775a1`; actual UI message
