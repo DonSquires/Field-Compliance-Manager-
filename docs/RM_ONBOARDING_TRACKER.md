@@ -47,6 +47,27 @@ turn beats false completeness.
   contracted patrol coverage, which needs review. Rows with an unexplained
   difference from source (notably about 9,600 across the OFO workbooks) remain
   untouched holds.
+- **Legacy importer artifact correction (2026-10-30, migration
+  20261030140000):** about 21,000 imported rows had no source version and were
+  held as `initial_difference_requires_review`. Profiling showed known
+  legacy-importer artifacts: `occurred_at` stored exactly 1h late in NZDT months
+  (a fixed +12 offset; the sheet parser uses Pacific/Auckland), float noise in
+  `job_time_hours`, and payloads missing provenance/classification keys. Owner
+  ruling: the spreadsheets are source truth and history is preserved.
+  `correct_legacy_patrol_source_records` now corrects events and observations
+  from the same workbook/sheet, writing version 1 `legacy_correction` and an
+  audited `patrol_legacy_source_corrected` entry. It also moves an observation's
+  `observation_trigger` context event to the corrected time. Uninvoiced finance
+  cost rows no longer block a correction that keeps the record's local service
+  date (the cost row's date and amounts stay true). An invoiced record, or one
+  whose local date would move, stays held. Live run (attempt 2): **18,902
+  corrected** (including 1,944 observations, with 1,944 context events moved)
+  and **2,018 held** for genuine content differences: status, zone, officer,
+  `event_type`, payload values or a time gap that is not the offset artifact.
+  Those stay visible holds for reviewed adoption; possible key collisions (for
+  example, two STAND rows) must not be adopted automatically. A post-run check found no
+  finance service date moved by the correction (34 pre-existing date
+  mismatches, unchanged).
 - **Photo download hazard:** 72,543 of 76,156 R&M photos (424.7 GB) are
   OneDrive online-only placeholders. Hashing them downloads them. The laptop
   scanner container's `SOURCE_SYNC_INCLUDE_PHOTOS` is now `"false"`, and photo
@@ -55,10 +76,33 @@ turn beats false completeness.
   attached. Its receipt is keyed by size and modified time, so it is not re-read.
 - Live photo dry run (2026-10-26), no bytes read and the local footprint is
   unchanged at 3,613 files: 396 unique matches, 19 ambiguous, 11,151 unstructured
-  filenames, and 47,029 with no exact record match. Committing photos needs the
-  governed importer actor (`RM_PHOTO_IMPORT_ACTOR_EMAIL`/`_PASSWORD`). The
-  low match rate is a matching-rule question for review, not a reason to guess
-  links.
+  filenames, and 47,029 with no exact record match. The low match rate is a
+  matching-rule question for review, not a reason to guess links.
+- Owner photo rules (2026-10-26): a photo whose structured filename date/minute
+  matches a record is attached to it; a structured photo with no match should
+  become a new observation (phase 2, needs a reviewed folder-to-place map for
+  the 440 "Place - Area - Client" folders and a governed creation path, not yet
+  built); photos without the structured `YYMMDD HHMM[SS] [rego]` name are
+  ignored (`status: ignored`, not holds). Matching now also falls back to R&M
+  patrol `location_events` when no observation matches.
+- Photo attachment runs as the `rm_patrol_log` source profile's configured
+  import identity (the same governed actor as the record writer) via
+  `attach_external_photo_to_record`; no importer password is needed. File
+  metadata goes into the source note as provenance (for example, "no camera
+  EXIF, consistent with a CCTV screenshot or export"). Rollback check: the
+  import identity passes `org_access_allowed` for every R&M client org; the one
+  refusal is Downer/LINZ, outside R&M's operational agreements, so any match
+  there is refused, not forced.
+- NCC coverage: four NCC zones (Branford Park, Neale Park, Peppertree Park and
+  Queens Garden) were linked to the R&M NCC operational agreement through
+  `manage_crm_agreement_zone_coverage` (audited `crm_agreement_link_zone`), so
+  rows at those places can be written.
+- NZTA photos stay on the existing governed MVR workflow: OCR proposes person and
+  vehicle facts, and an org admin approves each one in Identity Records before
+  canonical people and vehicles change.
+- Scheduling: `scripts/run-rm-source-promotion.ps1` runs the promoter with
+  `--commit --photos`, fetching the service key from the linked CLI at runtime
+  (never stored) and logging each run to the state directory.
 - Seeded spreadsheet jobs remain accepted reporting/billing source truth until
   R&M operates in FCM, with no retrospective geofence requirement. This does not
   invent geometry, GPS attendance, a worker identity or a photo-to-job link.

@@ -55,7 +55,18 @@ function mimeType(path) {
 function storagePath(row, sha256) {
   const sourceExtension = extname(row.relativePath).toLowerCase();
   const extension = sourceExtension === '.jpeg' ? '.jpg' : sourceExtension;
-  return `org/${row.organizationId}/record-evidence/observation/${row.observationId}/${sha256}${extension}`;
+  return `org/${row.organizationId}/record-evidence/${row.recordKind ?? 'observation'}/${row.observationId}/${sha256}${extension}`;
+}
+
+// File metadata is provenance: a camera photo normally carries an EXIF block, while a CCTV
+// screenshot or export does not. This is supporting evidence, not proof of origin.
+export function photoProvenance(bytes, fileInfo = null) {
+  const head = bytes.subarray(0, 65536).toString('latin1');
+  const exif = head.includes('Exif\u0000\u0000');
+  const parts = [exif ? 'camera EXIF present' : 'no camera EXIF (consistent with a CCTV screenshot or export)'];
+  if (fileInfo?.size_bytes !== undefined) parts.push(`${fileInfo.size_bytes} bytes`);
+  if (fileInfo?.modified_at) parts.push(`file modified ${fileInfo.modified_at}`);
+  return parts.join(', ');
 }
 
 async function page(queryFactory) {
@@ -86,8 +97,8 @@ export async function loadVisibleOrganizationIds(service, providerOrganizationId
   return [...ids];
 }
 
-export async function loadTargets(service, organizationIds) {
-  const [targets, sites, zones, locations] = await Promise.all([
+export async function loadTargets(service, organizationIds, { includePatrolEvents = false } = {}) {
+  const [targets, sites, zones, locations, events] = await Promise.all([
     page(() => service
       .from('observations')
       .select('id,organization_id,plate_number,officer_notes,observed_at,site_id,zone_id,location_id,canonical_vehicle_id,module_key,plate_source')
@@ -96,6 +107,14 @@ export async function loadTargets(service, organizationIds) {
     page(() => service.from('client_sites').select('id,name').in('organization_id', organizationIds)),
     page(() => service.from('location_zones').select('id,name').in('organization_id', organizationIds)),
     page(() => service.from('locations').select('id,name').in('organization_id', organizationIds)),
+    includePatrolEvents
+      ? page(() => service
+        .from('location_events')
+        .select('id,organization_id,occurred_at,zone_id,client_site_id,reg_raw:payload->>reg_raw,plates_found:payload->>plates_found,location_raw:payload->>location_raw,reserve_raw:payload->>reserve_raw,comments:payload->>comments')
+        .in('organization_id', organizationIds)
+        .eq('source', 'rm_patrol_log_import')
+        .order('id', { ascending: true }))
+      : Promise.resolve([]),
   ]);
   const aliasesByPlace = new Map();
   for (const place of [...sites, ...zones, ...locations]) {
@@ -107,18 +126,31 @@ export async function loadTargets(service, organizationIds) {
       .flatMap((id) => aliasesByPlace.get(id) ?? []),
   }));
   const byMinute = indexPhotoTargets(withAliases);
-  return { targets, byMinute };
+  // Patrol log entries are a fallback index: observations are mirrored into location_events,
+  // so matching both at once would make every sighting look ambiguous.
+  const eventsByMinute = indexPhotoTargets(events.map((event) => ({
+    id: event.id,
+    organization_id: event.organization_id,
+    observed_at: event.occurred_at,
+    plate_number: event.reg_raw,
+    officer_notes: [event.plates_found, event.comments].filter(Boolean).join(' '),
+    place_aliases: [...(aliasesByPlace.get(event.zone_id ?? event.client_site_id) ?? []), event.location_raw, event.reserve_raw]
+      .filter(Boolean),
+    recordKind: 'location_event',
+  })));
+  return { targets, byMinute, eventsByMinute };
 }
 
 // Classifies one source photo: unsupported, unnamed (no structured date/time), unmatched,
 // ambiguous, missing, or a single exact observation match ready to attach.
-export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName = null) {
+export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName = null, eventsByMinute = null) {
   const extension = extname(relativePath).toLowerCase();
   if (!/^photos[\\/]/i.test(relativePath) || !SUPPORTED_EXTENSIONS.has(extension)) return { status: 'unsupported' };
   const parsed = parsePhotoName(fileName ?? relativePath);
   if (!parsed) return { status: 'unnamed' };
-  const match = matchPhotoTarget(parsed, relativePath, byMinute);
-  if (match.status === 'unmatched' || match.status === 'ambiguous') return { status: match.status };
+  let match = matchPhotoTarget(parsed, relativePath, byMinute);
+  if (match.status === 'unmatched' && eventsByMinute) match = matchPhotoTarget(parsed, relativePath, eventsByMinute);
+  if (match.status === 'unmatched' || match.status === 'ambiguous') return { status: match.status, parsed };
   const localPath = sourcePath(sourceRoot, relativePath);
   try {
     await access(localPath);
@@ -133,6 +165,7 @@ export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName
       relativePath,
       localPath,
       parsed,
+      recordKind: match.target.recordKind ?? 'observation',
       observationId: match.target.id,
       organizationId: match.target.organization_id,
       plate: parsed.plate ?? normalizePlate(match.target.plate_number),
@@ -199,17 +232,19 @@ export async function attachMatchedPhoto(service, governed, row) {
   let alreadyLinked = false;
   if (existing.data?.storage_path) {
     reused = true;
-    const support = await service
-      .from('observation_supporting_evidence')
-      .select('id')
-      .eq('organization_id', row.organizationId)
-      .eq('observation_id', row.observationId)
-      .eq('evidence_kind', 'external_photo')
-      .eq('storage_path', destination)
-      .limit(1)
-      .maybeSingle();
-    if (support.error) throw support.error;
-    alreadyLinked = Boolean(support.data);
+    if ((row.recordKind ?? 'observation') === 'observation') {
+      const support = await service
+        .from('observation_supporting_evidence')
+        .select('id')
+        .eq('organization_id', row.organizationId)
+        .eq('observation_id', row.observationId)
+        .eq('evidence_kind', 'external_photo')
+        .eq('storage_path', destination)
+        .limit(1)
+        .maybeSingle();
+      if (support.error) throw support.error;
+      alreadyLinked = Boolean(support.data);
+    }
   } else {
     const upload = await governed.storage.from('bob-uploads').upload(
       destination,
@@ -224,9 +259,9 @@ export async function attachMatchedPhoto(service, governed, row) {
 
   const sourceReference = `local://rm/remsec-documents/${row.relativePath.replaceAll('\\', '/')}`;
   const description = `Approved working-file photo${row.plate ? ` for ${row.plate}` : ''}`;
-  const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}`;
+  const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}; ${photoProvenance(bytes, row.fileInfo)}`;
   const result = await governed.rpc('attach_external_photo_to_record', {
-    p_record_kind: 'observation',
+    p_record_kind: row.recordKind ?? 'observation',
     p_record_id: row.observationId,
     p_storage_path: destination,
     p_sha256: sha256,
