@@ -1,5 +1,7 @@
 'use strict';
 
+const { laneAllows } = require('./builder-path-policy');
+
 /**
  * Count an author run that ended without a proposal as a step attempt. The worker claim RPCs
  * increment attempt_count only when a patch reaches a worker, so before this an author that
@@ -22,11 +24,22 @@ async function recordGenerationFailure({ supabase, job, step, logger = console }
   }
 }
 
-function crossLaneNoChange(generation) {
-  const detail = String(generation?.error || generation?.summary || '').toLowerCase();
-  return /outside the (frontend|backend) lane/.test(detail)
-    || /outside the allowed .* lane/.test(detail)
-    || /resides outside the allowed/.test(detail);
+function crossLaneNoChange(generation, mode) {
+  const ownLane = mode === 'frontend_engineer' ? 'frontend' : mode === 'backend_engineer' ? 'backend' : null;
+  if (generation?.no_change_lane) return Boolean(ownLane && ['frontend', 'backend'].includes(generation.no_change_lane)
+    && generation.no_change_lane !== ownLane && laneAllows(generation.no_change_lane, generation.no_change_file));
+  const reason = String(generation?.error || generation?.summary || '');
+  const detail = reason.toLowerCase();
+  if (!ownLane) return false;
+  const sibling = ownLane === 'frontend' ? 'backend' : 'frontend';
+  const files = (reason.match(/[^\s`"'<>()[\]{},;]+/g) || []).map(token => token.replace(/[.:!?]+$/, ''));
+  if (!files.some(file => /\.(?:[cm]?[jt]sx?|sql|css|html)$/.test(file) && laneAllows(sibling, file))) return false;
+  if (ownLane && detail.includes('protected lane boundary:')) {
+    return detail.includes(`(${sibling} lane)`) && detail.includes(`restricted to`)
+      && detail.includes(`${ownLane} files`);
+  }
+  return detail.includes(`outside the ${ownLane} lane`)
+    || detail.includes(`outside the allowed ${ownLane} lane`);
 }
 
 /**
@@ -36,7 +49,7 @@ function crossLaneNoChange(generation) {
  * In either case, skip this lane with the recorded reason so the job can continue.
  */
 async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, logger = console }, generation) {
-  const reroute = crossLaneNoChange(generation);
+  const reroute = crossLaneNoChange(generation, step?.builder_mode);
   if (!generation?.no_change || (!siblingCompleted && !reroute) || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
   const sibling = step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend';
   const reason = reroute

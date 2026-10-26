@@ -386,7 +386,7 @@ test('an author that ran out of turns reading gets one immediate second run seed
     assert.equal(calls.length, 2);
     assert.equal(rpcs.length, 1);
     assert.equal(rpcs[0].args._retryable, false);
-    assert.match(rpcs[0].args._reason, /two attempts ran out of turns without an edit; second attempt: still too big/);
+    assert.match(rpcs[0].args._reason, /Two author attempts produced no patch; second attempt: still too big/);
   } finally {
     require.cache[engineerPath].exports = originalEngineer;
     require.cache[handoffPath].exports = originalHandoff;
@@ -582,7 +582,7 @@ test('a cross-lane no-change skips this lane even before the sibling finishes', 
   delete require.cache[coordinatorPath];
   require.cache[engineerPath].exports = {
     ...originalEngineer,
-    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in builder-vibe-preview.js: outside the frontend lane', routing: { provider: 'openai' } }),
+    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in apps/web/src/Preview.tsx: outside the backend lane', routing: { provider: 'openai' } }),
   };
   const rpcs = [];
   const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };

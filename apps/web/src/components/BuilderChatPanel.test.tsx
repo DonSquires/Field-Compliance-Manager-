@@ -226,3 +226,28 @@ it('surfaces a stale implementation gate and never manufactures a receipt', asyn
   expect((await screen.findByRole('alert')).textContent).toMatch(/moved or expired/);
   expect(screen.queryByText(/Revision requested · Receipt/)).toBeNull();
 });
+
+it.each([false, true])('requires confirmation for same-job recovery and surfaces a stale failure (%s)', async stale => {
+  wire({ messages: [row('report', 1, 'owner', 'message'), row('recover', 2, 'bob', 'proposal', 'Recovery', {
+    message_id: 'report', revision: { kind: 'recovery', job_id: 'existing-job', feedback: 'Route the backend-owned fix without unrelated frontend edits or resetting attempts.' },
+  })] });
+  const prior = rpc.getMockImplementation()!;
+  rpc.mockImplementation(async (name: string, args: unknown) => name === 'builder_chat_recover_implementation'
+    ? stale ? { data: null, error: { message: 'Failed correction changed; prepare a fresh recovery card' } }
+      : { data: 'recovery-receipt', error: null } : prior(name, args));
+  const onCreateJob = vi.fn();
+  render(<BuilderChatPanel context={{}} onCreateJob={onCreateJob} />);
+  expect(await screen.findByRole('article', { name: 'Implementation recovery for job existing-job' })).toBeTruthy();
+  expect(rpc.mock.calls.some(call => call[0] === 'builder_chat_recover_implementation')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Resume failed implementation' }));
+  if (stale) {
+    expect((await screen.findByRole('alert')).textContent).toMatch(/prepare a fresh recovery card/);
+    expect(screen.queryByText(/Revision requested · Receipt/)).toBeNull();
+  } else {
+    expect(await screen.findByText('Revision requested · Receipt: recovery-receipt')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Resume failed implementation' })).toBeNull();
+  }
+  expect(onCreateJob).not.toHaveBeenCalled();
+  expect(rpc).toHaveBeenCalledWith('builder_chat_recover_implementation', { p_message_id: 'recover' });
+  expect(rpc.mock.calls.some(call => ['builder_chat_request_code_changes', 'builder_chat_request_spec_revision'].includes(call[0]))).toBe(false);
+});

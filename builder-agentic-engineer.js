@@ -26,9 +26,10 @@ const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/f
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
+const { crossLaneNoChange } = require('./builder-generation-failure');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v13';
+const PROMPT_VERSION = 'agentic-engineer-v14';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -263,7 +264,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     ATLAS_RESEARCH_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
-    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it, so Builder can re-scope. Never edit builder-path-policy.js or any guard to get around it.',
+    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
@@ -1349,6 +1350,7 @@ async function runAgenticEngineer({
   const inputKey = crypto.createHash('sha256').update(JSON.stringify({
     task: job.task_description, seed: seedPatch?.artifact_id ?? null, inputArtifactIds,
     code_review_revision: job.code_review_revision?.approval_id ?? null,
+    implementation_recovery: job.code_review_revision?.recovery_id ?? null,
   })).digest('hex');
   const checkpoint = engineerCheckpoint({ workspaceRoot, job, step, lane, inputKey });
   const saved = checkpoint.load();
@@ -1377,6 +1379,7 @@ async function runAgenticEngineer({
   // A revision after a blocked review starts from the previous attempt's verified change, applied
   // here so the model edits it instead of rebuilding from main (round 2 of job f233ec31 did the latter).
   let seeded = null;
+  let seedDiff = null;
   if (saved ? saved.patch : seedPatch?.text) {
     const seedFile = path.join(os.tmpdir(), `bob-seed-${job.id.slice(0, 8)}-${process.pid}.patch`);
     try {
@@ -1386,6 +1389,7 @@ async function runAgenticEngineer({
       fs.writeFileSync(seedFile, text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600 });
       git(workspacePath, ['apply', '--whitespace=nowarn', seedFile]);
       seeded = { from_job: seedPatch?.from_job ?? job.id, files: tools.__changedFiles(), checkpoint: Boolean(saved) };
+      seedDiff = execFileSync('git', ['diff', 'HEAD', '--no-color', '--binary'], { cwd: workspacePath, encoding: 'utf8' });
       log({ turn: 0, seed_applied: seeded.files });
     } catch (error) {
       throw new Error(`Engineer continuation could not restore its patch: ${redactGitError(error.message)}`);
@@ -1572,11 +1576,34 @@ async function runAgenticEngineer({
       // "No changes made" in the summary with no no_change_reason is still a no-change answer (job 79b4c08f
       // put it in summary, was refused on its last turn, and ended as a bare 'turn budget exhausted').
       const noChangeReason = args.no_change_reason || (/\bno changes?\b|\bnot (?:made|implemented)\b|\bunchanged\b/i.test(String(args.summary ?? '')) ? args.summary : null);
+      if (noChangeReason && seedDiff && seedPatch?.artifact_id && job.code_review_revision?.recovery_id) {
+        const routing = { no_change: true, error: String(noChangeReason),
+          no_change_lane: args.no_change_lane, no_change_file: args.no_change_file };
+        const currentDiff = execFileSync('git', ['diff', 'HEAD', '--no-color', '--binary'], { cwd: workspacePath, encoding: 'utf8' });
+        if (currentDiff === seedDiff && JSON.stringify(tools.__changedFiles().sort()) === JSON.stringify([...seeded.files].sort())
+            && crossLaneNoChange(routing, `${lane}_engineer`)) {
+          const files = validatePatchText(seedDiff, { lane: lane === 'frontend' ? 'frontend' : 'verified' });
+          outcome = { ok: true, model: response.data?.model, proposal: {
+            summary: 'Retain the reviewed lane seed unchanged for fresh verification; the reported repair belongs to the sibling lane.',
+            patch: seedDiff, changed_files: files, tests: [], acceptance_evidence: [], verified_runs: [],
+            database_migrations: files.filter(file => file.startsWith('supabase/migrations/')),
+            edge_functions: [],
+            retained_seed_artifact_id: seedPatch.artifact_id,
+            sibling_lane_request: routing,
+            tests_not_run_reason: 'No new edits or verification are claimed. The independent lane worker must freshly verify this retained patch.',
+            follow_ups: ['The original repair acceptance remains outstanding; independent whole-job human review is required.'],
+            lane, prompt_version: PROMPT_VERSION,
+          } };
+          break;
+        }
+      }
       if (noChangeReason && !tools.__changedFiles().length) {
         const reason = String(noChangeReason).slice(0, 2000);
         const budgetExhausted = classifyNoChange({ reason, turns, transcript, limits });
         if (budgetExhausted) log({ turn: turns, budget_no_change: true });
-        outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? '') };
+        outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? ''),
+          no_change_lane: ['frontend', 'backend'].includes(args.no_change_lane) ? args.no_change_lane : null,
+          no_change_file: typeof args.no_change_file === 'string' ? args.no_change_file : null };
         break;
       }
       const built = buildProposal({
@@ -1706,6 +1733,8 @@ async function runAgenticEngineer({
     ok: outcome.ok,
     error: outcome.ok ? undefined : outcome.error,
     no_change: Boolean(outcome.no_change),
+    no_change_lane: outcome.no_change_lane ?? null,
+    no_change_file: outcome.no_change_file ?? null,
     // The next attempt starts from this map instead of from nothing (see classifyNoChange).
     budget_exhausted: Boolean(outcome.budget_exhausted),
     resume_hints: outcome.budget_exhausted ? { ...readingMap(transcript), conclusion: String(outcome.summary || outcome.error || '').slice(0, 1500), turns_used: turns, lessons: lessons.slice(0, 3) } : null,

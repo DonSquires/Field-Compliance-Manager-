@@ -239,7 +239,7 @@ function agenticGenerator(lane, context, extra = {}) {
         if (third.ok && third.patch_artifact?.id) return { ...third, attempts: 3, escalated_after_in_house_budget: true, first_attempt: generation.first_attempt };
         return { ...third, attempts: 3, no_change: true, error: `two in-house attempts ran out of turns without an edit; escalated attempt (${third.routing?.provider || 'outsourced'}): ${String(third.error || '').slice(0, 600)}` };
       }
-      if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
+      if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `Two author attempts produced no patch; second attempt: ${String(second.error || '').slice(0, 600)}` };
     }
     return generation;
   };

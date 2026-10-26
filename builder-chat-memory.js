@@ -1,7 +1,7 @@
 'use strict';
 
 const { HANDOFF_TOOL, investigationProposal } = require('./builder-chat-handoff');
-const { REVISION_TOOL, CODE_CHANGES_TOOL, prepareSpecRevision, prepareCodeChanges } = require('./builder-chat-revision');
+const { REVISION_TOOL, CODE_CHANGES_TOOL, RECOVERY_TOOL, prepareSpecRevision, prepareCodeChanges, prepareImplementationRecovery } = require('./builder-chat-revision');
 
 const SELF_MEMORY_TOOL = Object.freeze({
   type: 'function',
@@ -31,7 +31,7 @@ function completedPmResult(result) {
 }
 
 async function pmChatWithMemory({ api, request, supabase, message, post, allowHandoff = false, sources = [] }) {
-  const first = completedPmResult(await api('chat', { ...request, tools: [SELF_MEMORY_TOOL, ...(allowHandoff ? [HANDOFF_TOOL, REVISION_TOOL, CODE_CHANGES_TOOL] : [])] }, 90_000));
+  const first = completedPmResult(await api('chat', { ...request, tools: [SELF_MEMORY_TOOL, ...(allowHandoff ? [HANDOFF_TOOL, REVISION_TOOL, CODE_CHANGES_TOOL, RECOVERY_TOOL] : [])] }, 90_000));
   const calls = first.message?.tool_calls;
   if (calls !== undefined && !Array.isArray(calls)) throw new Error('Cloud PM tool calls must be an array');
   if (!calls?.length) {
@@ -39,7 +39,7 @@ async function pmChatWithMemory({ api, request, supabase, message, post, allowHa
     return { result: first, memoryReceipts: [] };
   }
   const tool = calls[0]?.function?.name;
-  if (calls.length !== 1 || (tool !== 'write_self_memory' && !(allowHandoff && [HANDOFF_TOOL.function.name, REVISION_TOOL.function.name, CODE_CHANGES_TOOL.function.name].includes(tool)))) {
+  if (calls.length !== 1 || (tool !== 'write_self_memory' && !(allowHandoff && [HANDOFF_TOOL.function.name, REVISION_TOOL.function.name, CODE_CHANGES_TOOL.function.name, RECOVERY_TOOL.function.name].includes(tool)))) {
     throw new Error('Cloud PM may use one diary or investigation handoff tool per turn; no other tools are enabled');
   }
   let args = calls[0].function.arguments;
@@ -56,6 +56,10 @@ async function pmChatWithMemory({ api, request, supabase, message, post, allowHa
   }
   if (tool === CODE_CHANGES_TOOL.function.name) {
     const revision = await prepareCodeChanges(args, message, supabase);
+    return { result: first, memoryReceipts: [], revision };
+  }
+  if (tool === RECOVERY_TOOL.function.name) {
+    const revision = await prepareImplementationRecovery(args, message, supabase);
     return { result: first, memoryReceipts: [], revision };
   }
   if (!args || typeof args.content !== 'string' || !args.content.trim() || args.content.length > 2000
