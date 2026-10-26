@@ -110,6 +110,7 @@ DECLARE
   v_titled_owner uuid;
   v_particle_owner uuid;
   v_middle_owner uuid;
+  v_compound_owner uuid;
   v_error text;
   v_result jsonb;
   v_family_member uuid;
@@ -139,10 +140,11 @@ BEGIN
   v_titled_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mr Rowan Ash', 'M' || v_stem, 'owner-titled');
   v_particle_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira de Vries', 'N' || v_stem, 'owner-particle');
   v_middle_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira Jane Cole', 'P' || v_stem, 'owner-middle');
+  v_compound_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Alex St-John Cole', 'Q' || v_stem, 'owner-compound-middle');
   PERFORM pg_temp.check(
-    'owner reviews resolved eight distinct registered people',
+    'owner reviews resolved nine distinct registered people',
     (SELECT count(DISTINCT person) FROM unnest(ARRAY[v_owner, v_hyphen_owner, v_repeat_owner, v_initial_owner,
-      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner]) AS person) = 8
+      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner, v_compound_owner]) AS person) = 9
   );
 
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Rowan Alder', 'different-given');
@@ -218,6 +220,13 @@ BEGIN
       AND (v_result->>'canonical_person_id')::uuid <> v_middle_owner
   );
 
+  v_result := pg_temp.import_on_plate(v_client, 'Q' || v_stem, 'Alex StJohn', 'family-equals-owner-middle');
+  PERFORM pg_temp.check(
+    'a notice family name that is only the owner''s middle name is not the owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_compound_owner
+  );
+
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Mrs Mira Alder', 'same-given-title');
   PERFORM pg_temp.check(
     'the same given name behind a title still resolves the registered owner',
@@ -279,6 +288,13 @@ BEGIN
     'a notice using the owner''s middle name as the first name resolves the registered owner',
     v_result->>'match_basis' = 'vehicle_registered_owner_at_notice'
       AND (v_result->>'canonical_person_id')::uuid = v_middle_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'Q' || v_stem, 'Alex Cole', 'compound-middle-owner-family');
+  PERFORM pg_temp.check(
+    'the owner''s own family name with an agreeing given name still resolves the owner',
+    v_result->>'match_basis' = 'vehicle_registered_owner_at_notice'
+      AND (v_result->>'canonical_person_id')::uuid = v_compound_owner
   );
 END $$;
 

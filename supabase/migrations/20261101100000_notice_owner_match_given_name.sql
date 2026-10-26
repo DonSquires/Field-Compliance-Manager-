@@ -7,8 +7,8 @@
 --
 -- Names are now compared word by word (whitespace-separated words, letters only, so
 -- Smith-Jones and O'Connor stay one family name), with leading titles stripped on both sides.
--- The family name is the last word of two or more letters and is excluded by position on both
--- sides. The owner matches only when the notice gives no given name, or the first given name on
+-- The family name is the last word of two or more letters on both sides; the notice's must be the
+-- owner's, and it is excluded by position from the given names. The owner matches only when the notice gives no given name, or the first given name on
 -- the notice equals one of the owner's given names, is a one-letter initial of it, or shares a
 -- 3+ letter prefix with it (Chris / Christopher; a notice using the owner's middle name still
 -- matches). A shared particle (de, van) or middle name after a different first name does not.
@@ -202,15 +202,20 @@ BEGIN
         JOIN public.canonical_people person
           ON person.id = check_row.canonical_person_id AND person.status = 'active'
         CROSS JOIN LATERAL (
-          SELECT array_agg(word.token ORDER BY word.ord) AS tokens
+          SELECT owner_words.tokens,
+            (SELECT max(family.ord) FROM unnest(owner_words.tokens) WITH ORDINALITY AS family(token, ord)
+              WHERE length(family.token) >= 2) AS family_position
           FROM (
-            SELECT regexp_replace(raw.token, '[^[:alpha:]]+', '', 'g') AS token, raw.ord
-            FROM unnest(regexp_split_to_array(
-              lower(regexp_replace(coalesce(person.display_name, ''), '^\s*(mr|mrs|ms|miss|mx|dr)\.?\s+', '', 'i')),
-              '\s+'))
-              WITH ORDINALITY AS raw(token, ord)
-          ) word
-          WHERE word.token <> ''
+            SELECT array_agg(word.token ORDER BY word.ord) AS tokens
+            FROM (
+              SELECT regexp_replace(raw.token, '[^[:alpha:]]+', '', 'g') AS token, raw.ord
+              FROM unnest(regexp_split_to_array(
+                lower(regexp_replace(coalesce(person.display_name, ''), '^\s*(mr|mrs|ms|miss|mx|dr)\.?\s+', '', 'i')),
+                '\s+'))
+                WITH ORDINALITY AS raw(token, ord)
+            ) word
+            WHERE word.token <> ''
+          ) owner_words
         ) owner_name
         WHERE check_row.organization_id = v_provider
           AND regexp_replace(upper(vehicle.plate_number), '[^A-Z0-9]', '', 'g') = v_plate
@@ -218,7 +223,10 @@ BEGIN
           AND document.document_kind = 'nzta_mvr_record'
           AND (document.review_state = 'approved'
             OR check_row.vehicle_snapshot->>'owner_only_review' = 'true')
-          AND v_surname = ANY (owner_name.tokens)
+          -- The owner's family name is resolved the same way as the notice's (the last word of two or
+          -- more letters) and must be the notice's family name, so a notice family name that only
+          -- equals one of the owner's given or middle names is not agreement.
+          AND owner_name.tokens[owner_name.family_position] = v_surname
           -- A shared family name on the plate is not enough: a family member named on the notice is a
           -- different person. The owner matches only when the notice gives no given name, or the first
           -- given name on the notice equals one of the owner's given names, is a one-letter initial of
@@ -231,10 +239,7 @@ BEGIN
             OR EXISTS (
               SELECT 1
               FROM unnest(owner_name.tokens) WITH ORDINALITY AS owner_given(token, ord)
-              WHERE owner_given.ord <> (
-                  SELECT max(owner_family.ord)
-                  FROM unnest(owner_name.tokens) WITH ORDINALITY AS owner_family(token, ord)
-                  WHERE owner_family.token = v_surname)
+              WHERE owner_given.ord <> owner_name.family_position
                 AND (
                   owner_given.token = v_given[1]
                   OR (length(v_given[1]) = 1 AND left(owner_given.token, 1) = v_given[1])
