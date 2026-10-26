@@ -38042,6 +38042,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_reopen_required_implementation_lanes: {
+        Args: { _job_id: string }
+        Returns: Json
+      }
       builder_request_approval: {
         Args: {
           _approval_type: string
