@@ -1,4 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { canAccessFieldOpsArea } from '../lib/fieldOpsAreaAccess';
 import { supabase } from '../lib/supabase';
 import { isDuplicateError, type NewPersonFields, type PersonMatch } from '../lib/personIdentity';
 import { PersonIdentityPanel, PersonMatchSuggestions, PersonSearchPicker } from './PersonIdentity';
@@ -54,6 +57,21 @@ const NZTA_NOTICE = 'NZTA register information is restricted. Only people your o
 const EMPTY_FIELDS = { display_name: '', phone: '', email: '', suburb: '', city: '', address: '' };
 const isOwner = (link: VehiclePersonLink) => link.relationship === 'owner' || link.relationship === 'registered_owner';
 
+// Rendered only for person-search roles, so the router hook never runs where person search is unavailable.
+const OpenPersonRecordButton: React.FC<{ canonicalPersonId: string; displayName: string }> = ({ canonicalPersonId, displayName }) => {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="btn btn-sm btn-secondary"
+      aria-label={`Open notices and person record for ${displayName}`}
+      onClick={() => navigate(`/admin/field-ops?area=person-search&person=${encodeURIComponent(canonicalPersonId)}`, { state: { personQuery: displayName } })}
+    >
+      Notices and record
+    </button>
+  );
+};
+
 /**
  * People linked to a canonical vehicle by the caller's organisation: the owner
  * (one current owner), drivers and associated people (any number), optionally
@@ -69,6 +87,8 @@ export const VehicleOwnerPanel: React.FC<{
   observationId?: string | null;
   onChanged?: () => void;
 }> = ({ vehicleId, organizationId, observationId = null, onChanged }) => {
+  const { profile } = useAuth();
+  const canOpenPersonSearch = canAccessFieldOpsArea('person-search', () => true, profile?.role);
   const [access, setAccess] = useState<{ view: boolean; record: boolean } | null>(null);
   const [people, setPeople] = useState<VehiclePersonLink[]>([]);
   const [checks, setChecks] = useState<NztaCheck[]>([]);
@@ -197,6 +217,9 @@ export const VehicleOwnerPanel: React.FC<{
         {!observationId && link.observation_ids?.length ? ` · seen at ${link.observation_ids.length} sighting${link.observation_ids.length === 1 ? '' : 's'}` : ''}</small>
       {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
       <div className="vehicle-owner__actions">
+        {canOpenPersonSearch && link.canonical_person_id && link.display_name && (
+          <OpenPersonRecordButton canonicalPersonId={link.canonical_person_id} displayName={link.display_name} />
+        )}
         {link.person_record_id && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button>}
         {canRecord && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(link)}>No longer {ROLE_LABEL[link.relationship].toLowerCase()}</button>}
       </div>

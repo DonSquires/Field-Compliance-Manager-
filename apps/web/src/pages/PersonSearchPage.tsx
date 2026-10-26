@@ -9,10 +9,15 @@
  *   or recently expired; fed daily into notifications by
  *   sweep_notice_expiry_alerts)
  * - get_safety_warnings via SafetyWarningsPanel (platform-wide, redacted)
+ *
+ * Cross-links: `?person=<canonical_person_id>` with router state
+ * `{ personQuery }` opens one person from a vehicle owner card (the name stays
+ * out of the URL); linked vehicles open vehicle search by canonical id.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, ShieldAlert } from 'lucide-react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Car, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { supabase } from '../lib/supabase';
 import {
@@ -38,6 +43,12 @@ const PERSON_FILTERS: Array<{ id: PersonFilter; label: string }> = [
 ];
 
 const PersonSearchPage: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const routedPersonId = searchParams.get('person');
+  const routedState = location.state as { personQuery?: unknown } | null;
+  const routedQuery = typeof routedState?.personQuery === 'string' ? routedState.personQuery : null;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PersonMatch[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -97,6 +108,16 @@ const PersonSearchPage: React.FC = () => {
       setSearching(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!routedQuery || !personSearchQueryIsValid(routedQuery)) return;
+    setQuery(routedQuery);
+    void runSearch(routedQuery, routedPersonId);
+  }, [routedPersonId, routedQuery, runSearch]);
+
+  const openVehicle = (canonicalVehicleId: string) => {
+    navigate(`/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(canonicalVehicleId)}`);
+  };
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -184,6 +205,9 @@ const PersonSearchPage: React.FC = () => {
           )}
         </form>
         {error && <div id="person-search-error" className="alert alert-error person-search-error" role="alert">{error}</div>}
+        {routedPersonId && !routedQuery && results === null && !searching && (
+          <p className="person-search-handoff" role="status">This link opens a specific person record, but the name was not passed with it. Search by name to open the record.</p>
+        )}
       </section>
 
       <section className="person-search-workspace" aria-label="Person search results and details">
@@ -337,6 +361,14 @@ const PersonSearchPage: React.FC = () => {
                             {nztaObservation
                               ? ` · NZTA observation ${formatNzDate(vehicle.source_checked_at)} (not a legal transfer date)`
                               : vehicle.since ? ` · Recorded from ${formatNzDate(vehicle.since)}` : ''}</p>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-secondary person-vehicle__open"
+                            aria-label={`Open vehicle ${vehicle.plate_number} in vehicle search`}
+                            onClick={() => openVehicle(vehicle.canonical_vehicle_id)}
+                          >
+                            <Car size={14} aria-hidden="true" /> Open vehicle
+                          </button>
                         </li>
                       );
                     })}

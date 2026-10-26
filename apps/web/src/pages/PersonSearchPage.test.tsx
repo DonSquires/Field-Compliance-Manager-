@@ -1,11 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router-dom';
 import PersonSearchPage from './PersonSearchPage';
 import { describeDaysRemaining, noticeStillBarsEntry, noticeTypeLabel, personSearchQueryIsValid } from '../lib/personSearch';
 
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc } }));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: ({ entityId }: { entityId: string }) => <div data-testid="safety">{entityId}</div> }));
+
+const LocationProbe = () => {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+};
+
+const renderPage = (entry: InitialEntry = '/admin/field-ops?area=person-search') => render(
+  <MemoryRouter initialEntries={[entry]}>
+    <Routes><Route path="*" element={<><PersonSearchPage /><LocationProbe /></>} /></Routes>
+  </MemoryRouter>,
+);
 
 const person = (overrides: Record<string, unknown> = {}) => ({
   canonical_person_id: 'person-1',
@@ -44,7 +56,7 @@ describe('person search', () => {
   afterEach(cleanup);
 
   it('shows the expiry register and opens the person behind an alert', async () => {
-    render(<PersonSearchPage />);
+    renderPage();
     expect(await screen.findByText('Expiring soon')).toBeTruthy();
     expect(screen.getByText(/6 days left/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Test Person' }));
@@ -60,7 +72,7 @@ describe('person search', () => {
     rpc.mockImplementation(async (name: string) => name === 'get_notice_expiry_register'
       ? { data: [], error: null }
       : { data: [person({ nzta_authorised: true, nzta: { address: '1 Example Road', last_checked_at: '2026-01-02T00:00:00Z', checks: [] } })], error: null });
-    render(<PersonSearchPage />);
+    renderPage();
     fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByText('Enter at least two letters or numbers of a name.')).toBeTruthy();
@@ -76,7 +88,7 @@ describe('person search', () => {
     const pending = new Promise<{ data: ReturnType<typeof person>[]; error: null }>((resolve) => { completeSearch = resolve; });
     const defaultRpc = rpc.getMockImplementation();
     rpc.mockImplementation((name: string) => name === 'search_people' ? pending : defaultRpc?.(name));
-    render(<PersonSearchPage />);
+    renderPage();
     const button = await screen.findByRole('button', { name: 'Test Person' });
     fireEvent.click(button);
     expect(button.hasAttribute('disabled')).toBe(true);
@@ -117,7 +129,7 @@ describe('person search', () => {
           has_notice_in_force: false,
         }),
       ], error: null });
-    render(<PersonSearchPage />);
+    renderPage();
     fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByRole('button', { name: /Second Person/ })).toBeTruthy();
@@ -138,11 +150,36 @@ describe('person search', () => {
       }
       return defaultRpc?.(name, args);
     });
-    render(<PersonSearchPage />);
+    renderPage();
     expect(await screen.findByText('Expiring soon')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh queue' }));
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByText('Test Person')).toBeTruthy();
     expect(screen.getByText(/Showing the last successful results/)).toBeTruthy();
+  });
+
+  it('opens the exact person handed over from a vehicle owner card without the name in the URL', async () => {
+    const defaultRpc = rpc.getMockImplementation();
+    rpc.mockImplementation(async (name: string, args?: unknown) => name === 'search_people'
+      ? { data: [person({ canonical_person_id: 'person-0', organizations: ['Other Client'] }), person()], error: null }
+      : defaultRpc?.(name, args));
+    renderPage({ pathname: '/admin/field-ops', search: '?area=person-search&person=person-1', state: { personQuery: 'Test Person' } });
+    expect(await screen.findByText('Recorded in Client Forest')).toBeTruthy();
+    expect(rpc).toHaveBeenCalledWith('search_people', { p_query: 'Test Person', p_limit: 25 });
+    expect((screen.getByLabelText('Name or alias') as HTMLInputElement).value).toBe('Test Person');
+    expect(screen.getByTestId('location').textContent).not.toContain('Test');
+  });
+
+  it('explains a person link that arrives without a name instead of guessing', async () => {
+    renderPage('/admin/field-ops?area=person-search&person=person-1');
+    expect(await screen.findByText(/the name was not passed with it/)).toBeTruthy();
+    expect(rpc.mock.calls.some(([name]) => name === 'search_people')).toBe(false);
+  });
+
+  it('opens a linked vehicle in vehicle search by its canonical id', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Test Person' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open vehicle ABC123 in vehicle search' }));
+    expect(screen.getByTestId('location').textContent).toBe('/admin/field-ops?area=vehicle-search&vehicle=vehicle-1');
   });
 });
