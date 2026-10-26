@@ -19655,6 +19655,7 @@ export type Database = {
           breach_id: string | null
           comply_by: string | null
           created_at: string
+          expires_at: string | null
           fine_amount: number | null
           id: string
           import_key: string | null
@@ -19681,6 +19682,7 @@ export type Database = {
           breach_id?: string | null
           comply_by?: string | null
           created_at?: string
+          expires_at?: string | null
           fine_amount?: number | null
           id?: string
           import_key?: string | null
@@ -19707,6 +19709,7 @@ export type Database = {
           breach_id?: string | null
           comply_by?: string | null
           created_at?: string
+          expires_at?: string | null
           fine_amount?: number | null
           id?: string
           import_key?: string | null
@@ -36559,6 +36562,10 @@ export type Database = {
         }
         Returns: string
       }
+      builder_chat_request_spec_revision: {
+        Args: { p_message_id: string }
+        Returns: string
+      }
       builder_chat_require_owner: { Args: never; Returns: string }
       builder_chat_reserve_proposal: {
         Args: { p_message_id: string; p_token: string }
@@ -42227,6 +42234,23 @@ export type Database = {
         Args: { p_dispatch_job_id: string }
         Returns: Json
       }
+      get_notice_expiry_register: {
+        Args: { p_expired_days?: number; p_window_days?: number }
+        Returns: {
+          canonical_person_id: string
+          days_remaining: number
+          expires_at: string
+          expiry_state: string
+          issued_at: string
+          location_name: string
+          notice_id: string
+          notice_number: string
+          notice_type: string
+          organization_id: string
+          organization_name: string
+          person_display_name: string
+        }[]
+      }
       get_nzscv_supplier_dashboard: {
         Args: { p_limit?: number; p_offset?: number; p_search?: string }
         Returns: Json
@@ -45647,6 +45671,10 @@ export type Database = {
       }
       normalize_person_name: { Args: { p_name: string }; Returns: string }
       normalize_plate_number: { Args: { p_plate: string }; Returns: string }
+      notice_expiry_state: {
+        Args: { p_expires_at: string; p_status: string; p_window_days?: number }
+        Returns: string
+      }
       observation_search_text: {
         Args: {
           p_colour: string
@@ -45736,6 +45764,18 @@ export type Database = {
           p_item: Json
         }
         Returns: Json
+      }
+      patrol_source_correction_dependency_hold: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_external_ref: string
+          p_kind: string
+          p_provider_organization_id: string
+          p_record_id: string
+          p_service_date_unchanged: boolean
+        }
+        Returns: string
       }
       patrol_source_event_dependency_hold: {
         Args: {
@@ -49332,6 +49372,10 @@ export type Database = {
           zone_name: string
         }[]
       }
+      search_people: {
+        Args: { p_limit?: number; p_query: string }
+        Returns: Json
+      }
       search_vehicle_registrations: {
         Args: { p_limit?: number; p_pattern: string }
         Returns: {
@@ -50996,6 +51040,10 @@ export type Database = {
       sweep_missed_field_work: {
         Args: { p_grace_minutes?: number; p_now?: string }
         Returns: Json
+      }
+      sweep_notice_expiry_alerts: {
+        Args: { p_window_days?: number }
+        Returns: number
       }
       sweep_place_hazard_reviews: {
         Args: { p_organization_id?: string }
