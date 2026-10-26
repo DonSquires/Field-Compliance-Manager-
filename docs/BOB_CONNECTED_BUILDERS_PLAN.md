@@ -89,6 +89,22 @@ adding mismatched worker-target/organization/lane controls. Atlas dry-run
 generation succeeded; no live Atlas refresh, migration or deployment was
 performed by these local checks.
 
+Production follow-up: #247 merged as
+`cab76d20dc2effe1ae8eef755fc271be4d883fce`. The live runtime reconciled the
+original job and recorded all six requirements blocked; human approval remained
+disabled. Glass testing caught a missing transport seam: control-room
+`safeSnapshot` removed the test-step report, so the UI showed the generic
+missing-coverage state instead of the recorded blockers. Project only bounded
+requirement IDs/statuses and blocker text from that report, never raw
+`input_context`, identity, author evidence, prompts or correction history.
+Regression tests execute the actual TypeScript projection, not a mocked UI
+snapshot, including malformed/bounded receipts and private-context exclusion.
+This follow-up still requires protected release and UI revalidation.
+The governed release subsequently completed at
+`cd58f736559b069fac9b9ee5ef028e9deffb1057` after catalog PR #250:
+the durable pointer advanced, Atlas refreshed and the live catalog matched.
+A fresh production login explicitly confirmed `Approve` was disabled.
+
 Recovery release evidence: #244 and generated-catalog #246 deployed as
 `a15f081019f7afff54250fd2b14f4669a0b6e3e8`, with healthy runtime, matching
 schema, refreshed Atlas, successful production Vercel and all three main CI

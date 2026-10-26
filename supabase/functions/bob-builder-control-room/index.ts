@@ -64,6 +64,31 @@ function eventDetail(value: unknown) {
   };
 }
 
+function acceptanceSummary(value: unknown) {
+  const object = (input: unknown): Record<string, unknown> =>
+    input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  const report = object(object(object(value).implementation_acceptance).report);
+  if (report.version !== 1 || typeof report.passed !== 'boolean'
+    || !Array.isArray(report.blockers) || !Array.isArray(report.requirements)) return undefined;
+  return {
+    implementation_acceptance: {
+      report: {
+        version: 1, passed: report.passed && report.blockers.length === 0
+          && report.requirements.length > 0 && report.requirements.length <= 100
+          && report.requirements.every(value => object(value).status === 'covered'),
+        blockers: strings(report.blockers, 300).map(item => item.slice(0, 1000)),
+        requirements: report.requirements.slice(0, 100).map(value => {
+          const row = object(value);
+          return {
+            requirement_id: typeof row.requirement_id === 'string' ? row.requirement_id.slice(0, 100) : null,
+            status: row.status === 'covered' ? 'covered' : 'blocked',
+          };
+        }),
+      },
+    },
+  };
+}
+
 function safeSnapshot(value: Record<string, unknown>) {
   const rows = (input: unknown) => Array.isArray(input) ? input as Array<Record<string, unknown>> : [];
   return {
@@ -73,6 +98,7 @@ function safeSnapshot(value: Record<string, unknown>) {
       builder_mode: step.builder_mode, status: step.status, attempt_count: step.attempt_count,
       result_summary: step.result_summary, error: step.error, retryable: step.retryable,
       started_at: step.started_at, completed_at: step.completed_at,
+      ...(step.step_id === 'test_suite' ? { input_context: acceptanceSummary(step.input_context) } : {}),
     })),
     artifacts: rows(value.artifacts).map(artifact => ({
       id: artifact.id, step_id: artifact.step_id, artifact_type: artifact.artifact_type,
