@@ -111,6 +111,7 @@ DECLARE
   v_particle_owner uuid;
   v_middle_owner uuid;
   v_compound_owner uuid;
+  v_van_owner uuid;
   v_error text;
   v_result jsonb;
   v_family_member uuid;
@@ -141,10 +142,11 @@ BEGIN
   v_particle_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira de Vries', 'N' || v_stem, 'owner-particle');
   v_middle_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira Jane Cole', 'P' || v_stem, 'owner-middle');
   v_compound_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Alex St-John Cole', 'Q' || v_stem, 'owner-compound-middle');
+  v_van_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira van Vries', 'R' || v_stem, 'owner-van-particle');
   PERFORM pg_temp.check(
-    'owner reviews resolved nine distinct registered people',
+    'owner reviews resolved ten distinct registered people',
     (SELECT count(DISTINCT person) FROM unnest(ARRAY[v_owner, v_hyphen_owner, v_repeat_owner, v_initial_owner,
-      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner, v_compound_owner]) AS person) = 9
+      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner, v_compound_owner, v_van_owner]) AS person) = 10
   );
 
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Rowan Alder', 'different-given');
@@ -209,6 +211,20 @@ BEGIN
   v_result := pg_temp.import_on_plate(v_client, 'N' || v_stem, 'Rowan de Vries', 'particle-different-given');
   PERFORM pg_temp.check(
     'a shared family-name particle does not pass as a given name',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_particle_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'R' || v_stem, 'Vanessa van Vries', 'particle-prefix-different-given');
+  PERFORM pg_temp.check(
+    'a given name that only starts with the owner''s family-name particle is not the owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_van_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'N' || v_stem, 'D de Vries', 'particle-initial-different-given');
+  PERFORM pg_temp.check(
+    'an initial matching only the owner''s family-name particle is not the owner',
     v_result->>'match_basis' = 'created_from_notice'
       AND (v_result->>'canonical_person_id')::uuid <> v_particle_owner
   );
