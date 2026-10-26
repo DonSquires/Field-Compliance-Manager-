@@ -119,3 +119,12 @@ test('generated notice PL/pgSQL closes every IF block', async () => {
   assert.ok(opens > 0);
   assert.equal(opens, closes);
 });
+
+test('a person named with a vehicle they do not own is linked as an associated person through the governed RPC', async () => {
+  const { noticesSql } = await load();
+  const sql = noticesSql([]);
+  assert.match(sql, /public\.record_vehicle_person\([\s\S]*'associated_person', 'other'/);
+  assert.match(sql, /<> 'vehicle_registered_owner_at_notice'/);
+  assert.doesNotMatch(sql, /INSERT INTO public\.entity_links/i);
+  assert.match(sql, /'already_linked'/);
+});
