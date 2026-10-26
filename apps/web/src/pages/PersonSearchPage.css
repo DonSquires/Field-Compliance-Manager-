@@ -130,6 +130,17 @@
   margin: 0;
 }
 
+.person-search-handoff {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .person-search-workspace {
   display: grid;
   grid-template-columns: minmax(275px, 340px) minmax(0, 1fr);
@@ -551,6 +562,13 @@
 
 .person-vehicle-list p {
   margin: 0;
+}
+
+.person-vehicle__open {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
 }
 
 .person-nzta-history {
