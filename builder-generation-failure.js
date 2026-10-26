@@ -2,6 +2,14 @@
 
 const { laneAllows } = require('./builder-path-policy');
 
+// A required lane that an owner-confirmed same-job correction reopened cannot be routed away again.
+function reopenedRequiredLane(job, step) {
+  const stepId = step?.step_id || (step?.builder_mode === 'frontend_engineer' ? 'frontend_implementation'
+    : step?.builder_mode === 'backend_engineer' ? 'backend_implementation' : null);
+  const reopened = job?.code_review_revision?.reopened_required_lanes;
+  return Boolean(stepId && Array.isArray(reopened) && reopened.includes(stepId));
+}
+
 /**
  * Count an author run that ended without a proposal as a step attempt. The worker claim RPCs
  * increment attempt_count only when a patch reaches a worker, so before this an author that
@@ -10,7 +18,10 @@ const { laneAllows } = require('./builder-path-policy');
  */
 async function recordGenerationFailure({ supabase, job, step, logger = console }, generation, phase) {
   if (!supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return null;
-  const reason = `${phase}: ${String(generation?.error || generation?.result?.error || 'author produced no proposal').slice(0, 300)}`;
+  const authorReason = String(generation?.error || generation?.result?.error || 'author produced no proposal').slice(0, 300);
+  const reason = generation?.no_change && reopenedRequiredLane(job, step)
+    ? `${phase}: Required lane reopened by the confirmed correction cannot be skipped; human direction is required. Author: ${authorReason}`
+    : `${phase}: ${authorReason}`;
   // An honest "no change" (the file does not exist, the task is unsafe) is an answer for the requester,
   // not a failure to run again: job 92f7369a repeated one six times before the ceiling stopped it.
   const retryable = !generation?.no_change;
@@ -49,6 +60,7 @@ function crossLaneNoChange(generation, mode) {
  * In either case, skip this lane with the recorded reason so the job can continue.
  */
 async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, logger = console }, generation) {
+  if (reopenedRequiredLane(job, step)) return false;
   const reroute = crossLaneNoChange(generation, step?.builder_mode);
   if (!generation?.no_change || (!siblingCompleted && !reroute) || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
   const sibling = step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend';
@@ -65,4 +77,4 @@ async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, 
   }
 }
 
-module.exports = { crossLaneNoChange, recordGenerationFailure, skipLaneWithNothingToDo };
+module.exports = { crossLaneNoChange, recordGenerationFailure, reopenedRequiredLane, skipLaneWithNothingToDo };

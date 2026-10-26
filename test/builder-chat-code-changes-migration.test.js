@@ -8,6 +8,7 @@ const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026101500_builder_chat_code_changes.sql'), 'utf8');
 const cycleMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026103000_builder_correction_verification_cycles.sql'), 'utf8');
 const recoveryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026110000_builder_chat_implementation_recovery.sql'), 'utf8');
+const requiredLaneMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101090000_builder_reopen_required_implementation_lanes.sql'), 'utf8');
 const skipSql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260830181000_builder_implementation_skip.sql'), 'utf8');
 const skipFunction = skipSql.slice(skipSql.indexOf('CREATE OR REPLACE FUNCTION'), skipSql.indexOf('$$;') + 3);
 
@@ -17,6 +18,10 @@ test('code corrections preserve immutable task/target/attempts and have owner-on
   assert.match(migration, /status = 'cancelled'/);
   assert.match(migration, /FROM PUBLIC, anon, service_role/);
   assert.doesNotMatch(migration, /INSERT INTO public.builder_jobs|task_description\s*=|(?:SET|,)\s*target_sha\s*=|attempt_count\s*=/);
+  assert.match(requiredLaneMigration, /v_job\.frontend_required/);
+  assert.match(requiredLaneMigration, /v_job\.backend_required/);
+  assert.match(requiredLaneMigration, /reopened_required_lanes/);
+  assert.match(requiredLaneMigration, /FROM PUBLIC, anon, authenticated, service_role/);
 });
 
 test('actual PostgreSQL enforces same-job correction authorization, stale/active guards, retained seeds and replay', {
@@ -156,6 +161,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       CREATE TABLE builder_jobs(id uuid PRIMARY KEY,organization_id uuid,status text,target_sha text,task_description text,
         last_error text,autopilot_requested_by uuid,autopilot_state text,updated_at timestamptz,code_review_mode text,code_review_status text,
         code_review_artifact_id uuid,current_step_name text,current_step_index integer,
+        frontend_required boolean DEFAULT true,backend_required boolean DEFAULT false,
         workspace_published_at timestamptz,workspace_published_head_sha text,workspace_pull_request_url text);
       CREATE TABLE builder_approvals(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),job_id uuid,organization_id uuid,status text,approval_type text,
         expires_at timestamptz DEFAULT now()+interval '1 day',triggered_at_status text,requested_from_users uuid[],requested_target_sha text,
@@ -257,6 +263,66 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       END LOOP;
       END $f$;
     `;
+    const requiredLaneChecks = `
+      SELECT set_config('test.role','service_role',false);
+      DO $f$
+      DECLARE job_id uuid:=gen_random_uuid(); org_id uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid();
+        approval_id uuid:=gen_random_uuid(); front_id uuid:=gen_random_uuid(); back_id uuid:=gen_random_uuid();
+        optional_job uuid:=gen_random_uuid(); optional_approval uuid:=gen_random_uuid();
+        optional_front uuid:=gen_random_uuid(); result jsonb; repeated jsonb; before_events integer;
+      BEGIN
+        INSERT INTO builder_jobs(id,organization_id,status,target_sha,code_review_mode,code_review_status,
+          autopilot_requested_by,frontend_required,backend_required,code_review_revision)
+          VALUES(job_id,org_id,'implementation_pending',repeat('c',40),'human','pending',owner_id,true,true,
+            jsonb_build_object('approval_id',approval_id,'requested_by',owner_id,'requested_at',now(),
+              'seed_patch_ids',jsonb_build_object('backend_implementation',gen_random_uuid())));
+        INSERT INTO builder_approvals(id,job_id,organization_id,status,approval_type,requested_target_sha)
+          VALUES(approval_id,job_id,org_id,'cancelled','implementation_review',repeat('c',40));
+        INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status,attempt_count,ordinal_position)
+          VALUES(front_id,job_id,'frontend_implementation','frontend_engineer','skipped',3,3),
+            (back_id,job_id,'backend_implementation','backend_engineer','pending',4,4);
+        SELECT count(*) INTO before_events FROM builder_audit_events
+          WHERE builder_audit_events.job_id=(SELECT s.job_id FROM builder_job_steps s WHERE s.id=front_id);
+        result:=builder_reopen_required_implementation_lanes(job_id);
+        repeated:=builder_reopen_required_implementation_lanes(job_id);
+        IF result->'reopened' IS DISTINCT FROM '["frontend_implementation"]'::jsonb
+          OR repeated IS DISTINCT FROM result
+          OR (SELECT status FROM builder_job_steps WHERE id=front_id)<>'pending'
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=front_id)<>3
+          OR (SELECT status FROM builder_job_steps WHERE id=back_id)<>'pending'
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=back_id)<>4
+          OR (SELECT code_review_revision->'reopened_required_lanes' FROM builder_jobs WHERE id=job_id)
+            IS DISTINCT FROM '["frontend_implementation"]'::jsonb
+          OR (SELECT count(*) FROM builder_audit_events
+            WHERE builder_audit_events.job_id=(SELECT s.job_id FROM builder_job_steps s WHERE s.id=front_id))<>before_events+1
+          THEN RAISE EXCEPTION 'Required lane reopen did not preserve correction state, attempts or idempotency'; END IF;
+        PERFORM expect_error(format('SELECT builder_skip_implementation_step(%L,%L,%L,%L)',job_id,front_id,'frontend_engineer',
+          'Nothing to change in this lane; author evidence says this fix belongs to the backend lane.'),
+          'A required lane reopened by the confirmed correction cannot be skipped');
+        IF (SELECT status FROM builder_job_steps WHERE id=front_id)<>'pending'
+          THEN RAISE EXCEPTION 'Reopened required lane was skipped again'; END IF;
+        PERFORM builder_skip_implementation_step(job_id,back_id,'backend_engineer','Nothing to change in this lane; the frontend lane delivered the change.');
+        IF (SELECT status FROM builder_job_steps WHERE id=back_id)<>'skipped'
+          THEN RAISE EXCEPTION 'Non-reopened sibling lane lost its existing skip behaviour'; END IF;
+
+        INSERT INTO builder_jobs(id,organization_id,status,target_sha,code_review_mode,code_review_status,
+          autopilot_requested_by,frontend_required,backend_required,code_review_revision)
+          VALUES(optional_job,org_id,'implementation_pending',repeat('d',40),'human','pending',owner_id,false,true,
+            jsonb_build_object('approval_id',optional_approval,'requested_by',owner_id,'requested_at',now(),
+              'seed_patch_ids',jsonb_build_object('backend_implementation',gen_random_uuid())));
+        INSERT INTO builder_approvals(id,job_id,organization_id,status,approval_type,requested_target_sha)
+          VALUES(optional_approval,optional_job,org_id,'cancelled','implementation_review',repeat('d',40));
+        INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status,attempt_count,ordinal_position)
+          VALUES(optional_front,optional_job,'frontend_implementation','frontend_engineer','skipped',2,3);
+        result:=builder_reopen_required_implementation_lanes(optional_job);
+        IF result->'reopened' IS DISTINCT FROM '[]'::jsonb
+          OR (SELECT status FROM builder_job_steps WHERE id=optional_front)<>'skipped'
+          THEN RAISE EXCEPTION 'Optional skipped lane was changed'; END IF;
+
+        PERFORM set_config('test.role','authenticated',false);
+        PERFORM expect_error(format('SELECT builder_reopen_required_implementation_lanes(%L)',job_id),'Service identity required');
+      END $f$;
+    `;
     const checks = `
       CREATE TRIGGER review_policy BEFORE UPDATE OF status ON builder_job_steps
         FOR EACH ROW EXECUTE FUNCTION builder_enforce_release_review_policy();
@@ -275,8 +341,10 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         review_step uuid; new_ids uuid[]:='{}'; fresh_approval uuid; t text; artifact_id uuid;
       BEGIN
         INSERT INTO builder_chat_threads VALUES(thread_id,owner_id);
-        INSERT INTO builder_jobs(id,organization_id,status,target_sha,task_description,code_review_mode,code_review_status,autopilot_requested_by)
-          VALUES(job_id,org_id,'security_review',repeat('a',40),'Immutable original task','human','pending',owner_id);
+        INSERT INTO builder_jobs(id,organization_id,status,target_sha,task_description,code_review_mode,code_review_status,
+          autopilot_requested_by,frontend_required,backend_required)
+          VALUES(job_id,org_id,'security_review',repeat('a',40),'Immutable original task','human','pending',owner_id,
+            scope<>'backend',scope<>'frontend');
         INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status) SELECT gen_random_uuid(),job_id,x,
           CASE WHEN x='frontend_implementation' THEN 'frontend_engineer' WHEN x='backend_implementation' THEN 'backend_engineer'
             WHEN x='code_review' THEN 'code_reviewer' ELSE 'other' END,
@@ -367,7 +435,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-        input: fixture + migration + skipFunction + recoveryMigration + reviewFunctions + checks + recoveryChecks + cycleFixture
+        input: fixture + migration + skipFunction + recoveryMigration + requiredLaneMigration + reviewFunctions + checks + requiredLaneChecks + recoveryChecks + cycleFixture
           + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
