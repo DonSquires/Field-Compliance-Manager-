@@ -10,8 +10,9 @@ const {
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
 const { loadCodeReviewSeed } = require('../../../builder-artifact-read');
+const { loadVerifiedProductSpecification } = require('./builder-backend-engineer');
 
-const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v3';
+const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v4';
 const MAX_SOURCE_FILES = 30;
 const MAX_SOURCE_FILE_BYTES = 50000;
 const MAX_SOURCE_TOTAL_BYTES = 300000;
@@ -85,12 +86,13 @@ async function loadVerifiedUxPlan(supabase, artifactId, jobId) {
   }
 }
 
-function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = null, codeReviewRevision = null, previousImplementation = null }) {
+function buildFrontendEngineerPrompt({ designPlan, specification, sourceContext, liveContext = null, codeReviewRevision = null, previousImplementation = null }) {
   const systemPrompt = [
     'You are the Frontend Engineer for Field Compliance Manager.',
     'Understand the supplied commit-pinned whole-build map before making a module-local change.',
     'Implement only the approved UX plan using only the supplied commit-pinned source files.',
-    'Return one JSON object containing summary, patch, changed_files, and tests.',
+    'Return one JSON object containing summary, patch, changed_files, tests, and acceptance_evidence.',
+    'Use the approved product specification as the mandatory acceptance contract, not just the UX plan. Supply acceptance_evidence entries {requirement_id,status:"completed",evidence} for the outcomes actually implemented. Name full changed source and regression-test paths. Whole-job acceptance checks every mandatory outcome after independent workers; a lane skip waives none. Never invent IDs or claim tests executed before verification.',
     'The patch must be a standard unified git diff limited to apps/web and must apply to the supplied files.',
     'Do not change dependencies, environment files, authentication, routing, access control, or safety gates.',
     'Do not invent APIs, schema, permissions, or behavior absent from the approved artifacts.',
@@ -101,6 +103,7 @@ function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = 
     systemPrompt,
     userPrompt: JSON.stringify({
       approved_ux_plan: designPlan,
+      approved_product_specification: specification,
       confirmed_code_review_corrections: codeReviewRevision,
       previous_implementation: previousImplementation,
       target_sha: sourceContext.target_sha,
@@ -111,7 +114,8 @@ function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = 
         summary: 'string',
         patch: 'unified git diff string',
         changed_files: ['apps/web/src/path.tsx'],
-        tests: ['fixed validation command or test description']
+        tests: ['fixed validation command or test description'],
+        acceptance_evidence: [{ requirement_id: 'approved delivery requirement ID', status: 'completed', evidence: 'Full changed source and regression-test paths; observable proof of the whole outcome' }]
       }
     })
   };
@@ -140,10 +144,12 @@ async function runFrontendEngineer({
   job,
   step,
   uxArtifact,
+  productArtifact,
   sourceDir,
   requestedFiles,
   liveContext = null,
   loadUxPlan = loadVerifiedUxPlan,
+  loadSpecification = loadVerifiedProductSpecification,
   executeModelRun = executeBuilderModelRun
 }) {
   if (!job?.id || !job?.organization_id || !job?.target_sha) throw new Error('commit-pinned job identity is required');
@@ -151,12 +157,14 @@ async function runFrontendEngineer({
   if (!uxArtifact?.id || uxArtifact.artifact_type !== 'ui_design_plan' || uxArtifact.status !== 'final') {
     throw new Error('a final UX design artifact is required');
   }
-  const [ux, sourceContext] = await Promise.all([
+  if (!productArtifact?.id) throw new Error('a final product specification artifact is required for frontend acceptance');
+  const [ux, sourceContext, product] = await Promise.all([
     loadUxPlan(supabase, uxArtifact.id, job.id),
-    Promise.resolve(collectFrontendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles }))
+    Promise.resolve(collectFrontendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles })),
+    loadSpecification(supabase, productArtifact.id, job.id)
   ]);
   const previousImplementation = await loadCodeReviewSeed(supabase, job, step);
-  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, sourceContext, liveContext,
+  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, specification: product.specification, sourceContext, liveContext,
     codeReviewRevision: job.code_review_revision, previousImplementation: previousImplementation?.text });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
@@ -167,8 +175,8 @@ async function runFrontendEngineer({
     promptVersion: FRONTEND_ENGINEER_PROMPT_VERSION,
     systemPrompt: prompt.systemPrompt,
     userPrompt: prompt.userPrompt,
-    inputArtifactIds: [uxArtifact.id],
-    outputSchema: { type: 'object', required: ['summary', 'patch', 'changed_files', 'tests'] }
+    inputArtifactIds: [uxArtifact.id, productArtifact.id],
+    outputSchema: { type: 'object', required: ['summary', 'patch', 'changed_files', 'tests', 'acceptance_evidence'] }
   });
   const result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseFrontendProposal });
   return {

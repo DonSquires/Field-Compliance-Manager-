@@ -15,6 +15,7 @@ const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-pa
 const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 const { laneFor, normalizeRepoPath } = require('./builder-path-policy');
+const { checkImplementationAcceptance } = require('./builder-implementation-acceptance');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -189,7 +190,10 @@ function agenticGenerator(lane, context, extra = {}) {
   return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext,
     failureArtifact = extra.failureArtifact, failedPatchArtifact = extra.failedPatchArtifact, startAfterProvider = null }) => {
     const [specification, uxPlan, previousFailure, seedPatch] = await Promise.all([
-      productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
+      productArtifact ? (async () => {
+        const { bytes } = await downloadVerifiedArtifact(supabase, productArtifact.id, job.id, 'product_specification');
+        return JSON.parse(bytes.toString('utf8'));
+      })() : Promise.resolve(extra.specification ?? null),
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
       failureArtifact ? (async () => {
         const downloaded = await downloadVerifiedArtifact(supabase, failureArtifact.id, job.id, 'build_logs');
@@ -342,6 +346,13 @@ async function runBackendImplementation(input) {
 }
 
 async function executeBuilderAction({ snapshot, action, supabase, gateway, context, handlers = {} }) {
+  let acceptance = null;
+  if (['start_optional_review', 'run_independent_review', 'run_release'].includes(action.type)) {
+    acceptance = await (handlers.acceptance || checkImplementationAcceptance)({ supabase, snapshot });
+    if (!acceptance.passed && !(action.type === 'start_optional_review' && snapshot.job.code_review_mode === 'human')) {
+      return { success: false, phase: 'acceptance', error: `Whole-job acceptance incomplete: ${acceptance.blockers.join(' ').slice(0, 3000)}`, acceptance };
+    }
+  }
   const run = {
     product: handlers.product || runProductAnalyst,
     ux: handlers.ux || runUxDesigner,
@@ -412,7 +423,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     const generator = agentic ? agenticGenerator('frontend', context, failedImplementationEvidence(snapshot, action.step)) : undefined;
     const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
     const siblingCompleted = byStep(snapshot, 'backend_implementation')?.status === 'completed';
-    return run.frontend({ ...common, siblingCompleted, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
+    return run.frontend({ ...common, siblingCompleted, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
   }
   if (action.type === 'run_backend') return run.backend({ ...common, context, priorFailure: failedImplementationEvidence(snapshot, action.step), siblingCompleted: byStep(snapshot, 'frontend_implementation')?.status === 'completed', productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
   const implementation = implementationArtifacts(snapshot);
@@ -420,7 +431,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
   if (action.type === 'run_security_review') return run.security({ ...common, securityStep: action.step, implementationWorkerRunIds: runs.map(item => item.id), sourceDir: context.sourceDir, workerImage: context.workerImage, runnerId: context.runnerId });
   if (action.type === 'start_optional_review') return run.optionalReview(supabase, { jobId: snapshot.job.id, stepId: action.step.id, artifactIds: [...implementation.patch, ...implementation.manifest, ...implementation.buildLogs, securityArtifact].filter(Boolean).map(item => item.id), requestedFromUsers: context.requestedFromUsers });
-  if (action.type === 'run_independent_review') return run.independentReview({ ...common, artifacts: { ...implementation, security: securityArtifact }, reviewerModelName: context.reviewerModelName });
+  if (action.type === 'run_independent_review') return run.independentReview({ ...common, artifacts: { ...implementation, security: securityArtifact }, reviewerModelName: context.reviewerModelName, acceptance });
   if (action.type === 'run_release') return run.release({ ...common, artifacts: { ...implementation, securityReview: securityArtifact, codeReview: artifactsFor(snapshot, 'code_review', 'code_review').at(-1) }, securityWorkerRunId: snapshot.workerRuns.filter(item => item.profile === 'security-review' && item.status === 'completed').at(-1)?.id, requestedFromUsers: context.requestedFromUsers });
   return action;
 }
@@ -430,6 +441,11 @@ async function advanceBuilderJob({ supabase, gateway, jobId, context, handlers, 
   await accountVerifierRecoveries(supabase, jobId);
   const snapshot = await loadSnapshot(supabase, jobId);
   const action = planBuilderAction(snapshot);
+  if (snapshot.job.status === 'security_review' && byStep(snapshot, 'code_review')?.status === 'blocked') {
+    const report = await (handlers?.acceptance || checkImplementationAcceptance)({ supabase, snapshot });
+    if (!report.passed) return { advanced: false, action: { type: 'blocked', reason: 'acceptance_incomplete',
+      detail: `Whole-job acceptance incomplete: ${report.blockers.join(' ').slice(0, 3000)}` }, snapshot };
+  }
   if (['terminal', 'waiting_for_human', 'waiting_for_worker', 'blocked'].includes(action.type)) return { advanced: false, action, snapshot };
   const result = await executeBuilderAction({ snapshot, action, supabase, gateway, context, handlers });
   return { advanced: true, action, result };
@@ -451,6 +467,9 @@ async function runBuilderUntilPause({
     history.push({ action: outcome.action, advanced: outcome.advanced });
     if (!outcome.advanced) return { paused: true, reason: outcome.action.reason || outcome.action.type, detail: outcome.action.detail, history, snapshot: outcome.snapshot };
     if (outcome.result?.ok === false || outcome.result?.success === false) {
+      if (outcome.result.phase === 'acceptance') {
+        return { paused: true, reason: 'acceptance_incomplete', detail: outcome.result.error, history, result: outcome.result };
+      }
       return { paused: true, reason: 'action_failed', history, result: outcome.result };
     }
   }

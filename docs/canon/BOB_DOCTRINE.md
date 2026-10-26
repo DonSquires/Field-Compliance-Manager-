@@ -11,6 +11,38 @@
 
 ## 1. What Bob is
 
+**Whole-job acceptance, owner decision 2026-10-26.** The owner selected fixing
+Builder's acceptance gate before another correction of the partial-success
+repair. A lane skip routes work; it cannot waive a mandatory outcome. Before
+human/independent/no-review progression or release, reconcile every delivery
+requirement from the current specification against current worker-verified
+implementation evidence, not superseded seeds or author-only runs. Missing,
+invented, duplicate or incompatible evidence is an explicit blocker. Scope
+conflicts require an authorized specification correction rather than silent
+reassignment or invented completion claims.
+
+Record the complete coverage report and exact target, correction, specification,
+artifact checksums, lane states and worker inputs/outputs in the existing test
+step context and audit ledger. Changed evidence invalidates the receipt.
+Database gates protect automated review, approval and release even when a caller
+bypasses the coordinator. Human mode may expose an explicitly incomplete review
+for owner-confirmed same-job corrections, with approval blocked. Incomplete
+acceptance parks non-terminally rather than failing the job. Rejection and
+confirmed corrections remain available; no attempt
+reset, duplicate job or automatic approval is introduced. Coverage reconciliation
+is not semantic acceptance: independent review must compare the full outcomes,
+required workflow evidence and original/correction brief with the actual patch
+and tests. Narrow passing commands alone do not prove a full workflow repair.
+
+**Prototype engineering scope, owner direction 2026-10-26.** The owner permits
+inspection and correction throughout Builder Chat, Bob Builder, Vibe Builder
+and their build stack, including measured changes to in-house/cloud models, to
+deliver an enterprise-grade assisted building system for repairs, pages,
+workflows and new systems within Field Compliance Manager. This is engineering
+scope, not authority to bypass data classification, cloud-transfer consent,
+tenant isolation, consequential-action approvals or protected release. Model
+changes need capability and task evidence, not assumed ranking or larger size.
+
 **Failed correction recovery, owner decision 2026-10-26.** A correction cycle
 must not demand an unrelated frontend edit before a backend-owned repair can
 run. An explicit sibling-lane no-change result names an unprotected source

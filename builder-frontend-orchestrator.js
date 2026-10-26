@@ -22,6 +22,7 @@ async function runFrontendImplementation({
   job,
   step,
   uxArtifact,
+  productArtifact,
   sourceDir,
   requestedFiles,
   workerImage,
@@ -40,7 +41,7 @@ async function runFrontendImplementation({
   let generation = resumePatchArtifact
     ? { ok: true, patch_artifact: resumePatchArtifact }
     : await generate({
-      supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
+      supabase, gateway, job, step: currentStep, uxArtifact, productArtifact, sourceDir, requestedFiles, liveContext
     });
   if (!generation.ok || !generation.patch_artifact?.id) {
     if (await skipLaneWithNothingToDo({ supabase, job, step: currentStep, siblingCompleted }, generation)) return { success: true, skipped: true, phase: 'generation', result: generation, attempts: 0 };
@@ -95,6 +96,7 @@ async function runFrontendImplementation({
       job,
       step: currentStep,
       uxArtifact,
+      productArtifact,
       failedPatchArtifact: patchArtifact,
       failureArtifact,
       failedWorkerRunId: verification.worker_run_id,

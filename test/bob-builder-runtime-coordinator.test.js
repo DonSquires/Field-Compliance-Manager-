@@ -215,6 +215,7 @@ test('agentic runtime advances the complete post-spec workflow to final human ap
     supabase: {}, gateway: {}, jobId: 'job-1', context: {}, maxActions: 8,
     loadSnapshot: async () => states[Math.min(index++, states.length - 1)],
     handlers: {
+      acceptance: async () => ({ passed: true, blockers: [] }),
       ux: async () => { calls.push('ux'); return { ok: true }; },
       frontend: async () => { calls.push('frontend'); return { success: true }; },
       backend: async () => { calls.push('backend'); return { success: true }; },
@@ -250,7 +251,7 @@ test('independent review and release receive the author patch plus the worker-ve
   const action = planBuilderAction(state);
   assert.equal(action.type, 'run_independent_review');
   let received;
-  await executeBuilderAction({ snapshot: state, action, supabase: {}, gateway: {}, context: { reviewerModelName: 'gpt-5.4-mini' }, handlers: { independentReview: async (input) => { received = input; return { ok: true }; } } });
+  await executeBuilderAction({ snapshot: state, action, supabase: {}, gateway: {}, context: { reviewerModelName: 'gpt-5.4-mini' }, handlers: { acceptance: async () => ({ passed: true, blockers: [] }), independentReview: async (input) => { received = input; return { ok: true }; } } });
   assert.deepEqual(received.artifacts.patch.map(a => a.id), ['proposal-2'], 'the author artifact keeps model-run provenance for the reviewer != author check');
   assert.deepEqual(received.artifacts.manifest.map(a => a.id), ['manifest']);
   assert.deepEqual(received.artifacts.buildLogs.map(a => a.id), ['verification']);

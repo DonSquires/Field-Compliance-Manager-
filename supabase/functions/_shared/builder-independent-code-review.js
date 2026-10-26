@@ -6,7 +6,7 @@ const {
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./builder-patch-envelope');
 
-const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v4';
+const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v5';
 const MAX_REVIEW_EVIDENCE_CHARS = 48_000;
 
 // The exact shape the validator accepts; json_object mode does not enforce `required`, and the
@@ -28,7 +28,7 @@ function diagnosticTail(value, limit = 600) {
 
 function summarizeBuildLog(bytes) {
   const parsed = JSON.parse(bytes.toString('utf8'));
-  const commands = Array.isArray(parsed?.commands) ? parsed.commands : [];
+  const commands = Array.isArray(parsed?.commands) ? parsed.commands : Array.isArray(parsed?.checks) ? parsed.checks : [];
   return {
     artifact_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
     artifact_bytes: bytes.length,
@@ -216,6 +216,7 @@ async function runIndependentCodeReview({
   job,
   step,
   artifacts,
+  acceptance,
   reviewerModelName,
   loadEvidence = loadCodeReviewEvidence,
   loadAuthors = loadAuthorIdentities,
@@ -240,6 +241,9 @@ async function runIndependentCodeReview({
   let evidence;
   try {
     evidence = await loadEvidence({ supabase, job, artifacts });
+    evidence.acceptance = acceptance;
+    evidence.original_task = job.task_description;
+    evidence.correction_feedback = job.code_review_revision?.feedback;
   } catch (error) {
     // Never leave the step "running" (which reads as waiting-for-human) when the evidence itself is unusable.
     const message = error instanceof Error ? error.message : String(error);
@@ -251,9 +255,10 @@ async function runIndependentCodeReview({
     'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
     'Data paths: for every table the patch reads or writes, check who can see it (row-level security in supabase/schema.sql is the truth: a caller-scoped client reading a service-role-only table gets no rows) and that the two-turn/pending patterns the code claims to follow are wired at every seam the precedent uses.',
     'Write the summary in your own words about what you verified; do not restate the author\'s description. On any patch of substance, list the test gaps and residual risks you see.',
+    'Whole-job acceptance: reconcile every full mandatory outcome and required evidence in acceptance against the actual current patch and tests, original_task, workflow_verification and correction_feedback. Coverage is not proof of behavior. Block for missing mandatory behavior or required regression coverage even if all narrow commands passed. A skipped lane waives no outcome. A complete replacement patch must retain required prior behavior; do not approve a reader-only fix for a user-visible workflow failure. Unknown/unsupported retry or idempotency claims are not acceptance evidence.',
     evidence.previous_review ? `This is a REVISION (round ${evidence.previous_review.round} of ${evidence.previous_review.of}): an earlier attempt was blocked and the author was given that review (previous_review in the evidence). First check whether each previous finding is resolved in this patch. Block only for a previous finding that is still unresolved or for a NEW critical/high defect this patch introduces; concerns the previous review already listed as residual risks or test gaps stay residual risks or test gaps, not new blocking findings. Say explicitly which previous findings are resolved.` : null,
     'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
-    'Use only the verified patch, manifest, build logs, and security report.',
+    'Use the verified patch, manifest, build logs, security report and the pinned whole-job acceptance contract; author prose is a claim, not independent proof.',
     REVIEW_OUTPUT_CONTRACT
   ].filter(Boolean).join(' ');
   const modelRequest = buildModelRunRequest({
