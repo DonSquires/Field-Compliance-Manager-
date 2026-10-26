@@ -13,7 +13,9 @@
 -- owner's first given name, is a one-letter initial of it, or shares a 3+ letter prefix with it
 -- (Chris / Christopher), or exactly equals one of the owner's later words (a notice using the
 -- owner's middle name still matches). Later owner words get no initial or prefix leeway, so a
--- shared particle (de, van) or middle name after a different first name is not agreement.
+-- shared particle (de, van) or middle name after a different first name is not agreement. A
+-- generational suffix (Jr, Sr, II to IV) on either name hides the family-name boundary, so such
+-- names are never matched to the owner.
 -- Anything else, including a family name whose word boundaries differ, falls through to the
 -- unique exact-name match, then to a person verified by the notice itself; the import links
 -- that person to the vehicle as an associated person, and genuine spelling duplicates are
@@ -161,7 +163,11 @@ BEGIN
     v_basis := 'explicit';
   END IF;
 
-  IF v_person IS NULL AND v_plate IS NOT NULL AND v_surname IS NOT NULL THEN
+  -- A generational suffix (Jr, Sr, II to IV) hides where the family name ends, so a notice that
+  -- carries one is never matched to the registered owner; it falls through to the exact-name
+  -- match or a person verified by the notice.
+  IF v_person IS NULL AND v_plate IS NOT NULL AND v_surname IS NOT NULL
+    AND NOT (v_name_tokens && ARRAY['jr', 'jnr', 'sr', 'snr', 'ii', 'iii', 'iv']::text[]) THEN
     SELECT max(check_row.checked_at)
       INTO v_latest_owner_check
     FROM public.vehicle_identity_checks check_row
@@ -231,6 +237,8 @@ BEGIN
           AND document.document_kind = 'nzta_mvr_record'
           AND (document.review_state = 'approved'
             OR check_row.vehicle_snapshot->>'owner_only_review' = 'true')
+          -- An owner whose name carries a generational suffix is not matched either.
+          AND NOT (owner_name.tokens && ARRAY['jr', 'jnr', 'sr', 'snr', 'ii', 'iii', 'iv']::text[])
           -- The owner's family name is resolved the same way as the notice's (the last word of two or
           -- more letters) and must be the notice's family name, so a notice family name that only
           -- equals one of the owner's given or middle names is not agreement.

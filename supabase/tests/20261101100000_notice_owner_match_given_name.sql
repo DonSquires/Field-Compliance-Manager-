@@ -112,6 +112,8 @@ DECLARE
   v_middle_owner uuid;
   v_compound_owner uuid;
   v_van_owner uuid;
+  v_suffix_owner uuid;
+  v_plain_owner uuid;
   v_error text;
   v_result jsonb;
   v_family_member uuid;
@@ -143,10 +145,13 @@ BEGIN
   v_middle_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira Jane Cole', 'P' || v_stem, 'owner-middle');
   v_compound_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Alex St-John Cole', 'Q' || v_stem, 'owner-compound-middle');
   v_van_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira van Vries', 'R' || v_stem, 'owner-van-particle');
+  v_suffix_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Andrew Thomas Jr.', 'S' || v_stem, 'owner-suffix');
+  v_plain_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Andrew Thomas', 'T' || v_stem, 'owner-plain-for-suffix');
   PERFORM pg_temp.check(
-    'owner reviews resolved ten distinct registered people',
+    'owner reviews resolved twelve distinct registered people',
     (SELECT count(DISTINCT person) FROM unnest(ARRAY[v_owner, v_hyphen_owner, v_repeat_owner, v_initial_owner,
-      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner, v_compound_owner, v_van_owner]) AS person) = 10
+      v_apostrophe_owner, v_titled_owner, v_particle_owner, v_middle_owner, v_compound_owner, v_van_owner,
+      v_suffix_owner, v_plain_owner]) AS person) = 12
   );
 
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Rowan Alder', 'different-given');
@@ -227,6 +232,20 @@ BEGIN
     'an initial matching only the owner''s family-name particle is not the owner',
     v_result->>'match_basis' = 'created_from_notice'
       AND (v_result->>'canonical_person_id')::uuid <> v_particle_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'S' || v_stem, 'Thomas Thomas Jr.', 'suffix-repeated-name');
+  PERFORM pg_temp.check(
+    'a generational suffix does not stand in for the family name, so a repeated name is not the owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_suffix_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'T' || v_stem, 'Thomas Jr', 'suffix-without-given');
+  PERFORM pg_temp.check(
+    'a suffixed notice is not treated as a family name alone and matched to the owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_plain_owner
   );
 
   v_result := pg_temp.import_on_plate(v_client, 'P' || v_stem, 'Rowan Jane Cole', 'shared-middle-different-first');
