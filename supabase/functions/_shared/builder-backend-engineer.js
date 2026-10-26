@@ -11,7 +11,7 @@ const { collectRepositoryContext } = require('./builder-repository-context');
 const { laneAllows } = require('../../../builder-path-policy');
 const { loadCodeReviewSeed } = require('../../../builder-artifact-read');
 
-const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v3';
+const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v4';
 const MAX_SOURCE_FILES = 40;
 const MAX_SOURCE_FILE_BYTES = 100000;
 const MAX_SOURCE_TOTAL_BYTES = 500000;
@@ -206,7 +206,8 @@ function buildBackendEngineerPrompt({ specification, sourceContext, liveContext 
       'You are the Backend Engineer for Field Compliance Manager.',
       'Understand the supplied commit-pinned whole-build map before making a module-local change.',
       'Implement only the approved product specification using the supplied commit-pinned backend sources.',
-      'Return one JSON object containing summary, patch, changed_files, database_migrations, edge_functions, tests, and rollback_notes.',
+      'Return one JSON object containing summary, patch, changed_files, database_migrations, edge_functions, tests, acceptance_evidence, and rollback_notes.',
+      'Supply acceptance_evidence entries {requirement_id,status:"completed",evidence} for actual approved outcomes, naming full changed source and regression-test paths. Whole-job acceptance checks every mandatory delivery requirement after independent verification, even if another lane was skipped. Do not invent IDs, silently waive outcomes, or claim test execution before workers run.',
       'Use additive schema changes, preserve tenant isolation and provenance, and keep secrets server-side.',
       'Do not include destructive SQL, dependency changes, environment files, deployment commands, or production credentials.',
       'Do not claim execution, migration application, approval, or deployment.',
@@ -228,6 +229,7 @@ function buildBackendEngineerPrompt({ specification, sourceContext, liveContext 
         database_migrations: ['supabase/migrations/<timestamp>_<name>.sql'],
         edge_functions: ['function-name'],
         tests: ['fixed validation command or test description'],
+        acceptance_evidence: [{ requirement_id: 'approved delivery requirement ID', status: 'completed', evidence: 'Full changed source and regression-test paths; observable proof of the whole outcome' }],
         rollback_notes: ['non-destructive rollback or forward-fix step']
       }
     })
@@ -270,7 +272,7 @@ async function runBackendEngineer({
     inputArtifactIds: [productArtifact.id],
     outputSchema: {
       type: 'object',
-      required: ['summary', 'patch', 'changed_files', 'database_migrations', 'edge_functions', 'tests', 'rollback_notes']
+      required: ['summary', 'patch', 'changed_files', 'database_migrations', 'edge_functions', 'tests', 'acceptance_evidence', 'rollback_notes']
     }
   });
   const result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseBackendProposal });

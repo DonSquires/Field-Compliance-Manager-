@@ -10,7 +10,7 @@ const {
 } = require('./builder-frontend-engineer');
 const { redactLog } = require('../../../frontend-worker');
 
-const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v3';
+const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v4';
 
 function sanitizeVerificationFailure(verification) {
   const commands = Array.isArray(verification?.commands) ? verification.commands : [];
@@ -64,16 +64,18 @@ async function loadJsonArtifact(supabase, artifactId, jobId, expectedType) {
   }
 }
 
-async function loadRepairInputs({ supabase, job, uxArtifact, failedPatchArtifact, failureArtifact }) {
-  const [ux, failedProposal, failure] = await Promise.all([
+async function loadRepairInputs({ supabase, job, uxArtifact, productArtifact, failedPatchArtifact, failureArtifact }) {
+  if (!productArtifact?.id) throw new Error('a final product specification artifact is required for frontend repair acceptance');
+  const [ux, failedProposal, failure, specification] = await Promise.all([
     loadVerifiedUxPlan(supabase, uxArtifact.id, job.id),
     loadJsonArtifact(supabase, failedPatchArtifact.id, job.id, 'code_implementation'),
-    loadJsonArtifact(supabase, failureArtifact.id, job.id, 'build_logs')
+    loadJsonArtifact(supabase, failureArtifact.id, job.id, 'build_logs'),
+    loadJsonArtifact(supabase, productArtifact.id, job.id, 'product_specification')
   ]);
-  return { uxPlan: ux.designPlan, failedProposal, failure };
+  return { uxPlan: ux.designPlan, failedProposal, failure, specification };
 }
 
-function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext, liveContext = null, codeReviewRevision = null }) {
+function buildRepairPrompt({ uxPlan, specification, failedProposal, failure, sourceContext, liveContext = null, codeReviewRevision = null }) {
   return {
     systemPrompt: [
       'You are repairing a failed frontend patch for Field Compliance Manager.',
@@ -81,10 +83,12 @@ function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext, liv
       'Use only the approved UX plan, commit-pinned source, prior proposal, and sanitized failure evidence.',
       'Retain and address confirmed code review corrections when supplied; reported findings still require verification.',
       'Do not change dependencies, environment, authentication, routing, access control, safety gates, or backend files.',
-      'Return one JSON object with summary, patch, changed_files, and tests. Do not use markdown fences.'
+      'Retain every mandatory product acceptance outcome and return acceptance_evidence entries {requirement_id,status:"completed",evidence}, naming changed source and regression-test paths. A passing narrow repair is not whole-job acceptance; do not drop prior required behavior or invent IDs.',
+      'Return one JSON object with summary, patch, changed_files, tests, and acceptance_evidence. Do not use markdown fences.'
     ].join(' '),
     userPrompt: JSON.stringify({
       approved_ux_plan: uxPlan,
+      approved_product_specification: specification,
       confirmed_code_review_corrections: codeReviewRevision,
       failed_proposal: failedProposal,
       verification_failure: failure,
@@ -102,6 +106,7 @@ async function runFrontendRepair({
   job,
   step,
   uxArtifact,
+  productArtifact,
   failedPatchArtifact,
   failureArtifact,
   failedWorkerRunId,
@@ -126,10 +131,11 @@ async function runFrontendRepair({
   });
   if (!authorization.success) return { ok: false, status: 409, error: authorization.error };
 
-  const inputs = await loadInputs({ supabase, job, uxArtifact, failedPatchArtifact, failureArtifact });
+  const inputs = await loadInputs({ supabase, job, uxArtifact, productArtifact, failedPatchArtifact, failureArtifact });
   const sanitizedFailure = sanitizeVerificationFailure(inputs.failure);
   const prompt = buildRepairPrompt({
     uxPlan: inputs.uxPlan,
+    specification: inputs.specification,
     failedProposal: inputs.failedProposal,
     failure: sanitizedFailure,
     sourceContext,
@@ -145,8 +151,8 @@ async function runFrontendRepair({
     promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
     systemPrompt: prompt.systemPrompt,
     userPrompt: prompt.userPrompt,
-    inputArtifactIds: [uxArtifact.id, failedPatchArtifact.id, failureArtifact.id],
-    outputSchema: { type: 'object', required: ['summary', 'patch', 'changed_files', 'tests'] }
+    inputArtifactIds: [uxArtifact.id, productArtifact?.id, failedPatchArtifact.id, failureArtifact.id].filter(Boolean),
+    outputSchema: { type: 'object', required: ['summary', 'patch', 'changed_files', 'tests', 'acceptance_evidence'] }
   });
   const result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseFrontendProposal });
   return {

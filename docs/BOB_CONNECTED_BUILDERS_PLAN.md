@@ -39,6 +39,65 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Whole-job acceptance reconciliation (2026-10-26)
+
+Before: production UI review of original job
+`d29aaf78-8bb1-4d87-9913-9705dd8767fa` showed a complete replacement patch
+containing only a receipt-reader change and focused reader test. The prior
+partial-success catch handling was absent. The author claimed only DR-6 and
+explicitly did not run broader workflow tests, yet passed workers reached
+human review. All six delivery requirements named frontend scopes; the backend
+author validator skipped them, and the skipped frontend lane left no whole-job
+reconciliation. PM UI assessment `2e96118f-7cf6-4b53-9948-797116b40c60`
+agreed the repair remained incomplete; no new correction was dispatched.
+
+During: owner selected fixing acceptance enforcement rather than another
+prompt-only cycle. Reconcile the full current specification against only
+current independent worker artifact sets. Retain all mandatory IDs, outcomes,
+required evidence and workflow verification for review. Missing outcomes,
+scope mismatches, invented/duplicate IDs, absent claimed regression tests and
+missing independent test execution are blockers, not optional follow-ups.
+Use existing test-step context and audit records for an identity-bound report.
+SQL triggers prevent automated review, human approval and release when that
+report is missing, incomplete or stale. Human mode can still open an explicitly
+incomplete correction review; approval is disabled and same-job Chat feedback
+and rejection remain available. Coordinator/autopilot pause non-terminally
+without burning author attempts or cutting off existing correction authority.
+Independent review receives the full contract and correction brief instead of
+judging just the narrow patch. Coverage is not semantic or human acceptance.
+The trace also found that frontend orchestration supplied only UX input:
+agentic frontend authors had no product specification to validate. Both initial
+frontend generation and repair now receive the integrity-checked product
+specification and retain its artifact provenance. One-shot frontend/backend/
+repair output contracts also carry structured acceptance claims rather than
+becoming an untracked alternate route.
+
+After gate: targeted runtime and actual disposable PostgreSQL tests must prove
+cross-lane coverage, skipped lanes, replacement patches, superseded evidence,
+replay, stale identities and all protected progression paths. Protected merge,
+governed migration/schema snapshot/Atlas refresh and actual UI revalidation
+remain required before calling the gate deployed or the original repair fixed.
+The original repair is still unapproved and not deployed.
+
+Local gate validation: the full runtime suite passed (1,840 passed, 12 skips);
+the exact PostgreSQL CI entry passed all ten tests, including the new actual
+database guards and JavaScript/SQL evidence-identity equality. Twenty-three
+focused web tests passed, plus app/browser type checks, production build and
+two desktop/mobile correction-gate/reload workflows without mutations or
+horizontal overflow. Final targeted provenance/reviewer tests passed after
+adding mismatched worker-target/organization/lane controls. Atlas dry-run
+generation succeeded; no live Atlas refresh, migration or deployment was
+performed by these local checks.
+
+Recovery release evidence: #244 and generated-catalog #246 deployed as
+`a15f081019f7afff54250fd2b14f4669a0b6e3e8`, with healthy runtime, matching
+schema, refreshed Atlas, successful production Vercel and all three main CI
+jobs passing. Actual UI confirmation
+`6ec9b247-4260-4eee-9175-87b55424616e` survived reload, resumed the same
+job and preserved frontend attempt count at three. Frontend was audited
+skipped and backend ran; no fresh frontend seed verification was observed.
+This proves recovery, not the underlying partial-success repair.
+
 ### Same-job implementation corrections (2026-10-26)
 
 Second-cycle UI acceptance exposed a routing/recovery gap: frontend correctly

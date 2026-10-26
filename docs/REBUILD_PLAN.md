@@ -15,6 +15,14 @@ quality, Builder/Vibe handoffs, measured routing and UI acceptance. Existing
 approval and credential boundaries stand; the original release-source repair
 remains open until independently investigated and verified by Bob.
 
+Owner direction 2026-10-26 expands prototype engineering scope across Builder
+Chat, Bob Builder, Vibe Builder and their full stack, including measured
+in-house/cloud model changes. First close whole-job acceptance reconciliation:
+lane skips and narrow tests must not hide missing approved outcomes. Retain a
+same-job correction path and distinguish coverage, semantic review and deployed
+human acceptance. See the connected plan and Bob doctrine; consent, tenant
+isolation, audit and protected releases remain in force.
+
 Builder research release follow-up, 2026-10-25:
 
 - PR #213 and generated-catalog PR #214 are merged; governed release

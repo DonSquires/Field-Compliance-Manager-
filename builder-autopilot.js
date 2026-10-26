@@ -698,6 +698,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
       }
       const run = await actions.run(job.id);
       if (run?.skipped) { outcomes.push({ job: job.id, outcome: 'running' }); continue; }
+      if (run?.reason === 'acceptance_incomplete') {
+        await actions.record(job.id, 'blocked', composeReport({ job, state: 'blocked', reason: run.detail || 'Whole-job acceptance is incomplete' }));
+        outcomes.push({ job: job.id, outcome: 'acceptance_incomplete' });
+        continue;
+      }
       const blockedReason = run?.reason === 'attempt_ceiling' ? run.detail : run?.reason === 'blocked' ? (run.detail || 'the Builder is blocked') : run?.reason === 'action_failed' ? (run.result?.error || run.result?.detail || 'a Builder step failed') : null;
       if (blockedReason && run?.reason !== 'action_failed') {
         const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);

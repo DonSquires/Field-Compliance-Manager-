@@ -5,6 +5,7 @@ import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
 import { builderRequestError } from '../lib/builderRequestError';
+import { acceptanceCoverage } from '../lib/builderApprovalSummary';
 import { BuilderLiveActivity, builderSuccessorId, deriveLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -63,6 +64,7 @@ interface BuilderStep {
   status: string;
   attempt_count: number;
   result_summary: string | null;
+  input_context?: unknown;
   error: string | null;
   retryable: boolean;
   started_at?: string | null;
@@ -877,13 +879,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
             {snapshot.approvals.filter(approval => !successorId && !cancelled && approval.status === 'pending').map(approval => {
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
               const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
+              const coverage = ['implementation_review', 'release_approval'].includes(approval.approval_type)
+                ? acceptanceCoverage(snapshot.steps.find(step => step.step_id === 'test_suite')?.input_context) : undefined;
               return (
               <section className="builder-approval" key={approval.id}>
                 <div><span>Human approval required</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}.</small></div>
-                <BuilderApprovalBrief jobId={selectedJob.id} approvalType={approval.approval_type} artifacts={[...reviewedArtifacts, ...snapshot.artifacts.filter(artifact => artifact.status === 'final')]} readArtifact={readArtifactContent} />
+                <BuilderApprovalBrief jobId={selectedJob.id} approvalType={approval.approval_type} artifacts={[...reviewedArtifacts, ...snapshot.artifacts.filter(artifact => artifact.status === 'final')]} readArtifact={readArtifactContent} acceptance={coverage} />
                 <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}{!evidenceComplete && <li className="is-incomplete"><strong>Evidence unavailable</strong><span>Refresh before deciding</span></li>}</ul>
                 <label>Note for Bob <small>(optional to approve; required to reject: say what should change)</small><textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} /></label>
-                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy)}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy) || coverage?.supplied === false}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
               </section>
               );
             })}

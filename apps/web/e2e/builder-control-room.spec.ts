@@ -5,6 +5,51 @@ const JOB_ID = '91919191-9191-4919-8919-919191919191';
 const PROJECT_ID = '92929292-9292-4929-8929-929292929292';
 const ORGANIZATION_ID = '33333333-3333-4333-8333-333333333333';
 
+test('incomplete acceptance stays a same-job correction gate after reload, never finished-code approval', async ({ page, isMobile }) => {
+  const errors = monitorBrowserErrors(page);
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  const mutations: string[] = [];
+  const job = {
+    id: JOB_ID, organization_id: ORGANIZATION_ID, project_id: PROJECT_ID, title: 'Partial-success correction',
+    status: 'security_review', target_sha: 'a'.repeat(40), frontend_required: true, backend_required: true,
+    code_review_mode: 'human', code_review_status: 'pending', autopilot_state: 'blocked',
+    created_at: '2026-10-26T12:00:00Z', updated_at: '2026-10-26T12:00:00Z',
+  };
+  await page.route('**/functions/v1/bob-builder-control-room', async route => {
+    const body = route.request().postDataJSON() as { action: string };
+    if (!['list', 'get', 'context_snapshot'].includes(body.action)) mutations.push(body.action);
+    const response = body.action === 'list'
+      ? { projects: [{ id: PROJECT_ID, organization_id: ORGANIZATION_ID, name: 'FCM' }], jobs: [job] }
+      : body.action === 'get' ? { job, steps: [{ id: 'test', step_id: 'test_suite', ordinal_position: 5,
+        builder_mode: 'qa_security_reviewer', status: 'completed', attempt_count: 1,
+        input_context: { implementation_acceptance: { report: { version: 1, passed: false,
+          requirements: [{ requirement_id: 'DR-1', status: 'blocked' }],
+          blockers: ['DR-1: saved-diary/final-answer-failure workflow is not demonstrated.'] } } } }],
+        artifacts: [{ id: 'patch', artifact_type: 'code_implementation', status: 'final', checksum: 'b'.repeat(64) }],
+        workerRuns: [], modelRuns: [], events: [], approvals: [{ id: 'review', approval_type: 'implementation_review',
+          status: 'pending', triggered_at_status: 'security_review', requested_target_sha: job.target_sha, reviewed_artifact_ids: ['patch'] }]
+      } : { context: null };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) });
+  });
+  await signInAsAdmin(page, '/admin/builder');
+  for (let round = 0; round < 2; round++) {
+    await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+    if (isMobile) await page.getByRole('button', { name: 'Jobs', exact: true }).click();
+    await page.locator('.builder-list button').filter({ hasText: job.title }).click();
+    await expect(page.getByRole('alert', { name: 'Acceptance corrections required' })).toContainText('DR-1');
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
+    await expect(page.getByText(/Ask Builder Chat for corrections on this same job/)).toBeVisible();
+    await expect(page.getByText('Is the finished code acceptable?')).toHaveCount(0);
+    await page.getByRole('textbox', { name: /Note for Bob/ }).fill('Keep this same job and correct the missing workflow.');
+    await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeEnabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    if (round === 0) await page.reload();
+  }
+  expect(mutations).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('a superseded attempt opens its failed successor without implying that either is running', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });

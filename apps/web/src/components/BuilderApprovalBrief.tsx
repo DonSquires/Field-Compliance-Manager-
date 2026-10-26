@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { approvalMeaning, summarizeSpecification, type PlainPlanSummary } from '../lib/builderApprovalSummary';
+import { approvalMeaning, summarizeSpecification, type PlainPlanSummary, type AcceptanceCoverage } from '../lib/builderApprovalSummary';
 import './BuilderApprovalBrief.css';
 
 interface Props {
@@ -7,13 +7,14 @@ interface Props {
   approvalType: string;
   artifacts: Array<{ id: string; artifact_type: string }>;
   readArtifact: (jobId: string, artifactId: string) => Promise<string>;
+  acceptance?: AcceptanceCoverage;
 }
 
 function Lines({ items }: { items: string[] }) {
   return items.length === 0 ? <p className="approval-brief-none">Not stated.</p> : <ul>{items.map(item => <li key={item}>{item}</li>)}</ul>;
 }
 
-export function BuilderApprovalBrief({ jobId, approvalType, artifacts, readArtifact }: Props) {
+export function BuilderApprovalBrief({ jobId, approvalType, artifacts, readArtifact, acceptance }: Props) {
   const meaning = approvalMeaning(approvalType);
   const specificationId = artifacts.find(artifact => artifact.artifact_type === 'product_specification')?.id ?? null;
   const [state, setState] = useState<{ loading: boolean; summary: PlainPlanSummary | null; error: string | null }>({ loading: Boolean(specificationId), summary: null, error: null });
@@ -32,6 +33,9 @@ export function BuilderApprovalBrief({ jobId, approvalType, artifacts, readArtif
   return (
     <div className="approval-brief">
       <h4>{meaning.question}</h4>
+      {acceptance && (acceptance.supplied
+        ? <p role="status">Recorded acceptance coverage is supplied. The server rechecks its evidence identity before approval. This does not prove the behavior is correct; review the full workflow and regression evidence.</p>
+        : <section role="alert" className="approval-brief-error" aria-label="Acceptance corrections required"><strong>Incomplete implementation — approval blocked</strong><Lines items={acceptance.blockers} /><p>Ask Builder Chat for corrections on this same job. Do not create a duplicate or assume passing tests mean the task is finished.</p></section>)}
       <div className="approval-brief-outcomes">
         <p><strong>Approve:</strong> {meaning.approveMeans}</p>
         <p><strong>Reject:</strong> {meaning.rejectMeans}</p>

@@ -93,10 +93,12 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
       job: { id: 'job-1', organization_id: 'org-1', target_sha: fixture.sha },
       step: { id: 'step-3', builder_mode: 'frontend_engineer' },
       uxArtifact: { id: 'ux-1', artifact_type: 'ui_design_plan', status: 'final' },
+      productArtifact: { id: 'spec-1', artifact_type: 'product_specification', status: 'final' },
       sourceDir: fixture.root,
       requestedFiles: ['apps/web/src/example.ts'],
       liveContext: { atlas: { capability_count: 1 }, live_data: { scope: 'aggregate row counts only' } },
       loadUxPlan: async () => ({ designPlan: { route_map: [], component_inventory: [] } }),
+      loadSpecification: async () => ({ specification: { delivery_requirements: [{ id: 'DR-1', outcome: 'Preserve the whole task' }] } }),
       executeModelRun: async input => {
         captured = input;
         return { ok: true, validated_output: { summary: 'Update example', patch, changed_files: ['apps/web/src/example.ts'], tests: [] }, artifact: { id: 'patch-1' } };
@@ -105,7 +107,9 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
     assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'openai']);
     assert.equal(captured.modelRequest.provider, 'gpu_workstation');
     assert.equal(captured.modelRequest.prompt_version, FRONTEND_ENGINEER_PROMPT_VERSION);
-    assert.deepEqual(captured.modelRequest.input_artifact_ids, ['ux-1']);
+    assert.deepEqual(captured.modelRequest.input_artifact_ids, ['ux-1', 'spec-1']);
+    assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).approved_product_specification.delivery_requirements[0].id, 'DR-1');
+    assert.ok(captured.modelRequest.request.output_schema.required.includes('acceptance_evidence'));
     assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).repository_context.target_sha, fixture.sha);
     assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).live_context.atlas.capability_count, 1);
     assert.equal(result.patch_artifact.id, 'patch-1');
