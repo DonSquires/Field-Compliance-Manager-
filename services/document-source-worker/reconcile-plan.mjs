@@ -921,8 +921,14 @@ export function cliQuery(sql) {
     const result = JSON.parse(execFileSync(process.execPath, [cli, 'db', 'query', '--linked', '--file', input, '--output-format', 'json'], {
       encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
     }));
-    if (!Array.isArray(result.rows)) throw new Error('Linked query returned no rows');
-    return result.rows;
+    // Inside an agent session the CLI wraps rows in a { boundary, rows, warning } envelope;
+    // unattended runs (e.g. the scheduled task) get the bare row array.
+    const rows = Array.isArray(result) ? result : result?.rows;
+    if (!Array.isArray(rows)) {
+      const detail = String(result?.message ?? result?.error ?? Object.keys(result ?? {}).join(',')).slice(0, 300);
+      throw new Error(`Linked query returned no rows (${detail})`);
+    }
+    return rows;
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

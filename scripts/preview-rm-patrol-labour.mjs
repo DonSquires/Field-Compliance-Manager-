@@ -102,7 +102,7 @@ export function runLinkedSql(sql, prefix = 'fcm-labour-read-') {
 /** Reads the live snapshot (read-only transaction) and plans it. */
 export function loadLabourReport(from, to) {
   const result = runLinkedSql(labourSnapshotSql(from, to));
-  const snapshot = result.rows?.[0]?.snapshot;
+  const snapshot = (Array.isArray(result) ? result : result?.rows)?.[0]?.snapshot;
   if (!snapshot || !Array.isArray(snapshot.records)
     || snapshot.records.length !== snapshot.source_record_count) {
     throw new Error('The linked read returned no complete snapshot');
