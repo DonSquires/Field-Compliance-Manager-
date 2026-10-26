@@ -457,6 +457,33 @@ resolutions, and H&S concerns on an observation or patrol visit are appended to
 `record_updates` (append-only, audited, same access as the source record);
 photos use the existing org-scoped record-evidence path.
 
+### 2026-10-26 — Person search, NZTA people and notice expiry (Don Squires)
+
+> "we need to pull person information from R&M and create add them to the
+> canonical person record ... R&M do not have a system that advised when a
+> treaspass notice is about to expire or has expried ... fcm has this system
+> already built and we should be utalising it ... people infromation will come
+> from NZTA screenshots as the primary sauce then followed up by treaspass notice"
+
+Rulings, and how the build honours them:
+
+- **NZTA screenshots are the primary person source.** A screenshot whose OCR
+  reads a consistent plate, name and query date is approved without a second
+  reviewer (2026-10-26); anything unread or inconsistent is held. People are
+  filed under the provider (R&M) and projected to `canonical_people`; the
+  registered-owner edge is written through the governed vehicle-person path, and
+  facts on a vehicle shared with another organisation stay held behind the
+  existing grand-master gate. NZTA address and check history are returned only
+  to users holding `can_access_vehicle_owner_identity`.
+- **Notices follow the NZTA person source.** R&M trespass and warning notices
+  are to be associated with canonical people and used with the existing expiry
+  register; notice import and any additional notice types remain subject to
+  source review and confirmed rules before a seed or migration is applied.
+- **Access.** Person search and the notice-expiry register are restricted to
+  active operations roles at both the UI and RPC boundary. Address and NZTA
+  check history remain additionally restricted by
+  `can_access_vehicle_owner_identity`.
+
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
 > "We should only have 1 person canonical record, 1 vehicle canonical record and

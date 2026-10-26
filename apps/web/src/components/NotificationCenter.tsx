@@ -6,7 +6,7 @@ import './NotificationCenter.css';
 
 export type NotificationCategory =
   | 'credential_expiry' | 'sla_breach' | 'report_ready' | 'welfare' | 'dispatch'
-  | 'roster' | 'open_job' | 'report_reviewed' | 'leave_decision' | 'timesheet_decision' | 'breach_decision' | 'debrief_followup' | 'noise_review' | 'video_review' | 'system' | 'schema_change_request' | 'bob_conversation' | 'bob_self_memory' | 'document_review' | 'crm_client' | 'builder_job' | 'place_hazard_review';
+  | 'roster' | 'open_job' | 'report_reviewed' | 'leave_decision' | 'timesheet_decision' | 'breach_decision' | 'debrief_followup' | 'noise_review' | 'video_review' | 'system' | 'schema_change_request' | 'bob_conversation' | 'bob_self_memory' | 'document_review' | 'crm_client' | 'builder_job' | 'place_hazard_review' | 'notice_expiry';
 
 export interface NotificationRecord {
   id: string;
