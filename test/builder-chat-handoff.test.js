@@ -78,7 +78,7 @@ test('one native handoff call yields an unconfirmed proposal with no job, diary 
     post: () => assert.fail('Proposal is persisted by the existing chat worker, not as a completed dispatch'),
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].tools.length, 3);
+  assert.equal(calls[0].tools.length, 4);
   assert.equal(outcome.proposal.handoff_kind, 'investigation');
   assert.deepEqual(outcome.memoryReceipts, []);
 });

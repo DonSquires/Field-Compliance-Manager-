@@ -224,7 +224,9 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
         : { result: await api('chat', request, 90_000), memoryReceipts: [] };
       if (revision) return {
         revision, model,
-        reply: 'I prepared review feedback for the existing Builder job. Confirm Request specification revision on the card to send it. This does not create a duplicate job, approve the specification or start implementation.',
+        reply: revision.kind === 'implementation'
+          ? 'I prepared implementation corrections for the existing Builder job. Confirm Request implementation changes on the card to deliver them. This keeps the same job and specification, invalidates the old review, reruns implementation checks and security, and requires fresh human review. Nothing is approved or deployed.'
+          : 'I prepared review feedback for the existing Builder job. Confirm Request specification revision on the card to send it. This does not create a duplicate job, approve the specification or start implementation.',
         research: {
           provider: 'ollama_cloud', policy_version: consent.policy_version, purpose: message.payload.pm_purpose,
           model, prompt_version: PM_PROMPT_VERSION, history_withheld: true, fallback_allowed: false,

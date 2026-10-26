@@ -9,8 +9,9 @@ const {
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
 const { laneAllows } = require('../../../builder-path-policy');
+const { loadCodeReviewSeed } = require('../../../builder-artifact-read');
 
-const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v2';
+const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v3';
 const MAX_SOURCE_FILES = 40;
 const MAX_SOURCE_FILE_BYTES = 100000;
 const MAX_SOURCE_TOTAL_BYTES = 500000;
@@ -199,7 +200,7 @@ function parseBackendProposal(content) {
   };
 }
 
-function buildBackendEngineerPrompt({ specification, sourceContext, liveContext = null }) {
+function buildBackendEngineerPrompt({ specification, sourceContext, liveContext = null, codeReviewRevision = null, previousImplementation = null }) {
   return {
     systemPrompt: [
       'You are the Backend Engineer for Field Compliance Manager.',
@@ -209,10 +210,13 @@ function buildBackendEngineerPrompt({ specification, sourceContext, liveContext 
       'Use additive schema changes, preserve tenant isolation and provenance, and keep secrets server-side.',
       'Do not include destructive SQL, dependency changes, environment files, deployment commands, or production credentials.',
       'Do not claim execution, migration application, approval, or deployment.',
+      'When confirmed code review corrections are supplied, inspect the previous implementation and address the reported findings within the approved scope. Preserve unrelated correct behavior and tests. Return a COMPLETE replacement patch against the pinned source, not an incremental diff. Reported feedback is not independently verified evidence.',
       'Do not invent schema or behavior absent from the supplied evidence, and do not use markdown fences.'
     ].join(' '),
     userPrompt: JSON.stringify({
       approved_product_specification: specification,
+      confirmed_code_review_corrections: codeReviewRevision,
+      previous_implementation: previousImplementation,
       target_sha: sourceContext.target_sha,
       repository_context: sourceContext.repository_context,
       live_context: liveContext,
@@ -251,7 +255,9 @@ async function runBackendEngineer({
     loadProductSpecification(supabase, productArtifact.id, job.id),
     Promise.resolve(collectBackendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles }))
   ]);
-  const prompt = buildBackendEngineerPrompt({ specification: product.specification, sourceContext, liveContext });
+  const previousImplementation = await loadCodeReviewSeed(supabase, job, step);
+  const prompt = buildBackendEngineerPrompt({ specification: product.specification, sourceContext, liveContext,
+    codeReviewRevision: job.code_review_revision, previousImplementation: previousImplementation?.text });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,

@@ -308,6 +308,32 @@ test('a process interruption resumes completed edits and tool context from disk 
   }
 });
 
+test('confirmed code-review feedback invalidates a completed checkpoint even when task, target and input artifacts are unchanged', async () => {
+  const repo = makeRepo();
+  const input = {
+    supabase: null, gateway: {}, job: { id: 'correction000001', organization_id: 'org', target_sha: repo.sha, task_description: 'Fix sum' },
+    step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+    repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+  };
+  try {
+    const { callModel } = fakeModel([
+      { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'Correct addition and verify the result with its regression test.', tests: ['node --test test/sum.test.js'] } },
+    ]);
+    const first = await runAgenticEngineer({ ...input, callModel });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    const correction = { approval_id: 'new-review', feedback: 'Check the reported boundary behavior.' };
+    await assert.rejects(runAgenticEngineer({ ...input, job: { ...input.job, code_review_revision: correction }, callModel: async ({ modelRequest }) => {
+      const packet = JSON.parse(modelRequest.request.messages[1].content);
+      assert.deepEqual(packet.confirmed_code_review_corrections, correction);
+      throw new Error('fresh correction reached model');
+    } }), /fresh correction reached model/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('an invalid repair seed stops before any model call instead of silently starting again', async () => {
   const repo = makeRepo();
   try {

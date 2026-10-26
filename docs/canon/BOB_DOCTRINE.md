@@ -97,6 +97,24 @@ or require the owner to diagnose code. Governed tool discovery, evidence
 collection, approved continuity, handoff and outcome verification remain work
 to connect under the existing rails and protected-effect gates.
 
+**Same-job code-review corrections, owner decision 2026-10-26:** PM Chat must
+be able to deliver implementation feedback at pending human code review, not
+only at initial specification review. The owner selected a same-job correction
+loop rather than notes-only delivery. A native `request_builder_code_changes`
+card is confirmed by the authenticated owner. It cancels the old pending
+review (never approving or terminally rejecting the job), preserves the
+specification, immutable task/target, attempt counters and historical artifacts,
+and returns implementation to pending. Prior implementation/test/security
+artifacts become superseded, not deleted. Each implementation lane starts
+from its exact reviewed, checksum-verified patch and receives the confirmed
+feedback as reported evidence. Old completed checkpoints must not bypass it.
+Verification and security run again; the unchanged human policy requires a new
+review of fresh evidence. No duplicate job, analysis rewind, approval, merge or
+deployment is implied. Active work, stale/expired reviews, unrelated threads
+and already-published work are refused. Repeated confirmation returns the
+original audit receipt without a second reset. Release and live UI acceptance
+remain necessary before calling this delivered or the underlying defect fixed.
+
 **Atlas evidence clarification, owner ruling 2026-10-25.** Atlas is a map
 showing Bob where to go and look, not evidence establishing facts about those
 areas. Bob must research the mapped locations: inspect current source and

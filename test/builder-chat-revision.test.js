@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { prepareSpecRevision } = require('../builder-chat-revision');
+const { prepareSpecRevision, prepareCodeChanges } = require('../builder-chat-revision');
 const { pmChatWithMemory } = require('../builder-chat-memory');
 
 const JOB = '11111111-1111-4111-8111-111111111111';
@@ -51,8 +51,32 @@ test('native revision prepares a confirmation card in one assigned-model call, n
       return { message: { tool_calls: [{ function: { name: 'request_builder_spec_revision', arguments: ARGS } }] } };
     }, post: () => assert.fail('No dispatch'),
   });
+
   assert.equal(calls, 1);
   assert.equal(outcome.revision.job_id, JOB);
   assert.equal(outcome.proposal, undefined);
   assert.deepEqual(outcome.memoryReceipts, []);
+});
+
+test('code-review feedback pins the implementation gate without using the specification channel', async () => {
+  const db = fixture();
+  const revision = await prepareCodeChanges(ARGS, MESSAGE, db);
+  assert.equal(revision.kind, 'implementation');
+  assert.equal(revision.source_message_id, MESSAGE.id);
+  assert.equal(revision.review_quote, MESSAGE.content);
+  assert.ok(db.calls.some(call => call.name === 'eq' && call.args[0] === 'approval_type' && call.args[1] === 'implementation_review'));
+  assert.ok(!db.calls.some(call => call.args[1] === 'specification_review'));
+  await assert.rejects(prepareCodeChanges(ARGS, MESSAGE, fixture({ pending: false })), /pending human code review/);
+});
+
+test('native code changes prepare only a card, and independent QA cannot dispatch one', async () => {
+  const call = { message: { tool_calls: [{ function: { name: 'request_builder_code_changes', arguments: ARGS } }] } };
+  let count = 0;
+  const input = { message: MESSAGE, supabase: fixture(), request: {}, api: async () => { count++; return call; } };
+  const outcome = await pmChatWithMemory({ ...input, allowHandoff: true });
+  assert.equal(count, 1);
+  assert.equal(outcome.revision.kind, 'implementation');
+  assert.equal(outcome.proposal, undefined);
+  assert.deepEqual(outcome.memoryReceipts, []);
+  await assert.rejects(pmChatWithMemory({ ...input, allowHandoff: false }), /no other tools/);
 });

@@ -8,6 +8,7 @@ const { startOptionalCodeReview } = require('./supabase/functions/_shared/builde
 const { runIndependentCodeReview } = require('./supabase/functions/_shared/builder-independent-code-review');
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
 const { runAgenticEngineer } = require('./builder-agentic-engineer');
+const { loadCodeReviewSeed } = require('./builder-artifact-read');
 const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
@@ -39,7 +40,9 @@ function artifactsFor(snapshot, stepId, artifactType) {
 function implementationRuns(snapshot) {
   const modes = new Set(['frontend_engineer', 'backend_engineer']);
   const stepIds = new Set(snapshot.steps.filter(step => modes.has(step.builder_mode) && step.status === 'completed').map(step => step.id));
-  return snapshot.workerRuns.filter(run => stepIds.has(run.step_id) && run.status === 'completed' && ['frontend-verify', 'backend-verify'].includes(run.profile));
+  const superseded = new Set(snapshot.artifacts.filter(artifact => artifact.status === 'superseded').map(artifact => artifact.id));
+  return snapshot.workerRuns.filter(run => stepIds.has(run.step_id) && run.status === 'completed'
+    && !superseded.has(run.patch_artifact_id) && ['frontend-verify', 'backend-verify'].includes(run.profile));
 }
 
 function attemptCeilingReached(step) {
@@ -199,7 +202,9 @@ function agenticGenerator(lane, context, extra = {}) {
           if (!patch?.trim()) throw new Error('Repair source patch is empty');
           return { text: patch, from_job: job.id, artifact_id: failedPatchArtifact.id };
         })()
-        : (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
+        : job.code_review_revision
+          ? loadCodeReviewSeed(supabase, job, step)
+          : (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.

@@ -87,6 +87,17 @@ supersedes the reviewed artifact, cancels the old pending approval and
 returns the same idle job to analysis. It cannot approve implementation,
 change the immutable task/target, reset attempt counts or create a new job.
 
+Code-review correction extension (owner choice, 2026-10-26): the same approved
+packet boundary applies to `request_builder_code_changes`. Server-only
+same-thread pending approval lookup never returns private job evidence to
+cloud. `builder_chat_request_code_changes` is authenticated-owner execution
+only, with existing organization/reviewer checks. Confirmation cancels the
+old human review and records the original human message plus PM feedback
+against the existing job. Retained superseded patches may be read only as
+explicitly bound, checksum-verified lane seeds, never as fresh review evidence.
+No new credential, impersonation, automatic history transfer, merge or release
+authority is introduced.
+
 ### Builder chat public research (owner decision, 2026-10-25)
 
 Builder chat's explicit public-research mode uses only server-side Ollama Cloud

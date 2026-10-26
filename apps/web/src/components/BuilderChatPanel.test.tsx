@@ -194,3 +194,35 @@ it('keeps confirmation disabled with a safe next action if the source turn faile
   expect((await screen.findByRole('button', { name: 'Request specification revision' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText(/Ask Bob for a fresh revision card/)).toBeTruthy();
 });
+
+it('delivers implementation feedback to the same job only after confirmation, with no creation or specification rewind', async () => {
+  const messages = [row('review', 1, 'owner', 'message'), row('changes', 2, 'bob', 'proposal', 'Corrections', {
+    message_id: 'review', revision: { kind: 'implementation', job_id: 'existing-job', feedback: 'Verify the real receipt reader and retry behavior before seeking fresh human review.' },
+  })];
+  wire({ messages });
+  const onCreateJob = vi.fn();
+  rpc.mockImplementation(async name => ({ data: name === 'is_grand_master' ? true : name === 'builder_chat_request_code_changes' ? 'audit-receipt' : null, error: null }));
+  render(<BuilderChatPanel context={{}} onCreateJob={onCreateJob} />);
+  expect(await screen.findByRole('article', { name: 'Implementation corrections for job existing-job' })).toBeTruthy();
+  expect(screen.getByText(/verification and security run again/i)).toBeTruthy();
+  expect(rpc.mock.calls.some(call => call[0] === 'builder_chat_request_code_changes')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Request implementation changes' }));
+  expect(await screen.findByText('Revision requested · Receipt: audit-receipt')).toBeTruthy();
+  expect(rpc).toHaveBeenCalledWith('builder_chat_request_code_changes', { p_message_id: 'changes' });
+  expect(rpc.mock.calls.some(call => call[0] === 'builder_chat_request_spec_revision')).toBe(false);
+  expect(onCreateJob).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Request implementation changes' })).toBeNull();
+});
+
+it('surfaces a stale implementation gate and never manufactures a receipt', async () => {
+  wire({ messages: [row('review', 1, 'owner', 'message'), row('changes', 2, 'bob', 'proposal', 'Corrections', {
+    message_id: 'review', revision: { kind: 'implementation', job_id: 'existing-job', feedback: 'Verify the real receipt reader before fresh human review.' },
+  })] });
+  rpc.mockImplementation(async name => name === 'builder_chat_request_code_changes'
+    ? { data: null, error: { message: 'Human code review has moved or expired; prepare a fresh correction card' } }
+    : { data: true, error: null });
+  render(<BuilderChatPanel context={{}} onCreateJob={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Request implementation changes' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/moved or expired/);
+  expect(screen.queryByText(/Revision requested · Receipt/)).toBeNull();
+});
