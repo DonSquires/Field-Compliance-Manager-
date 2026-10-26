@@ -134,13 +134,14 @@ function Steps({ steps }: { steps: BuilderChatMessage[] }) {
   );
 }
 
-function RevisionCard({ message, busy, onRequest, onOpenJob }: {
-  message: BuilderChatMessage; busy: boolean; onRequest: () => void; onOpenJob?: (jobId: string) => void;
+function RevisionCard({ message, busy, sourceStatus, onRequest, onOpenJob }: {
+  message: BuilderChatMessage; busy: boolean; sourceStatus?: BuilderChatMessage['status']; onRequest: () => void; onOpenJob?: (jobId: string) => void;
 }) {
   const revision = message.payload.revision;
   if (!revision || typeof revision !== 'object' || !('job_id' in revision) || typeof revision.job_id !== 'string'
       || !('feedback' in revision) || typeof revision.feedback !== 'string') return null;
   const jobId = revision.job_id;
+  const sourceComplete = sourceStatus === 'done';
   const receipt = typeof message.payload.revision_receipt === 'string' ? message.payload.revision_receipt : null;
   return <article className="bchat-proposal" aria-label={`Specification revision for job ${jobId}`}>
     <header><span>Review feedback · existing Bob Builder job</span><h3>Revise specification before implementation</h3></header>
@@ -150,7 +151,10 @@ function RevisionCard({ message, busy, onRequest, onOpenJob }: {
     <p>No duplicate job. Confirmation supersedes the current specification review and returns this same job to analysis. No implementation is approved.</p>
     {receipt
       ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Revision requested · Receipt: {receipt}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
-      : <button type="button" disabled={busy} onClick={onRequest}>{busy ? 'Recording revision…' : 'Request specification revision'}</button>}
+      : <><button type="button" disabled={busy || !sourceComplete} onClick={onRequest}>{busy ? 'Recording revision…' : 'Request specification revision'}</button>
+        {!sourceComplete && <p role="status">{sourceStatus === 'failed'
+          ? 'The originating PM turn failed. Ask Bob for a fresh revision card before confirming.'
+          : 'Waiting for the originating PM turn to complete before confirmation.'}</p>}</>}
   </article>;
 }
 
@@ -352,6 +356,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
               ? <Steps key={item.key} steps={item.steps} />
               : item.message.kind === 'proposal' && item.message.payload.revision
                 ? <RevisionCard key={item.message.id} message={item.message} busy={Boolean(busy)}
+                  sourceStatus={messages.find(row => row.id === item.message.payload.message_id && row.role === 'owner')?.status}
                   onRequest={() => void requestRevision(item.message)} onOpenJob={onOpenJob} />
               : item.message.kind === 'proposal'
                 ? <ProposalCard key={item.message.id} message={item.message} settings={jobSettings} busy={busy === `proposal:${item.message.id}`}

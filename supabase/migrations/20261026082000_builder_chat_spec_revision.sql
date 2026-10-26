@@ -67,7 +67,8 @@ BEGIN
     WHERE job_id = v_job.id AND builder_mode = 'product_analyst';
   IF v_step.id IS NULL OR v_step.status <> 'completed'
     OR EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = v_job.id
-      AND id <> v_step.id AND status <> 'pending')
+      AND id <> v_step.id AND (status NOT IN ('pending', 'skipped')
+        OR started_at IS NOT NULL OR completed_at IS NOT NULL))
     OR EXISTS (SELECT 1 FROM public.builder_worker_runs WHERE job_id = v_job.id)
     OR EXISTS (SELECT 1 FROM public.builder_model_runs WHERE job_id = v_job.id AND status = 'running') THEN
     RAISE EXCEPTION 'Revision is limited to an idle initial specification review';

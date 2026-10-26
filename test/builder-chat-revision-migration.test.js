@@ -69,10 +69,14 @@ test('revision migration enforces actual authorization, stale gate, idle work an
       SELECT set_config('test.authorized','yes',false);
       DO $f$
       #variable_conflict use_variable
+      DECLARE scope text;
+      BEGIN
+      FOR scope IN SELECT unnest(ARRAY['fullstack','frontend','backend']) LOOP
       DECLARE owner_id uuid := current_setting('test.actor')::uuid; thread_id uuid := gen_random_uuid();
         job_id uuid := gen_random_uuid(); org_id uuid := gen_random_uuid(); source_id uuid := gen_random_uuid();
         card_id uuid := gen_random_uuid(); approval_id uuid := gen_random_uuid(); artifact_id uuid := gen_random_uuid();
-        analyst_id uuid := gen_random_uuid(); other_id uuid := gen_random_uuid(); receipt uuid; again uuid;
+        analyst_id uuid := gen_random_uuid(); other_id uuid := gen_random_uuid();
+        ux_id uuid := gen_random_uuid(); backend_id uuid := gen_random_uuid(); receipt uuid; again uuid;
         command text;
       BEGIN
         INSERT INTO builder_chat_threads VALUES(thread_id,owner_id);
@@ -83,7 +87,9 @@ test('revision migration enforces actual authorization, stale gate, idle work an
         INSERT INTO builder_artifacts VALUES(artifact_id,job_id,'final',now());
         INSERT INTO builder_job_steps(id,job_id,builder_mode,status,input_context) VALUES
           (analyst_id,job_id,'product_analyst','completed','{"preserve":"existing"}'),
-          (other_id,job_id,'frontend_engineer','pending','{}');
+          (other_id,job_id,'frontend_engineer',CASE WHEN scope='backend' THEN 'skipped' ELSE 'pending' END,'{}'),
+          (ux_id,job_id,'ux_designer',CASE WHEN scope='backend' THEN 'skipped' ELSE 'pending' END,'{}'),
+          (backend_id,job_id,'backend_engineer',CASE WHEN scope='frontend' THEN 'skipped' ELSE 'pending' END,'{}');
         INSERT INTO builder_chat_messages(id,thread_id,kind,payload) VALUES
           (gen_random_uuid(),thread_id,'proposal',jsonb_build_object('job_id',job_id));
         INSERT INTO builder_chat_messages VALUES(source_id,thread_id,'message','owner','done',owner_id,
@@ -106,13 +112,16 @@ test('revision migration enforces actual authorization, stale gate, idle work an
         UPDATE builder_approvals SET status='pending' WHERE id=approval_id;
         UPDATE builder_job_steps SET status='running' WHERE id=other_id;
         PERFORM expect_error(command,'idle initial');
-        UPDATE builder_job_steps SET status='pending' WHERE id=other_id;
+        UPDATE builder_job_steps SET status=CASE WHEN scope='backend' THEN 'skipped' ELSE 'pending' END WHERE id=other_id;
+        UPDATE builder_job_steps SET started_at=now() WHERE id=other_id;
+        PERFORM expect_error(command,'idle initial');
+        UPDATE builder_job_steps SET started_at=NULL WHERE id=other_id;
         INSERT INTO builder_worker_runs VALUES(job_id);
         PERFORM expect_error(command,'idle initial');
         DELETE FROM builder_worker_runs;
         receipt := builder_chat_request_spec_revision(card_id);
         again := builder_chat_request_spec_revision(card_id);
-        IF receipt IS DISTINCT FROM again OR (SELECT count(*) FROM builder_audit_events)<>1
+        IF receipt IS DISTINCT FROM again OR (SELECT count(*) FROM builder_audit_events a WHERE a.job_id=job_id)<>1
           OR (SELECT status FROM builder_jobs WHERE id=job_id)<>'analysis_pending'
           OR (SELECT status FROM builder_artifacts WHERE id=artifact_id)<>'superseded'
           OR (SELECT status FROM builder_approvals WHERE id=approval_id)<>'cancelled'
@@ -124,6 +133,8 @@ test('revision migration enforces actual authorization, stale gate, idle work an
           OR has_function_privilege('service_role','builder_chat_request_spec_revision(uuid)','EXECUTE')
           OR NOT has_function_privilege('authenticated','builder_chat_request_spec_revision(uuid)','EXECUTE')
           THEN RAISE EXCEPTION 'Wrong execute grants'; END IF;
+      END;
+      END LOOP;
       END $f$;
     `;
     execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {

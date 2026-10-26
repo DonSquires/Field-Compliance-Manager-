@@ -148,9 +148,12 @@ test('existing-job revision needs confirmation, never creates another job and su
   await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: THREAD }] }));
   await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
   await page.route('**/rest/v1/builder_chat_messages*', route => route.fulfill({ json: [{
-    id: cardId, seq: 1, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
+    id: 'review-message', seq: 1, thread_id: THREAD, role: 'owner', kind: 'message', status: 'done',
+    content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z', payload: {},
+  }, {
+    id: cardId, seq: 2, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
     content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z',
-    payload: { revision: { job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
+    payload: { message_id: 'review-message', revision: { job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
       ...(confirmed ? { revision_receipt: receipt } : {}) },
   }] }));
   await page.route('**/rest/v1/rpc/builder_chat_request_spec_revision', route => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BuilderChatPanel, chatContext, groupChat, mergeSnapshot, type BuilderChatMessage } from './BuilderChatPanel';
 
 const { rpc, from, channel, removeChannel, getUser } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn(), getUser: vi.fn() }));
@@ -21,7 +21,7 @@ function wire({ owner = true, threads = [{ id: THREAD }], messages = [] as Build
     return builder;
   };
   from.mockImplementation((table: string) => query(table === 'builder_chat_threads' ? threads : messages));
-  const sub = { on: () => sub, subscribe: () => sub };
+  const sub = { on: vi.fn(() => sub), subscribe: () => sub };
   channel.mockReturnValue(sub);
   getUser.mockResolvedValue({ data: { user: { id: 'test-owner' } }, error: null });
   rpc.mockImplementation(async (name: string) => {
@@ -134,7 +134,8 @@ it('surfaces a failed job creation instead of marking the proposal accepted', as
 });
 
 it('confirms an existing-job revision separately from job creation and shows its real receipt', async () => {
-  wire({ messages: [row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+  wire({ messages: [row('review', 1, 'owner', 'message'), row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+    message_id: 'review',
     revision: { job_id: 'existing-job', feedback: 'Verify the current workflow before approving implementation.' },
   })] });
   const prior = rpc.getMockImplementation()!;
@@ -152,7 +153,8 @@ it('confirms an existing-job revision separately from job creation and shows its
 });
 
 it('shows a moved-gate error without claiming a revision was sent or creating a job', async () => {
-  wire({ messages: [row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+  wire({ messages: [row('review', 1, 'owner', 'message'), row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+    message_id: 'review',
     revision: { job_id: 'existing-job', feedback: 'Revisit the report before implementation.' },
   })] });
   const prior = rpc.getMockImplementation()!;
@@ -164,4 +166,31 @@ it('shows a moved-gate error without claiming a revision was sent or creating a 
   expect((await screen.findByRole('alert')).textContent).toMatch(/has moved/);
   expect(screen.queryByText(/Revision requested · Receipt/)).toBeNull();
   expect(create).not.toHaveBeenCalled();
+});
+
+it('waits for the source turn to complete when its revision card arrives first', async () => {
+  const review = { ...row('review', 1, 'owner', 'message'), status: 'claimed' as const };
+  wire({ messages: [review, row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+    message_id: review.id, revision: { job_id: 'existing-job', feedback: 'Verify the reported workflow before implementation.' },
+  })] });
+  render(<BuilderChatPanel context={{}} onCreateJob={vi.fn()} />);
+  const confirm = await screen.findByRole('button', { name: 'Request specification revision' });
+  expect((confirm as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/Waiting for the originating PM turn/)).toBeTruthy();
+  fireEvent.click(confirm);
+  expect(rpc.mock.calls.some(call => call[0] === 'builder_chat_request_spec_revision')).toBe(false);
+  const onChange = channel.mock.results[0].value.on.mock.calls[0][2];
+  act(() => onChange({ new: { ...review, status: 'done' } }));
+  await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByText(/Waiting for the originating PM turn/)).toBeNull();
+});
+
+it('keeps confirmation disabled with a safe next action if the source turn failed', async () => {
+  wire({ messages: [{ ...row('review', 1, 'owner', 'message'), status: 'failed' },
+    row('revision-card', 2, 'bob', 'proposal', 'Revision', {
+      message_id: 'review', revision: { job_id: 'existing-job', feedback: 'Verify the reported workflow before implementation.' },
+    })] });
+  render(<BuilderChatPanel context={{}} onCreateJob={vi.fn()} />);
+  expect((await screen.findByRole('button', { name: 'Request specification revision' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/Ask Bob for a fresh revision card/)).toBeTruthy();
 });

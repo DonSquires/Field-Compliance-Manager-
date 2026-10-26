@@ -76,9 +76,17 @@ owner confirmation RPC, retaining job identity and immutable task. Bind the
 pending approval and target, preserve superseded artifacts and audit history,
 keep attempts, reject active/later-stage work, and consume confirmed feedback
 in the analyst's next prompt. No new job or implementation approval is created.
+Confirmation waits for its originating PM turn to finish; a failed turn calls
+for a fresh card. Separately bounded revision feedback survives all 100
+supported ordinary constraints. Untouched scope-skipped steps are allowed,
+but started/completed downstream work still blocks a rewind. Disposable
+PostgreSQL checks cover fullstack, frontend-only and backend-only initial
+layouts; UI regression checks cover card-before-source-completion ordering.
 Acceptance requires real PostgreSQL authorization/state/replay tests, native
 tool and UI tests, responsive confirmation/receipt reload tests, protected
-release, then actual UI feedback on the original job. Regenerating a
+release, then actual UI feedback on an eligible initial-review job. The
+original job now permits only moved-gate refusal testing, not successful
+revision acceptance. Regenerating a
 specification does not prove its evidence or the repair is adequate.
 
 ### PM investigation handoff follow-up (2026-10-25)
