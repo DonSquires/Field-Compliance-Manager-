@@ -68,6 +68,9 @@ test('a lane reopened by the correction authors from the pinned target; other mi
   assert.equal(input.seedPatch, null);
   assert.deepEqual(input.job.code_review_revision.reopened_required_lanes, ['frontend_implementation']);
   assert.equal(result.patch_artifact.id, 'fresh-frontend');
+  assert.match(JSON.parse(taskPacket({ job: reopened, lane: 'frontend' })).reopened_required_lane, /no previous change in this lane/);
+  assert.equal(JSON.parse(taskPacket({ job: reopened, lane: 'backend' })).reopened_required_lane, undefined);
+  assert.equal(JSON.parse(taskPacket({ job, lane: 'frontend' })).reopened_required_lane, undefined);
   await assert.rejects(agenticGenerator('frontend', { workspaceRoot: '/ws' }, {
     runEngineer: async () => ({ ok: true }),
   })({ supabase: db(), job, step: frontend }), /no seed/);
