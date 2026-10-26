@@ -74,6 +74,16 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       assert.ok(start >= 0, symbol);
       return schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
     }).join('\n');
+    const originalClaimFunctions = [
+      ['20260830090000_builder_frontend_worker_leases.sql', 'builder_claim_frontend_worker'],
+      ['20260830180000_builder_backend_worker_leases.sql', 'builder_claim_backend_worker'],
+    ].map(([file, symbol]) => {
+      const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations', file), 'utf8');
+      const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${symbol}(`);
+      const end = sql.indexOf('$$;', start);
+      assert.ok(start >= 0 && end > start, symbol);
+      return sql.slice(start, end + '$$;'.length);
+    }).join('\n');
     const cycleFixture = `
       CREATE SCHEMA extensions;
       CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
@@ -245,7 +255,8 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-        input: fixture + migration + reviewFunctions + checks + cycleFixture + claimFunctions + cycleMigration + cycleChecks,
+        input: fixture + migration + reviewFunctions + checks + cycleFixture
+          + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) { throw new Error(`PostgreSQL correction checks failed: ${error.stderr || error.message}`); }

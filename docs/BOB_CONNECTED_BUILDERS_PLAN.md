@@ -82,6 +82,40 @@ correction cycles: each cycle creates a fresh run, completed history remains,
 and duplicate verification within the same cycle is still rejected. This
 closes a fresh-verification blocker, not the underlying user-reported repair.
 
+Catalog-release follow-up: #241 and generated catalog #242 deployed as
+`a6a036a01d0fb12fa4eedb586a26d0a7b1f1e44f`, with a matching durable release
+pointer, healthy control plane, rebuilt worker and matching live schema.
+Post-release CI exposed a fixture ordering defect: it reapplied the guarded
+verification-cycle migration to functions already updated in the live snapshot.
+The regression now applies that migration to the original lease definitions,
+then separately exercises the current catalog definitions with the same
+three-cycle checks. The production migration remains fail-closed and unchanged.
+The exact CI PostgreSQL entry passed all eight tests locally after this fix.
+
+Production UI acceptance: PM turn
+`7fb8b4ce-b596-4be6-a369-0b467c211ae6` selected the native correction card.
+Owner UI confirmation returned audit receipt
+`25dc6844-f2f4-4dcf-9ade-52feece5ea6c`, visible after a fresh login/reload.
+Opening the same original job showed implementation pending, product analysis
+and UI design still completed, and implementation/tests/security/code review
+pending again. The UI recorded the correction event and still showed not
+deployed. This proves durable same-job feedback delivery, not Builder
+consumption, a corrected patch, fresh verification or the underlying repair.
+
+The first correction cycle subsequently completed fresh frontend/backend
+verification and security and reached a new human review. It remains
+unapproved: UI inspection showed the backend still calls the real reader with
+the owner sequence while its replacement test uses a different range-reader
+contract. Independent UI QA turn
+`6fd6723e-86fa-411e-a38a-4477bb9f41ee` advised against approval based on
+these human-reviewed observations. Passing checks did not prove the repair.
+
+PR #243 verification also reproduced a separate existing agentic-test cleanup
+failure on retry. Owner approved a narrow test-only follow-up: explicitly await
+the nested acceptance test and bound retries for transient temporary Git
+directory removal. Assertions, production code and CI failure handling remain
+unchanged.
+
 ### Same-job specification feedback (2026-10-26)
 
 PR #234 deployed as `637775a1`; actual UI message
