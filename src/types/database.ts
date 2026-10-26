@@ -37582,6 +37582,10 @@ export type Database = {
         Args: { _lease_token: string; _run_id: string }
         Returns: Json
       }
+      builder_implementation_acceptance_identity: {
+        Args: { _job_id: string }
+        Returns: Json
+      }
       builder_main_health_test_path_valid: {
         Args: { _file: string }
         Returns: boolean
@@ -37689,6 +37693,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      builder_record_implementation_acceptance: {
+        Args: { _expected_identity: Json; _job_id: string; _report: Json }
+        Returns: undefined
       }
       builder_record_pull_request_closed: {
         Args: { _details?: Json; _job_id: string; _pull_request_url: string }
@@ -38066,6 +38074,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      builder_require_implementation_acceptance: {
+        Args: { _job_id: string; _require_passed?: boolean }
+        Returns: undefined
       }
       builder_reset_backend_worker_retry: {
         Args: { _run_id: string }
@@ -42760,6 +42772,30 @@ export type Database = {
           p_status: string
           p_subject_display_name: string
           p_zone_id?: string
+        }
+        Returns: Json
+      }
+      import_person_notice: {
+        Args: {
+          p_area?: string
+          p_canonical_person_id?: string
+          p_expires_at?: string
+          p_import_key: string
+          p_issued_at: string
+          p_issued_date_basis?: string
+          p_legal_basis?: string
+          p_notice_number?: string
+          p_notice_type: string
+          p_organization_id: string
+          p_plate_number?: string
+          p_source_author?: string
+          p_source_document_name: string
+          p_source_reference: string
+          p_source_sha256: string
+          p_status: string
+          p_subject_address?: string
+          p_subject_display_name: string
+          p_title?: string
         }
         Returns: Json
       }
