@@ -67,7 +67,12 @@ turn beats false completeness.
   Those stay visible holds for reviewed adoption; possible key collisions (for
   example, two STAND rows) must not be adopted automatically. A post-run check found no
   finance service date moved by the correction (34 pre-existing date
-  mismatches, unchanged).
+  mismatches, unchanged). Review fixes (migration 20261030150000): a stored
+  object key that the sheet lacks is now a payload-difference hold, and an
+  observation's context event must have no continuity, incident, evidence or
+  access link before it moves. A retro check showed neither case occurred in
+  the live run. An event photo whose hash already belongs to another record is
+  a visible hold, not an applied receipt.
 - **Photo download hazard:** 72,543 of 76,156 R&M photos (424.7 GB) are
   OneDrive online-only placeholders. Hashing them downloads them. The laptop
   scanner container's `SOURCE_SYNC_INCLUDE_PHOTOS` is now `"false"`, and photo

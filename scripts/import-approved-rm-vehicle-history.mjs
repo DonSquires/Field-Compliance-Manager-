@@ -232,6 +232,22 @@ export async function attachMatchedPhoto(service, governed, row) {
   let alreadyLinked = false;
   if (existing.data?.storage_path) {
     reused = true;
+    if ((row.recordKind ?? 'observation') === 'location_event') {
+      // The governed RPC links reused evidence to observations only, so a photo already held by
+      // another record cannot be shown on this event; surface it for review instead of a receipt.
+      const linked = await service
+        .from('evidence_items')
+        .select('id')
+        .eq('organization_id', row.organizationId)
+        .eq('evidence_kind', 'photo')
+        .eq('sha256_hash', sha256)
+        .eq('location_event_id', row.observationId)
+        .limit(1)
+        .maybeSingle();
+      if (linked.error) throw linked.error;
+      if (!linked.data) return { held: 'photo_already_attached_to_other_record', sha256 };
+      alreadyLinked = true;
+    }
     if ((row.recordKind ?? 'observation') === 'observation') {
       const support = await service
         .from('observation_supporting_evidence')
@@ -359,9 +375,14 @@ async function main() {
   let attached = 0;
   let discardedDuplicateUploads = 0;
   let alreadyLinked = 0;
+  let held = 0;
   const observationHashPairs = new Set();
   await runWorkers(selected, concurrency, async (row) => {
     const outcome = await attachMatchedPhoto(service, governed, row);
+    if (outcome.held) {
+      held += 1;
+      return;
+    }
     observationHashPairs.add(`${row.observationId}:${outcome.sha256}`);
     if (outcome.uploaded) uploaded += 1;
     if (outcome.reused) reused += 1;
@@ -382,6 +403,7 @@ async function main() {
     discardedDuplicateUploads,
     uniqueObservationHashPairs: observationHashPairs.size,
     alreadyLinked,
+    heldForReview: held,
     attached,
   }));
   await governed.auth.signOut();

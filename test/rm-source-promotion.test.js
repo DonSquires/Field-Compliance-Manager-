@@ -193,4 +193,21 @@ test('governed photo RPCs run as the import identity with typed, delimiter-safe 
   assert.match(refused.error.message, /Record not found/);
   await assert.rejects(() => importActorRpc(() => [], actor, 'x; drop table y', {}), /Invalid governed RPC call/);
   await assert.rejects(() => importActorRpc(() => [], actor, 'f', { p_note: '$rpc_args$' }), /delimiter/);
+  const hashed = await importActorRpc(text => { sql = text; return [{ result: 'evidence-id' }]; }, actor,
+    'attach_external_photo_to_record', { p_sha256: 'a'.repeat(64) });
+  assert.equal(hashed.error, null);
+  assert.match(sql, /p_sha256 => \(SELECT \(a->>'p_sha256'\)::text FROM args\)/);
+  await assert.rejects(() => importActorRpc(() => [], actor, 'f', { 'p_x;drop': 1 }), /Invalid RPC argument/);
+});
+
+test('a photo the attach step holds gets a visible hold, not an applied receipt', async () => {
+  const { results, receipts } = await promotePhotos({
+    entries: [{ relative_path: 'Photos/a.jpg', size_bytes: 1, modified_at: '2026-01-01T00:00:00.000Z' }],
+    classify: async () => ({ status: 'matched', row: { matchType: 'event_minute' } }),
+    attach: async () => ({ held: 'photo_already_attached_to_other_record', sha256: 'a'.repeat(64) }),
+    commit: true, limit: 10,
+  });
+  assert.deepEqual(results, [{ source_relative_path: 'Photos/a.jpg', status: 'held',
+    reason: 'photo_already_attached_to_other_record' }]);
+  assert.deepEqual(receipts, {});
 });

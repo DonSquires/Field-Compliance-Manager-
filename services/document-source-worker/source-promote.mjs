@@ -147,6 +147,10 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
     }
     attachments += 1;
     const outcome = await attach({ ...match.row, fileInfo: entry });
+    if (outcome.held) {
+      results.push({ ...base, status: 'held', reason: outcome.held });
+      continue;
+    }
     nextReceipts[entry.relative_path] = { key, sha256: outcome.sha256, receipt_id: `evidence:${outcome.storage_path}` };
     results.push({ ...base, status: 'applied', reused: outcome.reused, already_linked: outcome.already_linked });
   }
@@ -289,7 +293,7 @@ export async function importActorRpc(query, actorId, name, args) {
   const json = JSON.stringify(args);
   if (json.includes('$rpc_args$')) throw new Error('RPC arguments must not contain their SQL delimiter');
   const named = Object.keys(args).map(key => {
-    if (!/^p_[a-z_]+$/.test(key)) throw new Error(`Invalid RPC argument ${key}`);
+    if (!/^p_[a-z0-9_]+$/.test(key)) throw new Error(`Invalid RPC argument ${key}`);
     // Schema convention: *_id parameters are uuid and *_at parameters are timestamptz.
     const type = key.endsWith('_id') ? 'uuid' : key.endsWith('_at') ? 'timestamptz' : 'text';
     return `${key} => (SELECT (a->>'${key}')::${type} FROM args)`;
@@ -373,7 +377,12 @@ async function main() {
   if (maxNewRows !== undefined) {
     const limit = Number(maxNewRows);
     if (!Number.isInteger(limit) || limit < 1 || limit > 2000) throw new Error('--max-new-rows must be 1-2000');
-    if (!argument('--only')) throw new Error('--max-new-rows requires --only so the raised limit is scoped to one workbook');
+    const only = argument('--only')?.toLowerCase();
+    const selected = only ? Object.keys(map.workbooks)
+      .filter(name => `${WORKBOOK_FOLDER}${name}`.toLowerCase().includes(only)) : [];
+    if (selected.length !== 1) {
+      throw new Error(`--max-new-rows requires --only to select exactly one mapped workbook (matched ${selected.length})`);
+    }
     map.max_new_rows_per_sheet = limit;
   }
   const report = await runPromotion({ root, statePath: path.resolve(statePath), map, deps: await linkedDeps({ root, map }),
