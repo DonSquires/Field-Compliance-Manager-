@@ -157,6 +157,20 @@ test('NZTA owner name comes from the registered-person field, not the owner-coun
   ], 'nzta_mvr_record');
   assert.equal(unknown.fields.display_name, undefined);
   assert.equal(unknown.identifier_verification.display_name.status, 'owner_withheld');
+
+  // Macrons survive cleaning; initials and a title-case surname are kept; a label fragment is still trimmed.
+  const owner = (value) => extractIdentityFields(`Current registered person: ${value}`, 'nzta_mvr_record').display_name;
+  assert.equal(owner('ĀPERA TĀMATI'), 'ĀPERA TĀMATI');
+  assert.equal(owner('J. Smith'), 'J. Smith');
+  assert.equal(owner('JANE Smith'), 'JANE Smith');
+  assert.equal(owner('JANE CITIZEN Regis'), 'JANE CITIZEN');
+  assert.equal(owner('JANE CITIZEN Acg'), 'JANE CITIZEN');
+  assert.equal(owner('Registered Person'), undefined);
+  const macron = extractIdentityFieldsConsensus([
+    'Current registered person: ĀPERA TĀMATI Acquisition date: 01/02/2024',
+    'Current registered person:\n\nAPERA TAMATI',
+  ], 'nzta_mvr_record');
+  assert.equal(macron.identifier_verification.display_name.status, 'variants_agree');
 });
 
 test('NZTA plate extraction requires valid multi-location OCR consensus and blocks conflicting model text', () => {

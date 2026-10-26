@@ -480,11 +480,14 @@ function proposedPersonForm(
     if (documentKind === "security_licence")
       values.security_licence_expiry = proposed.expiry_date;
   }
-  return {
+  const form = {
     ...current,
     ...values,
     person_vehicle_match_confirmed: false,
   } as PersonForm;
+  // The record itself may still carry the heading from the first seed; leave the name for the reviewer to enter.
+  if (NZTA_HEADING_NAME.test(form.display_name ?? "")) form.display_name = "";
+  return form;
 }
 
 function vehicleForm(vehicle: VehicleRecord): VehicleForm {

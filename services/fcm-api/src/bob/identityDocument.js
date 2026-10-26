@@ -105,34 +105,49 @@ const NZTA_OWNER_WITHHELD = /current\s+registered\s+person\s*[:;.]?\s*(?:informa
 const NZTA_OWNER_PLACEHOLDER = /^(?:information\s+not\s+available|person\s+unknown|unknown)\b/i;
 
 function cleanNztaValue(value) {
-  return clean(String(value || '').replace(NZTA_RIGHT_COLUMN, '').replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9)]+$/g, '')) || null;
+  return clean(String(value || '').replace(NZTA_RIGHT_COLUMN, '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N})]+$/gu, '')) || null;
 }
 
-// Motochek prints owner names in capitals; trailing label fragments ("Acqui", "deta") are mixed or lower case.
+// Motochek prints owner names in capitals (including macrons); trailing label fragments ("Acqui", "deta") are mixed or lower case.
 function isOwnerNameToken(token) {
-  const letters = token.replace(/[^A-Za-z]/g, '');
-  if (!/^[A-Z0-9&(]/.test(token)) return false;
-  return letters.length === 0 || letters.replace(/[^A-Z]/g, '').length / letters.length >= 0.6;
+  const letters = token.replace(/[^\p{L}]/gu, '');
+  if (!/^[\p{Lu}\p{N}&(]/u.test(token)) return false;
+  return letters.length === 0 || letters.replace(/[^\p{Lu}]/gu, '').length / letters.length >= 0.6;
 }
+
+// Words of the labels printed beside or below the owner; a cut-off prefix ("Acqui", "Regis") is never part of a name.
+const NZTA_LABEL_WORDS = ['acquisition', 'date', 'details', 'registered', 'person', 'status', 'sex', 'company', 'mailing',
+  'address', 'physical', 'male', 'female', 'information', 'current'];
+
+// A one-letter OCR slip ("Acg" for "Acq") still counts as the label it came from.
+function isLabelFragment(token) {
+  const word = token.toLowerCase().replace(/[^\p{L}]/gu, '');
+  if (word.length < 3) return false;
+  return NZTA_LABEL_WORDS.some((label) => label.length >= word.length
+    && [...word].filter((letter, index) => letter !== label[index]).length <= 1);
+}
+
+const isTitleNameToken = (token) => /^\p{Lu}[\p{L}'’.&-]*$/u.test(token) && !isLabelFragment(token);
 
 function nztaOwnerNameValue(value) {
   const cleaned = cleanNztaValue(value);
   const tokens = String(cleaned || '').split(/\s+/).filter(Boolean);
   if (tokens.length === 0 || NZTA_OWNER_PLACEHOLDER.test(cleaned)) return null;
-  let name;
-  if (isOwnerNameToken(tokens[0])) {
-    const kept = [];
+  const kept = [];
+  let index = 0;
+  while (index < tokens.length && isOwnerNameToken(tokens[index])) kept.push(tokens[index++]);
+  // A title-case surname may follow capitals ("JANE Smith"); a label fragment never continues the name.
+  if (kept.length > 0) while (index < tokens.length && isTitleNameToken(tokens[index])) kept.push(tokens[index++]);
+  let name = cleanNztaValue(kept.join(' '));
+  if (!name || !/\p{Lu}{2}/u.test(name)) {
+    // Other renderings use title case or initials ("J. Smith"): accept a leading run of two or more name words.
+    const titled = [];
     for (const token of tokens) {
-      if (!isOwnerNameToken(token)) break;
-      kept.push(token);
+      if (!isTitleNameToken(token)) break;
+      titled.push(token);
     }
-    name = cleanNztaValue(kept.join(' '));
-    if (!name || !/[A-Z]{2}/.test(name)) return null;
-  } else {
-    // Other renderings may use title case; accept only a plausible multi-word name, never a label fragment.
-    const plausible = tokens.length >= 2 && tokens.every((token) => /^[A-Z][A-Za-z'’.&-]*$/.test(token))
-      && !/\b(?:acquisition|details?|registered|person|address|company|vehicle)\b/i.test(cleaned);
-    name = plausible ? cleaned : null;
+    const plausible = titled.length >= 2 && titled.some((token) => token.replace(/[^\p{L}]/gu, '').length >= 2);
+    name = plausible ? cleanNztaValue(titled.join(' ')) : null;
   }
   return name && name.length <= 120 ? name : null;
 }
@@ -158,7 +173,8 @@ function nztaRegisteredPersonName(rawText) {
   return value ? nztaOwnerNameValue(value) : null;
 }
 
-const nameKey = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+// Macrons fold away so an OCR pass that drops "ā" still agrees with one that keeps it.
+const nameKey = (value) => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
 
 function resolveNztaNameFromOcr(variants) {
   const readings = variants.map((text, index) => ({ value: nztaRegisteredPersonName(text), variant_index: index }))

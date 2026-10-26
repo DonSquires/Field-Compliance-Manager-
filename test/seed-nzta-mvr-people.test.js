@@ -143,6 +143,46 @@ test('repairs heading-named people without guessing across different owners', as
   assert.equal(planNameRepair(entries, repaired).groups.length, 0);
 });
 
+test('the name repair merges only on a full address or the same vehicle and holds what it cannot decide', async () => {
+  const { planNameRepair, physicalPostcode } = await load();
+  const page = (street, town) => `Current registered person: JANE CITIZEN\nPhysical address: ${street} Is a company: No\n`
+    + `Suburb Registered person status: Current\n${town} Odometer reading: 123,456 km`;
+  assert.equal(physicalPostcode([page('1 Main Road', 'Whāngārei 0110')]), '0110');
+  assert.equal(physicalPostcode([page('1 Main Road', 'RD 1 Kaitaia')]), null);
+  assert.equal(physicalPostcode([page('1 Main Road', 'RD 1 Kaitaia 0482')]), '0482');
+  assert.equal(physicalPostcode(['Physical address:\n\n1 Main Road']), null);
+  assert.equal(physicalPostcode(['Physical address:\n\n1 Main Road\nSuburb\nWhangarei 0110\nMailing address:']), '0110');
+  assert.equal(physicalPostcode(['Physical address:\n\nSex or company: Male\nWhangarei 0110']), null);
+  assert.equal(physicalPostcode([page('1 Main Road', 'Whangarei = 0110')]), '0110');
+  const jane = (sha, plate, town) => shot({ sha256: sha.repeat(64), parsed: { ...shot().parsed, plate },
+    name_verification: reading('JANE CITIZEN', 'JANE CITIZEN'), ocr_variants: [page('1 Main Road', town)],
+    fields: { ...shot().fields, display_name: 'JANE CITIZEN', physical_address: '1 Main Road' } });
+  const entries = [
+    jane('1', 'AAA111', 'Whangarei 0110'), jane('2', 'BBB222', 'Whangarei 0110'), jane('3', 'CCC333', 'Kaitaia 0410'),
+    // No postcode: links only through the same vehicle.
+    jane('4', 'DDD444', 'RD 1 Kaitaia'), jane('5', 'DDD444', 'RD 2 Kaitaia'), jane('6', 'EEE555', 'RD 3 Kaitaia'),
+    shot({ sha256: '7'.repeat(64), name_verification: { status: 'variants_disagree', readings: [{ value: 'MARK WEST' }, { value: 'MARK VVEST' }] },
+      fields: { ...shot().fields, display_name: 'MARK WEST' } }),
+    shot({ sha256: '8'.repeat(64), name_verification: reading('SAM REAL'), fields: { ...shot().fields, display_name: 'SAM REAL' } }),
+  ];
+  const rows = [live('1', 'p1'), live('2', 'p2'), live('3', 'p3'), live('4', 'p4'), live('5', 'p5'), live('6', 'p6'),
+    live('7', 'p7'), live('8', 'p8'), live('f', 'p8')];
+  const plan = planNameRepair(entries, rows);
+  assert.deepEqual(plan.summary.people_by_status, { person: 6, name_spelling_unresolved: 1, incomplete_cache: 1 });
+  const merges = plan.groups.flat().filter((action) => action.kind === 'merge').map((action) => [action.source, action.target]).sort();
+  assert.deepEqual(merges, [['p2', 'p1'], ['p5', 'p4']]);
+  assert.equal(plan.groups.flat().some((action) => ['p7', 'p8'].includes(action.person_record_id)), false);
+});
+
+test('the name repair locks each row before its guard, source before target', async () => {
+  const { repairSql } = await load();
+  const sql = repairSql([]);
+  const lock = (from) => sql.indexOf('FOR UPDATE', sql.indexOf(from));
+  assert.ok(lock("(a->>'person_record_id')::uuid AND") < sql.indexOf("'skipped_missing_or_merged'"));
+  assert.ok(lock("(a->>'source')::uuid AND") < sql.indexOf("(a->>'target')::uuid AND"));
+  assert.ok(lock("(a->>'target')::uuid AND") < sql.indexOf("'already_merged'"));
+});
+
 test('people resolve through their existing screenshots before keys and names', async () => {
   const { peopleSql, buildPlan, applyPayload } = await load();
   const sql = peopleSql([]);

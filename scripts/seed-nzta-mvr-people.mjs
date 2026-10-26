@@ -621,17 +621,39 @@ SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]') AS out FROM nzta_seed_results r;\n
 /** Matches the Motochek page heading that the first seed stored as every owner's name. */
 export const HEADING_NAME = /^\s*details\s*\(\s*\d+\s+registered\s+persons?\s*\)\s*$/i;
 const HEADING_NAME_SQL = '^\\s*details\\s*\\(\\s*\\d+\\s+registered\\s+persons?\\s*\\)\\s*$';
-const ownerKey = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+const ownerKey = (value) => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
 const compactName = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 const REPAIR_RENAME_REASON = 'NZTA owner-name correction: the first R&M NZTA seed stored the Motochek heading '
   + '"Current registered person details (N registered persons)" as the owner name. The corrected name is the '
   + '"Current registered person" field read by two OCR passes of the same private source screenshot(s). '
   + 'Repaired by scripts/seed-nzta-mvr-people.mjs --repair-names.';
-const REPAIR_MERGE_REASON = 'Same NZTA registered owner (same name and address on the source screenshots) was split across '
-  + 'seed records by the heading-as-name defect. Merged by scripts/seed-nzta-mvr-people.mjs --repair-names.';
+const REPAIR_MERGE_REASON = 'Same NZTA registered owner (same name, and the same street address and postcode or the same vehicle, '
+  + 'on the source screenshots) was split across seed records by the heading-as-name defect. Merged by '
+  + 'scripts/seed-nzta-mvr-people.mjs --repair-names.';
 export const ORGANISATION_OWNER_CATEGORY = 'Registered vehicle owner (organisation)';
 export const WITHHELD_OWNER_NAME = 'Owner withheld by NZTA';
 export const WITHHELD_OWNER_CATEGORY = 'Registered vehicle owner (withheld by NZTA)';
+
+/**
+ * The postcode Motochek prints on the line after the physical street address. The extractor keeps only the
+ * street line, so two owners with the same name and street in different towns would otherwise look alike.
+ */
+export function physicalPostcode(variants) {
+  for (const text of variants ?? []) {
+    const lines = String(text || '').replace(/\r/g, '').split('\n');
+    const index = lines.findIndex((line) => /physical\s+address\s*[:;.]?/i.test(line));
+    if (index < 0) continue;
+    // Row reading: street on the label line, then suburb and town/postcode, each with right-column text after it.
+    // Column reading: a bare label, then the address block on the lines below until the next label.
+    const bare = /physical\s+address\s*[:;.]?\s*$/i.test(lines[index]);
+    for (const line of lines.slice(index + 1, index + (bare ? 7 : 4))) {
+      if (/(?:mailing|postal)\s+address/i.test(line) || (bare && line.includes(':'))) break;
+      const postcode = /^\s*(?:RD\s*\d{1,2}\s+)?\p{L}[^\d:]*?\s(\d{4})(?![\d,])/u.exec(line)?.[1];
+      if (postcode) return postcode;
+    }
+  }
+  return null;
+}
 
 function ownerReading(entry) {
   const readings = (entry.name_verification?.readings ?? []).map((reading) => reading.value).filter(Boolean);
@@ -667,7 +689,9 @@ export function planNameRepair(entries, liveRows, { renameOrganisations = false,
     const named = shots.map((entry) => ({ entry, reading: ownerReading(entry) })).filter((item) => item.reading.keys.size > 0);
     let status;
     let common = [];
-    if (named.length === 0) {
+    // A person is corrected only from all of its own evidence; a screenshot missing from the OCR cache could name someone else.
+    if (shots.length < person.shas.length) status = 'incomplete_cache';
+    else if (named.length === 0) {
       const allWithheld = shots.length === person.shas.length && shots.every((entry) => ownerReading(entry).withheld);
       status = allWithheld ? 'owner_withheld_only' : 'unreadable';
       if (allWithheld && renameWithheld && person.heading_name) {
@@ -678,6 +702,8 @@ export function planNameRepair(entries, liveRows, { renameOrganisations = false,
     else {
       common = [...named[0].reading.keys].filter((key) => named.every((item) => item.reading.keys.has(key)));
       if (common.length === 0) status = 'mixed_owners';
+      // Two spellings survive every screenshot: picking one would be a guess, so hold it for a reviewer.
+      else if (common.length > 1) status = 'name_spelling_unresolved';
       else if (named.some((item) => item.reading.organisation)) status = renameOrganisations ? 'organisation' : 'organisation_held';
       else status = 'person';
     }
@@ -690,10 +716,15 @@ export function planNameRepair(entries, liveRows, { renameOrganisations = false,
       const eligible = person.heading_name || person.name_compact === compactName(chosen);
       if (!eligible) status = 'kept_existing_name';
       else {
+        // The street line alone repeats across towns, so an address key needs the postcode too; otherwise only
+        // the same name on the same vehicle links two seed records.
         const keys = named.map(({ entry }) => {
           const address = normaliseAddress(entry.fields?.physical_address);
-          return address ? `${normaliseName(chosen)}|${address}` : `${normaliseName(chosen)}|plate:${entry.parsed?.plate ?? ''}`;
-        });
+          const postcode = address ? physicalPostcode(entry.ocr_variants) : null;
+          if (address && postcode) return `${normaliseName(chosen)}|${address}|${postcode}`;
+          const plate = String(entry.parsed?.plate ?? '').trim().toUpperCase();
+          return plate ? `${normaliseName(chosen)}|plate:${plate}` : null;
+        }).filter(Boolean);
         candidates.push({ person, display_name: String(chosen).trim(), organisation: status === 'organisation', keys });
       }
     }
@@ -769,8 +800,9 @@ BEGIN
     v_seq := v_seq + 1; v_outcome := NULL; v_error := NULL;
     BEGIN
       IF a->>'kind' = 'rename' THEN
+        -- Lock before the guard so a concurrent correction cannot slip between the check and the governed update.
         SELECT display_name, metadata->>'merged_into_person_record_id' INTO v_name, v_merged_into FROM public.person_records
-        WHERE id = (a->>'person_record_id')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid;
+        WHERE id = (a->>'person_record_id')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid FOR UPDATE;
         IF v_name IS NULL OR v_merged_into IS NOT NULL THEN v_outcome := 'skipped_missing_or_merged';
         ELSIF v_name = a->>'display_name' THEN v_outcome := 'already_named';
         ELSIF v_name !~* '${HEADING_NAME_SQL}' THEN v_outcome := 'skipped_not_heading_name';
@@ -780,10 +812,12 @@ BEGIN
           v_outcome := 'renamed';
         END IF;
       ELSE
+        -- Source then target: the same lock order merge_person_records uses.
         SELECT display_name, metadata->>'merged_into_person_record_id' INTO v_name, v_merged_into FROM public.person_records
-        WHERE id = (a->>'source')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid;
+        WHERE id = (a->>'source')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid FOR UPDATE;
         SELECT display_name INTO v_target_name FROM public.person_records
-        WHERE id = (a->>'target')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid AND NOT (metadata ? 'merged_into_person_record_id');
+        WHERE id = (a->>'target')::uuid AND organization_id = '${RM_ORGANIZATION_ID}'::uuid AND NOT (metadata ? 'merged_into_person_record_id')
+        FOR UPDATE;
         IF v_merged_into = a->>'target' THEN v_outcome := 'already_merged';
         ELSIF regexp_replace(lower(coalesce(v_name, '')), '[^a-z0-9]+', '', 'g') <> (a->>'name_compact')
           OR regexp_replace(lower(coalesce(v_target_name, '')), '[^a-z0-9]+', '', 'g') <> (a->>'name_compact') THEN v_outcome := 'skipped_name_mismatch';

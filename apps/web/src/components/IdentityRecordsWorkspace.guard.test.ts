@@ -46,6 +46,9 @@ describe("identity person-of-interest workflow", () => {
     expect(workspace).toContain(
       'if (NZTA_HEADING_NAME.test(String(values.display_name ?? "")))\n    delete values.display_name;',
     );
+    expect(workspace).toContain(
+      'if (NZTA_HEADING_NAME.test(form.display_name ?? "")) form.display_name = "";',
+    );
   });
 
   it("shows approved working-file observations and private photos on canonical vehicles", () => {
