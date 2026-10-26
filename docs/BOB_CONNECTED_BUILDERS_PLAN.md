@@ -82,6 +82,16 @@ correction cycles: each cycle creates a fresh run, completed history remains,
 and duplicate verification within the same cycle is still rejected. This
 closes a fresh-verification blocker, not the underlying user-reported repair.
 
+Catalog-release follow-up: #241 and generated catalog #242 deployed as
+`a6a036a01d0fb12fa4eedb586a26d0a7b1f1e44f`, with a matching durable release
+pointer, healthy control plane, rebuilt worker and matching live schema.
+Post-release CI exposed a fixture ordering defect: it reapplied the guarded
+verification-cycle migration to functions already updated in the live snapshot.
+The regression now applies that migration to the original lease definitions,
+then separately exercises the current catalog definitions with the same
+three-cycle checks. The production migration remains fail-closed and unchanged.
+Production UI correction delivery and the underlying repair remain unverified.
+
 ### Same-job specification feedback (2026-10-26)
 
 PR #234 deployed as `637775a1`; actual UI message
