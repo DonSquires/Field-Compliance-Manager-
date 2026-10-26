@@ -504,10 +504,34 @@ NZTA checks for the historical import:
   users with `can_access_vehicle_owner_identity`; ambiguous or unread evidence
   remains held rather than being promoted into canonical records.
 
-The import, history reconciliation, person-search display and focused SQL tests
-are prepared in migrations `20261031090000` and `20261031100000`. They remain
-pending release and live verification; this ruling does not claim that records
-have been imported or that the migrations are deployed.
+**Owner matching (migration `20261101100000`).** A shared plate and family name
+is not enough to attribute a notice to the registered owner: a family member
+named on the notice is a different person. The notice's family name must be the
+owner's family name (the last word of two or more letters on both sides, titles
+stripped), and the notice's first given name must equal the owner's first given
+name, be its initial or share a 3+ letter prefix with it, or exactly equal one
+of the owner's middle names. Names carrying a generational suffix (Jr, Sr, II
+to IV) are never matched to the owner. Anything else falls through to a unique
+exact-name match, then to a person verified by the notice itself, linked to the
+vehicle as an associated person; genuine spelling duplicates are joined with the
+governed Merge records action.
+
+**Live state (verified read-only 2026-10-27).** Migrations `20261031090000`,
+`20261031100000`, `20261031110000` and `20261101100000` are applied and
+ledgered. The governed NZTA name repair renamed 2,627 people whose display name
+had been read from a screenshot heading, merged 85 resulting duplicates and left
+47 heading-named records for manual review. The historical register import
+read 555 notices and letters: 546 imported (466 warnings, 54 trespass notices,
+14 permit refusals and 12 contact requests) and 9 held for review (3 ambiguous
+people, 6 names too incomplete to create a person). Of the 546, 166 resolved to
+the registered owner at the notice date, 63 to a unique exact name and 317 to a
+person created from the notice; 110 associated-person vehicle links were
+recorded through `record_vehicle_person`, and 169 notices name a plate not yet
+on file. A replay reported all 546 as already present. Across all imported
+notices (including 11 trespass rows imported on 2026-10-11), 42 are in force, 9
+warnings expire within 30 days, 472 have expired, 8 trespass notices are drafts
+and the 26 letters carry no expiry; 50 of 517 people have a notice in force or
+expiring.
 
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
