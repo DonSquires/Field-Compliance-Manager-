@@ -79,7 +79,7 @@ turn beats false completeness.
   promotion is name-first: listing, metadata and filename matching never read
   file bytes. Only a photo that uniquely matches one record is read and
   attached. Its receipt is keyed by size and modified time, so it is not re-read.
-- Live photo dry run (2026-10-26), no bytes read and the local footprint is
+- Live photo dry run (2026-10-26, before event fallback), no bytes read and the local footprint is
   unchanged at 3,613 files: 396 unique matches, 19 ambiguous, 11,151 unstructured
   filenames, and 47,029 with no exact record match. The low match rate is a
   matching-rule question for review, not a reason to guess links.
@@ -107,7 +107,27 @@ turn beats false completeness.
   canonical people and vehicles change.
 - Scheduling: `scripts/run-rm-source-promotion.ps1` runs the promoter with
   `--commit --photos`, fetching the service key from the linked CLI at runtime
-  (never stored) and logging each run to the state directory.
+  (never stored) and logging each run to the state directory. Windows task
+  "FCM R&M source promotion" runs it daily at 7pm (owner choice), with
+  `-PhotoLimit 200`, `StartWhenAvailable`, a 3h limit and state in
+  `%LOCALAPPDATA%\FCM\rm-promote`. Two unattended-run defects were fixed and
+  verified with a triggered run (`LastTaskResult 0`): Windows PowerShell 5 had
+  treated the CLI's stderr update notice as fatal, and outside an agent session
+  `supabase db query` returns a bare row array instead of the
+  `{ boundary, rows }` envelope (`cliQuery`, `import-patrol-log` and the labour
+  preview now accept both).
+- Photo phase 1 (2026-10-26), name-first matching with event fallback: 847
+  unique matches, 31 ambiguous, 46,566 with no exact match, 11,151 unstructured.
+  Of 320 committed so far, 17 were new governed attachments
+  (`external_photo_attached` by the import identity, not court-ready), 301 were
+  already attached on 2026-10-11 and reused idempotently, and 2 were held because
+  their hash already belongs to another record. 527 matches remain and drain at
+  200 per nightly run.
+- Owner decision (2026-10-26): the 2,018 held source content differences from
+  the legacy correction are adopted from the sheet, audited with history kept.
+  Invoiced rows, suspected key collisions and finance-linked rows whose local
+  service date would move stay held. This needs a governed adoption path (not yet
+  built).
 - Seeded spreadsheet jobs remain accepted reporting/billing source truth until
   R&M operates in FCM, with no retrospective geofence requirement. This does not
   invent geometry, GPS attendance, a worker identity or a photo-to-job link.
