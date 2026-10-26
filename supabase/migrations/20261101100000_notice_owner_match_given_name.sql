@@ -3,13 +3,18 @@
 -- import_person_notice resolved a notice to the NZTA registered owner of the named vehicle
 -- when the surname agreed. On R&M's historical register that attributed a family member's
 -- notice to the vehicle owner (same plate and surname, different given name), which would
--- show an innocent person as trespassed or warned. The owner is now matched only when the
--- notice gives no given name, or one of its given names equals the owner's, is an initial of
--- it, or shares a 3+ letter prefix with it (Chris / Christopher). Any other name falls through
--- to the unique exact-name match, then to a person verified by the notice itself; the import
--- links that person to the vehicle as an associated person, and genuine spelling duplicates
--- are joined with the governed Merge records action. Signature, grants and every other path
--- are unchanged.
+-- show an innocent person as trespassed or warned.
+--
+-- Names are now compared word by word (whitespace-separated words, letters only, so
+-- Smith-Jones and O'Connor stay one family name). The family name is the last word of two or
+-- more letters and is excluded by position on both sides. The owner matches only when the
+-- notice gives no given name, or one of its given names equals one of the owner's, is a
+-- one-letter initial of it, or shares a 3+ letter prefix with it (Chris / Christopher).
+-- Anything else, including a family name whose word boundaries differ, falls through to the
+-- unique exact-name match, then to a person verified by the notice itself; the import links
+-- that person to the vehicle as an associated person, and genuine spelling duplicates are
+-- joined with the governed Merge records action. Signature, grants and every other path are
+-- unchanged.
 
 CREATE OR REPLACE FUNCTION public.import_person_notice(
   p_organization_id uuid,
@@ -54,6 +59,8 @@ DECLARE
   v_record uuid;
   v_basis text;
   v_candidates uuid[];
+  v_name_tokens text[];
+  v_surname_position bigint;
   v_given text[];
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
@@ -108,14 +115,26 @@ BEGIN
   END IF;
 
   v_norm := regexp_replace(lower(coalesce(v_subject, '')), '[^a-z0-9]+', '', 'g');
-  v_surname := (SELECT token FROM unnest(regexp_split_to_array(lower(coalesce(v_subject, '')), '[^[:alpha:]]+'))
-    WITH ORDINALITY AS t(token, ord) WHERE length(token) >= 2 ORDER BY ord DESC LIMIT 1);
+  -- Names are compared word by word: words split on whitespace and keep their letters only, so
+  -- Smith-Jones and O'Connor stay one family name. The family name is the last word of two or more
+  -- letters; every other word on the notice, by position, is a given name or initial.
+  v_name_tokens := array(
+    SELECT word.token
+    FROM (
+      SELECT regexp_replace(raw.token, '[^[:alpha:]]+', '', 'g') AS token, raw.ord
+      FROM unnest(regexp_split_to_array(
+        lower(regexp_replace(coalesce(v_subject, ''), '^\s*(mr|mrs|ms|miss|mx|dr)\.?\s+', '', 'i')),
+        '\s+')) WITH ORDINALITY AS raw(token, ord)
+    ) word
+    WHERE word.token <> ''
+    ORDER BY word.ord);
+  v_surname_position := (SELECT max(word.ord) FROM unnest(v_name_tokens) WITH ORDINALITY AS word(token, ord)
+    WHERE length(word.token) >= 2);
+  v_surname := v_name_tokens[v_surname_position];
   v_given := array(
-    SELECT token
-    FROM unnest(regexp_split_to_array(
-      lower(regexp_replace(coalesce(v_subject, ''), '^\s*(mr|mrs|ms|miss|mx|dr)\.?\s+', '', 'i')),
-      '[^[:alpha:]]+')) AS t(token)
-    WHERE token <> '' AND token IS DISTINCT FROM v_surname);
+    SELECT word.token FROM unnest(v_name_tokens) WITH ORDINALITY AS word(token, ord)
+    WHERE word.ord IS DISTINCT FROM v_surname_position
+    ORDER BY word.ord);
 
   IF p_canonical_person_id IS NOT NULL THEN
     SELECT p.id INTO v_person
@@ -180,31 +199,43 @@ BEGIN
          AND document.organization_id = check_row.organization_id
         JOIN public.canonical_people person
           ON person.id = check_row.canonical_person_id AND person.status = 'active'
+        CROSS JOIN LATERAL (
+          SELECT array_agg(word.token ORDER BY word.ord) AS tokens
+          FROM (
+            SELECT regexp_replace(raw.token, '[^[:alpha:]]+', '', 'g') AS token, raw.ord
+            FROM unnest(regexp_split_to_array(lower(coalesce(person.display_name, '')), '\s+'))
+              WITH ORDINALITY AS raw(token, ord)
+          ) word
+          WHERE word.token <> ''
+        ) owner_name
         WHERE check_row.organization_id = v_provider
           AND regexp_replace(upper(vehicle.plate_number), '[^A-Z0-9]', '', 'g') = v_plate
           AND check_row.checked_at = v_latest_owner_check
           AND document.document_kind = 'nzta_mvr_record'
           AND (document.review_state = 'approved'
             OR check_row.vehicle_snapshot->>'owner_only_review' = 'true')
-          AND v_surname = ANY (regexp_split_to_array(lower(coalesce(person.display_name, '')), '[^[:alpha:]]+'))
-          -- A shared surname on the plate is not enough: a family member named on the notice is a
-          -- different person. The owner matches only when the notice gives no given name, or one of
-          -- its given names equals, is the initial of, or shares a 3+ letter prefix with the owner's.
+          AND v_surname = ANY (owner_name.tokens)
+          -- A shared family name on the plate is not enough: a family member named on the notice is a
+          -- different person. The owner matches only when the notice gives no given name, or one of its
+          -- given names equals one of the owner's, is a one-letter initial of it, or shares a 3+ letter
+          -- prefix with it. The owner's family name is excluded by position, so Thomas Thomas keeps its
+          -- given name and an owner recorded only by initial cannot claim a full given name.
           AND (
             cardinality(v_given) = 0
             OR EXISTS (
               SELECT 1
-              FROM unnest(v_given) AS notice_name(token)
-              CROSS JOIN unnest(regexp_split_to_array(lower(coalesce(person.display_name, '')), '[^[:alpha:]]+')) AS owner_name(token)
-              WHERE owner_name.token <> ''
-                AND owner_name.token <> v_surname
+              FROM unnest(v_given) AS notice_given(token)
+              CROSS JOIN unnest(owner_name.tokens) WITH ORDINALITY AS owner_given(token, ord)
+              WHERE owner_given.ord <> (
+                  SELECT max(owner_family.ord)
+                  FROM unnest(owner_name.tokens) WITH ORDINALITY AS owner_family(token, ord)
+                  WHERE owner_family.token = v_surname)
                 AND (
-                  owner_name.token = notice_name.token
-                  OR ((length(owner_name.token) = 1 OR length(notice_name.token) = 1)
-                    AND left(owner_name.token, 1) = left(notice_name.token, 1))
-                  OR (least(length(owner_name.token), length(notice_name.token)) >= 3
-                    AND (starts_with(owner_name.token, notice_name.token)
-                      OR starts_with(notice_name.token, owner_name.token)))
+                  owner_given.token = notice_given.token
+                  OR (length(notice_given.token) = 1 AND left(owner_given.token, 1) = notice_given.token)
+                  OR (least(length(owner_given.token), length(notice_given.token)) >= 3
+                    AND (starts_with(owner_given.token, notice_given.token)
+                      OR starts_with(notice_given.token, owner_given.token)))
                 )
             )
           ));
@@ -290,6 +321,6 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.import_person_notice(uuid, text, text, timestamptz, text, text, text, text, text, timestamptz, uuid, text, text, text, text, text, text, text, text) IS
-'Provider-administrator import of an R&M historical trespass notice, warning, permit refusal or contact request for a landowner client. Links the shared canonical person (explicit, NZTA registered owner of the named vehicle with agreeing surname and a compatible given name, or unique exact name) or creates a person verified by the notice; refuses ambiguous matches. Replay-safe by import key; audited.';
+'Provider-administrator import of an R&M historical trespass notice, warning, permit refusal or contact request for a landowner client. Links the shared canonical person (explicit, NZTA registered owner of the named vehicle with agreeing family name and a compatible given name, or unique exact name) or creates a person verified by the notice; refuses ambiguous matches. Replay-safe by import key; audited.';
 REVOKE ALL ON FUNCTION public.import_person_notice(uuid, text, text, timestamptz, text, text, text, text, text, timestamptz, uuid, text, text, text, text, text, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.import_person_notice(uuid, text, text, timestamptz, text, text, text, text, text, timestamptz, uuid, text, text, text, text, text, text, text, text) TO authenticated, service_role;

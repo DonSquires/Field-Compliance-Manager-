@@ -54,21 +54,64 @@ BEGIN
   );
 END $$;
 
+CREATE OR REPLACE FUNCTION pg_temp.make_owner(
+  p_admin uuid, p_org uuid, p_conversation uuid, p_name text, p_plate text, p_suffix text
+) RETURNS uuid LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_record uuid := gen_random_uuid();
+  v_attachment uuid := gen_random_uuid();
+  v_document uuid;
+  v_person uuid;
+BEGIN
+  PERFORM pg_temp.as_admin();
+  INSERT INTO public.person_records(id, organization_id, display_name, review_state, metadata)
+  VALUES (v_record, p_org, p_name, 'manual_review_required', '{}'::jsonb);
+  INSERT INTO public.bob_attachments(
+    id, organization_id, conversation_id, uploaded_by, file_name, file_type,
+    file_size_bytes, storage_bucket, storage_path, purpose, processing_state
+  ) VALUES (
+    v_attachment, p_org, p_conversation, p_admin, 'nzta-' || p_suffix || '.png', 'image/png', 10,
+    'identity-evidence', 'org/' || p_org || '/identity/' || p_admin || '/' || p_suffix || '.png',
+    'identity_document', 'processing'
+  );
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', p_admin::text, 'role', 'authenticated')::text, true);
+  v_document := (public.register_deterministic_identity_document_proposal(
+    p_admin, p_org, v_record, v_attachment, 'nzta_mvr_record',
+    md5(p_suffix) || md5(p_suffix || '-source'),
+    jsonb_build_object('display_name', p_name, 'plate_number', p_plate)
+  )->>'identity_document_id')::uuid;
+  PERFORM pg_temp.as_user(p_admin);
+  PERFORM public.review_nzta_mvr_owner_evidence(
+    v_document,
+    jsonb_build_object('display_name', p_name, 'plate_number', p_plate,
+      'query_completed_at', '2024-01-01T10:00:00+13:00', 'person_vehicle_match_confirmed', true),
+    'Source image reviewed for given-name notice matching'
+  );
+  PERFORM pg_temp.as_admin();
+  SELECT canonical_person_id INTO v_person
+  FROM public.vehicle_identity_checks WHERE identity_document_id = v_document;
+  PERFORM pg_temp.as_user(p_admin);
+  RETURN v_person;
+END $fn$;
+
 DO $$
 DECLARE
   v_provider uuid := gen_random_uuid();
   v_client uuid := gen_random_uuid();
   v_admin uuid := gen_random_uuid();
   v_conversation uuid := gen_random_uuid();
-  v_owner_record uuid := gen_random_uuid();
-  v_attachment uuid := gen_random_uuid();
-  v_document uuid;
-  v_owner uuid;
+  v_stem text;
   v_plate text;
+  v_owner uuid;
+  v_hyphen_owner uuid;
+  v_repeat_owner uuid;
+  v_initial_owner uuid;
+  v_apostrophe_owner uuid;
   v_result jsonb;
   v_family_member uuid;
 BEGIN
-  v_plate := 'G' || upper(substr(replace(v_provider::text, '-', ''), 1, 6));
+  v_stem := upper(substr(replace(v_provider::text, '-', ''), 1, 5));
+  v_plate := 'G' || v_stem;
   INSERT INTO public.organizations(id, name, organization_type, parent_organization_id)
   VALUES (v_provider, 'Given-name test provider', 'service_provider', NULL),
     (v_client, 'Given-name test client', 'private_enterprise', v_provider);
@@ -81,38 +124,18 @@ BEGIN
     gen_random_uuid(), v_provider, v_client, 'Given-name notice test',
     current_date - 30, 'operational', 'accepted'
   );
-  INSERT INTO public.person_records(id, organization_id, display_name, review_state, metadata)
-  VALUES (v_owner_record, v_provider, 'Mira Alder', 'manual_review_required', '{}'::jsonb);
   INSERT INTO public.bob_conversations(id, organization_id, user_id, module_key, title)
   VALUES (v_conversation, v_provider, v_admin, 'operations', 'Given-name notice test');
-  INSERT INTO public.bob_attachments(
-    id, organization_id, conversation_id, uploaded_by, file_name, file_type,
-    file_size_bytes, storage_bucket, storage_path, purpose, processing_state
-  ) VALUES (
-    v_attachment, v_provider, v_conversation, v_admin, 'nzta-given-name.png', 'image/png', 10,
-    'identity-evidence', 'org/' || v_provider || '/identity/' || v_admin || '/given-name.png',
-    'identity_document', 'processing'
-  );
 
-  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
-  v_result := public.register_deterministic_identity_document_proposal(
-    v_admin, v_provider, v_owner_record, v_attachment, 'nzta_mvr_record',
-    md5('given-name') || md5('given-name-source'),
-    jsonb_build_object('display_name', 'Mira Alder', 'plate_number', v_plate)
+  v_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira Alder', v_plate, 'owner-alder');
+  v_hyphen_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira Smith-Jones', 'H' || v_stem, 'owner-hyphen');
+  v_repeat_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Andrew Thomas', 'J' || v_stem, 'owner-repeat');
+  v_initial_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'M Birch', 'K' || v_stem, 'owner-initial');
+  v_apostrophe_owner := pg_temp.make_owner(v_admin, v_provider, v_conversation, 'Mira O''Connor', 'L' || v_stem, 'owner-apostrophe');
+  PERFORM pg_temp.check(
+    'owner reviews resolved five distinct registered people',
+    (SELECT count(DISTINCT person) FROM unnest(ARRAY[v_owner, v_hyphen_owner, v_repeat_owner, v_initial_owner, v_apostrophe_owner]) AS person) = 5
   );
-  v_document := (v_result->>'identity_document_id')::uuid;
-  PERFORM pg_temp.as_user(v_admin);
-  PERFORM public.review_nzta_mvr_owner_evidence(
-    v_document,
-    jsonb_build_object('display_name', 'Mira Alder', 'plate_number', v_plate,
-      'query_completed_at', '2024-01-01T10:00:00+13:00', 'person_vehicle_match_confirmed', true),
-    'Source image reviewed for given-name notice matching'
-  );
-  PERFORM pg_temp.as_admin();
-  SELECT canonical_person_id INTO v_owner
-  FROM public.vehicle_identity_checks WHERE identity_document_id = v_document;
-  PERFORM pg_temp.check('owner review resolved the registered person', v_owner IS NOT NULL);
-  PERFORM pg_temp.as_user(v_admin);
 
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Rowan Alder', 'different-given', '1');
   v_family_member := (v_result->>'canonical_person_id')::uuid;
@@ -132,6 +155,34 @@ BEGIN
     'a near-spelling of the owner''s given name is recorded under the name on the notice',
     v_result->>'match_basis' = 'created_from_notice'
       AND (v_result->>'canonical_person_id')::uuid NOT IN (v_owner, v_family_member)
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'H' || v_stem, 'Rowan Smith-Jones', 'hyphen-different-given', '8');
+  PERFORM pg_temp.check(
+    'a hyphenated family name does not leave a shared part that passes as a given name',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_hyphen_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'J' || v_stem, 'Thomas Thomas', 'repeated-name', '9');
+  PERFORM pg_temp.check(
+    'a given name repeated as the family name is kept and does not match a different owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_repeat_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'K' || v_stem, 'Milo Birch', 'owner-initial-only', 'a');
+  PERFORM pg_temp.check(
+    'an owner recorded only by initial does not claim a full given name on the notice',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_initial_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'L' || v_stem, 'Owen O''Connor', 'apostrophe-different-given', 'b');
+  PERFORM pg_temp.check(
+    'an apostrophe family name does not leave a stray initial that matches the owner',
+    v_result->>'match_basis' = 'created_from_notice'
+      AND (v_result->>'canonical_person_id')::uuid <> v_apostrophe_owner
   );
 
   v_result := pg_temp.import_on_plate(v_client, v_plate, 'Mrs Mira Alder', 'same-given-title', '4');
@@ -160,6 +211,20 @@ BEGIN
     'a given name sharing a 3+ letter prefix with the owner''s resolves the registered owner',
     v_result->>'match_basis' = 'vehicle_registered_owner_at_notice'
       AND (v_result->>'canonical_person_id')::uuid = v_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'H' || v_stem, 'Mira Smith-Jones', 'hyphen-same-given', 'c');
+  PERFORM pg_temp.check(
+    'the same given name with a hyphenated family name resolves the registered owner',
+    v_result->>'match_basis' = 'vehicle_registered_owner_at_notice'
+      AND (v_result->>'canonical_person_id')::uuid = v_hyphen_owner
+  );
+
+  v_result := pg_temp.import_on_plate(v_client, 'L' || v_stem, 'O''Connor M', 'apostrophe-family-first', 'd');
+  PERFORM pg_temp.check(
+    'a family-name-first notice with an agreeing initial resolves the registered owner',
+    v_result->>'match_basis' = 'vehicle_registered_owner_at_notice'
+      AND (v_result->>'canonical_person_id')::uuid = v_apostrophe_owner
   );
 END $$;
 
