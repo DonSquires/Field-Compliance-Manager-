@@ -39,6 +39,15 @@ describe("identity person-of-interest workflow", () => {
     );
   });
 
+  it("never prefills the NZTA page heading as the reviewed owner's name", () => {
+    expect(workspace).toContain(
+      "const NZTA_HEADING_NAME = /^\\s*details\\s*\\(\\s*\\d+\\s+registered\\s+persons?\\s*\\)\\s*$/i;",
+    );
+    expect(workspace).toContain(
+      'if (NZTA_HEADING_NAME.test(String(values.display_name ?? "")))\n    delete values.display_name;',
+    );
+  });
+
   it("shows approved working-file observations and private photos on canonical vehicles", () => {
     expect(workspace).toContain('"get_identity_vehicle_activity"');
     expect(workspace).toContain("Approved observation history");

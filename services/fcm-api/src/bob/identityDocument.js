@@ -97,6 +97,83 @@ function nztaPlateEvidence(rawText, variantIndex = 0) {
   return evidence;
 }
 
+// Motochek prints a second column beside the owner block; tesseract's row mode reads it onto the same line.
+const NZTA_RIGHT_COLUMN = /\s*[‘’'"`|]?\s*\b(?:acquisition\b|registered\s+person\s+status\b|sex\s+or\s+company\b|mailing\s+address\b).*$/i;
+const NZTA_OWNER_LABEL = /^[^A-Za-z0-9]*current\s+registered\s+person(?!\s*det)\s*[:;.]?\s*(.*)$/i;
+const NZTA_OWNER_WITHHELD = /current\s+registered\s+person\s*[:;.]?\s*(?:information\s+not\s+available|person\s+unknown)/i;
+// Motochek's placeholders when the owner is withheld or unknown; never a person's name.
+const NZTA_OWNER_PLACEHOLDER = /^(?:information\s+not\s+available|person\s+unknown|unknown)\b/i;
+
+function cleanNztaValue(value) {
+  return clean(String(value || '').replace(NZTA_RIGHT_COLUMN, '').replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9)]+$/g, '')) || null;
+}
+
+// Motochek prints owner names in capitals; trailing label fragments ("Acqui", "deta") are mixed or lower case.
+function isOwnerNameToken(token) {
+  const letters = token.replace(/[^A-Za-z]/g, '');
+  if (!/^[A-Z0-9&(]/.test(token)) return false;
+  return letters.length === 0 || letters.replace(/[^A-Z]/g, '').length / letters.length >= 0.6;
+}
+
+function nztaOwnerNameValue(value) {
+  const cleaned = cleanNztaValue(value);
+  const tokens = String(cleaned || '').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || NZTA_OWNER_PLACEHOLDER.test(cleaned)) return null;
+  let name;
+  if (isOwnerNameToken(tokens[0])) {
+    const kept = [];
+    for (const token of tokens) {
+      if (!isOwnerNameToken(token)) break;
+      kept.push(token);
+    }
+    name = cleanNztaValue(kept.join(' '));
+    if (!name || !/[A-Z]{2}/.test(name)) return null;
+  } else {
+    // Other renderings may use title case; accept only a plausible multi-word name, never a label fragment.
+    const plausible = tokens.length >= 2 && tokens.every((token) => /^[A-Z][A-Za-z'’.&-]*$/.test(token))
+      && !/\b(?:acquisition|details?|registered|person|address|company|vehicle)\b/i.test(cleaned);
+    name = plausible ? cleaned : null;
+  }
+  return name && name.length <= 120 ? name : null;
+}
+
+/**
+ * The page heading "Current registered person details (N registered persons)" counts the vehicle's
+ * owners over time; the owner's name is the value of the "Current registered person:" field, on the
+ * same line (row reading) or the next line (sparse reading).
+ */
+function nztaRegisteredPersonValue(rawText) {
+  const lines = String(rawText || '').replace(/\r/g, '').split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = NZTA_OWNER_LABEL.exec(lines[index]);
+    if (!match) continue;
+    if (cleanNztaValue(match[1])) return match[1];
+    return lines.slice(index + 1).find((line) => line.trim()) ?? null;
+  }
+  return null;
+}
+
+function nztaRegisteredPersonName(rawText) {
+  const value = nztaRegisteredPersonValue(rawText);
+  return value ? nztaOwnerNameValue(value) : null;
+}
+
+const nameKey = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+
+function resolveNztaNameFromOcr(variants) {
+  const readings = variants.map((text, index) => ({ value: nztaRegisteredPersonName(text), variant_index: index }))
+    .filter((reading) => reading.value);
+  const keys = new Set(readings.map((reading) => nameKey(reading.value)));
+  const withheld = readings.length === 0 && variants.some((text) => NZTA_OWNER_WITHHELD.test(text)
+    || NZTA_OWNER_PLACEHOLDER.test(cleanNztaValue(nztaRegisteredPersonValue(text)) ?? ''));
+  return {
+    status: withheld ? 'owner_withheld' : readings.length === 0 ? 'not_read'
+      : keys.size > 1 ? 'variants_disagree' : readings.length > 1 ? 'variants_agree' : 'single_variant',
+    value: readings[0]?.value ?? null,
+    readings,
+  };
+}
+
 function resolveNztaPlateFromOcr(rawVariants) {
   const variants = (Array.isArray(rawVariants) ? rawVariants : [rawVariants]).map((value) => String(value || '')).filter(Boolean);
   const allEvidence = variants.flatMap((text, index) => nztaPlateEvidence(text, index));
@@ -146,10 +223,14 @@ function extractIdentityFieldsConsensus(rawVariants, documentKind, requestedDefi
   const plate = resolveNztaPlateFromOcr(variants);
   delete fields.plate_number;
   if (plate.value) fields.plate_number = plate.value;
+  const name = resolveNztaNameFromOcr(variants);
+  delete fields.display_name;
+  if (name.value) fields.display_name = name.value;
   return {
     fields,
     identifier_verification: {
       plate_number: plate,
+      display_name: name,
       authority: 'provisional_source_time',
       review_required: true,
     },
@@ -192,7 +273,7 @@ function extractIdentityFields(rawText, documentKind, requestedDefinition = null
       /current details query results[\s\S]{0,180}?(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4}\s+\d{1,2}:\d{2}(?::\d{1,2})?)/i,
     )?.[1] || text.match(/\b\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4}\s+\d{1,2}:\d{2}(?::\d{1,2})?\b/)?.[0];
     const fields = {
-      display_name: labelled(text, ['current registered person', 'registered person', 'person name'], '[^\\n]{2,120}'),
+      display_name: nztaRegisteredPersonName(text),
       plate_number: labelled(text, ['plate', 'registration plate', 'rego'], '[A-Z0-9 -]{2,12}'),
       vin: labelled(text, ['vin'], '[A-Z0-9 -]{8,24}'),
       query_completed_at: localDateTime(queryDateTime),
@@ -210,8 +291,10 @@ function extractIdentityFields(rawText, documentKind, requestedDefinition = null
       wof_expiry: isoDate(labelled(text, ['expiry date of last wof', 'wof expiry'], DATE_PATTERN)),
       cof_expiry: isoDate(labelled(text, ['expiry date of last cof', 'cof expiry'], DATE_PATTERN)),
       acquisition_date: isoDate(labelled(text, ['acquisition date'], DATE_PATTERN)),
-      physical_address: labelled(text, ['physical address'], '[^\\n]{5,180}'),
-      mailing_address: labelled(text, ['mailing address'], '[^\\n]{5,180}'),
+      physical_address: cleanNztaValue(labelled(text, ['physical address'], '[^\\n]{5,180}')),
+      mailing_address: cleanNztaValue(labelled(text, ['mailing address'], '[^\\n]{5,180}')),
+      // Only the organisation signal is kept; a person's sex is not needed for any identity decision.
+      registered_to_company: /sex\s+or\s+company\s*[:;]?\s*[‘’'"`|]?\s*company\b/i.test(text),
       gross_vehicle_mass_kg: labelled(text, ['gross vehicle mass'], '[\\d, ]{2,12}'),
       cc_rating: labelled(text, ['cc rating'], '[\\d, ]{2,12}'),
       number_of_seats: labelled(text, ['no\\. of seats', 'number of seats'], '\\d{1,3}'),
