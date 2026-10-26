@@ -90,7 +90,17 @@ verification-cycle migration to functions already updated in the live snapshot.
 The regression now applies that migration to the original lease definitions,
 then separately exercises the current catalog definitions with the same
 three-cycle checks. The production migration remains fail-closed and unchanged.
-Production UI correction delivery and the underlying repair remain unverified.
+The exact CI PostgreSQL entry passed all eight tests locally after this fix.
+
+Production UI acceptance: PM turn
+`7fb8b4ce-b596-4be6-a369-0b467c211ae6` selected the native correction card.
+Owner UI confirmation returned audit receipt
+`25dc6844-f2f4-4dcf-9ade-52feece5ea6c`, visible after a fresh login/reload.
+Opening the same original job showed implementation pending, product analysis
+and UI design still completed, and implementation/tests/security/code review
+pending again. The UI recorded the correction event and still showed not
+deployed. This proves durable same-job feedback delivery, not Builder
+consumption, a corrected patch, fresh verification or the underlying repair.
 
 ### Same-job specification feedback (2026-10-26)
 
