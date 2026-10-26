@@ -139,7 +139,9 @@ test('PM investigation card requires owner confirmation and retains a persisted 
     expect(errors).toEqual([]);
 });
 
-for (const implementation of [false, true]) test(`existing-job ${implementation ? 'implementation corrections' : 'specification revision'} need confirmation, never create another job and survive reload`, async ({ page, isMobile }) => {
+for (const kind of ['specification', 'implementation', 'recovery']) test(`existing-job ${kind} need confirmation, never create another job and survive reload`, async ({ page, isMobile }) => {
+  const implementation = kind === 'implementation';
+  const recovery = kind === 'recovery';
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
   const cardId = '77777777-7777-4777-8777-777777777777';
@@ -153,10 +155,10 @@ for (const implementation of [false, true]) test(`existing-job ${implementation 
   }, {
     id: cardId, seq: 2, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
     content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z',
-    payload: { message_id: 'review-message', revision: { ...(implementation ? { kind: 'implementation' } : {}), job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
+    payload: { message_id: 'review-message', revision: { ...(kind !== 'specification' ? { kind } : {}), job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
       ...(confirmed ? { revision_receipt: receipt } : {}) },
   }] }));
-  await page.route(`**/rest/v1/rpc/${implementation ? 'builder_chat_request_code_changes' : 'builder_chat_request_spec_revision'}`, route => {
+  await page.route(`**/rest/v1/rpc/${recovery ? 'builder_chat_recover_implementation' : implementation ? 'builder_chat_request_code_changes' : 'builder_chat_request_spec_revision'}`, route => {
     expect(route.request().postDataJSON()).toEqual({ p_message_id: cardId });
     confirmed++;
     return route.fulfill({ json: receipt });
@@ -172,10 +174,10 @@ for (const implementation of [false, true]) test(`existing-job ${implementation 
   };
   await signInAsAdmin(page, '/admin/builder');
   const chat = await open();
-  await expect(chat.getByText(implementation ? 'Correct implementation before a fresh human review' : 'Revise specification before implementation')).toBeVisible();
+  await expect(chat.getByText(recovery ? 'Recover failed implementation on the same job' : implementation ? 'Correct implementation before a fresh human review' : 'Revise specification before implementation')).toBeVisible();
   expect(confirmed).toBe(0);
   await expect(chat.getByRole('button', { name: 'Create job', exact: true })).toHaveCount(0);
-  const confirmLabel = implementation ? 'Request implementation changes' : 'Request specification revision';
+  const confirmLabel = recovery ? 'Resume failed implementation' : implementation ? 'Request implementation changes' : 'Request specification revision';
   await chat.getByRole('button', { name: confirmLabel, exact: true }).click();
   await expect(chat.getByText(`Revision requested · Receipt: ${receipt}`)).toBeVisible();
   await page.reload();

@@ -348,6 +348,33 @@ test('an invalid repair seed stops before any model call instead of silently sta
   }
 });
 
+test('owner-confirmed recovery invalidates a failed checkpoint and preserves structured sibling-lane routing', async () => {
+  const repo = makeRepo();
+  const input = {
+    supabase: null, gateway: {}, job: { id: 'lanerecovery001', organization_id: 'org', target_sha: repo.sha,
+      task_description: 'Fix the backend sum', code_review_revision: { approval_id: 'review' } },
+    step: { id: 's' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+    repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+  };
+  try {
+    const first = fakeModel([{ tool: 'finish', args: { no_change_reason: 'No changes: the backend owns lib/sum.js.',
+      no_change_lane: 'backend', no_change_file: 'lib/sum.js' } }]);
+    const result = await runAgenticEngineer({ ...input, callModel: first.callModel });
+    assert.equal(result.no_change, true);
+    assert.equal(result.no_change_lane, 'backend');
+    assert.equal(result.no_change_file, 'lib/sum.js');
+    const recovery = { ...input.job.code_review_revision, recovery_id: 'confirmed-recovery', recovery_feedback: 'Let the backend implement its fix.' };
+    await assert.rejects(runAgenticEngineer({ ...input, job: { ...input.job, code_review_revision: recovery },
+      callModel: async ({ modelRequest }) => {
+        const packet = JSON.parse(modelRequest.request.messages[1].content);
+        assert.deepEqual(packet.confirmed_code_review_corrections, recovery);
+        throw new Error('fresh recovered author reached model');
+      } }), /fresh recovered author reached model/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
 test('authoring uses the memory-eligible model rather than forcing a larger installed model', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

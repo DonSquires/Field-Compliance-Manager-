@@ -98,6 +98,17 @@ explicitly bound, checksum-verified lane seeds, never as fresh review evidence.
 No new credential, impersonation, automatic history transfer, merge or release
 authority is introduced.
 
+Failed implementation-correction recovery (owner choice, 2026-10-26) uses the
+same approved packet and authenticated-owner confirmation boundary. The
+service-side preparation reads only the linked failed job/version and failed
+step metadata, never returning private diagnostics to cloud.
+`builder_chat_recover_implementation` rechecks organization/reviewer authority,
+same-thread completed PM consent, idle unpublished correction state and an
+author failure without a patch before downstream checks. It records a
+replay-safe receipt, preserves attempts and seeds, and invalidates the saved
+author checkpoint. It cannot recover worker/test/security failures, change
+target/specification, approve, merge or deploy.
+
 ### Builder chat public research (owner decision, 2026-10-25)
 
 Builder chat's explicit public-research mode uses only server-side Ollama Cloud

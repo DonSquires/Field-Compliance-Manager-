@@ -11,6 +11,26 @@
 
 ## 1. What Bob is
 
+**Failed correction recovery, owner decision 2026-10-26.** A correction cycle
+must not demand an unrelated frontend edit before a backend-owned repair can
+run. An explicit sibling-lane no-change result names an unprotected source
+path and routes through the existing audited implementation skip; it is not
+proof that the whole requirement is satisfied. Protected paths, missing
+evidence and exhausted budgets are not permission to skip safety checks.
+
+PM may prepare `request_builder_implementation_recovery` for an accepted
+same-thread correction job that failed in authoring without a patch before
+downstream verification started. Authenticated owner confirmation is bound to
+the failed step, target, correction approval and job version. It resumes the
+same job, preserves specification, seeds, attempt counts and history, and
+records an audit receipt. This is an explicit owner-authorized continuation,
+not automatic retries or reset budgets. Worker/test/security failures, active
+or published work and stale cards are refused. A new recovery identity
+invalidates the author's saved failed checkpoint; existing correction-cycle
+verification identity remains because verification has not started. Fresh
+verification, security and human review still gate delivery. No underlying
+repair is proven by a recovery receipt.
+
 **Builder memory continuity clarification, owner reminder 2026-10-25.**
 Bob already has his own `bob_self_memory` and must be able to write to it and
 use it to support lessons, continuity and jobs. Reuse that diary; do not invent

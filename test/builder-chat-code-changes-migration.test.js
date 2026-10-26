@@ -7,6 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026101500_builder_chat_code_changes.sql'), 'utf8');
 const cycleMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026103000_builder_correction_verification_cycles.sql'), 'utf8');
+const recoveryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026110000_builder_chat_implementation_recovery.sql'), 'utf8');
 
 test('code corrections preserve immutable task/target/attempts and have owner-only execution', () => {
   assert.match(migration, /builder_chat_require_owner/);
@@ -22,6 +23,87 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
   const name = `fcm-code-changes-${randomUUID()}`;
   const docker = args => execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   let created = false;
+  const recoveryChecks = `
+    SELECT set_config('test.role','authenticated',false);
+    DO $f$
+    #variable_conflict use_variable
+    DECLARE job_id uuid; source_id uuid; thread_id uuid; step_id uuid;
+      card_id uuid:=gen_random_uuid(); stale_card uuid:=gen_random_uuid();
+      owner_id uuid:=auth.uid(); approval_id uuid; receipt uuid; again uuid;
+      command text; original_revision jsonb; original_attempt integer; before_events integer;
+    BEGIN
+      SELECT id, code_review_revision INTO job_id,original_revision FROM builder_jobs
+        WHERE code_review_revision->'seed_patch_ids' ? 'frontend_implementation'
+          AND code_review_revision->'seed_patch_ids' ? 'backend_implementation' LIMIT 1;
+      source_id:=(original_revision->>'source_message_id')::uuid;
+      approval_id:=(original_revision->>'approval_id')::uuid;
+      SELECT m.thread_id INTO thread_id FROM builder_chat_messages m WHERE id=source_id;
+      SELECT id,attempt_count INTO step_id,original_attempt FROM builder_job_steps b
+        WHERE b.job_id=job_id AND b.step_id='frontend_implementation';
+      UPDATE builder_jobs SET status='failed',code_review_status='pending',updated_at=now() WHERE id=job_id;
+      UPDATE builder_job_steps b SET status=CASE WHEN id=step_id THEN 'failed' ELSE 'pending' END,
+        started_at=NULL,completed_at=NULL,error=CASE WHEN id=step_id THEN 'generation: Protected lane boundary: backend-owned fix' END
+        WHERE b.job_id=job_id AND b.step_id NOT IN ('product_analysis','ui_design');
+      UPDATE builder_artifacts SET status='superseded' WHERE builder_artifacts.job_id=job_id AND artifact_type='code_implementation';
+      INSERT INTO builder_chat_messages(id,thread_id,kind,role,payload)
+        SELECT card_id,thread_id,'proposal','bob',jsonb_build_object('message_id',source_id,'revision',
+          jsonb_build_object('kind','recovery','job_id',job_id,'source_message_id',source_id,
+            'approval_id',approval_id,'target_sha',repeat('a',40),'job_updated_at',updated_at,
+            'failed_step_id',step_id,'feedback','Recover routing without unrelated edits; backend must prove the original reader integration.'))
+        FROM builder_jobs WHERE id=job_id;
+      INSERT INTO builder_chat_messages SELECT stale_card,thread_id,kind,role,status,created_by,content,payload
+        FROM builder_chat_messages WHERE id=card_id;
+      command:=format('SELECT builder_chat_recover_implementation(%L)',card_id);
+      PERFORM set_config('test.actor',gen_random_uuid()::text,false); PERFORM expect_error(command,'card not found');
+      PERFORM set_config('test.actor',owner_id::text,false);
+      PERFORM set_config('test.authorized','no',false); PERFORM expect_error(command,'not authorized');
+      PERFORM set_config('test.authorized','yes',false);
+      UPDATE builder_approvals SET requested_from_users=ARRAY[gen_random_uuid()] WHERE id=approval_id;
+      PERFORM expect_error(command,'not authorized');
+      UPDATE builder_approvals SET requested_from_users=ARRAY[owner_id] WHERE id=approval_id;
+      UPDATE builder_chat_messages SET status='failed' WHERE id=source_id;
+      PERFORM expect_error(command,'completed approved PM');
+      UPDATE builder_chat_messages SET status='done',payload=jsonb_set(payload,'{pm_purpose}','"qa"') WHERE id=source_id;
+      PERFORM expect_error(command,'completed approved PM');
+      UPDATE builder_chat_messages SET payload=jsonb_set(payload,'{pm_purpose}','"pm"') WHERE id=source_id;
+      UPDATE builder_jobs SET target_sha=repeat('b',40) WHERE id=job_id; PERFORM expect_error(command,'changed or is published');
+      UPDATE builder_jobs SET target_sha=repeat('a',40),workspace_pull_request_url='https://example.invalid/pr' WHERE id=job_id;
+      PERFORM expect_error(command,'changed or is published');
+      UPDATE builder_jobs SET workspace_pull_request_url=NULL,updated_at=now()+interval '1 second' WHERE id=job_id;
+      PERFORM expect_error(command,'changed or is published'); UPDATE builder_jobs SET updated_at=now() WHERE id=job_id;
+      UPDATE builder_job_steps SET error='repair: verification failed' WHERE id=step_id;
+      PERFORM expect_error(command,'idle author failure'); UPDATE builder_job_steps SET error='generation: lane boundary' WHERE id=step_id;
+      INSERT INTO builder_model_runs(job_id,status) VALUES(job_id,'running'); PERFORM expect_error(command,'idle author failure');
+      DELETE FROM builder_model_runs WHERE builder_model_runs.job_id=job_id AND status='running';
+      INSERT INTO builder_worker_runs(job_id,status) VALUES(job_id,'running'); PERFORM expect_error(command,'idle author failure');
+      DELETE FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id AND status='running';
+      UPDATE builder_job_steps b SET started_at=now() WHERE b.job_id=job_id AND b.step_id='test_suite';
+      PERFORM expect_error(command,'idle author failure');
+      UPDATE builder_job_steps b SET started_at=NULL WHERE b.job_id=job_id AND b.step_id='test_suite';
+      INSERT INTO builder_artifacts(id,job_id,step_id,artifact_type,status)
+        VALUES(gen_random_uuid(),job_id,step_id,'code_implementation','final');
+      PERFORM expect_error(command,'idle author failure');
+      DELETE FROM builder_artifacts a WHERE a.job_id=job_id AND a.step_id=step_id AND status='final' AND artifact_type='code_implementation';
+      SELECT count(*) INTO before_events FROM builder_audit_events a WHERE a.job_id=job_id;
+      receipt:=builder_chat_recover_implementation(card_id); again:=builder_chat_recover_implementation(card_id);
+      IF receipt IS DISTINCT FROM again
+        OR (SELECT count(*) FROM builder_audit_events a WHERE a.job_id=job_id)<>before_events+1
+        OR (SELECT status FROM builder_jobs WHERE id=job_id)<>'implementation_pending'
+        OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>original_attempt
+        OR (SELECT code_review_revision->>'recovery_id' FROM builder_jobs WHERE id=job_id)<>receipt::text
+        OR (SELECT code_review_revision->'seed_patch_ids' FROM builder_jobs WHERE id=job_id) IS DISTINCT FROM original_revision->'seed_patch_ids'
+        OR (SELECT code_review_revision->>'approval_id' FROM builder_jobs WHERE id=job_id)<>approval_id::text
+        OR (SELECT task_description FROM builder_jobs WHERE id=job_id)<>'Immutable original task'
+        OR (SELECT target_sha FROM builder_jobs WHERE id=job_id)<>repeat('a',40)
+        OR (SELECT status FROM builder_job_steps WHERE id=step_id)<>'pending'
+        THEN RAISE EXCEPTION 'Recovery did not preserve job, seeds, attempts, or exactly-once receipt'; END IF;
+      PERFORM expect_error(format('SELECT builder_chat_recover_implementation(%L)',stale_card),'changed or is published');
+      IF has_function_privilege('anon','builder_chat_recover_implementation(uuid)','EXECUTE')
+        OR has_function_privilege('service_role','builder_chat_recover_implementation(uuid)','EXECUTE')
+        OR NOT has_function_privilege('authenticated','builder_chat_recover_implementation(uuid)','EXECUTE')
+        THEN RAISE EXCEPTION 'Wrong recovery execute grants'; END IF;
+    END $f$;
+  `;
   try {
     docker(['run', '--detach', '--name', name, '--network', 'none', '--mount', 'type=tmpfs,destination=/var/lib/postgresql/data',
       '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgis/postgis:17-3.5']);
@@ -255,7 +337,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-        input: fixture + migration + reviewFunctions + checks + cycleFixture
+        input: fixture + migration + recoveryMigration + reviewFunctions + checks + recoveryChecks + cycleFixture
           + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });

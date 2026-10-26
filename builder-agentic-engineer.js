@@ -28,7 +28,7 @@ const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v13';
+const PROMPT_VERSION = 'agentic-engineer-v14';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -263,7 +263,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     ATLAS_RESEARCH_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
-    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it, so Builder can re-scope. Never edit builder-path-policy.js or any guard to get around it.',
+    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
@@ -1349,6 +1349,7 @@ async function runAgenticEngineer({
   const inputKey = crypto.createHash('sha256').update(JSON.stringify({
     task: job.task_description, seed: seedPatch?.artifact_id ?? null, inputArtifactIds,
     code_review_revision: job.code_review_revision?.approval_id ?? null,
+    implementation_recovery: job.code_review_revision?.recovery_id ?? null,
   })).digest('hex');
   const checkpoint = engineerCheckpoint({ workspaceRoot, job, step, lane, inputKey });
   const saved = checkpoint.load();
@@ -1576,7 +1577,9 @@ async function runAgenticEngineer({
         const reason = String(noChangeReason).slice(0, 2000);
         const budgetExhausted = classifyNoChange({ reason, turns, transcript, limits });
         if (budgetExhausted) log({ turn: turns, budget_no_change: true });
-        outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? '') };
+        outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? ''),
+          no_change_lane: ['frontend', 'backend'].includes(args.no_change_lane) ? args.no_change_lane : null,
+          no_change_file: typeof args.no_change_file === 'string' ? args.no_change_file : null };
         break;
       }
       const built = buildProposal({
@@ -1706,6 +1709,8 @@ async function runAgenticEngineer({
     ok: outcome.ok,
     error: outcome.ok ? undefined : outcome.error,
     no_change: Boolean(outcome.no_change),
+    no_change_lane: outcome.no_change_lane ?? null,
+    no_change_file: outcome.no_change_file ?? null,
     // The next attempt starts from this map instead of from nothing (see classifyNoChange).
     budget_exhausted: Boolean(outcome.budget_exhausted),
     resume_hints: outcome.budget_exhausted ? { ...readingMap(transcript), conclusion: String(outcome.summary || outcome.error || '').slice(0, 1500), turns_used: turns, lessons: lessons.slice(0, 3) } : null,

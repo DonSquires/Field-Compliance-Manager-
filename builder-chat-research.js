@@ -224,7 +224,9 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
         : { result: await api('chat', request, 90_000), memoryReceipts: [] };
       if (revision) return {
         revision, model,
-        reply: revision.kind === 'implementation'
+        reply: revision.kind === 'recovery'
+          ? 'I prepared recovery for the existing failed correction job. Confirm Resume failed implementation on the card to record the recovery and retry this same job. Attempt counts and history remain; fresh verification, security and human review are still required. Nothing is approved or deployed.'
+          : revision.kind === 'implementation'
           ? 'I prepared implementation corrections for the existing Builder job. Confirm Request implementation changes on the card to deliver them. This keeps the same job and specification, invalidates the old review, reruns implementation checks and security, and requires fresh human review. Nothing is approved or deployed.'
           : 'I prepared review feedback for the existing Builder job. Confirm Request specification revision on the card to send it. This does not create a duplicate job, approve the specification or start implementation.',
         research: {

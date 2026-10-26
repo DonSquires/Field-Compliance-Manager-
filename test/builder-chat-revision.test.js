@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { prepareSpecRevision, prepareCodeChanges } = require('../builder-chat-revision');
+const { prepareSpecRevision, prepareCodeChanges, prepareImplementationRecovery } = require('../builder-chat-revision');
 const { pmChatWithMemory } = require('../builder-chat-memory');
 
 const JOB = '11111111-1111-4111-8111-111111111111';
@@ -79,4 +79,25 @@ test('native code changes prepare only a card, and independent QA cannot dispatc
   assert.equal(outcome.proposal, undefined);
   assert.deepEqual(outcome.memoryReceipts, []);
   await assert.rejects(pmChatWithMemory({ ...input, allowHandoff: false }), /no other tools/);
+});
+
+test('recovery pins a failed same-thread correction without dispatch or private transfer', async () => {
+  const db = fixture();
+  const original = db.from;
+  db.from = table => ['builder_jobs', 'builder_job_steps'].includes(table) ? {
+    select() { return this; }, eq() { return this; },
+    async limit() { return { data: table === 'builder_jobs'
+      ? [{ id: JOB, status: 'failed', target_sha: 'a'.repeat(40), updated_at: '2026-10-26T10:30:00Z', code_review_revision: { approval_id: 'review' } }]
+      : [{ id: 'failed-step', step_id: 'frontend_implementation', status: 'failed' }], error: null }; },
+  } : original(table);
+  const card = await prepareImplementationRecovery(ARGS, MESSAGE, db);
+  assert.equal(card.kind, 'recovery');
+  assert.equal(card.failed_step_id, 'failed-step');
+  assert.equal(card.job_updated_at, '2026-10-26T10:30:00Z');
+  assert.equal(card.approval_id, 'review');
+  const input = { message: MESSAGE, supabase: db, request: {},
+    api: async () => ({ message: { tool_calls: [{ function: { name: 'request_builder_implementation_recovery', arguments: ARGS } }] } }) };
+  assert.equal((await pmChatWithMemory({ ...input, allowHandoff: true })).revision.kind, 'recovery');
+  await assert.rejects(pmChatWithMemory({ ...input, allowHandoff: false }), /no other tools/);
+  await assert.rejects(prepareImplementationRecovery(ARGS, MESSAGE, fixture()), /failed implementation-correction/);
 });

@@ -41,6 +41,28 @@ These observations are dated evidence, not permanent health assertions.
 
 ### Same-job implementation corrections (2026-10-26)
 
+Second-cycle UI acceptance exposed a routing/recovery gap: frontend correctly
+declined a backend-owned fix, but a narrow text matcher missed its lane-boundary
+wording and terminally failed the job before backend ran. PM UI turn
+`b259f85c-b175-4047-9bfc-8a9e6bbb682e` reported the gap without claiming a
+recovery. Owner selected same-job recovery plus lane routing, not a duplicate.
+The new native recovery card pins the failed author step/version and requires
+owner confirmation; only idle unpublished correction-author failures without
+a patch before checks qualify. Preserve attempts, source, seeds and history.
+Structured no-change routing names the sibling lane and an allowed source
+file; the observed legacy lane-boundary response is also recognized. A
+recovery receipt invalidates saved author state but proves neither a repair
+nor successful fresh verification. Deployment and actual UI recovery remain
+pending until the protected release and glass-test gates pass.
+
+Local recovery validation: full runtime suite passed (1,821 passed, 11
+intentional skips); the exact PostgreSQL CI entry passed all eight tests,
+including actual recovery authorization, source consent, reviewer scope,
+stale/published/active refusal, missing-patch/downstream guards, replay and
+preserved job/target/seeds/attempts. Eighteen UI tests, six desktop/mobile
+confirmation-and-reload workflows, web/browser type checks and production build
+passed. None of these are production recovery or underlying repair acceptance.
+
 Release #239 and generated catalog #240 completed as
 `586980876e2d56fbf7b7450e3097d94a23d89210`: durable pointer, healthy runtime,
 matching live schema and Vercel success verified. The original partial-success
