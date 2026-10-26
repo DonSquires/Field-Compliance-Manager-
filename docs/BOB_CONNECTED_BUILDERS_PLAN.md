@@ -39,6 +39,40 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Same-job implementation corrections (2026-10-26)
+
+Release #239 and generated catalog #240 completed as
+`586980876e2d56fbf7b7450e3097d94a23d89210`: durable pointer, healthy runtime,
+matching live schema and Vercel success verified. The original partial-success
+job remains at human code review, unapproved. Actual UI QA advised against
+approval: its proposed receipt reader filters the owner row's sequence rather
+than finding the later persisted tool receipt. A mocked successful read does
+not establish integration correctness. PM truthfully reported that later-stage
+feedback had not been delivered; the initial-only revision tool must not rewind
+this job.
+
+Owner selected a governed same-job correction loop. Connect a native
+implementation-correction card to owner confirmation, exact pending
+implementation review/target and idle unpublished job. Preserve the
+specification/task/target/attempts and audit; supersede old implementation
+evidence and approval. Bind each lane's exact reviewed patch as its
+integrity-checked seed, deliver reported feedback to agentic and one-shot
+implementation/repair prompts, invalidate completed checkpoints for the new
+review cycle, and exclude superseded runs from aggregate verification/release.
+Require fresh verification, security and human review. Test authorization,
+stale/active/published refusal, retry identity, scope-skipped lanes, seed
+integrity, prompt delivery, review lifecycle and desktop/mobile receipt reload.
+Then use the actual production UI to let PM send the original job's correction;
+Bob must author and demonstrate the underlying fix. Local tests or a delivered
+feedback receipt alone do not prove that repair.
+
+Local acceptance: 140 affected runtime/database tests, 16 PM UI tests,
+eight desktop/mobile browser workflows, web/browser type checks and production
+build passed. Real Ollama Cloud Kimi K2.7 Code selected
+`request_builder_code_changes` with validated arguments in one synthetic
+no-write probe. These are pre-release checks, not production feedback delivery
+or a working underlying repair.
+
 ### Same-job specification feedback (2026-10-26)
 
 PR #234 deployed as `637775a1`; actual UI message

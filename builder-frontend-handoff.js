@@ -7,36 +7,13 @@ const { executeWorker } = require('./worker-executor');
 const { classifyMissingEvidence, classifyVerificationFailure } = require('./builder-verification-outcome');
 const { parseFrontendProposal } = require('./supabase/functions/_shared/builder-frontend-engineer');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
+const { downloadVerifiedArtifact } = require('./builder-artifact-read');
 
 function verifyRepositorySnapshot(sourceDir, targetSha) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   const status = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   if (head !== targetSha) throw new Error('worker repository does not match target SHA');
   if (status) throw new Error('worker repository must be a clean checkout');
-}
-
-async function downloadVerifiedArtifact(supabase, artifactId, jobId, expectedType) {
-  const { data: artifact, error } = await supabase
-    .from('builder_artifacts')
-    .select('id, job_id, step_id, artifact_type, status, storage_location, checksum')
-    .eq('id', artifactId)
-    .eq('job_id', jobId)
-    .single();
-  if (error || !artifact || artifact.artifact_type !== expectedType || artifact.status !== 'final') {
-    throw new Error(`final ${expectedType} artifact is unavailable`);
-  }
-  const prefix = 'supabase_storage://builder-artifacts/';
-  if (!artifact.storage_location?.startsWith(prefix) || !/^[a-f0-9]{64}$/.test(artifact.checksum || '')) {
-    throw new Error('artifact provenance is invalid');
-  }
-  const { data: object, error: downloadError } = await supabase.storage
-    .from('builder-artifacts')
-    .download(artifact.storage_location.slice(prefix.length));
-  if (downloadError || !object) throw new Error('artifact could not be downloaded');
-  const bytes = Buffer.from(await object.arrayBuffer());
-  const checksum = crypto.createHash('sha256').update(bytes).digest('hex');
-  if (checksum !== artifact.checksum) throw new Error('artifact integrity check failed');
-  return { artifact, bytes };
 }
 
 async function claimFrontendWorker(supabase, input) {

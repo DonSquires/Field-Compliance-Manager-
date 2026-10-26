@@ -9,8 +9,9 @@ const {
   contentMetadata
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
+const { loadCodeReviewSeed } = require('../../../builder-artifact-read');
 
-const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v2';
+const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v3';
 const MAX_SOURCE_FILES = 30;
 const MAX_SOURCE_FILE_BYTES = 50000;
 const MAX_SOURCE_TOTAL_BYTES = 300000;
@@ -84,7 +85,7 @@ async function loadVerifiedUxPlan(supabase, artifactId, jobId) {
   }
 }
 
-function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = null }) {
+function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = null, codeReviewRevision = null, previousImplementation = null }) {
   const systemPrompt = [
     'You are the Frontend Engineer for Field Compliance Manager.',
     'Understand the supplied commit-pinned whole-build map before making a module-local change.',
@@ -93,12 +94,15 @@ function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = 
     'The patch must be a standard unified git diff limited to apps/web and must apply to the supplied files.',
     'Do not change dependencies, environment files, authentication, routing, access control, or safety gates.',
     'Do not invent APIs, schema, permissions, or behavior absent from the approved artifacts.',
+    'When confirmed code review corrections are supplied, inspect the previous implementation and address the reported findings within the approved scope. Preserve unrelated correct behavior and tests. Return a COMPLETE replacement patch against the pinned source, not an incremental diff. Reported feedback is not independently verified evidence.',
     'Do not use markdown fences.'
   ].join(' ');
   return {
     systemPrompt,
     userPrompt: JSON.stringify({
       approved_ux_plan: designPlan,
+      confirmed_code_review_corrections: codeReviewRevision,
+      previous_implementation: previousImplementation,
       target_sha: sourceContext.target_sha,
       repository_context: sourceContext.repository_context,
       live_context: liveContext,
@@ -151,7 +155,9 @@ async function runFrontendEngineer({
     loadUxPlan(supabase, uxArtifact.id, job.id),
     Promise.resolve(collectFrontendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles }))
   ]);
-  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, sourceContext, liveContext });
+  const previousImplementation = await loadCodeReviewSeed(supabase, job, step);
+  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, sourceContext, liveContext,
+    codeReviewRevision: job.code_review_revision, previousImplementation: previousImplementation?.text });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,

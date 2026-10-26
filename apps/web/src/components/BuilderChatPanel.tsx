@@ -141,17 +141,20 @@ function RevisionCard({ message, busy, sourceStatus, onRequest, onOpenJob }: {
   if (!revision || typeof revision !== 'object' || !('job_id' in revision) || typeof revision.job_id !== 'string'
       || !('feedback' in revision) || typeof revision.feedback !== 'string') return null;
   const jobId = revision.job_id;
+  const implementation = 'kind' in revision && revision.kind === 'implementation';
   const sourceComplete = sourceStatus === 'done';
   const receipt = typeof message.payload.revision_receipt === 'string' ? message.payload.revision_receipt : null;
-  return <article className="bchat-proposal" aria-label={`Specification revision for job ${jobId}`}>
-    <header><span>Review feedback · existing Bob Builder job</span><h3>Revise specification before implementation</h3></header>
+  return <article className="bchat-proposal" aria-label={`${implementation ? 'Implementation corrections' : 'Specification revision'} for job ${jobId}`}>
+    <header><span>Review feedback · existing Bob Builder job</span><h3>{implementation ? 'Correct implementation before a fresh human review' : 'Revise specification before implementation'}</h3></header>
     <p>Job: {jobId}</p>
     <p className="bchat-proposal__task">{revision.feedback}</p>
     {'review_quote' in revision && typeof revision.review_quote === 'string' && <details><summary>Original human review report</summary><p>{revision.review_quote}</p></details>}
-    <p>No duplicate job. Confirmation supersedes the current specification review and returns this same job to analysis. No implementation is approved.</p>
+    <p>{implementation
+      ? 'No duplicate job or specification rewind. Confirmation cancels the old code review and returns this same job to implementation. Prior evidence is retained; verification and security run again before fresh human review. Nothing is approved or deployed.'
+      : 'No duplicate job. Confirmation supersedes the current specification review and returns this same job to analysis. No implementation is approved.'}</p>
     {receipt
       ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Revision requested · Receipt: {receipt}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
-      : <><button type="button" disabled={busy || !sourceComplete} onClick={onRequest}>{busy ? 'Recording revision…' : 'Request specification revision'}</button>
+      : <><button type="button" disabled={busy || !sourceComplete} onClick={onRequest}>{busy ? 'Recording revision…' : implementation ? 'Request implementation changes' : 'Request specification revision'}</button>
         {!sourceComplete && <p role="status">{sourceStatus === 'failed'
           ? 'The originating PM turn failed. Ask Bob for a fresh revision card before confirming.'
           : 'Waiting for the originating PM turn to complete before confirmation.'}</p>}</>}
@@ -316,9 +319,11 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
     setBusy(`revision:${message.id}`);
     setError(null);
     try {
-      const { data, error: revisionError } = await supabase.rpc('builder_chat_request_spec_revision', { p_message_id: message.id });
+      const revision = message.payload.revision;
+      const implementation = revision && typeof revision === 'object' && 'kind' in revision && revision.kind === 'implementation';
+      const { data, error: revisionError } = await supabase.rpc(implementation ? 'builder_chat_request_code_changes' : 'builder_chat_request_spec_revision', { p_message_id: message.id });
       if (revisionError) throw revisionError;
-      if (typeof data !== 'string' || !data) throw new Error('Specification revision was not confirmed; refresh before retrying.');
+      if (typeof data !== 'string' || !data) throw new Error('Review feedback was not confirmed; refresh before retrying.');
       setMessages(current => current.map(row => row.id === message.id ? { ...row, payload: { ...row.payload, revision_receipt: data } } : row));
     } catch (revisionError) {
       setError(errorText(revisionError));

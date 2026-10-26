@@ -10,7 +10,7 @@ const {
 } = require('./builder-frontend-engineer');
 const { redactLog } = require('../../../frontend-worker');
 
-const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v2';
+const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v3';
 
 function sanitizeVerificationFailure(verification) {
   const commands = Array.isArray(verification?.commands) ? verification.commands : [];
@@ -73,17 +73,19 @@ async function loadRepairInputs({ supabase, job, uxArtifact, failedPatchArtifact
   return { uxPlan: ux.designPlan, failedProposal, failure };
 }
 
-function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext, liveContext = null }) {
+function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext, liveContext = null, codeReviewRevision = null }) {
   return {
     systemPrompt: [
       'You are repairing a failed frontend patch for Field Compliance Manager.',
       'Return a complete replacement patch, not an incremental patch against the failed attempt.',
       'Use only the approved UX plan, commit-pinned source, prior proposal, and sanitized failure evidence.',
+      'Retain and address confirmed code review corrections when supplied; reported findings still require verification.',
       'Do not change dependencies, environment, authentication, routing, access control, safety gates, or backend files.',
       'Return one JSON object with summary, patch, changed_files, and tests. Do not use markdown fences.'
     ].join(' '),
     userPrompt: JSON.stringify({
       approved_ux_plan: uxPlan,
+      confirmed_code_review_corrections: codeReviewRevision,
       failed_proposal: failedProposal,
       verification_failure: failure,
       target_sha: sourceContext.target_sha,
@@ -131,7 +133,8 @@ async function runFrontendRepair({
     failedProposal: inputs.failedProposal,
     failure: sanitizedFailure,
     sourceContext,
-    liveContext
+    liveContext,
+    codeReviewRevision: job.code_review_revision,
   });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,

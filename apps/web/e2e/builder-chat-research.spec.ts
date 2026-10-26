@@ -139,7 +139,7 @@ test('PM investigation card requires owner confirmation and retains a persisted 
     expect(errors).toEqual([]);
 });
 
-test('existing-job revision needs confirmation, never creates another job and survives reload', async ({ page, isMobile }) => {
+for (const implementation of [false, true]) test(`existing-job ${implementation ? 'implementation corrections' : 'specification revision'} need confirmation, never create another job and survive reload`, async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
   const cardId = '77777777-7777-4777-8777-777777777777';
@@ -153,10 +153,10 @@ test('existing-job revision needs confirmation, never creates another job and su
   }, {
     id: cardId, seq: 2, thread_id: THREAD, role: 'bob', kind: 'proposal', status: 'done',
     content: 'Please revise the current specification.', created_at: '2026-10-26T00:00:00Z',
-    payload: { message_id: 'review-message', revision: { job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
+    payload: { message_id: 'review-message', revision: { ...(implementation ? { kind: 'implementation' } : {}), job_id: 'existing-job', feedback: 'Check the reported current workflow and distinguish hypotheses from evidence before implementation.' },
       ...(confirmed ? { revision_receipt: receipt } : {}) },
   }] }));
-  await page.route('**/rest/v1/rpc/builder_chat_request_spec_revision', route => {
+  await page.route(`**/rest/v1/rpc/${implementation ? 'builder_chat_request_code_changes' : 'builder_chat_request_spec_revision'}`, route => {
     expect(route.request().postDataJSON()).toEqual({ p_message_id: cardId });
     confirmed++;
     return route.fulfill({ json: receipt });
@@ -172,15 +172,16 @@ test('existing-job revision needs confirmation, never creates another job and su
   };
   await signInAsAdmin(page, '/admin/builder');
   const chat = await open();
-  await expect(chat.getByText('Revise specification before implementation')).toBeVisible();
+  await expect(chat.getByText(implementation ? 'Correct implementation before a fresh human review' : 'Revise specification before implementation')).toBeVisible();
   expect(confirmed).toBe(0);
   await expect(chat.getByRole('button', { name: 'Create job', exact: true })).toHaveCount(0);
-  await chat.getByRole('button', { name: 'Request specification revision', exact: true }).click();
+  const confirmLabel = implementation ? 'Request implementation changes' : 'Request specification revision';
+  await chat.getByRole('button', { name: confirmLabel, exact: true }).click();
   await expect(chat.getByText(`Revision requested · Receipt: ${receipt}`)).toBeVisible();
   await page.reload();
   const restored = await open();
   await expect(restored.getByText(`Revision requested · Receipt: ${receipt}`)).toBeVisible();
-  await expect(restored.getByRole('button', { name: 'Request specification revision', exact: true })).toHaveCount(0);
+  await expect(restored.getByRole('button', { name: confirmLabel, exact: true })).toHaveCount(0);
   expect(await restored.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   expect(confirmed).toBe(1);
   expect(errors).toEqual([]);
