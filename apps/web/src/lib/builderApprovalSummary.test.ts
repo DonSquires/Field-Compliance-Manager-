@@ -23,6 +23,17 @@ describe('builder approval summary', () => {
     expect(acceptanceCoverage({ implementation_acceptance: { report: {
       ...report, passed: true, blockers: [], requirements: [{ requirement_id: 'DR-1', status: 'covered' }]
     } } }).supplied).toBe(true);
+    for (const requirements of [
+      [{ status: 'covered' }],
+      [{ requirement_id: '', status: 'covered' }],
+      [{ requirement_id: 'DR-1', status: 'covered' }, { requirement_id: 'DR-1', status: 'covered' }],
+      [{ requirement_id: 'x'.repeat(101), status: 'covered' }],
+      Array.from({ length: 101 }, (_, index) => ({ requirement_id: `DR-${index}`, status: 'covered' })),
+    ]) {
+      expect(acceptanceCoverage({ implementation_acceptance: { report: {
+        ...report, passed: true, blockers: [], requirements,
+      } } }).supplied).toBe(false);
+    }
   });
   it('turns a product specification into a plain plan', () => {
     const summary = summarizeSpecification(JSON.stringify(spec));

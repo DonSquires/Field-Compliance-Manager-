@@ -74,5 +74,16 @@ test('actual projection preserves covered status, rejects malformed receipts and
     { ...report, requirements: [] },
     { ...report, blockers: [null] },
     { ...report, requirements: [{ status: 'invented' }] },
-  ]) assert.equal(acceptanceCoverage(projectReport(malformed)).supplied, false);
+    { ...report, requirements: [{ status: 'covered' }] },
+    { ...report, requirements: [{ requirement_id: '   ', status: 'covered' }] },
+    { ...report, requirements: [{ requirement_id: 7, status: 'covered' }] },
+    { ...report, requirements: [report.requirements[0], report.requirements[0]] },
+    { ...report, requirements: [{ requirement_id: 'x'.repeat(101), status: 'covered' }] },
+    { ...report, requirements: [{ requirement_id: `${'x'.repeat(100)}a`, status: 'covered' },
+      { requirement_id: `${'x'.repeat(100)}b`, status: 'covered' }] },
+  ]) {
+    const projected = projectReport(malformed);
+    assert.equal(projected?.implementation_acceptance.report.passed ?? false, false);
+    assert.equal(acceptanceCoverage(projected).supplied, false);
+  }
 });

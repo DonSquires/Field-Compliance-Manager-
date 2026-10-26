@@ -71,8 +71,12 @@ export function acceptanceCoverage(inputContext: unknown): AcceptanceCoverage {
   const report = record(receipt.report);
   const requirements = report.requirements;
   const blockers = Array.isArray(report.blockers) ? report.blockers.filter((item): item is string => typeof item === 'string') : [];
+  const ids = Array.isArray(requirements) ? requirements.map(item => record(item).requirement_id) : [];
+  const exactIds = ids.every(id => typeof id === 'string' && id.trim() !== '' && id.length <= 100)
+    && new Set(ids).size === ids.length;
   const supplied = report.version === 1 && report.passed === true && Array.isArray(report.blockers)
     && report.blockers.length === 0 && Array.isArray(requirements) && requirements.length > 0
+    && requirements.length <= 100 && exactIds
     && requirements.every(item => record(item).status === 'covered');
   return { supplied, blockers: supplied ? [] : blockers.length ? blockers : [
     'Whole-job acceptance coverage is missing or incomplete. Run to gate to reconcile the task before approving.'

@@ -70,10 +70,13 @@ function acceptanceSummary(value: unknown) {
   const report = object(object(object(value).implementation_acceptance).report);
   if (report.version !== 1 || typeof report.passed !== 'boolean'
     || !Array.isArray(report.blockers) || !Array.isArray(report.requirements)) return undefined;
+  const ids = report.requirements.map(value => object(value).requirement_id);
+  const exactIds = ids.every(id => typeof id === 'string' && id.trim() !== '' && id.length <= 100)
+    && new Set(ids).size === ids.length;
   return {
     implementation_acceptance: {
       report: {
-        version: 1, passed: report.passed && report.blockers.length === 0
+        version: 1, passed: report.passed && report.blockers.length === 0 && exactIds
           && report.requirements.length > 0 && report.requirements.length <= 100
           && report.requirements.every(value => object(value).status === 'covered'),
         blockers: strings(report.blockers, 300).map(item => item.slice(0, 1000)),
