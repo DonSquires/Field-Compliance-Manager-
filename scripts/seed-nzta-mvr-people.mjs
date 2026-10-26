@@ -411,7 +411,6 @@ BEGIN
       JOIN public.canonical_vehicles cv ON cv.id = c.canonical_vehicle_id
       WHERE c.organization_id = '${RM_ORGANIZATION_ID}'::uuid
         AND cv.plate_number = public.normalize_plate_number(s->'approved'->>'plate_number');
-      BEGIN
         IF v_newer IS NOT NULL AND v_newer > v_query THEN
           v_result := public.review_nzta_mvr_owner_evidence(
             v_doc,
@@ -439,7 +438,7 @@ BEGIN
               RAISE;
             END IF;
           END;
-        END;
+        END IF;
         v_vehicle := (v_result->>'canonical_vehicle_id')::uuid;
         v_linked := true;
     EXCEPTION WHEN OTHERS THEN

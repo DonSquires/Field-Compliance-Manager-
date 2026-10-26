@@ -152,11 +152,17 @@ BEGIN
   UPDATE public.entity_links link
   SET active = false,
       ends_at = coalesce(link.ends_at, clock_timestamp()),
-      evidence = link.evidence || jsonb_build_object(
-        'superseded_by_reconciliation', true,
-        'replaced_by_owner_history', true,
-        'reconciled_at', clock_timestamp()
-      ),
+      evidence = link.evidence || CASE WHEN EXISTS (
+          SELECT 1 FROM public.vehicle_identity_checks seen
+          WHERE seen.organization_id = p_organization_id
+            AND seen.canonical_vehicle_id = p_canonical_vehicle_id
+            AND seen.canonical_person_id = link.from_id
+            AND seen.relationship = 'registered_person_at_check'
+        ) THEN jsonb_build_object(
+          'superseded_by_reconciliation', true,
+          'replaced_by_owner_history', true,
+          'reconciled_at', clock_timestamp()
+        ) ELSE jsonb_build_object('reconciled_at', clock_timestamp()) END,
       updated_at = clock_timestamp()
   WHERE link.organization_id = p_organization_id
     AND link.from_type = 'person'
@@ -567,7 +573,8 @@ BEGIN
       FROM jsonb_array_elements(coalesce(link.evidence->'observation_ids', '[]'::jsonb)) item
     ), ARRAY[]::uuid[]),
     v_full,
-    link.created_at, user_profile.display_name, link.ends_at,
+    link.created_at, user_profile.display_name,
+    CASE WHEN v_full OR NOT (link.evidence ? 'nzta_owner_history_first_check_id') THEN link.ends_at END,
     CASE WHEN v_full THEN nullif(link.evidence->>'source_checked_at', '')::timestamptz END
   FROM public.entity_links link
   LEFT JOIN public.person_records person_record

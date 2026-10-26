@@ -97,6 +97,7 @@ BEGIN
   IF p_issued_date_basis IS NULL OR p_issued_date_basis NOT IN ('document', 'register', 'document_created') THEN
     RAISE EXCEPTION 'Unsupported issued date basis %', p_issued_date_basis;
   END IF;
+  IF p_expires_at IS NOT NULL AND p_notice_type IN ('permit_refusal', 'contact_request') THEN RAISE EXCEPTION 'Letters do not expire'; END IF;
   IF p_expires_at IS NOT NULL AND p_expires_at < p_issued_at THEN RAISE EXCEPTION 'A notice cannot expire before it is issued'; END IF;
   IF v_subject IS NULL AND p_canonical_person_id IS NULL THEN RAISE EXCEPTION 'The person named on the notice is required'; END IF;
   IF nullif(trim(coalesce(p_source_document_name, '')), '') IS NULL OR nullif(trim(coalesce(p_source_reference, '')), '') IS NULL THEN
