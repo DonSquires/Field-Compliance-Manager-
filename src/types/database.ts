@@ -42666,6 +42666,7 @@ export type Database = {
           recorded_by_name: string
           relationship: string
           source: string
+          source_checked_at: string
         }[]
       }
       get_vehicle_subject_details_for_agreement: {
@@ -48805,6 +48806,14 @@ export type Database = {
         }
         Returns: Json
       }
+      review_nzta_mvr_owner_evidence: {
+        Args: {
+          p_approved_fields: Json
+          p_identity_document_id: string
+          p_review_notes: string
+        }
+        Returns: Json
+      }
       review_observation_person_mention: {
         Args: {
           p_action: string
@@ -51100,6 +51109,10 @@ export type Database = {
         Returns: number
       }
       sync_my_profile_email: { Args: never; Returns: string }
+      sync_nzta_registered_owner_history: {
+        Args: { p_canonical_vehicle_id: string; p_organization_id: string }
+        Returns: Json
+      }
       test_bob_signing_config: { Args: never; Returns: Json }
       text_soundex: { Args: { "": string }; Returns: string }
       timesheet_dispatch_pay_review_blocker: {
