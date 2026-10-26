@@ -42,12 +42,14 @@ test('binds an upload to the cached screenshot digest and size', async () => {
   assert.equal(screenshotContentMatches(bytes, { ...expected, sha: '0'.repeat(64) }), false);
 });
 
-test('leaves shared-vehicle conflicts in the existing pending-review path', async () => {
+test('confirms the person on shared-vehicle conflicts while holding vehicle facts for review', async () => {
   const { screenshotsSql } = await load();
   const sql = screenshotsSql([], { dryRun: false });
   assert.equal((sql.match(/public\.review_nzta_mvr_identity_evidence/g) || []).length, 1);
-  assert.doesNotMatch(sql, /approved_vehicle_facts_held/);
-  assert.match(sql, /EXCEPTION WHEN OTHERS THEN\s+v_outcome := 'held_for_review'/);
+  assert.equal((sql.match(/public\.review_nzta_mvr_owner_evidence/g) || []).length, 3);
+  assert.match(sql, /EXCEPTION WHEN OTHERS THEN\s+IF SQLERRM IN \(/);
+  assert.match(sql, /v_outcome := 'owner_approved_vehicle_facts_pending'/);
+  assert.match(sql, /ELSE\s+RAISE;\s+END IF;/);
 });
 
 test('parses staff-typed screenshot names and rejects impossible dates', async () => {

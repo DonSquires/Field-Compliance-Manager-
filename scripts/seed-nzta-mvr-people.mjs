@@ -330,9 +330,9 @@ END $seed$;`;
 }
 
 /**
- * Register, approve and (for each plate's latest screenshot) link the owner. Screenshots
- * run oldest first so later NZTA checks win the canonical vehicle facts, as they did in
- * real life. A failed approval leaves the evidence in the admin review queue, not lost.
+ * Register source evidence, review owner identity independently from disputed
+ * vehicle facts, then rebuild registered-owner links from source check time.
+ * Screenshots run oldest first so the latest check remains canonical.
  */
 export function screenshotsSql(screenshots, { dryRun }) {
   return `CREATE TEMP TABLE IF NOT EXISTS nzta_seed_people (key_hash text PRIMARY KEY, person_record_id uuid, created boolean, error text);
@@ -340,13 +340,55 @@ CREATE TEMP TABLE IF NOT EXISTS nzta_seed_results (sha text PRIMARY KEY, outcome
 DO $seed$
 DECLARE s jsonb; v_person uuid; v_path text; v_doc uuid; v_query timestamptz; v_newer timestamptz; v_vehicle uuid;
   v_result jsonb; v_outcome text; v_error text; v_linked boolean;
+  v_existing_person uuid; v_document_state text;
 BEGIN
   FOR s IN SELECT * FROM jsonb_array_elements(${dollarQuote(JSON.stringify(screenshots), 'seed_shots')}) LOOP
     v_doc := NULL; v_outcome := NULL; v_error := NULL; v_linked := false;
     v_person := coalesce((s->>'person_record_id')::uuid, (SELECT person_record_id FROM nzta_seed_people WHERE key_hash = s->>'key_hash'));
-    IF EXISTS (SELECT 1 FROM public.evidence_items e WHERE e.organization_id = '${RM_ORGANIZATION_ID}'::uuid
-        AND e.module_key = 'identity_registry' AND e.sha256_hash = s->>'sha') THEN
-      INSERT INTO nzta_seed_results VALUES (s->>'sha', 'already_present', v_person, NULL, false, NULL) ON CONFLICT (sha) DO NOTHING;
+    SELECT document.id, document.person_record_id, document.review_state
+      INTO v_doc, v_existing_person, v_document_state
+    FROM public.evidence_items evidence
+    JOIN public.person_identity_documents document
+      ON document.evidence_item_id = evidence.id
+     AND document.organization_id = evidence.organization_id
+    WHERE evidence.organization_id = '${RM_ORGANIZATION_ID}'::uuid
+      AND evidence.module_key = 'identity_registry'
+      AND evidence.sha256_hash = s->>'sha'
+      AND document.document_kind = 'nzta_mvr_record'
+    ORDER BY document.created_at DESC
+    LIMIT 1;
+    IF v_doc IS NOT NULL THEN
+      IF v_person IS NULL THEN v_person := v_existing_person; END IF;
+      IF v_person IS DISTINCT FROM v_existing_person THEN
+        v_outcome := 'held_existing_person_mismatch';
+        v_error := 'Existing evidence is linked to a different tenant person record.';
+      ELSE
+        SELECT check_row.canonical_vehicle_id
+          INTO v_vehicle
+        FROM public.vehicle_identity_checks check_row
+        WHERE check_row.identity_document_id = v_doc;
+        IF v_vehicle IS NOT NULL THEN
+          PERFORM public.sync_nzta_registered_owner_history('${RM_ORGANIZATION_ID}'::uuid, v_vehicle);
+          v_outcome := 'already_present';
+          v_linked := true;
+        ELSIF v_document_state = 'manual_review_required' THEN
+          v_query := (s->>'query_local')::timestamp AT TIME ZONE 'Pacific/Auckland';
+          v_result := public.review_nzta_mvr_owner_evidence(
+            v_doc,
+            (s->'approved') || jsonb_build_object('query_completed_at', v_query),
+            '${SOURCE_RULING} Owner identity reviewed; vehicle facts remain pending.'
+          );
+          v_vehicle := (v_result->>'canonical_vehicle_id')::uuid;
+          v_outcome := 'owner_approved_vehicle_facts_pending';
+          v_linked := true;
+        ELSE
+          v_outcome := 'held_document_without_owner_check';
+          v_error := 'Existing document is not pending and has no source-time owner check.';
+        END IF;
+      END IF;
+      INSERT INTO nzta_seed_results VALUES (s->>'sha', v_outcome, v_person, v_doc, v_linked, v_error)
+      ON CONFLICT (sha) DO UPDATE SET outcome = excluded.outcome, person_record_id = excluded.person_record_id,
+        identity_document_id = excluded.identity_document_id, owner_linked = excluded.owner_linked, error = excluded.error;
       CONTINUE;
     END IF;
     IF v_person IS NULL THEN
@@ -367,32 +409,46 @@ BEGIN
       v_doc := (v_result->>'identity_document_id')::uuid;
       SELECT max(c.checked_at) INTO v_newer FROM public.vehicle_identity_checks c
       JOIN public.canonical_vehicles cv ON cv.id = c.canonical_vehicle_id
-      WHERE cv.plate_number = public.normalize_plate_number(s->'approved'->>'plate_number');
-      IF v_newer IS NOT NULL AND v_newer > v_query THEN
-        v_outcome := 'held_newer_vehicle_check';
-      ELSE
-        BEGIN
+      WHERE c.organization_id = '${RM_ORGANIZATION_ID}'::uuid
+        AND cv.plate_number = public.normalize_plate_number(s->'approved'->>'plate_number');
+      BEGIN
+        IF v_newer IS NOT NULL AND v_newer > v_query THEN
+          v_result := public.review_nzta_mvr_owner_evidence(
+            v_doc,
+            (s->'approved') || jsonb_build_object('query_completed_at', v_query),
+            '${SOURCE_RULING} Historical owner identity reviewed; newer vehicle facts are preserved.'
+          );
+          v_outcome := 'owner_approved_vehicle_facts_pending';
+        ELSE
+          BEGIN
           v_result := public.review_nzta_mvr_identity_evidence(v_doc, 'approve',
             (s->'approved') || jsonb_build_object('query_completed_at', v_query), '${SOURCE_RULING}');
           v_outcome := 'approved';
-          v_vehicle := (v_result->>'canonical_vehicle_id')::uuid;
-          IF (s->>'current_owner')::boolean AND NOT EXISTS (
-            SELECT 1 FROM public.vehicle_identity_checks c
-            WHERE c.organization_id = '${RM_ORGANIZATION_ID}'::uuid AND c.canonical_vehicle_id = v_vehicle
-              AND c.identity_document_id <> v_doc AND c.checked_at > v_query) THEN
-            PERFORM public.record_vehicle_person('${RM_ORGANIZATION_ID}'::uuid, v_vehicle, v_person, NULL, 'owner', 'nzta_mvr',
-              'Latest R&M NZTA Motochek screenshot for this plate. ${SOURCE_RULING}');
-            v_linked := true;
-          END IF;
-        EXCEPTION WHEN OTHERS THEN
-          v_outcome := 'held_for_review';
-          v_error := left(SQLERRM, 200);
+          EXCEPTION WHEN OTHERS THEN
+            IF SQLERRM IN (
+              'Shared canonical vehicle facts require grand master review; organization notes can still be updated',
+              'Conflicting canonical vehicle identifiers require grand master review'
+            ) THEN
+              v_result := public.review_nzta_mvr_owner_evidence(
+                v_doc,
+                (s->'approved') || jsonb_build_object('query_completed_at', v_query),
+                '${SOURCE_RULING} Registered owner confirmed; shared vehicle facts remain pending.'
+              );
+              v_outcome := 'owner_approved_vehicle_facts_pending';
+            ELSE
+              RAISE;
+            END IF;
+          END;
         END;
-      END IF;
+        v_vehicle := (v_result->>'canonical_vehicle_id')::uuid;
+        v_linked := true;
     EXCEPTION WHEN OTHERS THEN
-      v_outcome := 'failed';
+      v_outcome := CASE
+        WHEN SQLERRM LIKE 'Conflicting owners share an NZTA check timestamp%' THEN 'held_owner_history_conflict'
+        WHEN SQLERRM LIKE 'A manually recorded registered owner needs review%' THEN 'held_owner_history_conflict'
+        ELSE 'held_for_review'
+      END;
       v_error := left(SQLERRM, 200);
-      v_doc := NULL;
     END;
     INSERT INTO nzta_seed_results VALUES (s->>'sha', v_outcome, v_person, v_doc, v_linked, v_error)
     ON CONFLICT (sha) DO UPDATE SET outcome = excluded.outcome, identity_document_id = excluded.identity_document_id,
