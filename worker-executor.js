@@ -100,7 +100,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   if (browserProfile) {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755');
     // The Vibe walk runs unreviewed branch code offline: it only ever receives the fixture switches.
-    const forwarded = profile === 'vibe-human-qa' ? ['HUMAN_TEST_LIVE', 'E2E_OFFLINE'] : ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD', 'VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID'];
+    const forwarded = profile === 'vibe-human-qa' ? ['HUMAN_TEST_LIVE', 'E2E_OFFLINE'] : ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD'];
     for (const key of forwarded) {
       if (environment[key]) args.push('--env', key);
     }

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createProductionHumanTestMonitor, evictableProductionStates, resolveVercelProductionDeployment, classifyRun } = require('../builder-production-human-test');
+const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, classifyRun, worstPreflight } = require('../builder-production-human-test');
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -254,4 +254,17 @@ test('retention forgets only old terminal verdicts, never an active SHA', () => 
   assert.ok(evicted.every((state) => state.status === 'passed'));
   assert.ok(evicted.every((state) => state.first_seen_at < '2026-10-01T00:10:00.000Z'));
   assert.deepEqual(evictableProductionStates([{ sha: SHA_A, status: 'retry' }, { sha: SHA_B, status: 'starting' }], 0), []);
+});
+
+test('control-plane live preflight requires the exact settled production SHA and keeps the worst verdict', () => {
+  const sha = 'a'.repeat(40);
+  assert.deepEqual(liveDeploymentPreflight({ status: 'ready', sha }, sha.toUpperCase()), { result: 'matched', sha });
+  assert.equal(liveDeploymentPreflight({ status: 'ready', sha: 'b'.repeat(40) }, sha).result, 'stale');
+  assert.equal(liveDeploymentPreflight({ status: 'settling', state: 'BUILDING', sha }, sha).result, 'stale');
+  assert.equal(liveDeploymentPreflight({ status: 'unavailable', error: 'HTTP 503' }, sha).result, 'unavailable');
+  assert.equal(liveDeploymentPreflight({ status: 'unconfigured' }, sha).result, 'unavailable');
+  assert.equal(liveDeploymentPreflight({ status: 'ready', sha }, 'short').result, 'unverified');
+  assert.equal(worstPreflight('matched', 'stale', 'matched'), 'stale');
+  assert.equal(worstPreflight('matched', null, 'unavailable'), 'unavailable');
+  assert.equal(worstPreflight('matched', 'invented'), 'matched');
 });

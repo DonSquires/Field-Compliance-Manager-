@@ -110,6 +110,16 @@ export class HumanTestSession {
     const token = process.env.VERCEL_TOKEN;
     const projectId = process.env.VERCEL_PROJECT_ID;
     const expectedSha = process.env.HUMAN_TEST_EXPECTED_SHA || process.env.GITHUB_SHA || '';
+    const verifiedSha = String(process.env.HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA || '').toLowerCase();
+    if (!token && verifiedSha) {
+      // Bob's control plane checked Vercel itself so the browser worker never receives Vercel credentials.
+      const hostname = new URL(targetUrl).hostname;
+      const matched = /^[a-f0-9]{40}$/.test(verifiedSha) && verifiedSha === expectedSha.toLowerCase();
+      console.log(`[HUMAN DEPLOYMENT PREFLIGHT] target=${hostname} source=control-plane deployed_sha=${verifiedSha} expected_sha=${expectedSha || 'not supplied'}`);
+      console.log(`[HUMAN DEPLOYMENT PREFLIGHT] result=${matched ? 'matched' : 'stale'} source=control-plane`);
+      if (!matched) this.findings.push({ severity: 'error', message: `Deployment is stale: expected ${expectedSha || 'not supplied'}, serving ${verifiedSha}.`, url: targetUrl, step: this.currentStep });
+      return;
+    }
     if (!token || !projectId) {
       console.log('[HUMAN DEPLOYMENT PREFLIGHT] unverified: VERCEL_TOKEN/VERCEL_PROJECT_ID not supplied');
       if (process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true') {

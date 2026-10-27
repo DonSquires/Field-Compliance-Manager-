@@ -194,15 +194,19 @@ test('human QA forwards only named environment variables without putting values 
       HUMAN_TEST_EXPECTED_SHA: 'a'.repeat(40),
       HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
       HUMAN_TEST_ADMIN_ROUTE: '/admin/builder',
+      HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA: 'a'.repeat(40),
       GRANDMASTER_TEST_PASSWORD: 'not-in-argv',
+      VERCEL_TOKEN: 'not-forwarded',
       VERCEL_PROJECT_ID: 'project-id',
+      VERCEL_TEAM_ID: 'team-id',
     }
   });
   assert.deepEqual(args.filter((value, index) => args[index - 1] === '--env'), [
     'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA',
     'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE',
-    'GRANDMASTER_TEST_PASSWORD', 'VERCEL_PROJECT_ID'
+    'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA', 'GRANDMASTER_TEST_PASSWORD'
   ]);
+  assert.equal(args.some(value => /VERCEL_/.test(value)), false, 'Vercel deployment credentials stay in the control plane');
   assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv') || value.includes('project-id')), false);
   assert.ok(args.includes('--network=bob-workers'));
 });

@@ -26,7 +26,7 @@ function deploymentCommitSha(deployment) {
 // What a person is served is the deployment the production hostname is aliased to, not merely the
 // newest production deployment (a newer one may have failed or been cancelled). While a newer
 // production deployment is still building, nothing is settled: the alias is about to move.
-async function resolveVercelProductionDeployment({ token, projectId, teamId, targetUrl, fetchImpl = globalThis.fetch }) {
+async function resolveVercelProductionDeployment({ token, projectId, teamId, targetUrl, apiBase = 'https://api.vercel.com', fetchImpl = globalThis.fetch }) {
   if (!token || !projectId || typeof fetchImpl !== 'function') return { status: 'unconfigured' };
   let hostname;
   try { hostname = new URL(targetUrl).hostname; } catch { return { status: 'unconfigured' }; }
@@ -41,7 +41,7 @@ async function resolveVercelProductionDeployment({ token, projectId, teamId, tar
   };
   const listQuery = new URLSearchParams({ projectId, target: 'production', limit: '5' });
   if (teamId) listQuery.set('teamId', teamId);
-  const listed = await get(`https://api.vercel.com/v6/deployments?${listQuery}`);
+  const listed = await get(`${apiBase}/v6/deployments?${listQuery}`);
   if (listed.error) return { status: 'unavailable', error: listed.error };
   if (!listed.response.ok) return { status: 'unavailable', error: `Vercel deployment lookup returned HTTP ${listed.response.status}` };
   const newest = Array.isArray(listed.body?.deployments) ? listed.body.deployments[0] : null;
@@ -52,7 +52,7 @@ async function resolveVercelProductionDeployment({ token, projectId, teamId, tar
   }
   const aliasQuery = new URLSearchParams();
   if (teamId) aliasQuery.set('teamId', teamId);
-  const served = await get(`https://api.vercel.com/v13/deployments/${encodeURIComponent(hostname)}?${aliasQuery}`);
+  const served = await get(`${apiBase}/v13/deployments/${encodeURIComponent(hostname)}?${aliasQuery}`);
   if (served.error) return { status: 'unavailable', error: served.error };
   if (!served.response.ok) return { status: 'unavailable', error: `Vercel alias lookup for ${hostname} returned HTTP ${served.response.status}` };
   const deployment = served.body || {};
@@ -68,6 +68,28 @@ async function resolveVercelProductionDeployment({ token, projectId, teamId, tar
     deployment_id: deployment.uid || deployment.id || null,
     ready_at: Number.isFinite(Number(deployment.ready)) ? new Date(Number(deployment.ready)).toISOString() : null,
   };
+}
+
+const PREFLIGHT_SEVERITY = ['unavailable', 'stale', 'unverified', 'matched'];
+
+// The control plane, not repository test code, decides whether production serves the tested SHA.
+function liveDeploymentPreflight(resolution, expectedSha) {
+  const expected = String(expectedSha || '').toLowerCase();
+  if (!SHA_RE.test(expected)) return { result: 'unverified', error: 'Expected deployment SHA is missing' };
+  if (resolution?.status === 'ready') {
+    return resolution.sha === expected
+      ? { result: 'matched', sha: resolution.sha }
+      : { result: 'stale', sha: resolution.sha, error: `Production serves ${String(resolution.sha).slice(0, 12)}, not ${expected.slice(0, 12)}` };
+  }
+  if (resolution?.status === 'settling') {
+    return { result: 'stale', sha: resolution.sha ?? null, error: `Production deployment is ${clip(resolution.state || 'settling', 40)}` };
+  }
+  return { result: 'unavailable', error: clip(resolution?.error || `Production deployment lookup is ${resolution?.status || 'unavailable'}`) };
+}
+
+function worstPreflight(...results) {
+  const present = new Set(results.filter((result) => PREFLIGHT_SEVERITY.includes(result)));
+  return PREFLIGHT_SEVERITY.find((result) => present.has(result)) ?? null;
 }
 
 function classifyRun(run) {
@@ -240,6 +262,8 @@ module.exports = {
   createProductionHumanTestMonitor,
   evictableProductionStates,
   resolveVercelProductionDeployment,
+  liveDeploymentPreflight,
+  worstPreflight,
   classifyRun,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_RELEASE_GRACE_MS,

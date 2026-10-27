@@ -52,15 +52,23 @@ is not an automatic repair, approval or release decision.
 
 Known limits:
 
-- The live worker runs repository test code from a commit that is already on
-  `main`, and holds the dedicated test password and `VERCEL_TOKEN` in its Node
-  process while it does. Neither reaches the browser context or a receipt.
-  Moving the deployment preflight into the control plane, or issuing
-  short-lived least-privilege test credentials, would remove that exposure.
+- Vercel credentials stay in the control plane. It resolves the deployment
+  serving production before the live worker starts and again after it exits;
+  the worker receives only the SHA the control plane verified, never
+  `VERCEL_TOKEN`, `VERCEL_PROJECT_ID` or `VERCEL_TEAM_ID`. If the deployment is
+  not the expected SHA beforehand, no worker starts and the test identity is
+  not used. If it moved during the walk, the live phase fails.
+- The live worker still runs repository test code from a commit that is
+  already on `main`, and holds the dedicated test password in its Node process
+  while it does. The password never reaches a receipt, and the browser context
+  sees it only as typed login input. A short-lived, audited test-session broker
+  would remove that remaining exposure.
 - The release lane's idle check and the monitor's start are not one atomic
-  step. If a release restarts the control plane during a start, the run is
-  marked `interrupted` and retried within the bounded budget, and a newer
-  production SHA supersedes it.
+  reservation. Duplicate starts are refused synchronously inside the control
+  plane, and the release lane defers while `/health.activeHumanTests` is
+  non-zero. If a release still restarts the control plane during a start, the
+  run is marked `interrupted` and retried within the bounded budget, and a
+  newer production SHA supersedes it.
 
 ## Run through Bob
 
@@ -116,21 +124,26 @@ desktop companion, officer and client control groups) are skipped in live mode.
 
 ## Deployment preflight
 
-Before a live human journey, Bob performs a server-side deployment preflight. If
-`VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available to the test process, it
-looks up the deployment serving the target hostname (falling back to the
-project's production deployments), checks its state, and compares its Git SHA
-with `HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
+Before a live human journey, Bob performs a server-side deployment preflight.
+For local and CI runs, if `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available
+to the test process, it looks up the deployment serving the target hostname
+(falling back to the project's production deployments), checks its state, and
+compares its Git SHA with `HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
 `HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale or unverifiable
 deployment must block the test rather than produce a warning; a serving
 deployment without a Git SHA is then an error. The preflight prints a
 `[HUMAN DEPLOYMENT PREFLIGHT] result=matched|stale|unavailable|unverified`
-line that the control plane records on the live phase. Vercel credentials never
-enter the browser context.
+line. Vercel credentials never enter the browser context.
 
-Bob's governed live and suite dispatch requires those Vercel settings and sets
-`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. A missing preflight, stale SHA, or
-failed fixture phase is a failed run, not a warning-shaped success.
+Bob's governed live and suite dispatch performs that lookup in the control plane
+instead, so it requires `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` there. It starts
+the live worker only when production is ready and serving the expected SHA,
+passes the worker `HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA` (no Vercel credentials),
+and sets `HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. After the worker exits, the
+control plane checks production again and records the worst of the before,
+after and worker results as the phase's `deployment_preflight`. A stale,
+unavailable or unverified result, or a failed fixture phase, is a failed run,
+not a warning-shaped success.
 
 ## Evidence
 

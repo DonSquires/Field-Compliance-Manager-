@@ -108,7 +108,7 @@ test('a live run is read-only even when a caller asks otherwise', async ({ page 
 });
 
 test.describe('deployment preflight', () => {
-  const keys = ['VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH'] as const;
+  const keys = ['VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA'] as const;
   const sha = 'a'.repeat(40);
   let saved: Partial<Record<(typeof keys)[number], string>> = {};
   let originalFetch: typeof globalThis.fetch;
@@ -118,6 +118,7 @@ test.describe('deployment preflight', () => {
     originalFetch = globalThis.fetch;
     Object.assign(process.env, { VERCEL_TOKEN: 'preflight-test-value', VERCEL_PROJECT_ID: 'prj_test', HUMAN_TEST_EXPECTED_SHA: sha, HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true' });
     delete process.env.VERCEL_TEAM_ID;
+    delete process.env.HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA;
   });
   test.afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -163,5 +164,20 @@ test.describe('deployment preflight', () => {
     const session = new HumanTestSession(page, testInfo);
     await session.verifyDeployment('https://www.example.test');
     expect(session.findings.map((finding) => finding.message)).toEqual([`Deployment is stale: expected ${sha}, serving ${'b'.repeat(40)}.`]);
+  });
+
+  test('uses the control-plane verified SHA without Vercel credentials or requests', async ({ page }, testInfo) => {
+    delete process.env.VERCEL_TOKEN;
+    delete process.env.VERCEL_PROJECT_ID;
+    const requested = respond({});
+    const verified = new HumanTestSession(page, testInfo);
+    process.env.HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA = sha;
+    await verified.verifyDeployment('https://www.example.test');
+    expect(verified.findings).toEqual([]);
+    process.env.HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA = 'b'.repeat(40);
+    const stale = new HumanTestSession(page, testInfo);
+    await stale.verifyDeployment('https://www.example.test');
+    expect(stale.findings.map((finding) => finding.severity)).toEqual(['error']);
+    expect(requested).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -27,6 +28,9 @@ let baseUrl;
 let mainSha;
 let olderMainSha;
 let branchSha;
+let vercelServer;
+let vercelApiUrl;
+const vercel = { sha: null, shaAfterLiveStart: null, liveBaseline: 0, requests: 0 };
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -67,6 +71,12 @@ async function until(probe, label, timeoutMs = 20_000) {
 }
 
 const dockerRuns = () => (fs.existsSync(dockerLog) ? fs.readFileSync(dockerLog, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
+const liveDockerRuns = () => dockerRuns().filter((run) => run.live === 'true');
+
+// Vercel as the control plane sees it; it can move after a live worker starts.
+function servedVercelSha() {
+  return vercel.shaAfterLiveStart && liveDockerRuns().length > vercel.liveBaseline ? vercel.shaAfterLiveStart : vercel.sha;
+}
 
 async function startServer(overrides = {}) {
   const port = await freePort();
@@ -99,6 +109,7 @@ async function startServer(overrides = {}) {
       VERCEL_TOKEN: 'fixture-vercel-value',
       VERCEL_PROJECT_ID: 'prj_fixture',
       VERCEL_TEAM_ID: '',
+      BOB_VERCEL_API_URL: vercelApiUrl,
       ...overrides,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -151,6 +162,8 @@ fs.appendFileSync(${JSON.stringify(dockerLog)}, JSON.stringify({
   expected_sha: args.includes('HUMAN_TEST_EXPECTED_SHA') ? process.env.HUMAN_TEST_EXPECTED_SHA : null,
   admin_route: args.includes('HUMAN_TEST_ADMIN_ROUTE') ? process.env.HUMAN_TEST_ADMIN_ROUTE : null,
   forwards_password: args.includes('GRANDMASTER_TEST_PASSWORD'),
+  forwards_vercel: args.some((arg) => /^VERCEL_/.test(arg)),
+  verified_sha: args.includes('HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA') ? process.env.HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA : null,
 }) + '\\n');
 const finish = () => {
   if (process.env.HUMAN_TEST_LIVE === 'true') console.log('[HUMAN DEPLOYMENT PREFLIGHT] result=matched\\n  2 passed\\n  9 skipped');
@@ -171,11 +184,24 @@ wait();
     productionHumanTests: [{ sha: restoredSha, status: 'passed', attempts: 1, run_id: interruptedRunId, first_seen_at: '2026-10-01T00:00:00.000Z', completed_at: '2026-10-01T00:20:00.000Z', summary: { passed: 40, failed: 0, skipped: 2 } }],
   }));
 
+  vercelServer = http.createServer((req, res) => {
+    vercel.requests += 1;
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const deployment = { projectId: 'prj_fixture', readyState: 'READY', state: 'READY', uid: 'dpl_fixture', meta: { githubCommitSha: servedVercelSha() } };
+    const body = url.pathname === '/v6/deployments' ? { deployments: [deployment] }
+      : url.pathname === '/v13/deployments/www.example.test' ? deployment : null;
+    res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body ?? {}));
+  });
+  vercelServer.listen(0, '127.0.0.1');
+  await once(vercelServer, 'listening');
+  vercelApiUrl = `http://127.0.0.1:${vercelServer.address().port}`;
   await startServer();
 });
 
 test.after(async () => {
   await stopServer();
+  vercelServer?.close();
   fs.rmSync(work, { recursive: true, force: true });
 });
 
@@ -203,6 +229,7 @@ test('live Dr Bob refuses commits that are not merged to main before any snapsho
 });
 
 test('a suite walks a pinned snapshot of the merged commit and /health counts it while it runs', async () => {
+  vercel.sha = olderMainSha;
   const started = await request('POST', '/api/bob/human-tests', { mode: 'suite', expected_sha: olderMainSha, target_route: '/admin/builder' });
   assert.equal(started.status, 202);
   assert.equal(started.body.run.source_sha, olderMainSha);
@@ -233,7 +260,43 @@ test('a suite walks a pinned snapshot of the merged commit and /health counts it
   assert.equal(live.live, 'true');
   assert.equal(live.expected_sha, olderMainSha);
   assert.equal(live.admin_route, '/admin/builder');
+  assert.equal(live.forwards_vercel, false, 'Vercel credentials never enter repository test code');
+  assert.equal(live.verified_sha, olderMainSha, 'the worker receives only the control-plane verified SHA');
+  assert.ok(vercel.requests >= 4, 'the control plane checked Vercel before and after the live walk');
   assert.equal((await (await fetch(`${baseUrl}/health`)).json()).activeHumanTests, 0);
+});
+
+async function finishedRun(id) {
+  return until(async () => {
+    const latest = await request('GET', `/api/bob/human-tests/${id}`);
+    return latest.body.run.status !== 'queued' && latest.body.run.status !== 'running' && latest.body.run;
+  }, 'the suite to finish');
+}
+
+test('a stale production deployment stops the live phase before credentials reach a worker', async () => {
+  vercel.sha = mainSha;
+  vercel.shaAfterLiveStart = null;
+  const liveBefore = liveDockerRuns().length;
+  const started = await request('POST', '/api/bob/human-tests', { mode: 'suite', expected_sha: olderMainSha });
+  assert.equal(started.status, 202);
+  const finished = await finishedRun(started.body.run.id);
+  assert.equal(finished.status, 'failed');
+  assert.deepEqual(finished.phases.map((phase) => [phase.mode, phase.status, phase.deployment_preflight ?? null, phase.exit_code]),
+    [['fixture', 'succeeded', null, 0], ['live', 'failed', 'stale', null]]);
+  assert.equal(liveDockerRuns().length, liveBefore, 'no live worker or test identity was started');
+});
+
+test('a production deployment that moves during the walk invalidates the live verdict', async () => {
+  vercel.sha = olderMainSha;
+  vercel.shaAfterLiveStart = mainSha;
+  vercel.liveBaseline = liveDockerRuns().length;
+  const started = await request('POST', '/api/bob/human-tests', { mode: 'suite', expected_sha: olderMainSha });
+  const finished = await finishedRun(started.body.run.id);
+  vercel.shaAfterLiveStart = null;
+  assert.equal(finished.status, 'failed');
+  assert.deepEqual(finished.phases.map((phase) => [phase.mode, phase.status, phase.deployment_preflight ?? null, phase.exit_code]),
+    [['fixture', 'succeeded', null, 0], ['live', 'failed', 'stale', 0]]);
+  assert.equal(liveDockerRuns().length, vercel.liveBaseline + 1);
 });
 
 test('an enabled production monitor is scheduled at startup and observes without starting a walk', async () => {

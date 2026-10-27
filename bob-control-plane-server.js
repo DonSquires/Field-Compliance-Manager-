@@ -34,7 +34,7 @@ const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
-const { createProductionHumanTestMonitor, evictableProductionStates, resolveVercelProductionDeployment } = require('./builder-production-human-test');
+const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, worstPreflight } = require('./builder-production-human-test');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
@@ -416,6 +416,21 @@ function repositoryTreeSha(sourceDir, sha, treePath) {
   }
 }
 
+// A loopback override exists only for hermetic tests; any other value keeps Vercel's API host.
+const vercelApiBase = /^http:\/\/127\.0\.0\.1:\d+$/.test(String(process.env.BOB_VERCEL_API_URL || ''))
+  ? process.env.BOB_VERCEL_API_URL
+  : 'https://api.vercel.com';
+
+function resolveProductionDeployment() {
+  return resolveVercelProductionDeployment({
+    token: process.env.VERCEL_TOKEN,
+    projectId: process.env.VERCEL_PROJECT_ID,
+    teamId: process.env.VERCEL_TEAM_ID,
+    targetUrl: process.env.HUMAN_TEST_BASE_URL,
+    apiBase: vercelApiBase,
+  });
+}
+
 function repositoryCommitOnMain(sourceDir, sha, mainSha) {
   if (!/^[a-f0-9]{40}$/i.test(String(sha || '')) || !/^[a-f0-9]{40}$/i.test(String(mainSha || ''))) return false;
   if (sha.toLowerCase() === mainSha.toLowerCase()) return true;
@@ -437,7 +452,7 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
   if (!repositoryTreeSha(readTarget.sourceDir, testSha, 'apps/web')) {
     throw new BuilderStepError(409, `Human-test deployment commit ${testSha.slice(0, 12)} is not yet in Bob's source repository`);
   }
-  // The live phase hands the worker the test identity and Vercel token: only reviewed code merged
+  // The live phase hands the worker the dedicated test identity: only reviewed code merged
   // to main may hold them, never an arbitrary branch commit named by a caller.
   if (mode !== 'fixture' && !repositoryCommitOnMain(readTarget.sourceDir, testSha, readTarget.sha)) {
     throw new BuilderStepError(409, `Live Dr Bob only tests commits merged to main; ${testSha.slice(0, 12)} is not on main ${String(readTarget.sha).slice(0, 12)} yet`);
@@ -484,6 +499,21 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
       for (const phaseMode of phaseModes) {
         const phaseDir = path.join(artifactDir, phaseMode);
         fs.mkdirSync(phaseDir, { recursive: true });
+        const liveSha = expectedSha || source.sha;
+        const before = phaseMode === 'live' ? liveDeploymentPreflight(await resolveProductionDeployment(), liveSha) : null;
+        if (before && before.result !== 'matched') {
+          run.phases.push({
+            mode: phaseMode,
+            status: 'failed',
+            exit_code: null,
+            summary: { passed: 0, failed: 0, skipped: 0 },
+            deployment_preflight: before.result,
+            error: before.error,
+          });
+          phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n[CONTROL-PLANE DEPLOYMENT PREFLIGHT] result=${before.result}\n`);
+          saveState();
+          break;
+        }
         const result = await executeWorker({
           image: builderWorkerImage,
           sourceDir: source.sourceDir,
@@ -497,14 +527,12 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
             ? {
                 HUMAN_TEST_LIVE: 'true',
                 HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
-                HUMAN_TEST_EXPECTED_SHA: expectedSha || source.sha,
+                HUMAN_TEST_EXPECTED_SHA: liveSha,
                 HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
+                HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA: before.sha,
                 HUMAN_TEST_ADMIN_ROUTE: targetRoute,
                 GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
                 GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD,
-                VERCEL_TOKEN: process.env.VERCEL_TOKEN,
-                VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
-                VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
               }
             : { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
         });
@@ -513,12 +541,20 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
           status: result.status,
           exit_code: result.exitCode,
           summary: summarizeHumanTest(result),
-          ...(phaseMode === 'live' ? { deployment_preflight: humanTestDeploymentPreflight(result) } : {}),
         };
+        if (phaseMode === 'live') {
+          // Production may move during the walk; only an unchanged deployment makes the walk evidence for this SHA.
+          const after = liveDeploymentPreflight(await resolveProductionDeployment(), liveSha);
+          phase.deployment_preflight = worstPreflight(before.result, after.result, humanTestDeploymentPreflight(result));
+          if (phase.deployment_preflight !== 'matched') {
+            phase.status = 'failed';
+            phase.error = after.error || 'Live deployment preflight was not confirmed';
+          }
+        }
         run.phases.push(phase);
         phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n${result.stdout || ''}\n${result.stderr || ''}`);
         saveState();
-        if (result.status !== 'succeeded') break;
+        if (phase.status !== 'succeeded') break;
       }
       run.summary = combineHumanTestSummaries(run.phases);
       const failedPhase = run.phases.find(phase => phase.status !== 'succeeded');
@@ -991,12 +1027,7 @@ function latestProductionHumanTest() {
 }
 
 const productionHumanTestMonitor = createProductionHumanTestMonitor({
-  resolveProduction: () => resolveVercelProductionDeployment({
-    token: process.env.VERCEL_TOKEN,
-    projectId: process.env.VERCEL_PROJECT_ID,
-    teamId: process.env.VERCEL_TEAM_ID,
-    targetUrl: process.env.HUMAN_TEST_BASE_URL,
-  }),
+  resolveProduction: resolveProductionDeployment,
   readReleasedSha: async () => {
     try { return fs.readFileSync(releasedShaFile, 'utf8').trim().toLowerCase() || null; } catch { return null; }
   },
