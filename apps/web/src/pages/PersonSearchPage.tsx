@@ -4,7 +4,8 @@
  * Canonical schema:
  * - search_people (canonical_people + person_record_aliases + notices +
  *   entity_links + person_permits, scoped to the caller's organisations;
- *   private contacts only for operations roles; NZTA separately authorized;
+ *   private contacts only for operations roles; NZTA separately authorized,
+ *   then hidden until reveal_nzta_registered_person opens a logged window;
  *   a permit holder is found by name, alias or exact permit number)
  * - get_notice_expiry_register (issued trespass/warning notices expiring soon
  *   or recently expired; fed daily into notifications by
@@ -21,6 +22,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Car, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { PermitAccessCard } from '../components/PermitAccessCard';
+import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from '../components/NztaRevealDialog';
 import { supabase } from '../lib/supabase';
 import { permitIsCurrent, permitValidity } from '../lib/permits';
 import {
@@ -67,6 +69,8 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerRefreshing, setRegisterRefreshing] = useState(false);
   const [registerUpdatedAt, setRegisterUpdatedAt] = useState<string | null>(null);
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [nztaReveal, setNztaReveal] = useState<(NztaRevealResult & { personId: string }) | null>(null);
 
   const loadRegister = useCallback(async () => {
     setRegisterRefreshing(true);
@@ -428,7 +432,13 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                     <div><p className="eyebrow">Restricted identity information</p><h3 id="person-nzta-title">NZTA register details</h3></div>
                   </header>
                   <p className="person-search-privacy"><ShieldAlert size={16} aria-hidden="true" /> NZTA information is restricted to authorised users and lawful purposes. Do not share it outside your organisation.</p>
-                  {!selected.nzta ? <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p> : (
+                  {nztaReveal?.personId === selected.canonical_person_id && <p className="person-search-privacy" role="status">Visible until {new Date(nztaReveal.revealed_until).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Your access has been logged.{nztaWarningText(nztaReveal.warnings) ? ` ${nztaWarningText(nztaReveal.warnings)}` : ''}</p>}
+                  {selected.nzta_reveal_required ? (
+                    <div className="person-search-section-empty">
+                      <p>NZTA register information is held for this person. It stays hidden until you state why you need it, and each view is logged.</p>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setRevealOpen(true)}>Reveal with a stated purpose</button>
+                    </div>
+                  ) : !selected.nzta ? <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p> : (
                     <>
                       <dl className="person-nzta-facts">
                         {selected.contact_details_authorised === true && <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>}
@@ -452,6 +462,24 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                 </section>
               ) : (
                 <p className="person-search-restricted-note"><ShieldAlert size={16} aria-hidden="true" /> NZTA register details are restricted and are not available in your current access scope.</p>
+              )}
+              {revealOpen && (
+                <NztaRevealDialog
+                  subjectType="person"
+                  subjectId={selected.canonical_person_id}
+                  subjectLabel={selected.display_name}
+                  notices={selected.notices.map((notice) => ({
+                    id: notice.notice_id,
+                    label: [notice.notice_type.replace(/_/g, ' '), notice.notice_number, notice.organization_name, notice.issued_at ? formatNzDate(notice.issued_at) : null].filter(Boolean).join(' · '),
+                  }))}
+                  onClose={() => setRevealOpen(false)}
+                  onRevealed={(result) => {
+                    const personId = selected.canonical_person_id;
+                    setRevealOpen(false);
+                    setNztaReveal({ ...result, personId });
+                    void runSearch(query.trim() || selected.display_name, personId);
+                  }}
+                />
               )}
             </article>
           )}

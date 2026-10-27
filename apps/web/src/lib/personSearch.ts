@@ -52,6 +52,8 @@ export interface PersonMatch {
   /** Absent until the permit-holder search migration is live. */
   permits?: PersonPermit[];
   nzta_authorised: boolean;
+  /** NZTA register data exists for this person but is hidden until a purpose-stated reveal. */
+  nzta_reveal_required?: boolean;
   contact_details_authorised?: boolean;
   nzta: PersonNzta | null;
 }

@@ -50,6 +50,7 @@ import {
   Settings,
     Tags,
   Shield,
+  ShieldCheck,
   UserSearch,
   Users,
   Wrench,
@@ -99,6 +100,7 @@ const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryRev
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
 const ZoneDetailPage = React.lazy(() => import('../pages/ZoneDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
+const NztaRegisterPage = React.lazy(() => import('../pages/NztaRegisterPage'));
 const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
 const OrganizationSetupPage = React.lazy(() => import('../pages/OrganizationSetupPage'));
@@ -141,7 +143,7 @@ const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearc
 type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
-  | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
+  | 'approvals' | 'nzta-register' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
@@ -171,7 +173,7 @@ const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined, isModuleEnabled: (moduleKey: string) => boolean): boolean {
   if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
-  if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals') && !isAdminTierRole(role)) return false;
+  if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals' || page === 'nzta-register') && !isAdminTierRole(role)) return false;
   const requiredModule = PAGE_PLATFORM_MODULE[page];
   if (requiredModule && !isModuleEnabled(requiredModule)) return false;
   return true;
@@ -325,6 +327,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   'Intelligence & Records': [
     { id: 'files', label: 'File System', icon: FolderOpen },
     { id: 'investigations', label: 'Investigations', icon: Search },
+    { id: 'nzta-register', label: 'NZTA register (s241)', icon: ShieldCheck },
   ],
   'Platform & Settings': [
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
@@ -852,6 +855,8 @@ const AdminShell: React.FC = () => {
         return <PlatformSubscribersPage />;
       case 'approvals':
         return <ApprovalsActivityPage />;
+      case 'nzta-register':
+        return <NztaRegisterPage />;
       case 'roster':
         return <RosterOperationsPage />;
       case 'rate-rules':

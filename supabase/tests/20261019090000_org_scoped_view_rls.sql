@@ -93,6 +93,15 @@ BEGIN
       NOT pg_temp.view_is_invoker(v)
     );
   END LOOP;
+  -- s241 readiness (2026-11-01): the person register is authenticated-only.
+  PERFORM pg_temp.check(
+    'anon cannot read canonical_person_public',
+    NOT has_table_privilege('anon', 'public.canonical_person_public', 'SELECT')
+  );
+  PERFORM pg_temp.check(
+    'authenticated can still read canonical_person_public',
+    has_table_privilege('authenticated', 'public.canonical_person_public', 'SELECT')
+  );
 END
 $$;
 

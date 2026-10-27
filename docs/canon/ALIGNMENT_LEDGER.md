@@ -826,3 +826,21 @@ email-and-surname rule. This keeps the family members separate from the
 relative without leaving a duplicate surname-only record.
 
 Truth table: `test/permit-holder-identity-repair-migration.test.js`.
+
+### 2026-11-01 — NZTA section 241 readiness for R&M (Don Squires)
+
+R&M's section 241 authorisation covers two Motor Vehicle Register purposes:
+trespass by a vehicle without a valid permit on a contracted property, and
+entry or damage seen on CCTV or patrol against posted signage. The owner
+ruled that a name alone is not restricted; the NZTA-sourced person-vehicle
+link is, in both directions, and only `vehicle_owner_identity` holders see it,
+after a purpose-stated, logged, 15-minute reveal. The client the notice was
+issued for and the investigating user may use the data for that notice.
+Retention is report-only. Anonymous reads of `canonical_person_public` are
+removed. Full ruling: `ACCESS_MODEL.md` (owner ruling 2026-11-01); retention:
+`RETENTION_DOCTRINE.md`. Live status: records written only through hardened
+definer RPCs in `20261101160000_nzta_s241_readiness.sql`; direct table reads
+of NZTA owner links and NZTA source documents are closed by RLS; historical checks
+are listed without a purpose rather than back-filled; existing NZTA holders
+show as not ready until training and confidentiality are recorded.
+Truth table: `test/nzta-s241-readiness.test.js`.

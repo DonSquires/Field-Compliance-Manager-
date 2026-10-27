@@ -123,8 +123,29 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   every screen that shows them. Everyone else sees only that the owner (or
   driver) has been identified and the suburb and town/city. Owners sourced from
   NZTA are marked **NZTA restricted** and must only be used for the purpose they
-  were obtained for. **No longer owner / driver** ends a link with a reason. The
+  were obtained for. An NZTA-sourced person is labelled **Registered person (at
+  check date)** — not proof of ownership — and stays hidden until an authorised
+  user chooses **Reveal with a stated purpose**, picks the Gazette purpose (or
+  the notice being followed up) and writes the reason. The details stay visible
+  to that user for 15 minutes and the view is logged. The same reveal applies in
+  Person search and the identity records workspace. **No longer owner / driver** ends a link with a reason. The
   owner can also be added from the repeat-subject drawer.
+- **NZTA register (s241)** (Admin → Investigations & Evidence, admin-tier only)
+  keeps the records NZTA can ask for: **Lookup register** (record every Motochek
+  lookup with the individual user, purpose, reason and later the outcome;
+  historical checks without a purpose are flagged), **Access log** (every
+  in-app reveal), **People & training** (record training and confidentiality,
+  each valid for up to 12 months; a new NZTA tick cannot be saved until both
+  are current — choose **Staff without access** to record them for someone
+  before granting access; administrators from a parent, provider or platform
+  organisation who can see the register are listed too), **Quarterly reviews**,
+  and the **Annual summary** with per-zone signage evidence and the retention
+  counts (18 months, 2 years and 5 years; report only, nothing is deleted).
+  Training and confidentiality belong to the person and count in every
+  organisation they can view. NZTA source documents and NZTA owner links cannot
+  be read directly from the database tables; they are only returned through a
+  logged reveal. The lookup register, access log and annual summary export
+  CSV; the summary also prints.
 - A flagged vehicle's profile has a border in the colour of its highest active
   flag (red for high/critical, amber for medium, blue for low) and a risk
   banner at the top listing the active flags.

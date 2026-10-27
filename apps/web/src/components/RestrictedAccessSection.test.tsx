@@ -59,6 +59,7 @@ describe('restricted user access', () => {
   });
 
   it('preserves the NZTA setter and reports a save failure', async () => {
+    rpc.mockResolvedValueOnce({ data: { ...access, training_current: true, training_expires_on: '2027-06-30', confidentiality_current: true, confidentiality_expires_on: '2027-06-30' }, error: null });
     render(<RestrictedAccessSection userId="officer" kind="vehicle" />);
     fireEvent.click(await screen.findByRole('checkbox'));
     fireEvent.change(screen.getByLabelText('Reason for change'), { target: { value: 'Approved lawful duties' } });
@@ -67,5 +68,16 @@ describe('restricted user access', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Organisation administrator required'));
     expect(rpc).toHaveBeenLastCalledWith('set_vehicle_owner_access', { p_user_id: 'officer', p_enabled: true, p_reason: 'Approved lawful duties' });
     expect(screen.queryByText('Direct authorization enabled.')).toBeNull();
+  });
+
+  it('blocks a new NZTA grant until training and confidentiality are current', async () => {
+    rpc.mockResolvedValueOnce({ data: { ...access, training_current: false, training_expires_on: null, confidentiality_current: true, confidentiality_expires_on: '2027-06-30' }, error: null });
+    render(<RestrictedAccessSection userId="officer" kind="vehicle" />);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText('Reason for change'), { target: { value: 'Approved lawful duties' } });
+    expect(screen.getByRole('alert').textContent).toContain('NZTA register (s241)');
+    expect(screen.getByRole('button', { name: 'Save restricted access' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Not recorded')).toBeTruthy();
+    expect(rpc.mock.calls.some(([name]) => name === 'set_vehicle_owner_access')).toBe(false);
   });
 });
