@@ -32,7 +32,8 @@ const CORS = {
 const CAN_INSPECT = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const MAX_TABLES = 60;
 function json(body, status = 200) {

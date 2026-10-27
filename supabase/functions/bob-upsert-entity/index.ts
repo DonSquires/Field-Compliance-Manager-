@@ -44,7 +44,8 @@ const CORS = {
 const CAN_WRITE_ROLES = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {

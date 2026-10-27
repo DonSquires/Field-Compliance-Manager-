@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Bold, Check, CheckCircle2, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -560,7 +561,7 @@ export default function BobDocumentStudioPage() {
     return () => { active = false; };
   }, [selectedFile?.versionId]);
 
-  const canReviewSourceDocuments = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '');
+  const canReviewSourceDocuments = isAdminTierRole(profile?.role);
   const reviewSourceClassification = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedFile || !canReviewSourceDocuments || !classificationForm.reason.trim()) return;

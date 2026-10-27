@@ -77,6 +77,7 @@ serve(async (req)=>{
       'grand_master',
       'master',
       'admin',
+      'admin_officer',
       'client_admin'
     ];
     if (!allowedRoles.includes(currentProfile.role)) {

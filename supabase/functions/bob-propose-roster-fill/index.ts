@@ -37,7 +37,7 @@ Deno.serve(async (request) => {
   const { data: profile } = await admin.from('user_profiles')
     .select('id,role,organization_id,authorized_organization_ids')
     .eq('id', caller.id).single();
-  if (!profile || !['grand_master', 'master', 'admin'].includes(profile.role)) {
+  if (!profile || !['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role)) {
     return json({ error: 'Forbidden: roster planning requires an administrator' }, 403);
   }
 

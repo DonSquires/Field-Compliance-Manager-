@@ -39,7 +39,8 @@ const CORS = {
 const CAN_PROMOTE = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const CAN_PROMOTE_GLOBAL = new Set([
   'grand_master',

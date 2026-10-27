@@ -26,7 +26,7 @@ describe('changing the address a person signs in with', () => {
   });
 
   it('holds the same authority ceiling as the identity RPC', () => {
-    expect(fn).toContain("const CAN_MANAGE = ['grand_master', 'master', 'admin', 'client_admin']");
+    expect(fn).toContain("const CAN_MANAGE = ['grand_master', 'master', 'admin', 'admin_officer', 'client_admin']");
     expect(fn).toContain('Cannot change the email of users in other organizations');
     expect(fn).toContain('A client administrator can only manage client users');
     expect(fn).toContain('Cannot manage a user above your authority');

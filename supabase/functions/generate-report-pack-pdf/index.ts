@@ -15,7 +15,7 @@ const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v10';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
-const canRender = new Set(['grand_master', 'master', 'admin']);
+const canRender = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 
 type SupabaseClient = ReturnType<typeof createClient<any>>;
 

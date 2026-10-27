@@ -75,7 +75,7 @@ serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id').eq('id', user.id).single();
-    if (!profile || !['grand_master', 'master', 'admin'].includes(String(profile.role))) return json({ error: 'Administrator approval required' }, 403);
+    if (!profile || !['grand_master', 'master', 'admin', 'admin_officer'].includes(String(profile.role))) return json({ error: 'Administrator approval required' }, 403);
     const { data: output, error: outputError } = await admin.from('bob_generated_document_outputs').select('id,organization_id,document_id,document_version_id,output_format,status').eq('id', outputId).single();
     if (outputError || !output) return json({ error: 'Output request not found' }, 404);
     if (String(profile.role) !== 'grand_master' && output.organization_id !== profile.organization_id) return json({ error: 'Forbidden' }, 403);

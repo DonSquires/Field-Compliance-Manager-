@@ -41,7 +41,8 @@ const CORS = {
 const CAN_PROMOTE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 const SUPPORTED_ACTIONS = new Set([
   'create_service_agreement_draft'

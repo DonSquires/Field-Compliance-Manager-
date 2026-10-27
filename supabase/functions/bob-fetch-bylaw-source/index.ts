@@ -37,7 +37,8 @@ const CORS = {
 const CAN_FETCH = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const FETCH_TIMEOUT_MS = 15_000; // bylaw pages/PDF-hosting pages can be slower than a search result
 const MAX_CONTENT_CHARS = 60_000; // bylaws are long; allow more than bob-web-research's 6000 excerpt cap

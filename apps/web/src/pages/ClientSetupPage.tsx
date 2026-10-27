@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -47,7 +48,7 @@ const failureMessage = (failure: unknown) => failure instanceof Error ? failure.
 const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: string; providerOrganizationId?: string; embedded?: boolean; onDirtyChange?: (dirty: boolean) => void; onOpenCoverage?: () => void }> = ({ onNavigate = () => undefined, accountId, providerOrganizationId, embedded = false, onDirtyChange, onOpenCoverage }) => {
   const { profile, operatingOrganizationId } = useAuth();
   const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
-  const canEdit = Boolean(branchId && profile && ['admin', 'master', 'grand_master'].includes(profile.role));
+  const canEdit = Boolean(branchId && isAdminTierRole(profile?.role));
   const location = useLocation();
   const navigate = useNavigate();
   const [client, setClient] = useState<Client | null>(null);

@@ -30,19 +30,18 @@ describe('AdminShell access and routing boundaries', () => {
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
-    expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
+    expect(source).toContain("if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals') && !isAdminTierRole(role)) return false;");
     expect(source).toContain('items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area)))');
   });
 
-  it('shows approvals only to roles that can make governed decisions', () => {
-    expect(source).toContain("const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin'])");
-    expect(source).toContain("if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;");
+  it('shows approvals and roster planning to every admin-tier role, including admin_officer', () => {
+    expect(source).toContain("import { isAdminTierRole } from '../lib/roles';");
+    expect(source).not.toContain('APPROVAL_DECISION_ROLES');
+    expect(source).not.toContain('ROSTER_MANAGEMENT_ROLES');
   });
 
   it('shows roster planning only to workforce-management roles', () => {
-    expect(source).toContain("const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer'])");
     expect(source).toContain("const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets'])");
-    expect(source).toContain('if (ROSTER_MANAGEMENT_PAGES.has(page) && (!role || !ROSTER_MANAGEMENT_ROLES.has(role))) return false;');
   });
 
   it('gates platform module pages (crm, rostering, hr, finance) by organisation subscription', () => {

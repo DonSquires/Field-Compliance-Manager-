@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ContactRound, Filter, History, MailPlus, MoreHorizontal, RefreshCw, Search, ShieldCheck, UserCheck, UserMinus, Users, X } from 'lucide-react';
 import { useAuth, type AppRole } from '../context/AuthContext';
@@ -58,7 +59,7 @@ const UserManagementPage: React.FC = () => {
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
   const directInviteRoles = assignableRoles;
   const isFieldInvite = ['officer', 'admin_officer'].includes(inviteForm.role);
-  const canManageIdentityRecords = ['grand_master', 'master', 'admin'].includes(profile?.role ?? 'unknown');
+  const canManageIdentityRecords = isAdminTierRole(profile?.role);
   const canPreauthenticate = canManageIdentityRecords;
 
   const closeProvisioningForm = () => {

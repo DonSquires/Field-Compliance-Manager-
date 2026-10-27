@@ -12,6 +12,7 @@
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
@@ -447,7 +448,7 @@ const VehicleSearchPage: React.FC = () => {
           <section aria-label="Updates and notes"><RecordUpdatesPanel recordKind="observation" recordId={obs.id} onChanged={() => void reloadAnnotations()} /></section>
           {vehicle && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} observationId={obs.id} />}
           <ObservationPeoplePanel observationId={obs.id} organizationId={profile?.organizationId}
-            isAdmin={['grand_master', 'master', 'admin'].includes(profile?.role ?? '')} onChanged={() => void reloadAnnotations()} />
+            isAdmin={isAdminTierRole(profile?.role)} onChanged={() => void reloadAnnotations()} />
           <details open={expanded}><summary>Photos and evidence</summary>
             <RecordEvidencePanel recordKind="observation" recordId={obs.id} organizationId={obs.organization_id} canAdd />
           </details>

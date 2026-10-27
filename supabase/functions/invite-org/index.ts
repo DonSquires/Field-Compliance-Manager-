@@ -151,7 +151,8 @@ const CORS = {
 /** Roles that may invoke this function; resolve_org_invitation decides what each may seat. */ const CAN_INVITE_ORG = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 // ── In-memory rate limiter (fallback when check_invite_rate_limit RPC is not migrated) ──
 // LIMITATION: This Map is NOT durable across cold starts. Each new Deno isolate

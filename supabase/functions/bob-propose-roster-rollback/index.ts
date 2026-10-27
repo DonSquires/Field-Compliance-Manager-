@@ -18,7 +18,7 @@ Deno.serve(async (request) => {
   if (authError || !caller) return json({ error: 'Unauthorized' }, 401);
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: profile } = await admin.from('user_profiles').select('id,role,organization_id').eq('id', caller.id).single();
-  if (!profile || !['grand_master', 'master', 'admin'].includes(profile.role)) return json({ error: 'Forbidden' }, 403);
+  if (!profile || !['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role)) return json({ error: 'Forbidden' }, 403);
   try {
     const body = await request.json();
     const planId = typeof body.plan_id === 'string' ? body.plan_id : '';

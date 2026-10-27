@@ -21,7 +21,6 @@ import { useAuth, type AppRole } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { useEnabledModules } from '../hooks/useEnabledModules';
-import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
@@ -99,10 +98,9 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   const { profile, operatingOrganizationId } = useAuth();
   const organizationId = operatingOrganizationId ?? profile?.organizationId;
   const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
-  const dispatchContext = useActiveModuleContext('dispatch');
   const { isModuleEnabled } = useEnabledModules(organizationId);
   const dispatchEnabled = isModuleEnabled('dispatch');
-  const dispatchAvailable = dispatchEnabled && dispatchContext.enabled;
+  const dispatchAvailable = dispatchEnabled;
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const role = profile?.role ?? 'unknown';
   const [workflowQuery, setWorkflowQuery] = useState('');
@@ -169,7 +167,6 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   }, [loadMetrics]);
 
   const warnings = Object.entries(metrics).filter(([, metric]) => metric.error);
-  if (dispatchEnabled && dispatchContext.error) warnings.push(['dispatchContext', { value: null, error: dispatchContext.error }]);
 
   return (
     <div className="field-ops-home field-ops-command" data-active-group={activeGroup}>

@@ -37,7 +37,8 @@ const ALLOWED_ROLES = [
 const CAN_INVITE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {

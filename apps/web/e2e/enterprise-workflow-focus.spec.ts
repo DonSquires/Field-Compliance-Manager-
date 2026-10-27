@@ -174,7 +174,7 @@ test('field workflow panes filter only entitled routes and retain navigation', a
   if (testInfo.project.name === 'mobile-chromium') {
     await page.getByRole('navigation', { name: 'Workflow panes' }).getByRole('button', { name: /Operational records/ }).click();
   }
-  await page.locator('.field-ops-workflow').filter({ hasText: 'Vehicle intelligence' }).click();
+  await page.locator('.field-ops-workflow').filter({ hasText: 'Vehicle search' }).click();
   await expect(page).toHaveURL(/area=vehicle-search/);
   await expectViewportContained(page);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);

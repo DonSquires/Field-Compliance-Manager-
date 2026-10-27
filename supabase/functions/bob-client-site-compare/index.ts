@@ -19,7 +19,8 @@ const CORS = {
 const CAN_COMPARE = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const ALLOWED_STAGING_TABLES = new Set([
   'fs_nelson_clients_clean'

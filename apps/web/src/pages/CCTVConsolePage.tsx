@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -184,7 +185,7 @@ const CCTVConsolePage: React.FC = () => {
   const search = new URLSearchParams(location.search);
   const requestedImportId = search.get('import');
   const popout = search.get('popout') === '1';
-  const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+  const isAdmin = isAdminTierRole(profile?.role);
 
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [importsLoading, setImportsLoading] = useState(true);

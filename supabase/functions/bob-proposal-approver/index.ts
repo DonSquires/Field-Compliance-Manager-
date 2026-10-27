@@ -43,7 +43,8 @@ const CORS = {
 const CAN_APPROVE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 const DECIDABLE = new Set([
   'pending',

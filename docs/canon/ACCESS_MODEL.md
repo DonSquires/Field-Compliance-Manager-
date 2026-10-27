@@ -39,6 +39,57 @@ Vehicle search is a shared operational registry workflow, available to admins
 independently of parking or freedom-camping subscriptions. This is not a grant
 of platform powers or cross-tenant Master access.
 
+## Owner ruling 2026-10-27 (later the same day): admin officer parity and simple module access
+
+**Admin officer = admin.** An `admin_officer` is an admin person who also works
+in the field. They hold exactly an admin's access — the same organisation reach,
+approvals, people/identity management, payroll setup, notifications and admin
+tools — and may additionally use the officer portal. Every database function,
+policy, edge-function gate and web surface that grants something to `admin`
+grants it to `admin_officer` (`20261101150000_admin_officer_parity.sql`,
+`supabase/functions/_shared/auth.ts`, `apps/web/src/lib/roles.ts`). The portal
+chooser only picks which workspace opens; it is not an access boundary.
+An admin officer's authorised private contact fields remain available in the
+field portal as well as the admin portal.
+
+**Module access is two switches, nothing else.** A person may open a module when:
+
+1. the organisation has the module switched on (`organization_modules`; a safety
+   module stays off until the organisation configures it, and an organisation
+   with no module configuration yet sees its non-safety modules), and
+2. the person is admin-tier (Grand Master, Master, Admin, Admin officer), or has
+   that module ticked on their profile (`user_profiles.module_access`).
+
+The single implementation is `canUseModule` in `apps/web/src/lib/moduleAccess.ts`;
+module keys and their officer-route aliases (for example `parking_enforcement` /
+`parking`, `static_guarding` / `site_guard`) resolve to the same switch and tick.
+The directory uses this same decision; it must not hide a module that the
+corresponding route permits. Core officer tools (including searches, schedule,
+reports and the assigned-job inbox) remain reachable independently of specialty
+module ticks; the separate person-search/NZTA authorisations still control
+sensitive lookup data.
+
+**Geofences and place are context, never a gate.** Place resolution, geofence
+position, active place rules (`resolve_active_rules`), shift state and
+assignment never stop a person from opening a module they are entitled to, or
+from running a person or vehicle search they are authorised for. They still
+choose which rules, evidence requirements and billing apply, and they still
+appear as context (for example "outside all geofences"). Sections 0–7 below are
+superseded to the extent they make place, geofence, shift or task state a gate on
+opening a module or running an authorised search; they continue to describe
+record disclosure depth only, and no new record-level gate may be built from
+them without a fresh owner ruling.
+
+**Kept:** the per-person person-search tick and the per-person NZTA
+(`vehicle_owner_identity`) tick, both audited, both default off; personal
+addresses and contact details stay with admin-tier roles; tenant reach
+(`org_access_allowed`) is unchanged.
+
+**Open item:** static guarding arrive/depart (`manage_officer_static_post`)
+still requires the device position inside a verified site boundary. That is an
+attendance evidence and billing rule, not module access, and is left in place
+pending an owner ruling.
+
 ## 0. The re-founding — accountable service, not restriction (READ FIRST)
 
 > Ruled 2026-08-01, owner + Bob. This is a CONSTITUTIONAL CORRECTION to the

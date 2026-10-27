@@ -70,7 +70,8 @@ const CORS = {
 const CAN_PROPOSE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 // MUST stay identical to bob-plan-step-advance's SUPPORTED_PLAN_ACTIONS --
 // re-verify against that file's live content before editing either list.

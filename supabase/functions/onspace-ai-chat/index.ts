@@ -961,7 +961,7 @@ function isValidGeoJsonBoundary(b: any) {
 }
 async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: string, userId: string | null = null) {
   const r = (role || '').toLowerCase();
-  const tier = r === 'grand_master' ? 'admiral' : r === 'master' ? 'captain' : r === 'admin' ? 'commander' : r === 'admin_officer' ? 'officer' : r === 'officer' ? 'ensign' : 'guest';
+  const tier = r === 'grand_master' ? 'admiral' : r === 'master' ? 'captain' : r === 'admin' || r === 'admin_officer' ? 'commander' : r === 'officer' ? 'ensign' : 'guest';
   const crossOrgUnrestricted = tier === 'admiral';
   let scopeOrgIds = orgId ? [
     orgId

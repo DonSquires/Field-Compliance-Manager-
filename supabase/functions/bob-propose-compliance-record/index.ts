@@ -32,7 +32,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin']);
+const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const RECORD_TYPES = new Set(['company_licence', 'insurance', 'policy', 'prequalification', 'registration', 'certification', 'other']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

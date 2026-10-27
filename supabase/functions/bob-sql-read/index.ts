@@ -37,7 +37,8 @@ const CORS = {
 const CAN_SQL = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const ADMIRAL = new Set([
   'grand_master'

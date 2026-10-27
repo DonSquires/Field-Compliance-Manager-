@@ -34,12 +34,16 @@
 //   CAN_SQL      -- bob-sql-read
 //   CAN_APPROVE  -- bob-proposal-approver, bob-job-plan-approve
 //   CAN_PROMOTE  -- bob-promote-action
-//   CAN_WRITE    -- bob-upsert-generic (includes admin_officer)
+//   CAN_WRITE    -- bob-upsert-generic
+//
+// admin_officer is admin-tier in every set (owner ruling 2026-10-27: an admin
+// officer is an admin who also works in the field).
 // ---------------------------------------------------------------------------
 export const CAN_PROPOSE = new Set([
   "grand_master",
   "master",
-  "admin"
+  "admin",
+  "admin_officer"
 ]);
 export const CAN_QUERY = new Set([
   "grand_master",
@@ -51,17 +55,20 @@ export const CAN_QUERY = new Set([
 export const CAN_SQL = new Set([
   "grand_master",
   "master",
-  "admin"
+  "admin",
+  "admin_officer"
 ]);
 export const CAN_APPROVE = new Set([
   "grand_master",
   "master",
-  "admin"
+  "admin",
+  "admin_officer"
 ]);
 export const CAN_PROMOTE = new Set([
   "grand_master",
   "master",
-  "admin"
+  "admin",
+  "admin_officer"
 ]);
 export const CAN_WRITE = new Set([
   "grand_master",
@@ -74,7 +81,7 @@ export function roleTier(role: string) {
   if (r === "grand_master") return "admiral";
   if (r === "master") return "captain";
   if (r === "admin") return "commander";
-  if (r === "admin_officer") return "officer";
+  if (r === "admin_officer") return "commander";
   if (r === "officer") return "ensign";
   return "guest";
 }

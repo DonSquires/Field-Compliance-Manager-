@@ -43,7 +43,8 @@ const CORS = {
 const CAN_PROPOSE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 const BOB_SYSTEM_USER_ID = '00000000-0000-0000-0000-00000000b0b0';
 // Owner elevation: mirrors the conductor's OWNER_EMAILS set so the downstream

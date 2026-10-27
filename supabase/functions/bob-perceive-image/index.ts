@@ -114,7 +114,7 @@ serve(async (req)=>{
     }, 404);
     if (att.uploaded_by !== user.id) return json({ error: 'Attachment belongs to another user' }, 403);
     if (body.mode === 'identity_document' || incidentMode || submissionMode) {
-      if (!incidentMode && !submissionMode && !['grand_master', 'master', 'admin'].includes(String(profile.role))) {
+      if (!incidentMode && !submissionMode && !['grand_master', 'master', 'admin', 'admin_officer'].includes(String(profile.role))) {
         return json({ error: 'Forbidden: administrator identity review required' }, 403);
       }
       const personRecordId = String(body.person_record_id ?? '').trim();
