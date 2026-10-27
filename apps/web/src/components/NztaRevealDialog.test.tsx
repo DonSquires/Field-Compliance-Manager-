@@ -6,16 +6,26 @@ import { toCsv } from '../lib/nztaRegister';
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc } }));
 
-const renderDialog = (notices: Array<{ id: string; label: string }> = []) => {
+type Notice = { notice_id: string; organization_id: string; notice_number: string | null; notice_type: string; issued_at: string | null };
+let notices: Notice[] = [];
+let revealResult: { data: unknown; error: { message: string } | null } = { data: null, error: null };
+
+const renderDialog = () => {
   const onRevealed = vi.fn();
   const onClose = vi.fn();
   render(<NztaRevealDialog subjectType="vehicle" subjectId="vehicle-1" subjectLabel="ABC123" organizationId="org"
-    notices={notices} onRevealed={onRevealed} onClose={onClose} />);
+    onRevealed={onRevealed} onClose={onClose} />);
   return { onRevealed, onClose };
 };
 
 describe('NZTA reveal dialog', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    notices = [];
+    revealResult = { data: null, error: null };
+    rpc.mockImplementation((name: string) => Promise.resolve(name === 'list_nzta_follow_up_notices'
+      ? { data: notices, error: null } : revealResult));
+  });
   afterEach(cleanup);
 
   it('refuses to reveal without a purpose and a real reason', async () => {
@@ -24,19 +34,32 @@ describe('NZTA reveal dialog', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Choose why you need this information.');
     expect(alert.textContent).toContain('at least 10 characters');
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith('reveal_nzta_registered_person', expect.anything());
   });
 
-  it('disables notice follow-up when there is no notice to follow up', () => {
+  it('disables notice follow-up when the server lists no issued notice for the subject', async () => {
     renderDialog();
+    expect(await screen.findByText(/No issued trespass or warning notice is recorded for this vehicle/)).toBeTruthy();
     const radio = screen.getByRole('radio', { name: /Following up a trespass or warning notice/ });
     expect(radio.hasAttribute('disabled')).toBe(true);
+    expect(rpc).toHaveBeenCalledWith('list_nzta_follow_up_notices', { p_subject_type: 'vehicle', p_subject_id: 'vehicle-1', p_organization_id: 'org' });
+  });
+
+  it('keeps notice follow-up unavailable when the notice list fails to load', async () => {
+    rpc.mockImplementation((name: string) => Promise.resolve(name === 'list_nzta_follow_up_notices'
+      ? { data: null, error: { message: 'boom' } } : revealResult));
+    renderDialog();
+    expect(await screen.findByText(/Issued notices could not be loaded/)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Following up a trespass or warning notice/ }).hasAttribute('disabled')).toBe(true);
   });
 
   it('requires the notice for a notice follow-up and sends it to the server', async () => {
-    rpc.mockResolvedValue({ data: { revealed_until: '2026-11-01T01:15:00Z', organization_count: 1, warnings: [] }, error: null });
-    const { onRevealed } = renderDialog([{ id: 'notice-1', label: 'TN-1 · 01/11/2026' }]);
-    fireEvent.click(screen.getByRole('radio', { name: /Following up a trespass or warning notice/ }));
+    notices = [{ notice_id: 'notice-1', organization_id: 'org', notice_number: 'TN-1', notice_type: 'trespass', issued_at: '2026-11-01T00:00:00Z' }];
+    revealResult = { data: { revealed_until: '2026-11-01T01:15:00Z', organization_count: 1, warnings: [] }, error: null };
+    const { onRevealed } = renderDialog();
+    const radio = screen.getByRole('radio', { name: /Following up a trespass or warning notice/ });
+    await waitFor(() => expect(radio.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(radio);
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: '  Second visit after warning  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record purpose and view' }));
     expect((await screen.findByRole('alert')).textContent).toContain('Choose the notice you are following up.');
@@ -50,13 +73,23 @@ describe('NZTA reveal dialog', () => {
   });
 
   it('shows the server refusal and does not reveal', async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: 'NZTA register access required' } });
+    revealResult = { data: null, error: { message: 'NZTA register access required' } };
     const { onRevealed } = renderDialog();
     fireEvent.click(screen.getByRole('radio', { name: /without a valid permit/ }));
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Parked in reserved bay 4 without permit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record purpose and view' }));
     expect((await screen.findByRole('alert')).textContent).toContain('NZTA register access required');
     expect(onRevealed).not.toHaveBeenCalled();
+  });
+
+  it('keeps keyboard focus inside the dialog', () => {
+    renderDialog();
+    const dialog = screen.getByRole('dialog');
+    const submit = screen.getByRole('button', { name: 'Record purpose and view' });
+    submit.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(submit);
   });
 
   it('closes on Escape', () => {

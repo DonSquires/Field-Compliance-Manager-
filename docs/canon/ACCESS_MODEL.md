@@ -110,30 +110,54 @@ investigations and marketing are not authorised purposes.
   It is shown only to people holding the `vehicle_owner_identity` tick, and only
   after they state a purpose and reason (`reveal_nzta_registered_person`). A
   reveal opens a 15-minute window for that user and that vehicle or person, and
-  is written to `nzta_register_access_log`. A `notice_follow_up` reveal must
-  name the trespass or warning notice it follows up. The table path is closed
-  too: `entity_links_select` hides NZTA-restricted links without an open reveal,
-  `person_identity_documents_select` never returns `nzta_mvr_record` source
-  documents, and `get_vehicle_identity_checks` returns only allow-listed vehicle
-  facts from the stored snapshot until a reveal.
+  is written to `nzta_register_access_log`. The window is timed by the server
+  clock (`get_nzta_reveal_seconds_remaining`); screens re-mask when it closes,
+  whatever the device clock says. A reveal opens only the organisation it was
+  made for: Person search shows NZTA links only from organisations with an open
+  person reveal and asks for another reveal for the rest.
+- **Notice follow-up.** A `notice_follow_up` reveal must name an issued
+  trespass or warning notice about the same person or vehicle
+  (`nzta_notice_matches_subject`, listed by `list_nzta_follow_up_notices`).
+  The reveal is recorded against the notice's organisation, and a different
+  organisation is refused.
+- **Every read path is closed.** `entity_links_select` hides NZTA-restricted
+  links without an open reveal; `person_identity_documents_select` never
+  returns `nzta_mvr_record` source documents; `get_vehicle_identity_checks`
+  returns only allow-listed vehicle facts until a reveal. The source file is
+  gated the same way wherever it is stored: `bob_attachments_select`,
+  `evidence_items_select` and the `identity_evidence_select` Storage policy
+  refuse NZTA source attachments, evidence rows and files without an open
+  reveal (`nzta_attachment_restricted`, `nzta_evidence_restricted`,
+  `nzta_storage_object_restricted`). `get_identity_registry` returns an
+  unrevealed NZTA record only as a masked stub (kind, review state, dates, plate
+  and vehicle), so administrators reveal through the vehicle before reviewing.
 - **The notice exception.** The client organisation a notice was issued for,
   and the investigating user, may use the data for that notice. This is not
   automatic: the notice still carries its own organisation scope, and the
   investigator uses a `notice_follow_up` reveal.
 - **Readiness before a new grant.** A new `vehicle_owner_identity` grant
   requires current NZTA register training and a current confidentiality
-  acceptance (`nzta_access_attestations`, each at most 12 months). These are
+  acceptance (`nzta_access_attestations`, each at most 12 months). This is
+  enforced on every grant path: `set_vehicle_owner_access`, and the
+  `trg_nzta_grant_readiness` trigger on `staff_area_grants`,
+  `preset_assignments` and presets whose grants gain the area. These are
   personal: they are recorded against the person's home organisation and count
-  wherever that person holds access. Existing grants are not revoked; they are
-  shown as not ready until recorded. The holder list mirrors the administrator
-  rule (home, parent, operational-provider and platform administrators) plus
-  direct and preset grants.
+  wherever that person holds access. An administrator of an organisation the
+  person holds access in may record them (`recorded_via_organization_id` is
+  audited). Existing grants are not revoked; they are shown as not ready until
+  recorded. The holder list mirrors the administrator rule (home, parent,
+  operational-provider and platform administrators) plus direct and preset
+  grants, including grants made at a parent scope.
 - **Records NZTA can ask for.** Every Motochek lookup is entered in
   `nzta_register_lookups` with the individual Motochek user, purpose,
   explanation and outcome. Admin-tier roles review holders quarterly
   (`nzta_access_reviews`) and produce the annual summary with per-zone signage
   evidence (`get_nzta_s241_summary`). Historical checks imported before the
-  register existed are listed without a purpose, never back-filled.
+  register existed are listed without a purpose, never back-filled; an
+  administrator may link one to the lookup that explains it
+  (`link_nzta_register_lookup_check`, audited), and each check explains at
+  most one lookup. Lists that reach their size cap say so and block export
+  rather than exporting a partial record.
 - **Anonymous access.** `canonical_person_public` is no longer readable by
   `anon`. `canonical_vehicle_public` and `canonical_scv_public` are unchanged
   pending a separate ruling.

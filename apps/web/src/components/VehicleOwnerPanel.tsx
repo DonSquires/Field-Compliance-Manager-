@@ -8,6 +8,7 @@ import { isDuplicateError, type NewPersonFields, type PersonMatch } from '../lib
 import { PersonIdentityPanel, PersonMatchSuggestions, PersonSearchPicker } from './PersonIdentity';
 import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from './NztaRevealDialog';
 import { NZTA_PERSON_LABEL, NZTA_PERSON_NOTE } from '../lib/nztaRegister';
+import { useNztaRevealExpiry } from '../lib/useNztaRevealExpiry';
 import './RecordFollowUp.css';
 
 type Relationship = 'owner' | 'registered_owner' | 'driver' | 'associated_person';
@@ -146,6 +147,13 @@ export const VehicleOwnerPanel: React.FC<{
   }, [access, canView, observationId, organizationId, vehicleId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const nztaVisible = reveal !== null || checks.some((check) => check.revealed === true)
+    || people.some((person) => person.nzta_restricted && person.display_name !== null);
+  useNztaRevealExpiry({
+    subjectType: 'vehicle', subjectId: vehicleId, organizationId, enabled: nztaVisible,
+    onExpire: () => { setReveal(null); void load(); },
+  });
 
   if (access === null) return null;
 

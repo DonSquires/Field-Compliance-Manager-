@@ -11,7 +11,7 @@
  * - get_nzta_s241_summary for the annual report (T&C 19) with signage evidence
  *   per zone and report-only retention counts.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, Download, FileText, Printer, RefreshCw, Search, ShieldCheck, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ShellLayout } from '../layouts/ShellLayout';
@@ -141,6 +141,11 @@ const endOf = (date: string) => { if (!date) return null; const end = new Date(`
 const nzDate = (value: string | null | undefined) => (value ? new Date(value.length === 10 ? `${value}T00:00:00` : value).toLocaleDateString('en-NZ') : '—');
 const friendlyError = (message: string | undefined, fallback: string) =>
   message && !/^(fetch|network|TypeError)/i.test(message) ? message : fallback;
+// Lists request one row more than they show, so a capped result is detected
+// and exports are blocked instead of silently omitting records.
+const LOOKUP_LIMIT = 2000;
+const ACCESS_LOG_LIMIT = 4000;
+const normalisePlate = (value: string | null | undefined) => (value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const StateMessage: React.FC<{ kind: 'loading' | 'empty' | 'error'; children: React.ReactNode; onRetry?: () => void }> = ({ kind, children, onRetry }) => (
   <div className={`nzta-state is-${kind}`} role={kind === 'error' ? 'alert' : 'status'}>
@@ -182,16 +187,23 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
   const [notice, setNotice] = useState<string | null>(null);
   const [places, setPlaces] = useState<Array<{ id: string; name: string }>>([]);
   const [editing, setEditing] = useState<{ id: string; outcome: LookupOutcome; notes: string } | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [linking, setLinking] = useState<{ checkId: string; lookupId: string; reason: string } | null>(null);
+  const loadSeq = useRef(0);
 
   // ATLAS CALLS: list_nzta_register_lookups
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setRows(null);
     setError(null);
     const { data, error: rpcError } = await supabase.rpc('list_nzta_register_lookups', {
-      p_organization_id: organizationId, p_from: startOf(from), p_to: endOf(to), p_limit: 2000,
+      p_organization_id: organizationId, p_from: startOf(from), p_to: endOf(to), p_limit: LOOKUP_LIMIT + 1,
     });
+    if (seq !== loadSeq.current) return;
     if (rpcError) { setError(friendlyError(rpcError.message, 'The lookup register could not be loaded.')); return; }
-    setRows((data ?? []) as LookupRow[]);
+    const all = (data ?? []) as LookupRow[];
+    setTruncated(all.length > LOOKUP_LIMIT);
+    setRows(all.slice(0, LOOKUP_LIMIT));
   }, [from, organizationId, to]);
 
   useEffect(() => { void load(); }, [load]);
@@ -264,6 +276,25 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
     await load();
   };
 
+  const linkCandidates = (row: LookupRow) => (rows ?? []).filter((candidate) => candidate.entry_kind === 'lookup'
+    && !candidate.vehicle_identity_check_id
+    && ((row.plate_number && normalisePlate(candidate.plate_number) === normalisePlate(row.plate_number))
+      || (row.vin && normalisePlate(candidate.vin) === normalisePlate(row.vin))));
+
+  // ATLAS CALLS: link_nzta_register_lookup_check
+  const saveLink = async () => {
+    if (!linking || !linking.lookupId || linking.reason.trim().length < 5) return;
+    setSaving(true);
+    const { error: rpcError } = await supabase.rpc('link_nzta_register_lookup_check', {
+      p_lookup_id: linking.lookupId, p_check_id: linking.checkId, p_reason: linking.reason.trim(),
+    });
+    setSaving(false);
+    if (rpcError) { setError(friendlyError(rpcError.message, 'The check could not be linked.')); return; }
+    setNotice('NZTA check linked to its recorded lookup. It now counts as an explained lookup.');
+    setLinking(null);
+    await load();
+  };
+
   const exportCsv = () => downloadCsv(`nzta-lookup-register-${from}-to-${to}.csv`, toCsv(filtered.map((row) => ({
     ...row, looked_up_at: new Date(row.looked_up_at).toISOString(), purpose: row.purpose ? nztaLabel(row.purpose) : 'Not recorded (historical check)',
     outcome: row.outcome ? nztaLabel(row.outcome) : '',
@@ -278,11 +309,12 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
       <header className="nzta-panel__head">
         <div><h2 id="nzta-lookups-title">Lookup register</h2><p>Record every Motochek lookup with the individual user, the Gazette purpose and what happened next. NZTA can ask for this register at any time; keep it for at least 18 months.</p></div>
         <div className="nzta-panel__actions">
-          <button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!rows || filtered.length === 0}><Download size={16} aria-hidden="true" /> Export CSV</button>
+          <button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!rows || filtered.length === 0 || truncated}><Download size={16} aria-hidden="true" /> Export CSV</button>
           <button type="button" className="btn btn-primary" aria-expanded={formOpen} onClick={() => { setFormOpen((open) => !open); setFormError(null); }}>{formOpen ? 'Close form' : 'Record a lookup'}</button>
         </div>
       </header>
       {notice && <p className="nzta-banner is-success" role="status"><CheckCircle2 size={16} aria-hidden="true" /> {notice}</p>}
+      {truncated && <p className="nzta-banner is-watch" role="note"><AlertTriangle size={16} aria-hidden="true" /> More than {LOOKUP_LIMIT.toLocaleString('en-NZ')} entries fall in this period, so only the newest are shown and export is turned off. Narrow the dates to see and export every entry.</p>}
       {missingPurpose > 0 && <p className="nzta-banner is-watch" role="note"><AlertTriangle size={16} aria-hidden="true" /> {missingPurpose} historical NZTA check{missingPurpose === 1 ? '' : 's'} in this period {missingPurpose === 1 ? 'has' : 'have'} no recorded purpose. They are listed for completeness and counted separately in the annual summary.</p>}
 
       {formOpen && (
@@ -366,7 +398,21 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
                       </td>
                       <td data-label="">{row.entry_kind === 'lookup' && row.can_edit && editing?.id !== row.entry_id && (
                         <button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditing({ id: row.entry_id, outcome: row.outcome ?? 'pending', notes: row.outcome_notes ?? '' })} aria-label={`Set outcome for ${row.plate_number ?? row.vin ?? 'lookup'}`}>Set outcome</button>
-                      )}</td>
+                      )}
+                      {row.entry_kind === 'historical_check' && (linking?.checkId === row.entry_id ? (
+                        <div className="nzta-outcome-edit">
+                          <label className="sr-only" htmlFor={`link-lookup-${row.entry_id}`}>Recorded lookup</label>
+                          <select id={`link-lookup-${row.entry_id}`} value={linking.lookupId} onChange={(event) => setLinking({ ...linking, lookupId: event.target.value })}>
+                            <option value="">Choose the lookup…</option>
+                            {linkCandidates(row).map((candidate) => <option key={candidate.entry_id} value={candidate.entry_id}>{formatNzDateTime(candidate.looked_up_at)} · {candidate.motochek_user ?? 'user not recorded'}</option>)}
+                          </select>
+                          <label className="sr-only" htmlFor={`link-reason-${row.entry_id}`}>Reason for linking</label>
+                          <input id={`link-reason-${row.entry_id}`} value={linking.reason} maxLength={500} placeholder="Why this lookup explains the check" onChange={(event) => setLinking({ ...linking, reason: event.target.value })} />
+                          <div><button type="button" className="btn btn-sm btn-primary" disabled={saving || !linking.lookupId || linking.reason.trim().length < 5} onClick={() => void saveLink()}>Link</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setLinking(null)}>Cancel</button></div>
+                        </div>
+                      ) : linkCandidates(row).length > 0 && (
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLinking({ checkId: row.entry_id, lookupId: '', reason: '' })} aria-label={`Link the check for ${row.plate_number ?? row.vin ?? 'this vehicle'} to its recorded lookup`}>Link to recorded lookup</button>
+                      ))}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -386,16 +432,22 @@ const AccessLog: React.FC<{ organizationId: string }> = ({ organizationId }) => 
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [rows, setRows] = useState<AccessLogRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const loadSeq = useRef(0);
 
   // ATLAS CALLS: list_nzta_register_access_log
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setRows(null);
     setError(null);
     const { data, error: rpcError } = await supabase.rpc('list_nzta_register_access_log', {
-      p_organization_id: organizationId, p_from: startOf(from), p_to: endOf(to), p_limit: 5000,
+      p_organization_id: organizationId, p_from: startOf(from), p_to: endOf(to), p_limit: ACCESS_LOG_LIMIT + 1,
     });
+    if (seq !== loadSeq.current) return;
     if (rpcError) { setError(friendlyError(rpcError.message, 'The access log could not be loaded.')); return; }
-    setRows((data ?? []) as AccessLogRow[]);
+    const all = (data ?? []) as AccessLogRow[];
+    setTruncated(all.length > ACCESS_LOG_LIMIT);
+    setRows(all.slice(0, ACCESS_LOG_LIMIT));
   }, [from, organizationId, to]);
 
   useEffect(() => { void load(); }, [load]);
@@ -419,8 +471,9 @@ const AccessLog: React.FC<{ organizationId: string }> = ({ organizationId }) => 
     <section className="nzta-panel" aria-labelledby="nzta-access-title">
       <header className="nzta-panel__head">
         <div><h2 id="nzta-access-title">Access log</h2><p>Every time someone revealed an NZTA person–vehicle link in this app: who, when, the subject, and the stated purpose. Entries cannot be edited or removed.</p></div>
-        <div className="nzta-panel__actions"><button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!rows || filtered.length === 0}><Download size={16} aria-hidden="true" /> Export CSV</button></div>
+        <div className="nzta-panel__actions"><button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!rows || filtered.length === 0 || truncated}><Download size={16} aria-hidden="true" /> Export CSV</button></div>
       </header>
+      {truncated && <p className="nzta-banner is-watch" role="note"><AlertTriangle size={16} aria-hidden="true" /> More than {ACCESS_LOG_LIMIT.toLocaleString('en-NZ')} views fall in this period, so only the newest are shown and export is turned off. Narrow the dates to see and export every view.</p>}
       <PeriodFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} search={search} onSearch={setSearch} searchLabel="Search user, subject or reason" />
       <label className="nzta-check"><input type="checkbox" checked={flaggedOnly} onChange={(event) => setFlaggedOnly(event.target.checked)} /> Only views by people without current training or confidentiality</label>
       {error ? <StateMessage kind="error" onRetry={() => void load()}>{error}</StateMessage>
@@ -465,20 +518,30 @@ const People: React.FC<{ organizationId: string; currentUserId: string | undefin
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   // ATLAS CALLS: get_nzta_access_holders
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setHolders(null);
     setError(null);
+    setHistoryError(null);
     const [holderResult, historyResult] = await Promise.all([
       supabase.rpc('get_nzta_access_holders', { p_organization_id: organizationId }),
       supabase.from('nzta_access_attestations')
         .select('id, user_id, attestation_type, completed_on, expires_on, provider, notes, created_at, withdrawn_at, withdrawn_reason')
         .eq('organization_id', organizationId).order('completed_on', { ascending: false }).limit(2000),
     ]);
+    if (seq !== loadSeq.current) return;
     if (holderResult.error) { setError(friendlyError(holderResult.error.message, 'Authorised staff could not be loaded.')); return; }
     setHolders((holderResult.data ?? []) as Holder[]);
-    setHistory(historyResult.error ? [] : (historyResult.data ?? []) as Attestation[]);
+    if (historyResult.error) {
+      setHistory([]);
+      setHistoryError(friendlyError(historyResult.error.message, 'The training and confidentiality history could not be loaded.'));
+    } else {
+      setHistory((historyResult.data ?? []) as Attestation[]);
+    }
   }, [organizationId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -516,6 +579,7 @@ const People: React.FC<{ organizationId: string; currentUserId: string | undefin
     const { error: rpcError } = await supabase.rpc('record_nzta_access_attestation', {
       p_user_id: recording.user.user_id, p_attestation_type: recording.type, p_completed_on: completedOn,
       p_expires_on: expiresOn || null, p_provider: provider.trim() || null, p_notes: notes.trim() || null,
+      p_organization_id: organizationId,
     });
     setSaving(false);
     if (rpcError) { setFormError(friendlyError(rpcError.message, 'The record could not be saved.')); return; }
@@ -603,6 +667,7 @@ const People: React.FC<{ organizationId: string; currentUserId: string | undefin
         </form>
       )}
 
+      {historyError && <StateMessage kind="error" onRetry={() => void load()}>{historyError}</StateMessage>}
       {history.length > 0 && (
         <details className="nzta-history">
           <summary>Training and confidentiality history ({history.length})</summary>
@@ -734,13 +799,16 @@ const SummaryView: React.FC<{ organizationId: string }> = ({ organizationId }) =
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadSeq = useRef(0);
 
   // ATLAS CALLS: get_nzta_s241_summary
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     if (!from || !to || to < from) { setError('Enter a valid reporting period.'); setLoading(false); return; }
     setLoading(true);
     setError(null);
     const { data, error: rpcError } = await supabase.rpc('get_nzta_s241_summary', { p_organization_id: organizationId, p_from: from, p_to: to });
+    if (seq !== loadSeq.current) return;
     setLoading(false);
     if (rpcError) { setError(friendlyError(rpcError.message, 'The summary could not be prepared.')); return; }
     setSummary(data as Summary);
@@ -749,7 +817,7 @@ const SummaryView: React.FC<{ organizationId: string }> = ({ organizationId }) =
   useEffect(() => { void load(); }, [load]);
 
   const exportCsv = () => {
-    if (!summary) return;
+    if (!summary || summary.period.from !== from || summary.period.to !== to) return;
     const rows: Array<Record<string, unknown>> = [
       { section: 'Period', item: 'From', value: summary.period.from },
       { section: 'Period', item: 'To', value: summary.period.to },
@@ -778,6 +846,9 @@ const SummaryView: React.FC<{ organizationId: string }> = ({ organizationId }) =
     downloadCsv(`nzta-s241-summary-${from}-to-${to}.csv`, toCsv(rows, [['section', 'Section'], ['item', 'Item'], ['value', 'Value']]));
   };
 
+  // Print and export only describe the period currently shown in the filter.
+  const summaryMatchesFilter = !!summary && !loading && !error && summary.period.from === from && summary.period.to === to;
+
   const zonesWithout = summary?.signage.filter((zone) => zone.evidence_count === 0).length ?? 0;
 
   return (
@@ -785,8 +856,8 @@ const SummaryView: React.FC<{ organizationId: string }> = ({ organizationId }) =
       <header className="nzta-panel__head">
         <div><h2 id="nzta-summary-title">Annual summary</h2><p>Figures for the yearly report to NZTA: lookups by purpose and outcome, in-app views, staff readiness, access reviews, signage evidence for each patrolled zone, and records due for a retention decision.</p></div>
         <div className="nzta-panel__actions">
-          <button type="button" className="btn btn-secondary" onClick={() => window.print()} disabled={!summary}><Printer size={16} aria-hidden="true" /> Print</button>
-          <button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!summary}><Download size={16} aria-hidden="true" /> Export CSV</button>
+          <button type="button" className="btn btn-secondary" onClick={() => window.print()} disabled={!summaryMatchesFilter}><Printer size={16} aria-hidden="true" /> Print</button>
+          <button type="button" className="btn btn-secondary" onClick={exportCsv} disabled={!summaryMatchesFilter}><Download size={16} aria-hidden="true" /> Export CSV</button>
         </div>
       </header>
       <PeriodFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} />
@@ -881,11 +952,11 @@ export const NztaRegisterContent: React.FC = () => {
       </div>
       <div id="nzta-tabpanel" role="tabpanel" aria-labelledby={`nzta-tab-${tab}`}>
         <p className="nzta-muted nzta-tab-hint">{active.hint}</p>
-        {tab === 'lookups' && <LookupRegister organizationId={operatingOrganizationId} />}
-        {tab === 'access' && <AccessLog organizationId={operatingOrganizationId} />}
-        {tab === 'people' && <People organizationId={operatingOrganizationId} currentUserId={profile?.id} />}
-        {tab === 'reviews' && <Reviews organizationId={operatingOrganizationId} />}
-        {tab === 'summary' && <SummaryView organizationId={operatingOrganizationId} />}
+        {tab === 'lookups' && <LookupRegister key={operatingOrganizationId} organizationId={operatingOrganizationId} />}
+        {tab === 'access' && <AccessLog key={operatingOrganizationId} organizationId={operatingOrganizationId} />}
+        {tab === 'people' && <People key={operatingOrganizationId} organizationId={operatingOrganizationId} currentUserId={profile?.id} />}
+        {tab === 'reviews' && <Reviews key={operatingOrganizationId} organizationId={operatingOrganizationId} />}
+        {tab === 'summary' && <SummaryView key={operatingOrganizationId} organizationId={operatingOrganizationId} />}
       </div>
     </div>
   );

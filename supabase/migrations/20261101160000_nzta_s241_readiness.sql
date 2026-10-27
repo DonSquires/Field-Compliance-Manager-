@@ -53,7 +53,9 @@ CREATE INDEX nzta_register_lookups_location_idx ON public.nzta_register_lookups 
 CREATE INDEX nzta_register_lookups_observation_idx ON public.nzta_register_lookups (observation_id);
 CREATE INDEX nzta_register_lookups_evidence_idx ON public.nzta_register_lookups (evidence_item_id);
 CREATE INDEX nzta_register_lookups_notice_idx ON public.nzta_register_lookups (notice_id);
-CREATE INDEX nzta_register_lookups_check_idx ON public.nzta_register_lookups (vehicle_identity_check_id);
+-- One lookup per NZTA check, so a check is never counted as both explained and unexplained.
+CREATE UNIQUE INDEX nzta_register_lookups_check_idx ON public.nzta_register_lookups (vehicle_identity_check_id)
+  WHERE vehicle_identity_check_id IS NOT NULL;
 CREATE INDEX nzta_register_lookups_created_by_idx ON public.nzta_register_lookups (created_by);
 CREATE INDEX nzta_register_lookups_outcome_by_idx ON public.nzta_register_lookups (outcome_recorded_by);
 
@@ -195,6 +197,195 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION public.nzta_access_readiness(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 
+-- Seconds left on the caller's open reveal for a subject, measured on the server
+-- clock so screens can remask at the deadline without trusting the device clock.
+-- Each organisation keeps its latest window; the earliest of those is returned.
+CREATE OR REPLACE FUNCTION public.get_nzta_reveal_seconds_remaining(
+  p_subject_type text, p_subject_id uuid, p_organization_id uuid DEFAULT NULL)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT ceil(extract(epoch FROM min(org_window.expires_at) - clock_timestamp()))::integer
+  FROM (
+    SELECT log.organization_id, max(log.expires_at) AS expires_at
+    FROM public.nzta_register_access_log log
+    WHERE auth.uid() IS NOT NULL AND log.actor_user_id = auth.uid()
+      AND log.subject_type = p_subject_type AND log.subject_id = p_subject_id
+      AND (p_organization_id IS NULL OR log.organization_id = p_organization_id)
+      AND log.expires_at > clock_timestamp()
+      AND public.can_access_vehicle_owner_identity(log.organization_id)
+    GROUP BY log.organization_id
+  ) org_window;
+$function$;
+
+-- NZTA source documents (images/PDFs of Motochek results) are as sensitive as
+-- the person<->vehicle link itself. Once a document is linked to an NZTA check,
+-- it, its attachment, its evidence row and its Storage object are readable only
+-- while the caller holds an open reveal for that check's vehicle or person.
+CREATE OR REPLACE FUNCTION public.nzta_document_restricted(p_document_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.vehicle_identity_checks c
+    JOIN public.person_identity_documents d ON d.id = c.identity_document_id
+    WHERE c.identity_document_id = p_document_id
+      AND d.document_kind = 'nzta_mvr_record'
+      AND NOT coalesce(
+        public.can_access_vehicle_owner_identity(c.organization_id)
+        AND (public.nzta_reveal_active(ARRAY[c.organization_id], 'vehicle', c.canonical_vehicle_id)
+             OR (c.canonical_person_id IS NOT NULL
+                 AND public.nzta_reveal_active(ARRAY[c.organization_id], 'person', c.canonical_person_id))),
+        false)
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.nzta_attachment_restricted(p_attachment_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.person_identity_documents d
+    WHERE d.attachment_id = p_attachment_id AND d.document_kind = 'nzta_mvr_record'
+      AND public.nzta_document_restricted(d.id)
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.nzta_storage_object_restricted(p_bucket text, p_name text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.bob_attachments a
+    WHERE a.storage_bucket = p_bucket AND a.storage_path = p_name
+      AND public.nzta_attachment_restricted(a.id)
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.nzta_evidence_restricted(p_evidence_item_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.vehicle_identity_checks c
+    WHERE c.evidence_item_id = p_evidence_item_id AND public.nzta_document_restricted(c.identity_document_id)
+  ) OR EXISTS (
+    SELECT 1 FROM public.person_identity_documents d
+    WHERE d.evidence_item_id = p_evidence_item_id AND d.document_kind = 'nzta_mvr_record'
+      AND public.nzta_document_restricted(d.id)
+  );
+$function$;
+
+CREATE INDEX IF NOT EXISTS person_identity_documents_evidence_item_idx
+  ON public.person_identity_documents (evidence_item_id) WHERE evidence_item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS vehicle_identity_checks_evidence_item_idx
+  ON public.vehicle_identity_checks (evidence_item_id) WHERE evidence_item_id IS NOT NULL;
+
+-- A notice can justify a follow-up reveal only for the subject it was issued about.
+CREATE OR REPLACE FUNCTION public.nzta_notice_matches_subject(p_notice_id uuid, p_subject_type text, p_subject_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.notices notice
+    WHERE notice.id = p_notice_id
+      AND notice.status = 'issued' AND notice.notice_type IN ('trespass', 'warning')
+      AND CASE p_subject_type
+        WHEN 'person' THEN notice.person_id = p_subject_id
+        WHEN 'vehicle' THEN (
+          EXISTS (
+            SELECT 1 FROM public.vehicles notice_vehicle
+            JOIN public.canonical_vehicles subject_vehicle ON subject_vehicle.id = p_subject_id
+            WHERE notice_vehicle.id = notice.vehicle_id
+              AND upper(regexp_replace(notice_vehicle.plate, '[^A-Za-z0-9]', '', 'g'))
+                = upper(regexp_replace(subject_vehicle.plate_number, '[^A-Za-z0-9]', '', 'g')))
+          OR (notice.person_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM public.entity_links link
+            WHERE link.organization_id = notice.organization_id
+              AND link.from_type = 'person' AND link.from_id = notice.person_id
+              AND link.to_type = 'vehicle' AND link.to_id = p_subject_id)))
+        ELSE false END
+  );
+$function$;
+REVOKE ALL ON FUNCTION public.nzta_notice_matches_subject(uuid, text, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Every path that grants vehicle_owner_identity (direct grant, preset
+-- assignment, or adding the area to a preset) requires current training and
+-- confidentiality for each person who would gain it. Existing active grants
+-- are not revoked; they are reported as not ready instead.
+CREATE OR REPLACE FUNCTION public.enforce_nzta_grant_readiness()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  v_ready jsonb;
+  v_unready integer;
+BEGIN
+  IF TG_TABLE_NAME = 'staff_area_grants' THEN
+    IF NEW.area <> 'vehicle_owner_identity' OR NEW.status <> 'active' THEN RETURN NEW; END IF;
+    IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.area = NEW.area
+       AND OLD.user_id = NEW.user_id AND OLD.scope_org_id = NEW.scope_org_id THEN
+      RETURN NEW;
+    END IF;
+    v_ready := public.nzta_access_readiness(NEW.user_id, NEW.scope_org_id);
+  ELSIF TG_TABLE_NAME = 'preset_assignments' THEN
+    IF NEW.status <> 'active' THEN RETURN NEW; END IF;
+    IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.preset_id = NEW.preset_id
+       AND OLD.user_id = NEW.user_id AND OLD.scope_org_id = NEW.scope_org_id THEN
+      RETURN NEW;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.access_presets preset
+                   WHERE preset.id = NEW.preset_id AND preset.grants ? 'vehicle_owner_identity') THEN
+      RETURN NEW;
+    END IF;
+    v_ready := public.nzta_access_readiness(NEW.user_id, NEW.scope_org_id);
+  ELSE
+    IF TG_OP <> 'UPDATE' OR NOT (NEW.grants ? 'vehicle_owner_identity')
+       OR (OLD.grants ? 'vehicle_owner_identity') THEN
+      RETURN NEW;
+    END IF;
+    SELECT count(*) INTO v_unready
+    FROM public.preset_assignments assignment
+    CROSS JOIN LATERAL public.nzta_access_readiness(assignment.user_id, assignment.scope_org_id) readiness
+    WHERE assignment.preset_id = NEW.id AND assignment.status = 'active'
+      AND NOT ((readiness->>'training_current')::boolean AND (readiness->>'confidentiality_current')::boolean);
+    IF v_unready > 0 THEN
+      RAISE EXCEPTION '% people assigned this preset have no current NZTA register training and confidentiality acceptance. Record both before adding NZTA register access to the preset.', v_unready
+        USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NOT ((v_ready->>'training_current')::boolean AND (v_ready->>'confidentiality_current')::boolean) THEN
+    RAISE EXCEPTION 'Record current NZTA register training and confidentiality acceptance before granting access'
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.enforce_nzta_grant_readiness() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_nzta_grant_readiness BEFORE INSERT OR UPDATE ON public.staff_area_grants
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_nzta_grant_readiness();
+CREATE TRIGGER trg_nzta_grant_readiness BEFORE INSERT OR UPDATE ON public.preset_assignments
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_nzta_grant_readiness();
+CREATE TRIGGER trg_nzta_grant_readiness BEFORE UPDATE OF grants ON public.access_presets
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_nzta_grant_readiness();
+
 -- 7. Lookup register RPCs.
 CREATE OR REPLACE FUNCTION public.record_nzta_register_lookup(
   p_organization_id uuid, p_looked_up_at timestamptz, p_plate_number text, p_vin text,
@@ -245,6 +436,10 @@ BEGIN
   IF p_vehicle_identity_check_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.vehicle_identity_checks WHERE id = p_vehicle_identity_check_id AND organization_id = p_organization_id) THEN
     RAISE EXCEPTION 'That NZTA check is not in this organisation';
+  END IF;
+  IF p_vehicle_identity_check_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.nzta_register_lookups WHERE vehicle_identity_check_id = p_vehicle_identity_check_id) THEN
+    RAISE EXCEPTION 'That NZTA check is already linked to another lookup';
   END IF;
   IF p_evidence_item_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.evidence_items WHERE id = p_evidence_item_id AND organization_id = p_organization_id) THEN
@@ -304,6 +499,54 @@ BEGIN
   INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   VALUES (v_row.organization_id, v_actor, 'nzta_register_lookup_outcome_set', 'nzta_register_lookups', p_lookup_id,
     jsonb_build_object('outcome', p_outcome, 'previous_outcome', v_row.outcome));
+END;
+$function$;
+
+-- Associate an NZTA check with the lookup that explains it, including checks
+-- approved after the lookup was recorded. Admin-only and audited.
+CREATE OR REPLACE FUNCTION public.link_nzta_register_lookup_check(p_lookup_id uuid, p_check_id uuid, p_reason text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_lookup public.nzta_register_lookups%rowtype;
+  v_check public.vehicle_identity_checks%rowtype;
+  v_check_plate text;
+  v_check_vin text;
+BEGIN
+  SELECT * INTO v_lookup FROM public.nzta_register_lookups WHERE id = p_lookup_id FOR UPDATE;
+  IF v_actor IS NULL OR v_lookup.id IS NULL OR NOT public.is_admin_for_org(v_lookup.organization_id) THEN
+    RAISE EXCEPTION 'Organisation administrator required' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO v_check FROM public.vehicle_identity_checks
+  WHERE id = p_check_id AND organization_id = v_lookup.organization_id;
+  IF v_check.id IS NULL THEN RAISE EXCEPTION 'That NZTA check is not in this organisation'; END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 5 THEN RAISE EXCEPTION 'A reason is required'; END IF;
+  IF v_lookup.vehicle_identity_check_id IS NOT NULL THEN
+    RAISE EXCEPTION 'This lookup is already linked to an NZTA check';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.nzta_register_lookups WHERE vehicle_identity_check_id = p_check_id) THEN
+    RAISE EXCEPTION 'That NZTA check is already linked to another lookup';
+  END IF;
+  SELECT upper(regexp_replace(coalesce(vehicle.plate_number, ''), '[^A-Za-z0-9]', '', 'g')), upper(vehicle.vin)
+  INTO v_check_plate, v_check_vin
+  FROM public.canonical_vehicles vehicle WHERE vehicle.id = v_check.canonical_vehicle_id;
+  IF NOT (v_lookup.canonical_vehicle_id = v_check.canonical_vehicle_id
+          OR (v_lookup.plate_number IS NOT NULL AND v_lookup.plate_number = v_check_plate)
+          OR (v_lookup.vin IS NOT NULL AND v_lookup.vin = v_check_vin)) THEN
+    RAISE EXCEPTION 'The lookup and the NZTA check are for different vehicles';
+  END IF;
+  UPDATE public.nzta_register_lookups
+  SET vehicle_identity_check_id = p_check_id,
+      canonical_vehicle_id = coalesce(canonical_vehicle_id, v_check.canonical_vehicle_id),
+      updated_at = clock_timestamp()
+  WHERE id = p_lookup_id;
+  INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  VALUES (v_lookup.organization_id, v_actor, 'nzta_register_lookup_check_linked', 'nzta_register_lookups', p_lookup_id,
+    jsonb_build_object('vehicle_identity_check_id', p_check_id, 'reason', btrim(p_reason)));
 END;
 $function$;
 
@@ -369,6 +612,8 @@ DECLARE
   v_actor uuid := auth.uid();
   v_orgs uuid[];
   v_org uuid;
+  v_notice_org uuid;
+  v_notice uuid := CASE WHEN p_purpose = 'notice_follow_up' THEN p_notice_id END;
   v_ready jsonb;
   v_expires timestamptz := clock_timestamp() + interval '15 minutes';
   v_warnings text[] := ARRAY[]::text[];
@@ -386,7 +631,18 @@ BEGIN
   IF p_purpose = 'notice_follow_up' AND p_notice_id IS NULL THEN
     RAISE EXCEPTION 'Choose the notice you are following up';
   END IF;
-  IF p_organization_id IS NOT NULL THEN
+  IF p_purpose = 'notice_follow_up' THEN
+    -- The notice justifies a window only in the organisation it was issued by.
+    SELECT notice.organization_id INTO v_notice_org FROM public.notices notice
+    WHERE notice.id = p_notice_id AND public.nzta_notice_matches_subject(notice.id, p_subject_type, p_subject_id);
+    IF v_notice_org IS NULL THEN
+      RAISE EXCEPTION 'Choose an issued trespass or warning notice for this %', p_subject_type;
+    END IF;
+    IF p_organization_id IS NOT NULL AND p_organization_id <> v_notice_org THEN
+      RAISE EXCEPTION 'That notice was issued by another organisation';
+    END IF;
+    v_orgs := ARRAY[v_notice_org];
+  ELSIF p_organization_id IS NOT NULL THEN
     v_orgs := ARRAY[p_organization_id];
   ELSIF p_subject_type = 'person' THEN
     v_orgs := array(
@@ -409,8 +665,8 @@ BEGIN
     SELECT 1 FROM public.nzta_register_lookups WHERE id = p_lookup_id AND organization_id = ANY (v_orgs)) THEN
     RAISE EXCEPTION 'That lookup is not in your authorised organisations';
   END IF;
-  IF p_notice_id IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM public.notices WHERE id = p_notice_id AND organization_id = ANY (v_orgs)) THEN
+  IF v_notice IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.notices WHERE id = v_notice AND organization_id = ANY (v_orgs)) THEN
     RAISE EXCEPTION 'That notice is not in your authorised organisations';
   END IF;
   IF p_observation_id IS NOT NULL AND NOT EXISTS (
@@ -425,13 +681,34 @@ BEGIN
       explanation, lookup_id, notice_id, observation_id, training_current, confidentiality_current, expires_at)
     VALUES (v_org, v_actor, p_subject_type, p_subject_id, p_purpose, btrim(p_explanation),
       CASE WHEN EXISTS (SELECT 1 FROM public.nzta_register_lookups WHERE id = p_lookup_id AND organization_id = v_org) THEN p_lookup_id END,
-      CASE WHEN EXISTS (SELECT 1 FROM public.notices WHERE id = p_notice_id AND organization_id = v_org) THEN p_notice_id END,
+      CASE WHEN EXISTS (SELECT 1 FROM public.notices WHERE id = v_notice AND organization_id = v_org) THEN v_notice END,
       CASE WHEN EXISTS (SELECT 1 FROM public.observations WHERE id = p_observation_id AND organization_id = v_org) THEN p_observation_id END,
       (v_ready->>'training_current')::boolean, (v_ready->>'confidentiality_current')::boolean, v_expires);
   END LOOP;
   RETURN jsonb_build_object('revealed_until', v_expires, 'organization_count', cardinality(v_orgs),
     'warnings', to_jsonb(ARRAY(SELECT DISTINCT w FROM unnest(v_warnings) w ORDER BY w)));
 END;
+$function$;
+
+-- Issued trespass/warning notices that can justify a follow-up reveal for this
+-- subject, limited to organisations where the caller holds register access.
+CREATE OR REPLACE FUNCTION public.list_nzta_follow_up_notices(
+  p_subject_type text, p_subject_id uuid, p_organization_id uuid DEFAULT NULL)
+ RETURNS TABLE(notice_id uuid, organization_id uuid, notice_number text, notice_type text, issued_at timestamptz)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT notice.id, notice.organization_id, notice.notice_number, notice.notice_type, notice.issued_at
+  FROM public.notices notice
+  WHERE auth.uid() IS NOT NULL
+    AND p_subject_type IN ('person', 'vehicle') AND p_subject_id IS NOT NULL
+    AND notice.status = 'issued' AND notice.notice_type IN ('trespass', 'warning')
+    AND (p_organization_id IS NULL OR notice.organization_id = p_organization_id)
+    AND public.can_access_vehicle_owner_identity(notice.organization_id)
+    AND public.nzta_notice_matches_subject(notice.id, p_subject_type, p_subject_id)
+  ORDER BY notice.issued_at DESC NULLS LAST
+  LIMIT 50;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.list_nzta_register_access_log(
@@ -466,7 +743,7 @@ $function$;
 -- 9. Training, confidentiality and quarterly review RPCs.
 CREATE OR REPLACE FUNCTION public.record_nzta_access_attestation(
   p_user_id uuid, p_attestation_type text, p_completed_on date, p_expires_on date DEFAULT NULL,
-  p_provider text DEFAULT NULL, p_notes text DEFAULT NULL)
+  p_provider text DEFAULT NULL, p_notes text DEFAULT NULL, p_organization_id uuid DEFAULT NULL)
  RETURNS uuid
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -483,8 +760,15 @@ BEGIN
   IF p_attestation_type IS NULL OR p_attestation_type NOT IN ('training', 'confidentiality') THEN
     RAISE EXCEPTION 'Choose training or confidentiality';
   END IF;
+  -- Administrators of an organisation where the person holds register access
+  -- (provider staff, parent-organisation admins) can record it too; it is still
+  -- stored against the person's home organisation because it is personal.
   IF NOT (public.is_admin_for_org(v_target.organization_id)
-          OR (p_attestation_type = 'confidentiality' AND p_user_id = v_actor)) THEN
+          OR (p_attestation_type = 'confidentiality' AND p_user_id = v_actor)
+          OR (p_organization_id IS NOT NULL AND public.is_admin_for_org(p_organization_id)
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(public.get_nzta_access_holders(p_organization_id)) holder
+                WHERE holder->>'user_id' = p_user_id::text))) THEN
     RAISE EXCEPTION 'Organisation administrator required' USING ERRCODE = '42501';
   END IF;
   IF p_completed_on IS NULL OR p_completed_on > current_date THEN
@@ -501,7 +785,8 @@ BEGIN
   RETURNING id INTO v_id;
   INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   VALUES (v_target.organization_id, v_actor, 'nzta_access_attestation_recorded', 'nzta_access_attestations', v_id,
-    jsonb_build_object('user_id', p_user_id, 'attestation_type', p_attestation_type, 'expires_on', v_expires));
+    jsonb_build_object('user_id', p_user_id, 'attestation_type', p_attestation_type, 'expires_on', v_expires,
+      'recorded_via_organization_id', coalesce(p_organization_id, v_target.organization_id)));
   RETURN v_id;
 END;
 $function$;
@@ -552,9 +837,17 @@ BEGIN
         'holds_access', reach.via_role OR direct_grant.id IS NOT NULL OR preset_grant.found
       ) || public.nzta_access_readiness(profile.id, profile.organization_id) AS holder
       FROM public.user_profiles profile
-      LEFT JOIN public.staff_area_grants direct_grant
-        ON direct_grant.user_id = profile.id AND direct_grant.scope_org_id = p_organization_id
-       AND direct_grant.area = 'vehicle_owner_identity' AND direct_grant.status = 'active'
+      -- A direct grant at a parent organisation reaches its descendants, the
+      -- same way can_access_vehicle_owner_identity resolves it.
+      LEFT JOIN LATERAL (
+        SELECT grant_row.id, grant_row.updated_at
+        FROM public.staff_area_grants grant_row
+        WHERE grant_row.user_id = profile.id
+          AND grant_row.area = 'vehicle_owner_identity' AND grant_row.status = 'active'
+          AND p_organization_id = ANY (public.get_descendant_organizations(grant_row.scope_org_id))
+        ORDER BY (grant_row.scope_org_id = p_organization_id) DESC, grant_row.updated_at DESC
+        LIMIT 1
+      ) direct_grant ON true
       CROSS JOIN LATERAL (
         SELECT EXISTS (
           SELECT 1 FROM public.preset_assignments assignment
@@ -1078,17 +1371,21 @@ BEGIN
         AND link.active AND link.organization_id = ANY(v_orgs)
         AND (link.relationship NOT IN ('owner', 'registered_owner', 'driver', 'associated_person')
           OR link.organization_id = ANY(v_identity_orgs))
-        AND (NOT coalesce((link.evidence->>'nzta_restricted')::boolean, false) OR rv.revealed)
+        AND (NOT coalesce((link.evidence->>'nzta_restricted')::boolean, false) OR link.organization_id = ANY(rv.orgs))
     ), '[]'::jsonb),
     'nzta_authorised', cardinality(v_identity_orgs) > 0,
-    'nzta_reveal_required', cardinality(v_identity_orgs) > 0 AND NOT rv.revealed AND (
+    -- A reveal opens NZTA data only for the organisations it was logged in;
+    -- anything recorded by another authorised organisation still needs a reveal.
+    'nzta_reveal_required', cardinality(v_identity_orgs) > 0 AND (
       EXISTS (SELECT 1 FROM public.vehicle_identity_checks pending_check
-              WHERE pending_check.canonical_person_id = r.id AND pending_check.organization_id = ANY(v_identity_orgs))
+              WHERE pending_check.canonical_person_id = r.id AND pending_check.organization_id = ANY(v_identity_orgs)
+                AND pending_check.organization_id <> ALL(rv.orgs))
       OR EXISTS (SELECT 1 FROM public.entity_links pending_link
                  WHERE pending_link.from_type = 'person' AND pending_link.from_id = r.id AND pending_link.to_type = 'vehicle'
                    AND pending_link.active AND pending_link.organization_id = ANY(v_identity_orgs)
+                   AND pending_link.organization_id <> ALL(rv.orgs)
                    AND coalesce((pending_link.evidence->>'nzta_restricted')::boolean, false))),
-    'nzta', CASE WHEN cardinality(v_identity_orgs) = 0 OR NOT rv.revealed THEN NULL ELSE (
+    'nzta', CASE WHEN cardinality(rv.orgs) = 0 THEN NULL ELSE (
       SELECT jsonb_build_object(
         'address', CASE WHEN check_row.organization_id = ANY(v_contact_orgs) THEN
           coalesce(doc.extracted_fields->'approved'->>'address',
@@ -1101,17 +1398,20 @@ BEGIN
           ) ORDER BY history.checked_at DESC), '[]'::jsonb)
           FROM public.vehicle_identity_checks history
           JOIN public.canonical_vehicles checked_vehicle ON checked_vehicle.id = history.canonical_vehicle_id
-          WHERE history.canonical_person_id = r.id AND history.organization_id = ANY(v_identity_orgs)
+          WHERE history.canonical_person_id = r.id AND history.organization_id = ANY(rv.orgs)
         )
       )
       FROM public.vehicle_identity_checks check_row
       JOIN public.person_identity_documents doc ON doc.id = check_row.identity_document_id
-      WHERE check_row.canonical_person_id = r.id AND check_row.organization_id = ANY(v_identity_orgs)
+      WHERE check_row.canonical_person_id = r.id AND check_row.organization_id = ANY(rv.orgs)
       ORDER BY check_row.checked_at DESC LIMIT 1
     ) END
   ) ORDER BY r.exact_match DESC, r.has_notice_in_force DESC, r.display_name), '[]'::jsonb)
   INTO v_result FROM ranked r
-  CROSS JOIN LATERAL (SELECT public.nzta_reveal_active(v_identity_orgs, 'person', r.id) AS revealed) rv;
+  CROSS JOIN LATERAL (
+    SELECT array(SELECT org_id FROM unnest(v_identity_orgs) org_id
+                 WHERE public.nzta_reveal_active(ARRAY[org_id], 'person', r.id)) AS orgs
+  ) rv;
   RETURN v_result;
 END;
 $function$;
@@ -1120,6 +1420,260 @@ COMMENT ON FUNCTION public.search_people(text, integer) IS 'Authorized operation
 COMMENT ON FUNCTION public.get_vehicle_owner_links(uuid, uuid) IS 'Scoped vehicle-person links. NZTA-restricted links show identity only to vehicle-owner-authorised users with an open purpose-stated reveal for the vehicle. Private contact/address/locality and free-text basis also require operations administrator roles. Owner history remains source-time observations, never legal transfer dates.';
 COMMENT ON FUNCTION public.get_vehicle_identity_checks(uuid, uuid) IS 'Administrator-only vehicle view of human-approved NZTA source-time checks. Person and private evidence paths are returned only with vehicle-owner authorisation and an open purpose-stated reveal.';
 COMMENT ON FUNCTION public.set_vehicle_owner_access(uuid, boolean, text) IS 'Audited administrator switch for a user''s vehicle_owner_identity access area. New grants require current NZTA register training and confidentiality acceptance; existing grants are not revoked.';
+
+-- Identity registry: NZTA source documents follow the reveal rule.
+CREATE OR REPLACE FUNCTION "public"."get_identity_registry"(p_organization_id uuid, p_search text DEFAULT NULL::text, p_limit integer DEFAULT 100)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  v_search text := lower(trim(coalesce(p_search, '')));
+  v_limit integer := greatest(1, least(coalesce(p_limit, 100), 250));
+  v_visible_organizations uuid[];
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.is_admin_for_org(p_organization_id) THEN
+    RAISE EXCEPTION 'Identity registry administrator access required';
+  END IF;
+
+  SELECT array_agg(DISTINCT scope.id)
+    INTO v_visible_organizations
+    FROM (
+      SELECT p_organization_id AS id
+      UNION
+      SELECT unnest(public.get_descendant_organizations(p_organization_id))
+      UNION
+      SELECT agreement.client_organization_id
+      FROM public.service_agreements AS agreement
+      WHERE agreement.provider_organization_id = p_organization_id
+        AND agreement.agreement_type = 'operational'
+        AND agreement.invitation_status = 'accepted'
+    ) AS scope;
+
+  RETURN jsonb_build_object(
+    'people', coalesce((
+      SELECT jsonb_agg(jsonb_build_object(
+        'person_record_id', person.id,
+        'canonical_person_id', link.canonical_person_id,
+        'display_name', person.display_name,
+        'review_state', person.review_state,
+        'profile_details', coalesce(person.metadata->'profile_details', '{}'::jsonb),
+        'date_of_birth', coalesce(person.metadata->'profile_details'->>'date_of_birth', canonical.date_of_birth::text),
+        'canonical_review_state', canonical.review_state,
+        'face_candidate_ready', EXISTS (
+          SELECT 1 FROM public.person_face_templates face
+          WHERE face.person_record_id = person.id
+            AND face.organization_id = person.organization_id
+        ),
+        'document_count', (
+          SELECT count(*)
+          FROM public.person_identity_documents document
+          WHERE document.person_record_id = person.id
+        )
+      ) ORDER BY lower(coalesce(person.display_name, '')), person.created_at)
+      FROM (
+        SELECT *
+        FROM public.person_records
+        WHERE organization_id = p_organization_id
+          AND (
+            v_search = ''
+            OR lower(coalesce(display_name, '') || ' ' || coalesce(metadata::text, ''))
+              LIKE '%' || v_search || '%'
+          )
+        ORDER BY created_at DESC
+        LIMIT v_limit
+      ) AS person
+      LEFT JOIN public.canonical_person_links AS link
+        ON link.source_table = 'person_records'
+       AND link.source_id = person.id
+      LEFT JOIN public.canonical_people AS canonical
+        ON canonical.id = link.canonical_person_id
+    ), '[]'::jsonb),
+    'vehicle_total', (
+      SELECT count(*)
+      FROM public.canonical_vehicles AS vehicle
+      WHERE (
+        vehicle.org_notes ? p_organization_id::text
+        OR EXISTS (
+          SELECT 1
+          FROM public.canonical_vehicle_links AS link
+          WHERE link.canonical_vehicle_id = vehicle.id
+            AND nullif(link.metadata->>'organization_id', '')::uuid = ANY(v_visible_organizations)
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM public.observations AS observation
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM public.cctv_entity_observations AS observation
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        )
+      )
+      AND (
+        v_search = ''
+        OR lower(concat_ws(
+          ' ',
+          vehicle.plate_number,
+          vehicle.make,
+          vehicle.model,
+          vehicle.colour,
+          vehicle.body_type
+        )) LIKE '%' || v_search || '%'
+      )
+    ),
+    'vehicles', coalesce((
+      SELECT jsonb_agg(jsonb_build_object(
+        'id', vehicle.id,
+        'plate_number', vehicle.plate_number,
+        'make', vehicle.make,
+        'model', vehicle.model,
+        'year', vehicle.year,
+        'colour', vehicle.colour,
+        'body_type', vehicle.body_type,
+        'rego_status', vehicle.rego_status,
+        'rego_expiry', vehicle.rego_expiry,
+        'wof_status', vehicle.wof_status,
+        'wof_expiry', vehicle.wof_expiry,
+        'cof_status', vehicle.cof_status,
+        'cof_expiry', vehicle.cof_expiry,
+        'notes', vehicle.org_notes->p_organization_id::text->>'text',
+        'compliance_source', vehicle.compliance_source,
+        'compliance_checked_at', vehicle.compliance_checked_at,
+        'observation_count', (
+          SELECT count(*)
+          FROM public.observations AS observation
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        ),
+        'evidence_count', (
+          SELECT count(*)
+          FROM public.observations AS observation
+          JOIN public.evidence_items AS evidence
+            ON evidence.organization_id = observation.organization_id
+           AND evidence.metadata->>'observation_id' = observation.id::text
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        ),
+        'first_seen_at', (
+          SELECT min(observation.observed_at)
+          FROM public.observations AS observation
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        ),
+        'last_seen_at', (
+          SELECT max(observation.observed_at)
+          FROM public.observations AS observation
+          WHERE observation.organization_id = ANY(v_visible_organizations)
+            AND observation.canonical_vehicle_id = vehicle.id
+        ),
+        'source_kinds', coalesce((
+          SELECT jsonb_agg(source.kind ORDER BY source.kind)
+          FROM (
+            SELECT DISTINCT CASE
+              WHEN observation.module_key = 'cctv_review' THEN 'CCTV review'
+              WHEN observation.plate_source = 'historical_import' THEN 'Approved patrol record'
+              ELSE 'Field observation'
+            END AS kind
+            FROM public.observations AS observation
+            WHERE observation.organization_id = ANY(v_visible_organizations)
+              AND observation.canonical_vehicle_id = vehicle.id
+          ) AS source
+        ), '[]'::jsonb)
+      ) ORDER BY coalesce(vehicle.last_seen_at, vehicle.updated_at) DESC, vehicle.plate_number)
+      FROM (
+        SELECT *
+        FROM public.canonical_vehicles AS candidate
+        WHERE (
+          candidate.org_notes ? p_organization_id::text
+          OR EXISTS (
+            SELECT 1
+            FROM public.canonical_vehicle_links AS link
+            WHERE link.canonical_vehicle_id = candidate.id
+              AND nullif(link.metadata->>'organization_id', '')::uuid = ANY(v_visible_organizations)
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM public.observations AS observation
+            WHERE observation.organization_id = ANY(v_visible_organizations)
+              AND observation.canonical_vehicle_id = candidate.id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM public.cctv_entity_observations AS observation
+            WHERE observation.organization_id = ANY(v_visible_organizations)
+              AND observation.canonical_vehicle_id = candidate.id
+          )
+        )
+        AND (
+          v_search = ''
+          OR lower(concat_ws(
+            ' ',
+            candidate.plate_number,
+            candidate.make,
+            candidate.model,
+            candidate.colour,
+            candidate.body_type
+          )) LIKE '%' || v_search || '%'
+        )
+        ORDER BY coalesce(candidate.last_seen_at, candidate.updated_at) DESC, candidate.plate_number
+        LIMIT v_limit
+      ) AS vehicle
+    ), '[]'::jsonb),
+    'documents', coalesce((
+      -- NZTA Motor Vehicle Register records linked to a check stay masked until
+      -- the caller opens a purpose-stated reveal for that vehicle or person.
+      SELECT jsonb_agg(CASE WHEN restriction.restricted THEN jsonb_build_object(
+        'id', document.id,
+        'document_kind', document.document_kind,
+        'review_state', document.review_state,
+        'created_at', document.created_at,
+        'reviewed_at', document.reviewed_at,
+        'nzta_restricted', true,
+        'canonical_vehicle_id', nzta_check.canonical_vehicle_id,
+        'plate_number', nzta_vehicle.plate_number
+      ) ELSE jsonb_build_object(
+        'id', document.id,
+        'person_record_id', document.person_record_id,
+        'evidence_item_id', document.evidence_item_id,
+        'attachment_id', document.attachment_id,
+        'document_kind', document.document_kind,
+        'extracted_fields', document.extracted_fields,
+        'review_state', document.review_state,
+        'review_notes', document.review_notes,
+        'created_at', document.created_at,
+        'reviewed_at', document.reviewed_at,
+        'file_name', attachment.file_name,
+        'file_type', attachment.file_type,
+        'storage_bucket', attachment.storage_bucket,
+        'storage_path', attachment.storage_path,
+        'nzta_restricted', false,
+        'canonical_vehicle_id', nzta_check.canonical_vehicle_id,
+        'plate_number', nzta_vehicle.plate_number
+      ) END ORDER BY document.created_at DESC)
+      FROM public.person_identity_documents AS document
+      LEFT JOIN public.bob_attachments AS attachment
+        ON attachment.id = document.attachment_id
+      LEFT JOIN public.vehicle_identity_checks AS nzta_check
+        ON nzta_check.identity_document_id = document.id
+      LEFT JOIN public.canonical_vehicles AS nzta_vehicle
+        ON nzta_vehicle.id = nzta_check.canonical_vehicle_id
+      CROSS JOIN LATERAL (
+        SELECT document.document_kind = 'nzta_mvr_record' AND nzta_check.id IS NOT NULL
+          AND public.nzta_document_restricted(document.id) AS restricted
+      ) AS restriction
+      WHERE document.organization_id = p_organization_id
+    ), '[]'::jsonb)
+  );
+END;
+$function$;
+COMMENT ON FUNCTION public.get_identity_registry(uuid, text, integer) IS 'Administrator-only tenant registry of people and all canonical vehicles evidenced by the organization or its accepted operational clients. Vehicle results include source, sighting, and evidence summaries. NZTA Motor Vehicle Register documents linked to a check return only id, kind, state, vehicle and nzta_restricted=true until the caller opens a purpose-stated reveal for the vehicle or person.';
+REVOKE ALL ON FUNCTION public.get_identity_registry(uuid, text, integer) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_identity_registry(uuid, text, integer) TO authenticated, service_role;
 
 REVOKE ALL ON FUNCTION public.get_vehicle_identity_checks(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_vehicle_identity_checks(uuid, uuid) TO authenticated, service_role;
@@ -1133,8 +1687,14 @@ REVOKE ALL ON FUNCTION public.reveal_nzta_registered_person(text, uuid, text, te
 GRANT EXECUTE ON FUNCTION public.reveal_nzta_registered_person(text, uuid, text, text, uuid, uuid, uuid, uuid) TO authenticated;
 REVOKE ALL ON FUNCTION public.list_nzta_register_access_log(uuid, timestamptz, timestamptz, integer) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.list_nzta_register_access_log(uuid, timestamptz, timestamptz, integer) TO authenticated;
-REVOKE ALL ON FUNCTION public.record_nzta_access_attestation(uuid, text, date, date, text, text) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.record_nzta_access_attestation(uuid, text, date, date, text, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.record_nzta_access_attestation(uuid, text, date, date, text, text, uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.record_nzta_access_attestation(uuid, text, date, date, text, text, uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.link_nzta_register_lookup_check(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.link_nzta_register_lookup_check(uuid, uuid, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.list_nzta_follow_up_notices(text, uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.list_nzta_follow_up_notices(text, uuid, uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.get_nzta_reveal_seconds_remaining(text, uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_nzta_reveal_seconds_remaining(text, uuid, uuid) TO authenticated;
 REVOKE ALL ON FUNCTION public.withdraw_nzta_access_attestation(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.withdraw_nzta_access_attestation(uuid, text) TO authenticated;
 REVOKE ALL ON FUNCTION public.get_nzta_access_holders(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -1177,3 +1737,45 @@ ALTER POLICY person_identity_documents_select ON public.person_identity_document
     AND public.is_admin_for_org(organization_id)
     AND document_kind IS DISTINCT FROM 'nzta_mvr_record'
   );
+
+-- The files behind an NZTA check (attachment row, evidence row, Storage
+-- object) follow the same reveal rule as the check itself. The helpers run in
+-- policies for every role and fail closed when no caller is signed in.
+REVOKE ALL ON FUNCTION public.nzta_document_restricted(uuid) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.nzta_attachment_restricted(uuid) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.nzta_storage_object_restricted(text, text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.nzta_evidence_restricted(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.nzta_document_restricted(uuid) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.nzta_attachment_restricted(uuid) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.nzta_storage_object_restricted(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.nzta_evidence_restricted(uuid) TO anon, authenticated, service_role;
+
+ALTER POLICY bob_attachments_select ON public.bob_attachments
+  USING (
+    public.org_access_allowed(organization_id)
+    AND (purpose <> 'identity_document'
+         OR (public.is_admin_for_org(organization_id) AND NOT public.nzta_attachment_restricted(id)))
+  );
+
+ALTER POLICY evidence_items_select ON public.evidence_items
+  USING (
+    public.org_access_allowed(organization_id)
+    AND (module_key IS DISTINCT FROM 'identity_registry' OR NOT public.nzta_evidence_restricted(id))
+  );
+
+DROP POLICY IF EXISTS identity_evidence_select ON storage.objects;
+CREATE POLICY identity_evidence_select ON storage.objects FOR SELECT USING (
+  bucket_id = 'identity-evidence'
+  AND (storage.foldername(name))[1] = 'org'
+  AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
+  AND (
+    public.is_admin_for_org(((storage.foldername(name))[2])::uuid)
+    OR ((storage.foldername(name))[3] = 'identity' AND (storage.foldername(name))[4] = (auth.uid())::text
+        AND (storage.foldername(name))[5] ~ '^incident-[0-9a-fA-F-]{36}$'
+        AND public.can_record_incident_person((substring((storage.foldername(name))[5] FROM 10))::uuid, auth.uid()))
+    OR ((storage.foldername(name))[3] = 'identity' AND (storage.foldername(name))[4] = (auth.uid())::text
+        AND (storage.foldername(name))[5] ~ '^submission-[0-9a-fA-F-]{36}$'
+        AND public.org_access_allowed(((storage.foldername(name))[2])::uuid))
+  )
+  AND NOT public.nzta_storage_object_restricted(bucket_id, name)
+);

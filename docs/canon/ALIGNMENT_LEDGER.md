@@ -843,4 +843,10 @@ definer RPCs in `20261101160000_nzta_s241_readiness.sql`; direct table reads
 of NZTA owner links and NZTA source documents are closed by RLS; historical checks
 are listed without a purpose rather than back-filled; existing NZTA holders
 show as not ready until training and confidentiality are recorded.
+Review hardening (same migration): NZTA source attachments, evidence rows and
+Storage files are reveal-gated; readiness is enforced by trigger on every grant
+path; reveal windows are timed by the server clock and scoped to the revealing
+organisation; notice follow-up requires an issued notice about the same subject;
+the identity registry masks unrevealed NZTA records; historical checks can be
+linked once to an explaining lookup.
 Truth table: `test/nzta-s241-readiness.test.js`.

@@ -24,6 +24,7 @@ import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { PermitAccessCard } from '../components/PermitAccessCard';
 import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from '../components/NztaRevealDialog';
 import { supabase } from '../lib/supabase';
+import { useNztaRevealExpiry } from '../lib/useNztaRevealExpiry';
 import { permitIsCurrent, permitValidity } from '../lib/permits';
 import {
   describeDaysRemaining,
@@ -92,19 +93,23 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
 
   useEffect(() => { if (!officer) void loadRegister(); }, [loadRegister, officer]);
 
-  const runSearch = useCallback(async (text: string, focusPersonId?: string | null) => {
+  // quiet: refresh in place (used to remask NZTA data) without clearing the view first.
+  const runSearch = useCallback(async (text: string, focusPersonId?: string | null, quiet = false) => {
     if (!personSearchQueryIsValid(text)) {
       setError('Enter at least two letters or numbers of a name, alias or permit number.');
       return;
     }
     setSearching(true);
     setError(null);
-    setResults(null);
-    setSelectedId(null);
-    setFilter('all');
+    if (!quiet) {
+      setResults(null);
+      setSelectedId(null);
+      setFilter('all');
+    }
     try {
       const { data, error: rpcError } = await supabase.rpc('search_people', { p_query: text, p_limit: 25 });
       if (rpcError) {
+        if (quiet) { setResults(null); setSelectedId(null); }
         setError('Person search did not complete. Check your access or connection, then retry.');
         return;
       }
@@ -115,6 +120,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
         : matches.length === 1 ? matches[0].canonical_person_id : null;
       setSelectedId(focus);
     } catch {
+      if (quiet) { setResults(null); setSelectedId(null); }
       setError('Person search did not complete. Check your connection and retry.');
     } finally {
       setSearching(false);
@@ -160,6 +166,15 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
   }), [filter, results]);
   const selected = filteredMatches.find((match) => match.canonical_person_id === selectedId) ?? null;
   const selectedPermits = useMemo(() => (selected ? personPermitSummaries(selected) : []), [selected]);
+  const selectedNztaVisible = Boolean(selected && (selected.nzta || nztaReveal?.personId === selected.canonical_person_id));
+  useNztaRevealExpiry({
+    subjectType: 'person', subjectId: selected?.canonical_person_id, enabled: selectedNztaVisible,
+    onExpire: () => {
+      if (!selected) return;
+      setNztaReveal(null);
+      void runSearch(query.trim() || selected.display_name, selected.canonical_person_id, true);
+    },
+  });
   const expiringCount = register?.filter((row) => row.expiry_state === 'expiring_soon').length ?? 0;
   const expiredCount = register?.filter((row) => row.expiry_state === 'expired').length ?? 0;
 
@@ -433,12 +448,15 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                   </header>
                   <p className="person-search-privacy"><ShieldAlert size={16} aria-hidden="true" /> NZTA information is restricted to authorised users and lawful purposes. Do not share it outside your organisation.</p>
                   {nztaReveal?.personId === selected.canonical_person_id && <p className="person-search-privacy" role="status">Visible until {new Date(nztaReveal.revealed_until).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Your access has been logged.{nztaWarningText(nztaReveal.warnings) ? ` ${nztaWarningText(nztaReveal.warnings)}` : ''}</p>}
-                  {selected.nzta_reveal_required ? (
+                  {selected.nzta_reveal_required && (
                     <div className="person-search-section-empty">
-                      <p>NZTA register information is held for this person. It stays hidden until you state why you need it, and each view is logged.</p>
+                      <p>{selected.nzta
+                        ? 'More NZTA register information is held for this person by another organisation you are authorised for. It stays hidden until you state why you need it, and each view is logged.'
+                        : 'NZTA register information is held for this person. It stays hidden until you state why you need it, and each view is logged.'}</p>
                       <button type="button" className="btn btn-primary btn-sm" onClick={() => setRevealOpen(true)}>Reveal with a stated purpose</button>
                     </div>
-                  ) : !selected.nzta ? <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p> : (
+                  )}
+                  {!selected.nzta ? (!selected.nzta_reveal_required && <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p>) : (
                     <>
                       <dl className="person-nzta-facts">
                         {selected.contact_details_authorised === true && <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>}
@@ -468,10 +486,6 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                   subjectType="person"
                   subjectId={selected.canonical_person_id}
                   subjectLabel={selected.display_name}
-                  notices={selected.notices.map((notice) => ({
-                    id: notice.notice_id,
-                    label: [notice.notice_type.replace(/_/g, ' '), notice.notice_number, notice.organization_name, notice.issued_at ? formatNzDate(notice.issued_at) : null].filter(Boolean).join(' · '),
-                  }))}
                   onClose={() => setRevealOpen(false)}
                   onRevealed={(result) => {
                     const personId = selected.canonical_person_id;

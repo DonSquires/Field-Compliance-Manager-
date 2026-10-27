@@ -14,6 +14,7 @@ const PUBLIC_RPCS = [
   'record_nzta_register_lookup', 'set_nzta_register_lookup_outcome', 'list_nzta_register_lookups', 'reveal_nzta_registered_person',
   'list_nzta_register_access_log', 'record_nzta_access_attestation', 'withdraw_nzta_access_attestation', 'get_nzta_access_holders',
   'record_nzta_access_review', 'list_nzta_access_reviews', 'get_nzta_s241_summary', 'get_vehicle_identity_checks',
+  'link_nzta_register_lookup_check', 'list_nzta_follow_up_notices', 'get_nzta_reveal_seconds_remaining',
 ];
 
 test('anonymous callers lose canonical person reads', () => {
@@ -107,4 +108,66 @@ test('retention is reported, never deleted, by this migration', () => {
     for (const age of ['18_months', '2_years', '5_years']) assert.match(summary, new RegExp(`${kind}_older_than_${age}`));
   }
   assert.doesNotMatch(migration, /\bDELETE FROM public\.(vehicle_identity_checks|nzta_)/);
+});
+
+test('NZTA source files, attachments and evidence are reveal-gated on every read path', () => {
+  for (const helper of ['nzta_document_restricted', 'nzta_attachment_restricted', 'nzta_storage_object_restricted', 'nzta_evidence_restricted']) {
+    const body = fn(helper);
+    assert.match(body, /SECURITY DEFINER/, helper);
+    assert.match(body, /nzta_reveal_active|nzta_document_restricted|nzta_attachment_restricted/, helper);
+  }
+  const policy = name => {
+    const start = migration.indexOf(name);
+    assert.ok(start >= 0, name);
+    return migration.slice(start, migration.indexOf(';', start));
+  };
+  assert.match(policy('ALTER POLICY bob_attachments_select'), /NOT public\.nzta_attachment_restricted\(id\)/);
+  assert.match(policy('ALTER POLICY evidence_items_select'), /NOT public\.nzta_evidence_restricted\(id\)/);
+  assert.match(policy('CREATE POLICY identity_evidence_select ON storage.objects'), /NOT public\.nzta_storage_object_restricted\(bucket_id, name\)/);
+  const registry = fn('get_identity_registry');
+  assert.match(registry, /'nzta_restricted'/);
+  assert.match(registry, /nzta_document_restricted/);
+});
+
+test('readiness is enforced on every grant path, not only the vehicle-owner RPC', () => {
+  assert.match(fn('enforce_nzta_grant_readiness'), /nzta_access_readiness/);
+  for (const table of ['staff_area_grants', 'preset_assignments']) {
+    assert.match(migration, new RegExp(`CREATE TRIGGER trg_nzta_grant_readiness BEFORE INSERT OR UPDATE ON public\\.${table}`));
+  }
+  assert.match(migration, /CREATE TRIGGER trg_nzta_grant_readiness BEFORE UPDATE OF grants ON public\.access_presets/);
+});
+
+test('reveal expiry is read from the server clock for the caller only', () => {
+  const remaining = fn('get_nzta_reveal_seconds_remaining');
+  assert.match(remaining, /auth\.uid\(\)/);
+  assert.match(remaining, /clock_timestamp\(\)/);
+});
+
+test('notice follow-up needs an issued notice for the same subject and runs in its organisation', () => {
+  const reveal = fn('reveal_nzta_registered_person');
+  assert.match(reveal, /nzta_notice_matches_subject/);
+  assert.match(fn('nzta_notice_matches_subject'), /trespass/);
+  assert.match(fn('list_nzta_follow_up_notices'), /nzta_notice_matches_subject/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.nzta_notice_matches_subject\(uuid, text, uuid\) FROM PUBLIC, anon, authenticated, service_role;/);
+  assert.doesNotMatch(migration, /GRANT EXECUTE ON FUNCTION public\.nzta_notice_matches_subject\(/);
+});
+
+test('each NZTA check explains at most one lookup, linked only by an administrator', () => {
+  assert.match(migration, /CREATE UNIQUE INDEX nzta_register_lookups_check_idx ON public\.nzta_register_lookups \(vehicle_identity_check_id\)\s+WHERE vehicle_identity_check_id IS NOT NULL;/);
+  const link = fn('link_nzta_register_lookup_check');
+  assert.match(link, /is_admin_for_org/);
+  assert.match(link, /INSERT INTO public\.audit_log|audit/i);
+});
+
+test('attestations can be recorded through the operating organisation; holders include inherited grants', () => {
+  const attestation = fn('record_nzta_access_attestation');
+  assert.match(attestation, /p_organization_id uuid DEFAULT NULL/);
+  assert.match(attestation, /recorded_via_organization_id/);
+  assert.match(fn('get_nzta_access_holders'), /LEFT JOIN LATERAL/);
+});
+
+test('person search shows NZTA links only for organisations with an open person reveal', () => {
+  const search = fn('search_people');
+  assert.match(search, /rv\.orgs/);
+  assert.match(search, /ANY\(rv\.orgs\)/);
 });
