@@ -24905,13 +24905,6 @@ export type Database = {
             referencedRelation: "person_permits"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "person_permit_vehicles_permit_id_fkey"
-            columns: ["permit_id"]
-            isOneToOne: false
-            referencedRelation: "person_permits_fieldwork"
-            referencedColumns: ["id"]
-          },
         ]
       }
       person_permits: {
@@ -34255,36 +34248,7 @@ export type Database = {
           validity_state: string | null
           vehicle_plates: string[] | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "person_permits_canonical_person_id_fkey"
-            columns: ["canonical_person_id"]
-            isOneToOne: false
-            referencedRelation: "canonical_people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "person_permits_canonical_person_id_fkey"
-            columns: ["canonical_person_id"]
-            isOneToOne: false
-            referencedRelation: "canonical_person_public"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "person_permits_client_organization_id_fkey"
-            columns: ["client_organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "person_permits_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       v_service_agreement_readiness: {
         Row: {
@@ -34448,6 +34412,32 @@ export type Database = {
       _geofence_active_at: {
         Args: { p_at: string; p_schedule: Json }
         Returns: boolean
+      }
+      _match_person_records: {
+        Args: {
+          p_date_of_birth: string
+          p_email: string
+          p_exclude_person_record_id: string
+          p_include_contacts: boolean
+          p_licence_number: string
+          p_limit: number
+          p_name: string
+          p_organization_id: string
+          p_phone: string
+        }
+        Returns: {
+          aliases: string[]
+          display_name: string
+          locality: string
+          match_basis: string
+          matched_name: string
+          origin: string
+          person_record_id: string
+          review_state: string
+          score: number
+          sighting_count: number
+          strength: string
+        }[]
       }
       _postgis_deprecate: {
         Args: { newname: string; oldname: string; version: string }
@@ -38731,6 +38721,10 @@ export type Database = {
         Args: { p_org_id: string; p_plate: string; p_zone_id: string }
         Returns: Json
       }
+      can_access_person_contacts: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
       can_access_vehicle_owner_identity: {
         Args: { p_organization_id: string; p_record?: boolean }
         Returns: boolean
@@ -38759,6 +38753,10 @@ export type Database = {
       }
       can_record_incident_person: {
         Args: { p_actor?: string; p_incident_id: string }
+        Returns: boolean
+      }
+      can_search_people: {
+        Args: { p_organization_id?: string }
         Returns: boolean
       }
       cancel_document_source_ingestion: {
@@ -42482,6 +42480,7 @@ export type Database = {
         Args: { p_person_record_id: string }
         Returns: Json
       }
+      get_person_search_access: { Args: { p_user_id: string }; Returns: Json }
       get_place_hazard_register: {
         Args: { p_include_retired?: boolean; p_location_id: string }
         Returns: Json
@@ -46471,6 +46470,38 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      read_person_permits_fieldwork: {
+        Args: { p_plate?: string }
+        Returns: {
+          activities: string[]
+          address_text: string
+          applicant_type: string
+          canonical_person_id: string
+          chainsaw_safety_equipment: boolean
+          client_organization_id: string
+          company_name: string
+          compliance_checked_at: string
+          compliance_source: string
+          conditions: string
+          contact_email: string
+          contact_phone: string
+          date_from: string
+          date_to: string
+          firearm_confirm: boolean
+          firearm_licence_valid: boolean
+          forest_areas: string[]
+          holder_name: string
+          hunting_season: string
+          id: string
+          keys_issued: boolean
+          organization_id: string
+          permit_number: string
+          permit_type: string
+          status: string
+          validity_state: string
+          vehicle_plates: string[]
+        }[]
+      }
       reassign_roster_slot: {
         Args: {
           p_expected_status: string
@@ -49734,6 +49765,10 @@ export type Database = {
       }
       set_patrol_route_primary_officer: {
         Args: { p_reason: string; p_route_id: string; p_staff_id: string }
+        Returns: Json
+      }
+      set_person_search_access: {
+        Args: { p_enabled: boolean; p_reason: string; p_user_id: string }
         Returns: Json
       }
       set_site_geometry: {
