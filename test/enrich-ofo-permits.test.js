@@ -283,3 +283,26 @@ test('summariseHolderRepair counts outcomes and keeps values out of error summar
   assert.equal(summary.unexpected, 1);
   assert.deepEqual(Object.keys(summary.errors), ['value "…" is too long']);
 });
+test('writePrivate keeps personal reports outside the repository and owner-only', async () => {
+  const { writePrivate } = await load();
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  assert.throws(() => writePrivate(path.join(process.cwd(), 'report.json'), 'repair report', '{}'), /outside the repository/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-private-'));
+  try {
+    const fresh = path.join(directory, 'fresh.json');
+    const existing = path.join(directory, 'existing.json');
+    fs.writeFileSync(existing, 'old', { mode: 0o644 });
+    writePrivate(fresh, 'repair report', '{"a":1}');
+    writePrivate(existing, 'repair report', '{"b":2}');
+    assert.equal(fs.readFileSync(fresh, 'utf8'), '{"a":1}');
+    assert.equal(fs.readFileSync(existing, 'utf8'), '{"b":2}');
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(fresh).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(existing).mode & 0o777, 0o600);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
