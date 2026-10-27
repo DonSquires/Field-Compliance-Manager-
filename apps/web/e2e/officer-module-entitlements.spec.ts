@@ -119,6 +119,7 @@ for (const configured of [true, false]) {
       });
     }
     await signInAsAdmin(page, '/officer/modules');
+    await expect(page.locator('.officer-module-card').getByRole('button', { name: /Person search/ })).toBeVisible();
     await page.locator('.officer-module-card').getByRole('button', { name: /Noise Control/ }).click();
     await expect(page).toHaveURL(/\/officer\/noise_control$/);
     await expect(page.getByRole('heading', { name: 'Noise Control', exact: true })).toBeVisible();
@@ -136,6 +137,19 @@ test('place rules supply context but never block a ticked, organisation-enabled 
 
   await page.goto('/modules/noise_control');
   await expect(page.locator('.module-shell-title').getByText('Noise Control', { exact: true })).toBeVisible();
+});
+
+test('a canonical OFF switch cannot be overridden by an enabled route alias', async ({ page }) => {
+  await installSupabaseFixtures(page);
+  await page.route('**/rest/v1/organization_modules*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+      { module_key: 'parking_enforcement', enabled: false }, { module_key: 'parking', enabled: true },
+    ]) });
+  });
+  await signInAsOfficer(page, '/officer/parking');
+  await expect(page).toHaveURL(/\/officer$/);
+  await page.goto('/modules/parking_enforcement');
+  await expect(page).toHaveURL(/\/officer$/);
 });
 
 test('an organisation-enabled module without the personal tick stays closed', async ({ page }) => {

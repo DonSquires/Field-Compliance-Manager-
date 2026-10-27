@@ -130,7 +130,7 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   workshop: { label: 'Workshop', description: 'Your builds and maintenance visits', icon: Wrench },
 };
 
-const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'bob']);
+const CORE_OFFICER_MODULES: ReadonlySet<string> = new Set(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'bob']);
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
@@ -205,7 +205,7 @@ const OfficerShell: React.FC = () => {
   const grantedModules = useMemo(() => {
     const candidates = isAdminTierRole(profile?.role) ? Object.keys(MODULE_METADATA) : (profile?.moduleAccess ?? []);
     return Array.from(new Set(candidates.map(officerRouteModuleKey))).filter((module) => MODULE_METADATA[module]
-      && canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled }));
+      && (CORE_OFFICER_MODULES.has(module) || canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled })));
   }, [isModuleEnabled, profile?.moduleAccess, profile?.role]);
 
   // Derive active module from URL

@@ -63,6 +63,9 @@ field portal as well as the admin portal.
 The single implementation is `canUseModule` in `apps/web/src/lib/moduleAccess.ts`;
 module keys and their officer-route aliases (for example `parking_enforcement` /
 `parking`, `static_guarding` / `site_guard`) resolve to the same switch and tick.
+An explicitly configured canonical switch takes precedence over a historical
+alias row, including when it is off. Organisation changes deny module access
+until that organisation's switch state has loaded.
 The directory uses this same decision; it must not hide a module that the
 corresponding route permits. Core officer tools (including searches, schedule,
 reports and the assigned-job inbox) remain reachable independently of specialty

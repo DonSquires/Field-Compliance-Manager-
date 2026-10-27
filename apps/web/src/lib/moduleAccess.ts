@@ -23,11 +23,6 @@ export function officerRouteModuleKey(moduleKey: string): string {
   return OFFICER_ROUTE_BY_CANONICAL.get(canonical) ?? canonical;
 }
 
-function moduleKeyAliases(moduleKey: string): string[] {
-  const canonical = canonicalModuleKey(moduleKey);
-  return Array.from(new Set([canonical, officerRouteModuleKey(canonical)]));
-}
-
 export function hasPersonalModuleTick(moduleAccess: readonly string[] | null | undefined, moduleKey: string): boolean {
   const canonical = canonicalModuleKey(moduleKey);
   return (moduleAccess ?? []).some((granted) => canonicalModuleKey(granted) === canonical);
@@ -42,7 +37,7 @@ export interface ModuleAccessInput {
 }
 
 export function canUseModule({ moduleKey, role, moduleAccess, isModuleEnabled, safetyRelevant }: ModuleAccessInput): boolean {
-  const organisationSwitchOn = moduleKeyAliases(moduleKey).some((key) => isModuleEnabled(key, { safetyRelevant }));
+  const organisationSwitchOn = isModuleEnabled(canonicalModuleKey(moduleKey), { safetyRelevant });
   if (!organisationSwitchOn) return false;
   return isAdminTierRole(role) || hasPersonalModuleTick(moduleAccess, moduleKey);
 }
