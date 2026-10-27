@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { dockerArguments, ensureWorkerNetwork, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
+const { dockerArguments, ensureWorkerNetwork, humanTestDeploymentPreflight, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 function writeNpmStub(binDir, source) {
@@ -149,6 +149,16 @@ test('fresh health checkouts get real directories for nested mounts before Docke
   assert.throws(() => prepareWorkerMounts(sourceDir, 'main-health'), /must be a directory/);
 });
 
+test('Dr Bob browser profiles get the nested node_modules mountpoint in their pinned snapshot', t => {
+  for (const profile of ['human-qa', 'human-qa-live']) {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), `bob-${profile}-mounts-`));
+    t.after(() => fs.rmSync(sourceDir, { recursive: true, force: true }));
+    prepareWorkerMounts(sourceDir, profile);
+    assert.ok(fs.lstatSync(path.join(sourceDir, 'apps/web/node_modules')).isDirectory());
+    assert.equal(fs.existsSync(path.join(sourceDir, '.bob')), false);
+  }
+});
+
 test('main health runs every check after a root failure and returns an aggregate failure', t => {
   const { spawnSync } = require('node:child_process');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-steps-'));
@@ -184,15 +194,19 @@ test('human QA forwards only named environment variables without putting values 
       HUMAN_TEST_EXPECTED_SHA: 'a'.repeat(40),
       HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
       HUMAN_TEST_ADMIN_ROUTE: '/admin/builder',
+      HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA: 'a'.repeat(40),
       GRANDMASTER_TEST_PASSWORD: 'not-in-argv',
+      VERCEL_TOKEN: 'not-forwarded',
       VERCEL_PROJECT_ID: 'project-id',
+      VERCEL_TEAM_ID: 'team-id',
     }
   });
   assert.deepEqual(args.filter((value, index) => args[index - 1] === '--env'), [
     'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA',
     'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE',
-    'GRANDMASTER_TEST_PASSWORD', 'VERCEL_PROJECT_ID'
+    'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA', 'GRANDMASTER_TEST_PASSWORD'
   ]);
+  assert.equal(args.some(value => /VERCEL_/.test(value)), false, 'Vercel deployment credentials stay in the control plane');
   assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv') || value.includes('project-id')), false);
   assert.ok(args.includes('--network=bob-workers'));
 });
@@ -221,6 +235,15 @@ test('human QA summary uses Playwright totals instead of request diagnostics', (
     '  35 passed (18.1m)'
   ].join('\n');
   assert.deepEqual(summarizeHumanTest({ stdout, stderr: '' }), { passed: 35, failed: 5, skipped: 2 });
+});
+
+test('live deployment preflight verdict: the worst check stands, and no line means unknown', () => {
+  const line = (result) => `[HUMAN DEPLOYMENT PREFLIGHT] result=${result}`;
+  assert.equal(humanTestDeploymentPreflight({ stdout: `${line('matched')}\n  3 passed`, stderr: '' }), 'matched');
+  assert.equal(humanTestDeploymentPreflight({ stdout: `${line('matched')}\n${line('unavailable')} reason=deployment lookup returned HTTP 503`, stderr: '' }), 'unavailable');
+  assert.equal(humanTestDeploymentPreflight({ stdout: line('matched'), stderr: line('stale') }), 'stale');
+  assert.equal(humanTestDeploymentPreflight({ stdout: '[HUMAN DEPLOYMENT PREFLIGHT] target=www.example.test state=READY', stderr: '' }), null);
+  assert.equal(humanTestDeploymentPreflight(null), null);
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {

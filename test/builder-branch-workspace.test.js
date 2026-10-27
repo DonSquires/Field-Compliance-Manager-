@@ -162,6 +162,35 @@ test('detached verification workspace retention removes only old clean snapshots
   }
 });
 
+test('a damaged retired snapshot is kept for inspection and never blocks the active check', () => {
+  const repo = fixture();
+  const healthRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-damaged-'));
+  try {
+    const shas = [repo.sha];
+    for (const value of [2, 3]) {
+      fs.writeFileSync(path.join(repo.root, 'apps/web/src/example.ts'), `export const value = ${value};\n`);
+      git(repo.root, ['add', '.']);
+      git(repo.root, ['commit', '-qm', `fixture ${value}`]);
+      shas.push(git(repo.root, ['rev-parse', 'HEAD']));
+    }
+    const damaged = createDetachedWorkspace({ sourceDir: repo.root, workspaceRoot: healthRoot, targetSha: shas[0], retentionCount: 1 });
+    // Production shape: an interrupted removal left the index stripped (every file staged as deleted).
+    git(damaged.workspacePath, ['rm', '-q', '--cached', '-r', '.']);
+    const clean = createDetachedWorkspace({ sourceDir: repo.root, workspaceRoot: healthRoot, targetSha: shas[1], retentionCount: 1 });
+    assert.equal(fs.existsSync(damaged.workspacePath), true, 'a damaged snapshot is not deleted blind');
+    assert.deepEqual(clean.unverifiedSnapshots.map((entry) => entry.path), [`snapshot-${shas[0]}`]);
+    assert.match(clean.unverifiedSnapshots[0].error, /must be clean/);
+
+    const next = createDetachedWorkspace({ sourceDir: repo.root, workspaceRoot: healthRoot, targetSha: shas[2], retentionCount: 1 });
+    assert.equal(git(next.workspacePath, ['rev-parse', 'HEAD']), shas[2]);
+    assert.equal(fs.existsSync(clean.workspacePath), false, 'clean retired snapshots are still pruned');
+    assert.equal(fs.existsSync(damaged.workspacePath), true);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+    fs.rmSync(healthRoot, { recursive: true, force: true });
+  }
+});
+
 test('new workspaces use the requested commit even when the shared checkout has moved or has unrelated edits', () => {
   const repo = fixture();
   try {

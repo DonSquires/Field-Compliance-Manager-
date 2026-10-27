@@ -48,6 +48,7 @@ test('shared probe defers for live work, absent credentials, network and respons
     { chat: [{ id: 'builder-chat-message' }] },
     { chat: {} },
     { runtime: { runningBuilderJobs: 1 } },
+    { runtime: { runningBuilderJobs: 0, activeHumanTests: 1 } },
     { runtime: {} },
     { runtime: null },
     { runtime: { runningBuilderJobs: -1 } },
@@ -79,4 +80,14 @@ test('shared probe defers for live work, absent credentials, network and respons
     assert.doesNotMatch(result.reason, /private error/);
   }
   assert.equal((await checkRuntimeIdle({})).idle, false);
+});
+
+test('a running Dr Bob suite defers a control-plane restart; older health without the field stays compatible', async () => {
+  const probe = (runtime) => checkRuntimeIdle({
+    url: 'https://fixture.invalid', key: 'fixture',
+    fetchImpl: async url => ({ ok: true, json: async () => (url.endsWith('/health') ? runtime : []) }),
+  });
+  assert.deepEqual(await probe({ runningBuilderJobs: 0, activeHumanTests: 1 }), { idle: false, reason: 'Dr Bob human test in flight' });
+  assert.equal((await probe({ runningBuilderJobs: 0, activeHumanTests: 0 })).idle, true);
+  assert.equal((await probe({ runningBuilderJobs: 0 })).idle, true);
 });

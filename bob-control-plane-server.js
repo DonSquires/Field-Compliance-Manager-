@@ -32,8 +32,9 @@ const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
-const { executeWorker, summarizeHumanTest } = require('./worker-executor');
+const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
+const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, worstPreflight } = require('./builder-production-human-test');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
@@ -278,6 +279,7 @@ const deliveries = new Set();
 const audit = [];
 const humanTestRuns = new Map();
 const mainHealthRuns = new Map();
+const productionHumanTests = new Map();
 let activeLease = null;
 
 function saveState() {
@@ -287,7 +289,8 @@ function saveState() {
     deliveries: [...deliveries],
     audit,
     humanTestRuns: [...humanTestRuns.values()],
-    mainHealthRuns: [...mainHealthRuns.values()]
+    mainHealthRuns: [...mainHealthRuns.values()],
+    productionHumanTests: [...productionHumanTests.values()]
   };
   const temporary = `${stateFile}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
@@ -310,6 +313,9 @@ function loadState() {
       mainHealthRuns.set(persisted.sha, persisted.status === 'running'
         ? { ...persisted, status: 'retry', error: 'Control plane restarted during main-health verification.' }
         : persisted);
+    }
+    for (const persisted of state.productionHumanTests || []) {
+      if (persisted && /^[a-f0-9]{40}$/i.test(String(persisted.sha || ''))) productionHumanTests.set(persisted.sha, persisted);
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -410,18 +416,56 @@ function repositoryTreeSha(sourceDir, sha, treePath) {
   }
 }
 
+// A loopback override exists only for hermetic tests; any other value keeps Vercel's API host.
+const vercelApiBase = /^http:\/\/127\.0\.0\.1:\d+$/.test(String(process.env.BOB_VERCEL_API_URL || ''))
+  ? process.env.BOB_VERCEL_API_URL
+  : 'https://api.vercel.com';
+
+function resolveProductionDeployment() {
+  return resolveVercelProductionDeployment({
+    token: process.env.VERCEL_TOKEN,
+    projectId: process.env.VERCEL_PROJECT_ID,
+    teamId: process.env.VERCEL_TEAM_ID,
+    targetUrl: process.env.HUMAN_TEST_BASE_URL,
+    apiBase: vercelApiBase,
+  });
+}
+
+function repositoryCommitOnMain(sourceDir, sha, mainSha) {
+  if (!/^[a-f0-9]{40}$/i.test(String(sha || '')) || !/^[a-f0-9]{40}$/i.test(String(mainSha || ''))) return false;
+  if (sha.toLowerCase() === mainSha.toLowerCase()) return true;
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', sha, mainSha], { cwd: sourceDir, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null, targetRoute = null }) {
   const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
   if (active) return { existing: true, run: safeHumanTestRun(active) };
   if (!builderWorkerImage) throw new BuilderStepError(503, 'Human-test worker image is unavailable');
-  const source = repositoryReadTarget();
-  if (expectedSha && source.sha !== expectedSha) {
-    const sourceWebTree = repositoryTreeSha(source.sourceDir, source.sha, 'apps/web');
-    const deployedWebTree = repositoryTreeSha(source.sourceDir, expectedSha, 'apps/web');
-    if (!sourceWebTree || !deployedWebTree || sourceWebTree !== deployedWebTree) {
-      throw new BuilderStepError(409, `Human-test source web tree does not match the requested deployment (${source.sha.slice(0, 12)} != ${expectedSha.slice(0, 12)})`);
-    }
+  const readTarget = repositoryReadTarget();
+  // Test the code that is deployed: the requested deployment commit itself, or main's head.
+  const testSha = expectedSha || readTarget.sha;
+  if (!repositoryTreeSha(readTarget.sourceDir, testSha, 'apps/web')) {
+    throw new BuilderStepError(409, `Human-test deployment commit ${testSha.slice(0, 12)} is not yet in Bob's source repository`);
   }
+  // The live phase hands the worker the dedicated test identity: only reviewed code merged
+  // to main may hold them, never an arbitrary branch commit named by a caller.
+  if (mode !== 'fixture' && !repositoryCommitOnMain(readTarget.sourceDir, testSha, readTarget.sha)) {
+    throw new BuilderStepError(409, `Live Dr Bob only tests commits merged to main; ${testSha.slice(0, 12)} is not on main ${String(readTarget.sha).slice(0, 12)} yet`);
+  }
+  // A private detached snapshot: the shared checkout is force-checked-out and cleaned by main
+  // health and chat reads, which must never change files under a running browser walk.
+  const snapshot = createDetachedWorkspace({
+    sourceDir: readTarget.sourceDir,
+    workspaceRoot: path.join(builderWorkspaceRoot, 'human-tests'),
+    targetSha: testSha,
+    retentionCount: 4,
+  });
+  const source = { sha: testSha, sourceDir: snapshot.workspacePath };
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const artifactDir = path.join(stateDir, 'human-test-runs', id);
@@ -455,6 +499,21 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
       for (const phaseMode of phaseModes) {
         const phaseDir = path.join(artifactDir, phaseMode);
         fs.mkdirSync(phaseDir, { recursive: true });
+        const liveSha = expectedSha || source.sha;
+        const before = phaseMode === 'live' ? liveDeploymentPreflight(await resolveProductionDeployment(), liveSha) : null;
+        if (before && before.result !== 'matched') {
+          run.phases.push({
+            mode: phaseMode,
+            status: 'failed',
+            exit_code: null,
+            summary: { passed: 0, failed: 0, skipped: 0 },
+            deployment_preflight: before.result,
+            error: before.error,
+          });
+          phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n[CONTROL-PLANE DEPLOYMENT PREFLIGHT] result=${before.result}\n`);
+          saveState();
+          break;
+        }
         const result = await executeWorker({
           image: builderWorkerImage,
           sourceDir: source.sourceDir,
@@ -468,14 +527,12 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
             ? {
                 HUMAN_TEST_LIVE: 'true',
                 HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
-                HUMAN_TEST_EXPECTED_SHA: expectedSha || source.sha,
+                HUMAN_TEST_EXPECTED_SHA: liveSha,
                 HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
+                HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA: before.sha,
                 HUMAN_TEST_ADMIN_ROUTE: targetRoute,
                 GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
                 GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD,
-                VERCEL_TOKEN: process.env.VERCEL_TOKEN,
-                VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
-                VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
               }
             : { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
         });
@@ -485,10 +542,19 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
           exit_code: result.exitCode,
           summary: summarizeHumanTest(result),
         };
+        if (phaseMode === 'live') {
+          // Production may move during the walk; only an unchanged deployment makes the walk evidence for this SHA.
+          const after = liveDeploymentPreflight(await resolveProductionDeployment(), liveSha);
+          phase.deployment_preflight = worstPreflight(before.result, after.result, humanTestDeploymentPreflight(result));
+          if (phase.deployment_preflight !== 'matched') {
+            phase.status = 'failed';
+            phase.error = after.error || 'Live deployment preflight was not confirmed';
+          }
+        }
         run.phases.push(phase);
         phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n${result.stdout || ''}\n${result.stderr || ''}`);
         saveState();
-        if (result.status !== 'succeeded') break;
+        if (phase.status !== 'succeeded') break;
       }
       run.summary = combineHumanTestSummaries(run.phases);
       const failedPhase = run.phases.find(phase => phase.status !== 'succeeded');
@@ -516,8 +582,20 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
       record(requestedBy || 'bob', 'human_test.completed', id, { mode, scope, status: run.status, source_sha: source.sha });
     }
   });
-  record(requestedBy || 'bob', 'human_test.started', id, { mode, scope, source_sha: source.sha });
+  record(requestedBy || 'bob', 'human_test.started', id, { mode, scope, source_sha: source.sha, ...(snapshot.unverifiedSnapshots?.length ? { unverified_snapshots: snapshot.unverifiedSnapshots } : {}) });
   return { existing: false, run: safeHumanTestRun(run) };
+}
+
+function liveHumanTestConfigured() {
+  return Boolean(process.env.HUMAN_TEST_BASE_URL && process.env.GRANDMASTER_TEST_EMAIL && process.env.GRANDMASTER_TEST_PASSWORD && process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID);
+}
+
+function activeHumanTestCount() {
+  return [...humanTestRuns.values()].filter(run => run.status === 'queued' || run.status === 'running').length;
+}
+
+function latestHumanTestRun() {
+  return [...humanTestRuns.values()].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))[0] ?? null;
 }
 
 function collectPinnedDesignContext(source) {
@@ -837,11 +915,13 @@ const mainHealthMonitor = createMainHealthMonitor({
   getMainSha: () => builderRepositoryHead('main').sha,
   runChecks: async ({ sha }) => {
     const mutableSource = builderGitSource(sha);
-    const source = createDetachedWorkspace({
+    const snapshot = createDetachedWorkspace({
       sourceDir: mutableSource,
       workspaceRoot: path.join(builderWorkspaceRoot, 'main-health'),
       targetSha: sha,
-    }).workspacePath;
+    });
+    if (snapshot.unverifiedSnapshots?.length) record('autopilot', 'builder.main_health.snapshot_retained', sha, { unverified: snapshot.unverifiedSnapshots });
+    const source = snapshot.workspacePath;
     const artifactDir = path.join(stateDir, 'main-health-runs', sha);
     fs.mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
     return executeWorker({
@@ -920,6 +1000,68 @@ function startMainHealthCheck() {
       mainHealthInFlight = null;
     });
   return mainHealthInFlight;
+}
+
+// Bob verifies every settled production deployment himself with Dr Bob (owner ruling 2026-10-27):
+// fixture walk then live walk as the dedicated test identity, no person requests or approves it.
+const productionHumanTestEnabled = process.env.BOB_PRODUCTION_HUMAN_TEST !== 'false'
+  && Boolean(builderWorkerImage && builderSourceConfigured)
+  && liveHumanTestConfigured();
+const productionHumanTestIntervalMs = Math.max(60_000, Number(process.env.BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS) || 5 * 60_000);
+const productionHumanTestStartupDelayMs = Math.min(600_000, Math.max(1_000, Number(process.env.BOB_PRODUCTION_HUMAN_TEST_STARTUP_DELAY_MS) || 120_000));
+const releasedShaFile = process.env.BOB_RELEASE_DEPLOYED_SHA_FILE || path.join(stateDir, 'release-lane', 'deployed_sha');
+// One authenticated production page observed read-only, so the live route check never silently skips.
+const productionHumanTestRoute = /^\/[A-Za-z0-9/_-]*$/.test(String(process.env.BOB_PRODUCTION_HUMAN_TEST_ROUTE || ''))
+  ? process.env.BOB_PRODUCTION_HUMAN_TEST_ROUTE
+  : '/admin/builder';
+
+function saveProductionHumanTestState(state) {
+  productionHumanTests.set(state.sha, state);
+  for (const stale of evictableProductionStates(productionHumanTests.values())) productionHumanTests.delete(stale.sha);
+  saveState();
+}
+
+function latestProductionHumanTest() {
+  return [...productionHumanTests.values()]
+    .sort((left, right) => String(right.first_seen_at).localeCompare(String(left.first_seen_at)))[0] ?? null;
+}
+
+const productionHumanTestMonitor = createProductionHumanTestMonitor({
+  resolveProduction: resolveProductionDeployment,
+  readReleasedSha: async () => {
+    try { return fs.readFileSync(releasedShaFile, 'utf8').trim().toLowerCase() || null; } catch { return null; }
+  },
+  readState: async (sha) => productionHumanTests.get(sha) ?? null,
+  writeState: async (state) => saveProductionHumanTestState(state),
+  listStates: async () => [...productionHumanTests.values()],
+  startRun: ({ sha }) => startHumanTestRun({ mode: 'suite', scope: 'full', requestedBy: 'bob:production-verify', expectedSha: sha, targetRoute: productionHumanTestRoute }),
+  getRun: async (id) => humanTestRuns.get(id) ?? null,
+  isIdle: async () => {
+    if (activeHumanTestCount()) return { idle: false, reason: 'a Dr Bob run is already in flight' };
+    if (runningBuilderJobs.size) return { idle: false, reason: 'a Builder job is executing' };
+    if (mainHealthInFlight) return { idle: false, reason: 'main health is verifying' };
+    return { idle: true };
+  },
+  log: (entry) => record('bob:production-verify', 'human_test.production_verify', entry.sha || 'production', entry),
+});
+
+function productionHumanTestStatus() {
+  const latest = latestProductionHumanTest();
+  return {
+    enabled: productionHumanTestEnabled,
+    route: productionHumanTestRoute,
+    latest: latest ? {
+      sha: latest.sha,
+      status: latest.status,
+      run_id: latest.run_id ?? null,
+      attempts: latest.attempts ?? 0,
+      summary: latest.summary ?? null,
+      release_lane_behind: latest.release_lane_behind ?? null,
+      completed_at: latest.completed_at ?? null,
+      error: latest.error ?? latest.waiting_reason ?? null,
+    } : null,
+    observation: productionHumanTestMonitor.lastObservation(),
+  };
 }
 
 function routineRepairBrief(packet) {
@@ -1437,7 +1579,7 @@ async function route(req, res, body) {
     const laptopLink = await loadLaptopLink(builderSupabase).catch(() => null);
     const laptop = laptopConfig(mergeLaptopLink(process.env, laptopLink));
     const latestMainHealth = [...mainHealthRuns.values()].sort((left, right) => String(right.checked_at || right.started_at).localeCompare(String(left.checked_at || left.started_at)))[0] ?? null;
-    return json(res, 200, { status: 'ok', service: 'bob-control-plane', storage: hostStorageStatus({ stateDir }), activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, builderApiConfigured, builderSshConfigured: Boolean(githubSshCommand), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', storage: hostStorageStatus({ stateDir }), activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, builderApiConfigured, builderSshConfigured: Boolean(githubSshCommand), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, activeHumanTests: activeHumanTestCount(), productionHumanTest: productionHumanTestStatus(), modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
   }
   if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
@@ -1553,7 +1695,7 @@ async function route(req, res, body) {
     const targetRoute = typeof body?.target_route === 'string' && /^\/[A-Za-z0-9/_-]*$/.test(body.target_route)
       ? body.target_route
       : null;
-    if ((mode === 'live' || mode === 'suite') && (!process.env.HUMAN_TEST_BASE_URL || !process.env.GRANDMASTER_TEST_EMAIL || !process.env.GRANDMASTER_TEST_PASSWORD || !process.env.VERCEL_TOKEN || !process.env.VERCEL_PROJECT_ID)) {
+    if ((mode === 'live' || mode === 'suite') && !liveHumanTestConfigured()) {
       return json(res, 409, { error: 'Dedicated live human-test identity and target URL are not configured' });
     }
     try {
@@ -1565,7 +1707,7 @@ async function route(req, res, body) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/bob/human-tests/latest') {
-    const latest = [...humanTestRuns.values()].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))[0];
+    const latest = latestHumanTestRun();
     return latest ? json(res, 200, { run: safeHumanTestRun(latest) }) : json(res, 404, { error: 'No human-test run exists' });
   }
 
@@ -1900,4 +2042,10 @@ if (autopilotEnabled && builderSupabase) {
   const autopilotTimer = setInterval(() => { autopilotOnce().catch(() => {}); }, autopilotIntervalMs);
   autopilotTimer.unref?.();
   setTimeout(() => { autopilotOnce().catch(() => {}); }, 5_000).unref?.();
+}
+
+if (productionHumanTestEnabled) {
+  const productionHumanTestTimer = setInterval(() => { productionHumanTestMonitor.tick().catch(() => {}); }, productionHumanTestIntervalMs);
+  productionHumanTestTimer.unref?.();
+  setTimeout(() => { productionHumanTestMonitor.tick().catch(() => {}); }, productionHumanTestStartupDelayMs).unref?.();
 }
