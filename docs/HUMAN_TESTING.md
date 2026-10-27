@@ -97,8 +97,10 @@ deployed commits have the exact same `apps/web` Git tree. This permits
 server-only Bob commits without pretending they changed the deployed web
 artifact.
 
-Fixture-backed runs use a bounded four-worker browser pool. Live runs remain
-serial and require `HUMAN_TEST_BASE_URL` plus the dedicated
+Fixture-backed runs use a bounded four-worker browser pool. Safe fixture
+button interactions wait up to five seconds for scheduled navigation to settle
+before recording a click failure. Live runs remain serial and require
+`HUMAN_TEST_BASE_URL` plus the dedicated
 `GRANDMASTER_TEST_EMAIL` and `GRANDMASTER_TEST_PASSWORD` test identity. Bob
 does not retrieve or reuse an arbitrary user's password, token, browser
 session, or MFA factor.

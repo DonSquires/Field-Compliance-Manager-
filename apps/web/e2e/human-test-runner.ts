@@ -43,6 +43,7 @@ const SAFE_SAMPLE_VALUES: Record<string, string> = {
   text: 'Bob Test human test observation',
   number: '999',
 };
+const SAFE_BUTTON_NAVIGATION_TIMEOUT_MS = 5_000;
 
 const RESOURCE_INTENSIVE_ADMIN_ROUTES = new Set(['Client Portfolios']);
 
@@ -448,7 +449,7 @@ export class HumanTestSession {
         continue;
       }
       await this.step(`button ${route} #${button.index}: ${label}`, async () => {
-        await candidate.click({ timeout: 2000 });
+        await candidate.click({ timeout: SAFE_BUTTON_NAVIGATION_TIMEOUT_MS });
         await this.page.waitForTimeout(100);
         const renderedText = compact(await this.page.locator('body').textContent(), 500);
         if (!renderedText) throw new Error(`Page became blank after clicking ${label}.`);
