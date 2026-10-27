@@ -36,9 +36,12 @@ const RM_ORGANIZATION_ID = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13';
 const OFO_ORGANIZATION_ID = 'c48c1aaf-236b-417c-bbce-938c151662d6';
 const IMPORT_ACTOR_ID = 'f1c00000-0000-4000-8000-000000000001';
 
-const PLATE_AHEAD = String.raw`[A-Z0-9]{2,7}\s*(?:\([^)]*\)\s*)?[A-Z][a-z]`;
+const STANDARD_PLATE = String.raw`(?:[A-Z]{3}\d{3}|[A-Z]{2}\d{4})`;
+const UPPERCASE_MAKE = String.raw`\s*(?:\([^)]*\)\s*)?[A-Z]{2,}(?=\s|,|$)`;
+const PLATE_AHEAD = String.raw`(?:[A-Z0-9]{2,7}\s*(?:\([^)]*\)\s*)?[A-Z][a-z]|${STANDARD_PLATE}${UPPERCASE_MAKE})`;
 const VEHICLE_SPLIT = new RegExp(`,(?=\\s*${PLATE_AHEAD})`);
 const LEADING_PLATE = /^([A-Z0-9]{2,7})(?=\s*(?:\([^)]*\)\s*)?[A-Z][a-z])/;
+const LEADING_STANDARD_PLATE = new RegExp(`^(${STANDARD_PLATE})(?=${UPPERCASE_MAKE})`);
 
 const clean = (value) => {
   const text = String(value ?? '').replace(/\r\n?/g, '\n').trim();
@@ -48,8 +51,8 @@ const oneLine = (value) => clean(value)?.replace(/\s+/g, ' ') ?? null;
 
 /**
  * Applicants type each vehicle as plate, make, model and colour with no separator
- * ("ABC123Toyota Hilux, white"), several to a cell. A segment that does not start
- * with a plate followed by a capitalised make is reported, never guessed.
+ * ("ABC123Toyota Hilux, white"), several to a cell. All-caps makes require a
+ * standard NZ plate boundary; ambiguous personalised-plate text is still reported.
  */
 export function parseOfoVehicles(text) {
   const source = oneLine(text);
@@ -57,7 +60,7 @@ export function parseOfoVehicles(text) {
   const vehicles = [];
   let unparsed = 0;
   for (const segment of source.split(VEHICLE_SPLIT).map((part) => part.trim()).filter(Boolean)) {
-    const plate = LEADING_PLATE.exec(segment)?.[1];
+    const plate = LEADING_PLATE.exec(segment)?.[1] ?? LEADING_STANDARD_PLATE.exec(segment)?.[1];
     if (!plate) { unparsed += 1; continue; }
     const rest = segment.slice(plate.length).trim().replace(/^\([^)]*\)\s*/, '');
     const comma = rest.indexOf(',');

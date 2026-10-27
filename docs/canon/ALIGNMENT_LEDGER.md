@@ -690,7 +690,7 @@ table: `supabase/tests/20260926010000_report_pack_review_and_delivery.sql`.
 > "I just added xlsx file you can use to enrich person records and vehicle
 > numberplates."
 
-**Build status (migration `20261101110000`, pending live application).** The
+**Live status (migration `20261101110000`, verified 2026-10-27).** The
 OFO "Permit Extract" workbook is the source of truth for the 112 forest-access
 permits it contains. A new admin-only, audited `import_person_permit` RPC fills
 blank permit, person-contact and vehicle fields from that workbook and inserts
@@ -710,9 +710,24 @@ table and are never returned to field users.
 The Person, Vehicle and Officer vehicle lookup pages all render the same
 `PermitAccessCard`. A permit's holder is shown as the permit holder, never as
 the vehicle's owner: NZTA ownership remains the owner record. The TPFL
-workbook is a forest-area catalogue only, and the employee sheet is not
-imported. Truth table:
+workbook supplies permit types, forms and rules, not holder or numberplate
+records. The booking CSV is not imported as FCM login accounts; its password
+and account-control fields are not identity evidence. Truth table:
 `test/permit-holder-person-search-migration.test.js`.
+
+**Source acceptance, 2026-10-27.** All 143 booking CSV permit numbers and all
+112 OFO workbook permit numbers persist: 156 distinct permits for 140 holders,
+with 110 permit-to-vehicle links across 95 canonical vehicles. All 112 workbook
+date pairs match the source. Across the combined set, 105 permits are expired,
+7 expire within 30 days, and 44 have no recorded dates.
+
+The workbook contains 93 vehicle entries in 86 rows. One was initially reported
+as unreadable because its make was in all caps. It contains a standard NZ plate,
+and the booking CSV had already linked that vehicle to the same permit.
+The parser now recognises standard three-letter/three-digit and
+two-letter/four-digit plate boundaries before all-caps makes, without guessing
+where an unseparated personalised plate ends. All 93 source entries are
+accounted for; no duplicate vehicle or permit link is needed.
 
 ### 2026-10-27 — A permit holder's name comes from the permit that names them (Don Squires)
 

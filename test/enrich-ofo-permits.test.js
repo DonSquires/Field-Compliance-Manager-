@@ -17,12 +17,31 @@ test('parseOfoVehicles splits plate, make, model and colour typed with no separa
   assert.deepEqual(parseOfoVehicles('ZZ1 Suzuki').vehicles, [{ plate: 'ZZ1', make: 'Suzuki', model: null, colour: null }]);
 });
 
+test('parseOfoVehicles reads all-caps makes after standard NZ plates, including mixed vehicle lists', async () => {
+  const { parseOfoVehicles } = await load();
+  assert.deepEqual(parseOfoVehicles('ABC123TOYOTA HILUX, grey'), {
+    vehicles: [{ plate: 'ABC123', make: 'TOYOTA', model: 'HILUX', colour: 'grey' }], unparsed: 0,
+  });
+  assert.deepEqual(parseOfoVehicles('ABC123BMW X5, black'), {
+    vehicles: [{ plate: 'ABC123', make: 'BMW', model: 'X5', colour: 'black' }], unparsed: 0,
+  });
+  assert.deepEqual(parseOfoVehicles('ABC123Toyota Hilux, white,XY9876 (work)FORD RANGER, Dark Grey,QWE456ISUZU DMAX'), {
+    vehicles: [
+      { plate: 'ABC123', make: 'Toyota', model: 'Hilux', colour: 'white' },
+      { plate: 'XY9876', make: 'FORD', model: 'RANGER', colour: 'Dark Grey' },
+      { plate: 'QWE456', make: 'ISUZU', model: 'DMAX', colour: null },
+    ],
+    unparsed: 0,
+  });
+});
+
 test('parseOfoVehicles reports text it cannot read instead of guessing', async () => {
   const { parseOfoVehicles } = await load();
   assert.deepEqual(parseOfoVehicles(''), { vehicles: [], unparsed: 0 });
   assert.deepEqual(parseOfoVehicles(null), { vehicles: [], unparsed: 0 });
   assert.deepEqual(parseOfoVehicles('my ute'), { vehicles: [], unparsed: 1 });
-  assert.equal(parseOfoVehicles('ABC123BMW X5, black').unparsed, 1);
+  assert.equal(parseOfoVehicles('MYCARBMW X5, black').unparsed, 1);
+  assert.equal(parseOfoVehicles('ABC1234TOYOTA HILUX, grey').unparsed, 1);
   const mixed = parseOfoVehicles('ABC123Toyota Hilux, white, plus the farm bike');
   assert.equal(mixed.vehicles.length, 1);
   assert.equal(mixed.vehicles[0].colour, 'white, plus the farm bike');
@@ -114,6 +133,17 @@ test('buildPermitPlan holds unreadable, reversed and repeated permits', async ()
   assert.equal(plan.summary.in_date_today, 1);
   assert.equal(plan.summary.vehicles, 1);
   assert.deepEqual(plan.held.map((held) => held.permit_number), ['n/a', '22222', '33333', '33333']);
+});
+
+test('buildPermitPlan includes the all-caps vehicle in the governed permit payload', async () => {
+  const { buildPermitPlan } = await load();
+  const plan = buildPermitPlan([row({ vehicles: 'ABC123TOYOTA HILUX, grey' })]);
+  assert.equal(plan.summary.vehicles, 1);
+  assert.equal(plan.summary.vehicle_segments_unparsed, 0);
+  assert.deepEqual(plan.summary.issues, {});
+  assert.deepEqual(plan.permits[0].vehicles, [
+    { plate: 'ABC123', make: 'TOYOTA', model: 'HILUX', colour: 'grey' },
+  ]);
 });
 
 test('permitsSql calls only the governed RPC, one savepoint per permit, and refuses delimiter injection', async () => {
