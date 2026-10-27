@@ -10,6 +10,8 @@
  * Governance (fail-closed, old-app contract):
  *   - SERVICE-ROLE or x-cron-secret only (never a browser/user call) OR a
  *     JWT admin/master/grand_master when human_invoked=true.
+ *   - Human callers must be active and administer the target and its parent
+ *     organisations; duplicate previews use their own row-level visibility.
  *   - Dedupe-aware: refuses to create a duplicate when a match key exists unless
  *     mode='update' with a target id.
  *   - Provenance required: every write records source + confidence + actor.
@@ -75,13 +77,15 @@ serve(async (req)=>{
     // Resolve actor: service-role/cron OR an authorised human (human_invoked).
     let actorId = null;
     let actorRole = 'service';
+    let actorOrganizationId = null;
+    let callerClient = null;
     const body = await req.json();
     if (!isServiceRole && !isCron) {
       // Human path: must be human_invoked + authorised role.
       if (!authHeader) return json({
         error: 'Unauthorized'
       }, 401);
-      const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         global: {
           headers: {
             Authorization: authHeader
@@ -92,7 +96,7 @@ serve(async (req)=>{
       if (authErr || !user) return json({
         error: 'Unauthorized'
       }, 401);
-      const { data: profile } = await admin.from('user_profiles').select('id, role').eq('id', user.id).single();
+      const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id').eq('id', user.id).is('deactivated_at', null).single();
       if (!profile || !CAN_WRITE_ROLES.has(String(profile.role))) return json({
         error: 'Forbidden: admin/master/grand_master required'
       }, 403);
@@ -102,6 +106,7 @@ serve(async (req)=>{
       }, 403);
       actorId = user.id;
       actorRole = String(profile.role);
+      actorOrganizationId = profile.organization_id;
     }
     const entity = String(body.entity ?? '');
     const mode = body.mode ?? 'create';
@@ -126,6 +131,54 @@ serve(async (req)=>{
     if (!provenance.source) return json({
       error: 'provenance.source is required (data lineage)'
     }, 400);
+    if (mode !== 'create' && mode !== 'update') return json({ error: 'mode must be create or update' }, 400);
+    if (entity === 'user' && mode !== 'create') return json({
+      error: 'user update is not supported here; use staff_profile update or the manage-user path for profile changes.'
+    }, 422);
+    if (callerClient) {
+      const scopes = {
+        client_org: { table: 'organizations', column: 'id', parents: ['parent_organization_id'] },
+        client_site: { table: 'client_sites', column: 'client_organization_id', parents: ['client_organization_id'] },
+        contact: { table: 'crm_contacts', column: 'organization_id', parents: ['organization_id'] },
+        service_agreement: { table: 'service_agreements', column: 'provider_organization_id', parents: ['provider_organization_id', 'client_organization_id'] },
+        user: { table: 'user_profiles', column: 'organization_id', parents: ['organization_id', 'employer_organization_id'] },
+        staff_profile: { table: 'staff_profiles', column: 'organization_id', parents: [] },
+        invoice: { table: 'invoices', column: 'organization_id', parents: ['organization_id'] },
+        credential: { table: 'staff_credentials', column: 'organization_id', parents: ['organization_id'] },
+        shift_template: { table: 'shift_templates', column: 'organization_id', parents: ['organization_id'] },
+      };
+      const scope = scopes[entity];
+      const organizations = new Set();
+      let staffId = entity === 'credential' ? data.staff_id : null;
+      if (mode === 'update' || entity === 'staff_profile') {
+        if (!body.target_id) return json({ error: 'target_id required for update' }, 400);
+        const columns = entity === 'credential' ? `${scope.column}, staff_id` : scope.column;
+        const { data: target, error } = await admin.from(scope.table).select(columns).eq('id', body.target_id).maybeSingle();
+        if (error) return json({ error: 'Unable to verify target authority' }, 500);
+        if (!target || !target[scope.column]) return json({ error: 'Target not found or not administrable' }, 403);
+        organizations.add(target[scope.column]);
+        if (entity === 'credential') staffId = target.staff_id;
+      } else {
+        const parent = data[scope.parents[0]] ?? (['client_org', 'user'].includes(entity) ? actorOrganizationId : null);
+        if (!parent && actorRole !== 'grand_master') return json({ error: 'Parent organisation is required' }, 400);
+        if (parent) organizations.add(parent);
+      }
+      for (const field of scope.parents) {
+        if (data[field]) organizations.add(data[field]);
+      }
+      if (staffId) {
+        const { data: staff, error } = await admin.from('staff_profiles').select('organization_id').eq('id', staffId).maybeSingle();
+        if (error) return json({ error: 'Unable to verify staff authority' }, 500);
+        if (!staff?.organization_id) return json({ error: 'Staff record not found or not administrable' }, 403);
+        organizations.add(staff.organization_id);
+      }
+      for (const organizationId of organizations) {
+        const { data: allowed, error } = await callerClient.rpc('is_admin_for_org', { target_org_id: organizationId });
+        if (error) return json({ error: 'Unable to verify organisation authority' }, 500);
+        if (allowed !== true) return json({ error: 'Administrative authority over the target and its parent organisation is required' }, 403);
+      }
+    }
+    const scopedRead = callerClient ?? admin;
     // ── credential (staff_credentials) ──
     if (entity === 'credential') {
       const staffId = data.staff_id ? String(data.staff_id) : null;
@@ -139,7 +192,8 @@ serve(async (req)=>{
           error: 'data.credential_type is required'
         }, 400);
         const credNumber = String(data.credential_number ?? '').trim();
-        const { data: existing } = await admin.from('staff_credentials').select('id, credential_type, credential_number').eq('staff_id', staffId).eq('credential_type', credType);
+        const { data: existing, error: duplicateError } = await scopedRead.from('staff_credentials').select('id, credential_type, credential_number').eq('staff_id', staffId).eq('credential_type', credType);
+        if (duplicateError) return json({ error: 'Unable to check for duplicate credentials' }, 500);
         const dup = (existing ?? []).find((c)=>credNumber && normKey(c.credential_number) === normKey(credNumber));
         if (dup) return json({
           success: false,
@@ -368,7 +422,8 @@ serve(async (req)=>{
           }, 200);
         }
         if (invoiceNumber) {
-          const { data: existing } = await admin.from('invoices').select('id, invoice_number, status').eq('organization_id', orgId).eq('invoice_number', invoiceNumber).maybeSingle();
+          const { data: existing, error: duplicateError } = await scopedRead.from('invoices').select('id, invoice_number, status').eq('organization_id', orgId).eq('invoice_number', invoiceNumber).maybeSingle();
+          if (duplicateError) return json({ error: 'Unable to check for duplicate invoices' }, 500);
           if (existing) return json({
             success: false,
             blocked: 'duplicate',
@@ -475,20 +530,14 @@ serve(async (req)=>{
     // Supabase Auth provisioning, invite email, and unified staff onboarding.
     // We never insert user_profiles/auth directly here.
     if (entity === 'user') {
-      if (mode !== 'create') {
-        // Non-auth profile edits go through staff_profile/update or a dedicated
-        // manage-user path; we do not update auth identity here.
-        return json({
-          error: 'user update is not supported here; use staff_profile update or the manage-user path for profile changes.'
-        }, 422);
-      }
       const email = String(data.email ?? '').trim();
       const role = String(data.role ?? '').trim();
       if (!email || !role) return json({
         error: 'data.email and data.role are required to create a user'
       }, 400);
       // Dedupe: existing profile by email.
-      const { data: existingUser } = await admin.from('user_profiles').select('id, display_name').eq('email', email).maybeSingle();
+      const { data: existingUser, error: duplicateError } = await scopedRead.from('user_profiles').select('id, display_name').eq('email', email).maybeSingle();
+      if (duplicateError) return json({ error: 'Unable to check for duplicate users' }, 500);
       if (existingUser) {
         return json({
           success: false,
@@ -606,7 +655,8 @@ serve(async (req)=>{
           error: 'data.first_name and data.last_name are required'
         }, 400);
         // Dedupe on org + normalised name + email.
-        const { data: existing } = await admin.from('crm_contacts').select('id, first_name, last_name, email').eq('organization_id', orgId);
+        const { data: existing, error: duplicateError } = await scopedRead.from('crm_contacts').select('id, first_name, last_name, email').eq('organization_id', orgId);
+        if (duplicateError) return json({ error: 'Unable to check for duplicate contacts' }, 500);
         const dup = (existing ?? []).find((c)=>normKey(`${c.first_name} ${c.last_name}`) === normKey(`${firstName} ${lastName}`) || data.email && normKey(c.email) === normKey(data.email));
         if (dup) return json({
           success: false,
@@ -793,7 +843,8 @@ serve(async (req)=>{
       }, 400);
       if (mode === 'create') {
         // Dedupe on normalised name.
-        const { data: existing } = await admin.from('organizations').select('id, name, organization_type').eq('organization_type', 'client');
+        const { data: existing, error: duplicateError } = await scopedRead.from('organizations').select('id, name, organization_type').eq('organization_type', 'client');
+        if (duplicateError) return json({ error: 'Unable to check for duplicate organisations' }, 500);
         const dup = (existing ?? []).find((o)=>normKey(o.name) === normKey(name));
         if (dup) {
           return json({
@@ -895,7 +946,8 @@ serve(async (req)=>{
       if (addressMatchKey && clientOrgId) {
         // A duplicate is the same address inside the same owner organisation; another
         // organisation's site at this address is its own facet on the shared registry place.
-        const { data: existing } = await admin.from('client_sites').select('id, name, address_match_key').eq('client_organization_id', clientOrgId).eq('address_match_key', addressMatchKey).limit(1).maybeSingle();
+        const { data: existing, error: duplicateError } = await scopedRead.from('client_sites').select('id, name, address_match_key').eq('client_organization_id', clientOrgId).eq('address_match_key', addressMatchKey).limit(1).maybeSingle();
+        if (duplicateError) return json({ error: 'Unable to check for duplicate sites' }, 500);
         if (existing) {
           return json({
             success: false,

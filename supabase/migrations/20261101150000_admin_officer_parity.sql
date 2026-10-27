@@ -268,7 +268,7 @@ DECLARE
 BEGIN
   SELECT up.role INTO v_role
   FROM user_profiles up
-  WHERE up.id = p_user_id;
+  WHERE up.id = p_user_id AND up.deactivated_at IS NULL;
 
   IF v_role IS NULL THEN
     RETURN false;
@@ -294,6 +294,7 @@ BEGIN
             OR EXISTS (
               SELECT 1 FROM service_agreements sa
               WHERE (sa.ends_on IS NULL OR sa.ends_on >= current_date)
+                AND sa.agreement_type = 'operational'
                 AND sa.client_organization_id = p_action_org_id
                 AND (up.organization_id = sa.provider_organization_id
                      OR up.employer_organization_id = sa.provider_organization_id)
@@ -308,6 +309,7 @@ BEGIN
             OR EXISTS (
               SELECT 1 FROM service_agreements sa
               WHERE (sa.ends_on IS NULL OR sa.ends_on >= current_date)
+                AND sa.agreement_type = 'operational'
                 AND sa.client_organization_id = p_action_org_id
                 AND (up.organization_id = sa.provider_organization_id
                      OR up.employer_organization_id = sa.provider_organization_id)
@@ -1401,6 +1403,45 @@ END;
 $function$;
 
 -- Role-addressed notifications sent to 'admin' reach an admin_officer as well.
+ALTER POLICY "bob_job_runs_select" ON "public"."bob_job_runs"
+USING (
+  EXISTS (SELECT 1 FROM public.user_profiles up
+    WHERE up.id = (SELECT auth.uid()) AND up.deactivated_at IS NULL
+      AND up.role IN ('grand_master', 'master', 'admin', 'admin_officer'))
+  AND ((organization_id IS NOT NULL AND public.org_access_allowed(organization_id)) OR public.is_grand_master())
+);
+
+ALTER POLICY "bob_job_rollback_refs_select" ON "public"."bob_job_rollback_refs"
+USING (
+  EXISTS (SELECT 1 FROM public.user_profiles up
+    WHERE up.id = (SELECT auth.uid()) AND up.deactivated_at IS NULL
+      AND up.role IN ('grand_master', 'master', 'admin', 'admin_officer'))
+  AND EXISTS (SELECT 1 FROM public.bob_job_runs run
+    WHERE run.job_id = bob_job_rollback_refs.job_id AND run.organization_id IS NOT NULL
+      AND public.org_access_allowed(run.organization_id))
+);
+
+ALTER POLICY "Admins can view audit records for their org" ON "public"."user_management_audit"
+USING (
+  EXISTS (SELECT 1 FROM public.user_profiles up
+    WHERE up.id = auth.uid() AND up.deactivated_at IS NULL
+      AND up.role IN ('grand_master', 'master', 'admin', 'admin_officer')
+      AND up.organization_id = (SELECT target.organization_id FROM public.user_profiles target
+        WHERE target.id = user_management_audit.target_user_id))
+);
+
+ALTER POLICY "sba_select" ON "public"."staff_branch_authorisations"
+USING (
+  user_id = auth.uid()
+  OR EXISTS (SELECT 1 FROM public.user_profiles actor
+    JOIN public.user_profiles target ON target.id = staff_branch_authorisations.user_id
+    WHERE actor.id = auth.uid() AND actor.deactivated_at IS NULL
+      AND (actor.role = 'grand_master'
+        OR (target.employer_organization_id = coalesce(actor.employer_organization_id, actor.organization_id)
+          AND (actor.role IN ('master', 'admin', 'admin_officer')
+            OR staff_branch_authorisations.branch_org_id = ANY(public.user_managed_branch_ids())))))
+);
+
 ALTER POLICY "notifications_select" ON "public"."notifications"
   USING (
     org_access_allowed(organization_id)
