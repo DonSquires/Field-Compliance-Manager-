@@ -11,37 +11,84 @@ export interface NztaRevealResult {
   warnings: Array<'training' | 'confidentiality'>;
 }
 
-interface NoticeOption { id: string; label: string }
+interface FollowUpNotice {
+  notice_id: string;
+  organization_id: string;
+  notice_number: string | null;
+  notice_type: string;
+  issued_at: string | null;
+}
+
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+const noticeLabel = (notice: FollowUpNotice) => {
+  const kind = notice.notice_type === 'trespass' ? 'Trespass notice' : 'Warning notice';
+  const issued = notice.issued_at ? new Date(notice.issued_at).toLocaleDateString('en-NZ', { dateStyle: 'medium' }) : 'issue date not recorded';
+  return `${kind} ${notice.notice_number ?? '(no number)'} · issued ${issued}`;
+};
 
 /**
  * Purpose-stated reveal of an NZTA person<->vehicle link. The server records
  * who, when, why and against which subject, then opens a 15-minute window for
- * this user and subject only.
+ * this user and subject only. Follow-up notices are loaded from the server so
+ * only issued trespass/warning notices about this subject can be chosen.
  */
 export const NztaRevealDialog: React.FC<{
   subjectType: 'vehicle' | 'person';
   subjectId: string;
   subjectLabel: string;
   organizationId?: string | null;
-  notices?: NoticeOption[];
   observationId?: string | null;
   onRevealed: (result: NztaRevealResult) => void;
   onClose: () => void;
-}> = ({ subjectType, subjectId, subjectLabel, organizationId = null, notices = [], observationId = null, onRevealed, onClose }) => {
+}> = ({ subjectType, subjectId, subjectLabel, organizationId = null, observationId = null, onRevealed, onClose }) => {
   const [purpose, setPurpose] = useState<RevealPurpose | ''>('');
   const [explanation, setExplanation] = useState('');
   const [noticeId, setNoticeId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
+  const [notices, setNotices] = useState<FollowUpNotice[]>([]);
+  const [noticesState, setNoticesState] = useState<'loading' | 'ready' | 'error'>('loading');
   const firstField = useRef<HTMLInputElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     firstField.current?.focus();
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose(); };
+    return () => { if (opener && opener.isConnected) opener.focus(); };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) { onClose(); return; }
+      if (event.key !== 'Tab' || !formRef.current) return;
+      const focusable = Array.from(formRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!formRef.current.contains(active)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && active === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onClose]);
+
+  useEffect(() => {
+    let current = true;
+    setNoticesState('loading');
+    void supabase.rpc('list_nzta_follow_up_notices', {
+      p_subject_type: subjectType, p_subject_id: subjectId, p_organization_id: organizationId,
+    }).then(({ data, error: noticeError }) => {
+      if (!current) return;
+      if (noticeError) { setNotices([]); setNoticesState('error'); return; }
+      setNotices((data ?? []) as FollowUpNotice[]);
+      setNoticesState('ready');
+    });
+    return () => { current = false; };
+  }, [subjectType, subjectId, organizationId]);
 
   const trimmed = explanation.trim();
   const problems = [
@@ -76,7 +123,7 @@ export const NztaRevealDialog: React.FC<{
 
   return createPortal(
     <div className="nzta-reveal-backdrop">
-      <form className="nzta-reveal-dialog" role="dialog" aria-modal="true" aria-labelledby="nzta-reveal-title" aria-describedby="nzta-reveal-intro" onSubmit={(event) => void submit(event)} noValidate>
+      <form ref={formRef} className="nzta-reveal-dialog" role="dialog" aria-modal="true" aria-labelledby="nzta-reveal-title" aria-describedby="nzta-reveal-intro" onSubmit={(event) => void submit(event)} noValidate>
         <header>
           <div>
             <span>NZTA register · logged access</span>
@@ -92,11 +139,14 @@ export const NztaRevealDialog: React.FC<{
           <legend>Purpose</legend>
           {REVEAL_PURPOSES.map((option, index) => {
             const unavailable = option.id === 'notice_follow_up' && notices.length === 0;
+            const unavailableHint = noticesState === 'loading' ? 'Checking for issued notices…'
+              : noticesState === 'error' ? 'Issued notices could not be loaded. Close and try again.'
+              : `No issued trespass or warning notice is recorded for this ${subjectType}.`;
             return (
               <label key={option.id} className={unavailable ? 'is-unavailable' : undefined}>
                 <input ref={index === 0 ? firstField : undefined} type="radio" name="nzta-purpose" value={option.id}
                   checked={purpose === option.id} disabled={unavailable} onChange={() => setPurpose(option.id)} />
-                <span><strong>{option.label}</strong><small>{unavailable ? 'No notice is available here. Open the person in Person search to follow up a notice.' : option.hint}</small></span>
+                <span><strong>{option.label}</strong><small>{unavailable ? unavailableHint : option.hint}</small></span>
               </label>
             );
           })}
@@ -105,7 +155,7 @@ export const NztaRevealDialog: React.FC<{
           <label className="nzta-reveal-field">Notice
             <select value={noticeId} onChange={(event) => setNoticeId(event.target.value)} disabled={busy} required>
               <option value="">Choose a notice…</option>
-              {notices.map((notice) => <option key={notice.id} value={notice.id}>{notice.label}</option>)}
+              {notices.map((notice) => <option key={notice.notice_id} value={notice.notice_id}>{noticeLabel(notice)}</option>)}
             </select>
           </label>
         )}

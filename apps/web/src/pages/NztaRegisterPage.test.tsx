@@ -41,7 +41,7 @@ describe('NZTA register page', () => {
     render(<NztaRegisterContent />);
     expect(await screen.findByText('ABC123')).toBeTruthy();
     expect(screen.getByRole('note').textContent).toContain('1 historical NZTA check in this period has no recorded purpose');
-    expect(rpc).toHaveBeenCalledWith('list_nzta_register_lookups', expect.objectContaining({ p_organization_id: 'org', p_limit: 2000 }));
+    expect(rpc).toHaveBeenCalledWith('list_nzta_register_lookups', expect.objectContaining({ p_organization_id: 'org', p_limit: 2001 }));
   });
 
   it('validates a lookup before recording it', async () => {
@@ -96,7 +96,48 @@ describe('NZTA register page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Record training for Oli Officer' }));
     fireEvent.submit(screen.getByRole('form', { name: /Record NZTA register training/ }));
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('record_nzta_access_attestation', expect.objectContaining({
-      p_user_id: 'officer-1', p_attestation_type: 'training',
+      p_user_id: 'officer-1', p_attestation_type: 'training', p_organization_id: 'org',
     })));
+  });
+
+  it('flags a capped lookup list and blocks the export', async () => {
+    const rows = Array.from({ length: 2001 }, (_, index) => ({ ...historical, entry_id: `check-${index}` }));
+    rpc.mockImplementation(async (name: string) => (name === 'list_nzta_register_lookups' ? { data: rows, error: null } : { data: [], error: null }));
+    render(<NztaRegisterContent />);
+    expect(await screen.findByText(/More than 2,000 entries fall in this period/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Export CSV/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/2,000 of 2,000 entries shown/)).toBeTruthy();
+  });
+
+  it('links a historical check to a recorded lookup for the same plate', async () => {
+    const lookup = { ...historical, entry_kind: 'lookup', entry_id: 'lookup-1', plate_number: 'abc-123', purpose: 'parking_enforcement',
+      explanation: 'Seen in bay 4', motochek_user: 'MC01', outcome: 'pending', can_edit: true, vehicle_identity_check_id: null };
+    rpc.mockImplementation(async (name: string) => (name === 'list_nzta_register_lookups'
+      ? { data: [historical, lookup], error: null } : { data: [], error: null }));
+    render(<NztaRegisterContent />);
+    fireEvent.click(await screen.findByRole('button', { name: /Link the check for ABC123 to its recorded lookup/ }));
+    fireEvent.change(screen.getByLabelText('Recorded lookup'), { target: { value: 'lookup-1' } });
+    fireEvent.change(screen.getByLabelText('Reason for linking'), { target: { value: 'Same Motochek search on 1 Oct' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('link_nzta_register_lookup_check', {
+      p_lookup_id: 'lookup-1', p_check_id: 'check-1', p_reason: 'Same Motochek search on 1 Oct',
+    }));
+  });
+
+  it('only prints or exports a summary for the period on screen', async () => {
+    const summary = {
+      period: { from: '2000-01-01', to: '2000-12-31' },
+      lookups: { total: 0, by_purpose: {}, by_outcome: {}, historical_checks_without_purpose: 0 },
+      reveals: { total: 0, by_purpose: {}, without_current_training: 0 },
+      holders: { total: 0, training_current: 0, confidentiality_current: 0 },
+      reviews: { in_period: 0 }, signage: [],
+      retention: {},
+    };
+    rpc.mockImplementation(async (name: string) => (name === 'get_nzta_s241_summary' ? { data: summary, error: null } : { data: [], error: null }));
+    render(<NztaRegisterContent />);
+    fireEvent.click(screen.getByRole('tab', { name: /Annual summary/ }));
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('get_nzta_s241_summary', expect.objectContaining({ p_organization_id: 'org' })));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Print/ }).hasAttribute('disabled')).toBe(true));
+    expect(screen.getByRole('button', { name: /Export CSV/ }).hasAttribute('disabled')).toBe(true);
   });
 });

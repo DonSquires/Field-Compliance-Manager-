@@ -43,8 +43,9 @@ const LocationProbe = () => {
   );
 };
 
-const renderPanel = (links: VehiclePersonLink[]) => {
+const renderPanel = (links: VehiclePersonLink[], secondsRemaining: number | null = 600) => {
   rpc.mockImplementation(async (name: string) => {
+    if (name === 'get_nzta_reveal_seconds_remaining') return { data: secondsRemaining, error: null };
     if (name === 'can_access_vehicle_owner_identity') return { data: true, error: null };
     if (name === 'get_vehicle_owner_links') return { data: links, error: null };
     if (name === 'can_search_people') return { data: false, error: null };
@@ -90,6 +91,12 @@ describe('vehicle owner panel person hand-off', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Open notices and person record/ })).toBeNull();
     expect(rpc.mock.calls.some(([name]) => name === 'reveal_nzta_registered_person')).toBe(false);
+  });
+
+  it('reloads masked details when the server reports the reveal window has closed', async () => {
+    renderPanel([link()], 0);
+    await vi.waitFor(() => expect(rpc.mock.calls.filter(([name]) => name === 'get_vehicle_owner_links').length).toBeGreaterThan(1));
+    expect(rpc).toHaveBeenCalledWith('get_nzta_reveal_seconds_remaining', { p_subject_type: 'vehicle', p_subject_id: 'vehicle-1', p_organization_id: 'org' });
   });
 
   it('opens the officer person route only after explicit person authorization', async () => {

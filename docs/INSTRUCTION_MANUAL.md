@@ -127,8 +127,13 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   check date)** — not proof of ownership — and stays hidden until an authorised
   user chooses **Reveal with a stated purpose**, picks the Gazette purpose (or
   the notice being followed up) and writes the reason. The details stay visible
-  to that user for 15 minutes and the view is logged. The same reveal applies in
-  Person search and the identity records workspace. **No longer owner / driver** ends a link with a reason. The
+  to that user for 15 minutes (timed by the server, so the screen hides them
+  again even if the device clock is wrong) and the view is logged. **Following
+  up a trespass or warning notice** is offered only when an issued notice about
+  that person or vehicle exists. The same reveal applies in Person search and
+  the identity records workspace; in the identity records workspace, hidden NZTA
+  records are listed by plate ? open the vehicle, reveal, then choose **Review
+  this NZTA record**. **No longer owner / driver** ends a link with a reason. The
   owner can also be added from the repeat-subject drawer.
 - **NZTA register (s241)** (Admin → Investigations & Evidence, admin-tier only)
   keeps the records NZTA can ask for: **Lookup register** (record every Motochek
@@ -144,8 +149,11 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   Training and confidentiality belong to the person and count in every
   organisation they can view. NZTA source documents and NZTA owner links cannot
   be read directly from the database tables; they are only returned through a
-  logged reveal. The lookup register, access log and annual summary export
-  CSV; the summary also prints.
+  logged reveal. Historical checks can be linked to the recorded lookup that
+  explains them with **Link to recorded lookup**. The lookup register, access
+  log and annual summary export CSV; the summary also prints, for the period
+  shown only. If a period has more entries than the screen can list, a banner
+  says so and export is turned off until the dates are narrowed.
 - A flagged vehicle's profile has a border in the colour of its highest active
   flag (red for high/critical, amber for medium, blue for low) and a risk
   banner at the top listing the active flags.
