@@ -5,7 +5,7 @@ const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploym
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 
-function harness({ production = { status: 'ready', sha: SHA_A }, releasedSha = SHA_A, idle = { idle: true }, startRun, maxAttempts } = {}) {
+function harness({ production = { status: 'ready', sha: SHA_A }, releasedSha = SHA_A, idle = { idle: true }, startRun, maxAttempts, onFailedVerdict } = {}) {
   const states = new Map();
   const runs = new Map();
   const logs = [];
@@ -29,6 +29,7 @@ function harness({ production = { status: 'ready', sha: SHA_A }, releasedSha = S
     now: () => clock,
     log: (entry) => logs.push(entry),
     ...(maxAttempts ? { maxAttempts } : {}),
+    ...(onFailedVerdict ? { onFailedVerdict } : {}),
   });
   context.advance = (ms) => { clock += ms; };
   context.finish = (id, fields) => Object.assign(runs.get(id), fields);
@@ -134,6 +135,85 @@ test('a genuine test failure is recorded once and never re-run in a loop', async
   assert.equal((await monitor.tick()).outcome, 'failed');
   assert.deepEqual(context.starts, [SHA_A]);
   assert.equal(context.states.get(SHA_A).failed_phase, 'live');
+});
+
+const LIVE_FAILURE = { status: 'failed', phases: [{ mode: 'fixture', status: 'succeeded', exit_code: 0 }, { mode: 'live', status: 'failed', exit_code: 1, deployment_preflight: 'matched' }] };
+
+test('a genuine live failure routes its findings into triage once, recorded on the verdict', async () => {
+  const intakes = [];
+  const { monitor, context } = harness({ onFailedVerdict: async (input) => {
+    intakes.push(input);
+    return { status: 'filed', unique: 3, truncated: false, filed: [{ packet_id: 'p1', repair_risk: 'routine' }], skipped: [{ packet_id: 'p0' }], errors: [] };
+  } });
+  await monitor.tick();
+  context.finish('run-1', LIVE_FAILURE);
+  assert.equal((await monitor.tick()).outcome, 'failed');
+  assert.deepEqual(intakes, [{ sha: SHA_A, run_id: 'run-1' }]);
+  const intake = context.states.get(SHA_A).triage_intake;
+  assert.equal(intake.status, 'filed');
+  assert.equal(intake.attempts, 1);
+  assert.equal(intake.findings, 3);
+  assert.deepEqual(intake.filed, [{ packet_id: 'p1', repair_risk: 'routine' }]);
+  assert.equal((await monitor.tick()).outcome, 'failed');
+  assert.equal(intakes.length, 1, 'a filed verdict is never re-filed');
+  assert.ok(context.logs.some((entry) => entry.outcome === 'triage_intake' && entry.intake.filed === 1));
+});
+
+test('triage intake failures retry a bounded number of times and never change the verdict', async () => {
+  let calls = 0;
+  const { monitor, context } = harness({ onFailedVerdict: async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('Supabase unreachable');
+    return { status: 'failed', filed: [], skipped: [], errors: [{ fingerprint: 'f', error: 'triage returned HTTP 503' }] };
+  } });
+  await monitor.tick();
+  context.finish('run-1', LIVE_FAILURE);
+  await monitor.tick();
+  assert.deepEqual([context.states.get(SHA_A).status, context.states.get(SHA_A).triage_intake.status], ['failed', 'error']);
+  assert.equal(context.states.get(SHA_A).triage_intake.error, 'Supabase unreachable');
+  for (let tick = 0; tick < 4; tick += 1) assert.equal((await monitor.tick()).outcome, 'failed');
+  assert.equal(calls, 3);
+  assert.equal(context.states.get(SHA_A).triage_intake.attempts, 3);
+  assert.deepEqual(context.starts, [SHA_A], 'triage retries never re-run the walk');
+});
+
+test('a restart mid-intake resumes the pending triage on the next tick', async () => {
+  const intakes = [];
+  const { monitor, context } = harness({ onFailedVerdict: async (input) => { intakes.push(input); return { status: 'filed', filed: [], skipped: [], errors: [] }; } });
+  context.states.set(SHA_A, { sha: SHA_A, status: 'failed', run_id: 'run-9', failed_phase: 'live', triage_intake: { status: 'pending', attempts: 0 } });
+  assert.equal((await monitor.tick()).outcome, 'failed');
+  assert.deepEqual(intakes, [{ sha: SHA_A, run_id: 'run-9' }]);
+  assert.equal(context.states.get(SHA_A).triage_intake.status, 'filed');
+});
+
+test('only a genuine live failure files triage: fixture failures, passes, infrastructure, and superseded runs do not', async () => {
+  const intakes = [];
+  const onFailedVerdict = async (input) => { intakes.push(input); return { status: 'filed', filed: [], skipped: [], errors: [] }; };
+
+  const fixture = harness({ onFailedVerdict });
+  await fixture.monitor.tick();
+  fixture.context.finish('run-1', { status: 'failed', phases: [{ mode: 'fixture', status: 'failed', exit_code: 1 }] });
+  assert.equal((await fixture.monitor.tick()).outcome, 'failed');
+  assert.equal(fixture.context.states.get(SHA_A).triage_intake, undefined);
+
+  const passed = harness({ onFailedVerdict });
+  await passed.monitor.tick();
+  passed.context.finish('run-1', { status: 'succeeded' });
+  assert.equal((await passed.monitor.tick()).outcome, 'passed');
+
+  const infrastructure = harness({ onFailedVerdict });
+  await infrastructure.monitor.tick();
+  infrastructure.context.finish('run-1', { status: 'failed', phases: [{ mode: 'live', status: 'failed', exit_code: null, deployment_preflight: 'stale' }] });
+  assert.equal((await infrastructure.monitor.tick()).outcome, 'retry');
+
+  const superseded = harness({ onFailedVerdict });
+  await superseded.monitor.tick();
+  superseded.context.finish('run-1', LIVE_FAILURE);
+  superseded.context.production = { status: 'ready', sha: SHA_B };
+  superseded.context.releasedSha = SHA_B;
+  await superseded.monitor.tick();
+  assert.equal(superseded.context.states.get(SHA_A).status, 'superseded');
+  assert.deepEqual(intakes, []);
 });
 
 test('infrastructure faults retry a bounded number of times, then give up', async () => {

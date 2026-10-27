@@ -385,6 +385,13 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   files appear, or more than eight files change, the automation pauses for
   Grandmaster review. Routine automation is authority to repair a defect, not
   authority to invent a capability.
+- **Dr Bob findings ruling (owner, 2026-10-27).** Bob's own post-production
+  Dr Bob suite is a runtime-friction reporter. A genuine live failure files
+  its distinct, redacted HTTP findings into the same triage path as the
+  dedicated test identity, once per open defect, and the same deterministic
+  classifier decides routine, not eligible, or Grandmaster review. Filing
+  never changes the verdict, never re-runs the walk, and never widens the
+  routine lane (`docs/HUMAN_TESTING.md`).
 - **Natural-language Builder autonomy ruling (owner, 2026-10-13).** An explicit
   software-build instruction from the admiral is itself the recorded key to
   open and drive the isolated Builder job; Bob must not ask the admiral to

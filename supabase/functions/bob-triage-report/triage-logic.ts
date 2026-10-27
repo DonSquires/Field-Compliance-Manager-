@@ -612,7 +612,9 @@ export function classifyRepairRisk(envelope, stopLineHit, triage, confidence, ro
   }
   if (triage !== 'bug' || route !== 'dispatch_flow' || (confidence ?? -1) < 0.85) return 'unknown';
 
-  const text = JSON.stringify(envelope).toLowerCase();
+  // Values only: the persisted envelope always carries the "schema_version" key, which would
+  // otherwise trip the "schema" term and make every monitored defect protected.
+  const text = envelopeValues(envelope).toLowerCase();
   if (protectedTerms.some((term) => text.includes(term))) return 'protected';
 
   const significantTerms = [

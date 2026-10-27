@@ -12,6 +12,8 @@ const UNCONFIRMED_PREFLIGHT = new Set(['unavailable', 'stale', 'unverified']);
 const DEFAULT_RETAINED_VERDICTS = 50;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RELEASE_GRACE_MS = 30 * 60 * 1000;
+const MAX_TRIAGE_INTAKE_ATTEMPTS = 3;
+const RETRYABLE_TRIAGE_INTAKE = new Set(['pending', 'error', 'failed', 'partial', 'unconfigured']);
 
 function clip(value, maximum = 300) {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').slice(0, maximum);
@@ -120,6 +122,9 @@ function createProductionHumanTestMonitor({
   isIdle,
   now = Date.now,
   log = () => {},
+  // Called once per genuine live failure (and retried a bounded number of times) to route its
+  // findings into governed triage. Its failure never changes the verdict.
+  onFailedVerdict = null,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
 }) {
@@ -127,6 +132,42 @@ function createProductionHumanTestMonitor({
   let lastObservation = null;
   const iso = () => new Date(now()).toISOString();
   const observe = (observation) => { lastObservation = { ...observation, observed_at: iso() }; return observation; };
+
+  function needsTriageIntake(state) {
+    return typeof onFailedVerdict === 'function'
+      && state?.status === 'failed'
+      && state.failed_phase === 'live'
+      && RETRYABLE_TRIAGE_INTAKE.has(state.triage_intake?.status)
+      && Number(state.triage_intake?.attempts || 0) < MAX_TRIAGE_INTAKE_ATTEMPTS;
+  }
+
+  async function runTriageIntake(state) {
+    if (!needsTriageIntake(state)) return state;
+    const attempts = Number(state.triage_intake?.attempts || 0) + 1;
+    let intake;
+    try {
+      const result = await onFailedVerdict({ sha: state.sha, run_id: state.run_id });
+      const filed = Array.isArray(result?.filed) ? result.filed : [];
+      const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
+      const errors = Array.isArray(result?.errors) ? result.errors : [];
+      intake = {
+        status: clip(result?.status || 'error', 20),
+        attempts,
+        completed_at: iso(),
+        findings: Number.isInteger(result?.unique) ? result.unique : filed.length + skipped.length + errors.length,
+        truncated: result?.truncated === true,
+        filed: filed.slice(0, 10),
+        skipped: skipped.slice(0, 10),
+        errors: errors.slice(0, 5).map((entry) => ({ fingerprint: entry?.fingerprint ?? null, error: clip(entry?.error, 200) })),
+      };
+    } catch (error) {
+      intake = { status: 'error', attempts, completed_at: iso(), error: clip(error instanceof Error ? error.message : error, 200) };
+    }
+    const next = { ...state, triage_intake: intake };
+    await writeState(next);
+    log({ sha: next.sha, outcome: 'triage_intake', run_id: next.run_id, intake: { status: intake.status, attempts, filed: intake.filed?.length ?? 0, skipped: intake.skipped?.length ?? 0, errors: intake.errors?.length ?? (intake.error ? 1 : 0) } });
+    return next;
+  }
 
   // Production moved to another SHA while this one was walked: whatever the walk saw, part of it may
   // have been the newer deployment, so the verdict is superseded (never passed or failed) and the
@@ -138,10 +179,15 @@ function createProductionHumanTestMonitor({
     let next;
     if (superseded) next = { ...state, status: 'superseded', completed_at: iso(), summary, superseded_by: readyProductionSha, run_outcome: verdict.outcome, error: verdict.error ?? null };
     else if (verdict.outcome === 'passed') next = { ...state, status: 'passed', completed_at: iso(), summary };
-    else if (verdict.outcome === 'failed') next = { ...state, status: 'failed', completed_at: iso(), summary, failed_phase: verdict.failed_phase, exit_code: verdict.exit_code };
+    else if (verdict.outcome === 'failed') {
+      next = { ...state, status: 'failed', completed_at: iso(), summary, failed_phase: verdict.failed_phase, exit_code: verdict.exit_code };
+      // Persisted before intake, so a restart mid-intake resumes it instead of losing the findings.
+      if (verdict.failed_phase === 'live' && typeof onFailedVerdict === 'function') next.triage_intake = { status: 'pending', attempts: 0 };
+    }
     else next = { ...state, status: state.attempts >= maxAttempts ? 'gave_up' : 'retry', completed_at: iso(), error: verdict.error };
     await writeState(next);
     log({ sha: next.sha, outcome: next.status, run_id: next.run_id, summary, error: next.error ?? null });
+    await runTriageIntake(next);
     return { sha: next.sha, outcome: next.status, run_id: next.run_id };
   }
 
@@ -169,7 +215,10 @@ function createProductionHumanTestMonitor({
       }
       const { sha } = production;
       let state = await readState(sha);
-      if (state && TERMINAL.has(state.status)) return observe({ sha, outcome: state.status, run_id: state.run_id ?? null });
+      if (state && TERMINAL.has(state.status)) {
+        if (needsTriageIntake(state)) await runTriageIntake(state);
+        return observe({ sha, outcome: state.status, run_id: state.run_id ?? null });
+      }
 
       if (state?.status === 'running' && state.run_id) {
         const run = await getRun(state.run_id);
