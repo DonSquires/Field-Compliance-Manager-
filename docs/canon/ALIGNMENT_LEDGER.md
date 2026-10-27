@@ -713,3 +713,56 @@ the vehicle's owner: NZTA ownership remains the owner record. The TPFL
 workbook is a forest-area catalogue only, and the employee sheet is not
 imported. Truth table:
 `test/permit-holder-person-search-migration.test.js`.
+
+### 2026-10-27 — A permit holder's name comes from the permit that names them (Don Squires)
+
+Owner decisions, recorded 2026-10-27: complete names the extract proves;
+give each named holder in a merged record their own record; link new permits
+by email and surname to the single matching holder and complete that name;
+never merge family members who have different first names.
+
+**Build status (migration `20261101120000`).** The RAMS booking import keyed
+permit holders by surname and email. It therefore recorded 125 people by
+surname alone and merged different people who share a surname. The OFO
+extract names the holder of each permit and is the source of truth for that
+name.
+
+`attribute_permit_holder` is admin-only and audited. It takes a full name and
+the permits that name it. If those permits are all of the record's permits,
+the given names are added in front of the recorded name. The canonical key
+stays, and the previous name is kept in the person's metadata. Otherwise
+those permits move to a new draft person of their own, and the record keeps
+the rest.
+
+It refuses:
+
+- a name that does not end with the recorded name;
+- permits the person does not hold;
+- renaming a person whom another organisation records.
+
+It never deletes a person.
+
+`import_person_permit` gains `p_create_holder`, which defaults to off. A new
+permit links to a holder recorded by surname only when:
+
+- the email agrees;
+- the full name ends with that surname;
+- exactly one such holder exists.
+
+The caller then completes that holder's name. With `p_create_holder` on, a
+named holder who matches no one is created as a new draft person. A
+one-word name never creates a person. Audit metadata carries permit numbers
+and identifiers, never names or emails.
+
+The repair script plans every step from a live snapshot and records the
+expected outcome. The database rolls back and holds any step whose actual
+outcome differs, so the run cannot drift from the reviewed plan.
+
+Four extract permits for family members first appeared to share an email
+with a differently named relative. They share it only with an older,
+unnamed permit on the merged record. Once the named relative moves to their
+own record, each family member is linked to that older permit by the
+email-and-surname rule. This keeps the family members separate from the
+relative without leaving a duplicate surname-only record.
+
+Truth table: `test/permit-holder-identity-repair-migration.test.js`.

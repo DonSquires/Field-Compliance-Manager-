@@ -141,3 +141,145 @@ test('summariseResults counts outcomes and keeps values out of error summaries',
   assert.equal(summary.vehicles.vehicles_linked, 2);
   assert.deepEqual(Object.keys(summary.errors), ['invalid input syntax for type date: "…"']);
 });
+
+test('nameExtends mirrors public.person_name_extends', async () => {
+  const { nameExtends } = await load();
+  assert.equal(nameExtends('Smith', 'Jane Smith'), true);
+  assert.equal(nameExtends('smith', '  JANE   smith '), true);
+  assert.equal(nameExtends('Jane Smith', 'Mary Jane Smith'), true);
+  assert.equal(nameExtends('van der Berg', 'Piet Van Der Berg'), true);
+  assert.equal(nameExtends('Smith', 'Smith'), false);
+  assert.equal(nameExtends('Smith', 'Jane Smyth'), false);
+  assert.equal(nameExtends('Smith', 'Smith Jane'), false);
+  assert.equal(nameExtends('Tama Ngata', 'Hine Ngata'), false);
+  assert.equal(nameExtends(null, 'Jane Smith'), false);
+});
+
+const holder = (permit_number, canonical_person_id, display_name, contact_email) =>
+  ({ permit_number, canonical_person_id, display_name, contact_email });
+const extract = (permit_number, holder_name, contact_email) => ({ permit_number, holder_name, contact_email });
+
+test('planHolderRepair completes a surname record only when every permit is accounted for', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('100', 'p-ngata', 'Ngata', 'n@example.test'),
+    holder('101', 'p-ngata', 'Ngata', ' N@example.test'),
+    holder('102', 'p-ngata', 'Ngata', 'n@example.test'),
+  ], [extract('100', 'Tama Ngata', 'n@example.test'), extract('101', 'Tama  Ngata', 'n@example.test')]);
+  assert.deepEqual(plan.attributions, [{ canonical_person_id: 'p-ngata', full_name: 'Tama Ngata',
+    permit_numbers: ['100', '101', '102'], expected: 'name_completed' }]);
+  assert.deepEqual(plan.summary.categories, { completed: 1 });
+});
+
+test('planHolderRepair separates two named holders and keeps the larger on the record', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('200', 'p-smith', 'Smith', 'jane@example.test'),
+    holder('201', 'p-smith', 'Smith', 'jane@example.test'),
+    holder('202', 'p-smith', 'Smith', 'mary@example.test'),
+  ], [extract('200', 'Jane Smith', 'jane@example.test'), extract('202', 'Mary Smith', 'mary@example.test')]);
+  assert.deepEqual(plan.attributions, [
+    { canonical_person_id: 'p-smith', full_name: 'Mary Smith', permit_numbers: ['202'], expected: 'split' },
+    { canonical_person_id: 'p-smith', full_name: 'Jane Smith', permit_numbers: ['200', '201'], expected: 'name_completed' },
+  ]);
+  assert.deepEqual(plan.summary.categories, { split_then_completed: 1 });
+});
+
+test('planHolderRepair never guesses who an unproven permit belongs to', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('300', 'p-brown', 'Brown', 'ann@example.test'),
+    holder('301', 'p-brown', 'Brown', 'other@example.test'),
+    holder('400', 'p-lee', 'Lee', 'family@example.test'),
+    holder('401', 'p-lee', 'Lee', 'family@example.test'),
+    holder('402', 'p-lee', 'Lee', 'family@example.test'),
+    holder('500', 'p-hall', 'Hall', 'h@example.test'),
+    holder('600', 'p-reid', 'Reid', 'r@example.test'),
+    holder('700', 'p-kim', 'Ana Kim', 'k@example.test'),
+  ], [
+    extract('300', 'Ann Brown', 'ann@example.test'),
+    extract('400', 'Kim Lee', 'family@example.test'), extract('401', 'Sam Lee', 'family@example.test'),
+    extract('500', 'Harry Hallett', 'h@example.test'),
+    extract('700', 'Ana Kim', 'k@example.test'),
+  ]);
+  assert.deepEqual(plan.attributions, [
+    { canonical_person_id: 'p-brown', full_name: 'Ann Brown', permit_numbers: ['300'], expected: 'split' },
+    { canonical_person_id: 'p-lee', full_name: 'Kim Lee', permit_numbers: ['400'], expected: 'split' },
+    { canonical_person_id: 'p-lee', full_name: 'Sam Lee', permit_numbers: ['401'], expected: 'split' },
+  ]);
+  assert.deepEqual(plan.summary.categories, {
+    split_record_kept_surname: 2, name_does_not_extend: 1, no_evidence_surname_only: 1, already_named: 1,
+  });
+});
+
+test('planHolderRepair predicts how each new permit finds its holder', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('800', 'p-ngata', 'Ngata', 'n@example.test'),
+    holder('810', 'p-hall', 'Hall', 'h@example.test'),
+    holder('820', 'p-reid', 'Reid', 'r@example.test'),
+    holder('821', 'p-reid', 'Reid', 'other@example.test'),
+    holder('830', 'p-cole', 'Cole', 'jo@example.test'),
+    holder('831', 'p-cole', 'Cole', 'family@example.test'),
+    holder('840', 'p-ward', 'Ward', 'w@example.test'),
+    holder('841', 'p-ward-2', 'Ward', 'w@example.test'),
+  ], [
+    extract('800', 'Tama Ngata', 'n@example.test'),
+    extract('830', 'Jo Cole', 'jo@example.test'),
+    extract('900', 'TAMA ngata', 'n@example.test'),
+    extract('901', 'Hine Ngata', 'n@example.test'),
+    extract('902', 'Harry Hall', 'h@example.test'),
+    extract('903', 'Rua Reid', 'r@example.test'),
+    extract('904', 'Mia Cole', 'family@example.test'),
+    extract('905', 'Ari Ward', 'w@example.test'),
+    extract('906', 'Solo', 'solo@example.test'),
+    extract('907', 'Harry Hall', 'h@example.test'),
+  ]);
+  assert.deepEqual(plan.new_permits.map(({ permit, expected, expected_follow_up }) => [permit.permit_number, expected, expected_follow_up]), [
+    ['900', 'permit_email_and_name', null],
+    ['901', 'created_holder', null],
+    ['902', 'permit_email_and_surname', 'name_completed'],
+    ['903', 'permit_email_and_surname', 'split'],
+    ['904', 'permit_email_and_surname', 'name_completed'],
+    ['905', 'held_holder_not_resolved', null],
+    ['906', 'held_holder_not_resolved', null],
+    ['907', 'permit_email_and_name', null],
+  ]);
+  assert.deepEqual(plan.summary.new_permit_follow_ups, { name_completed: 2, split: 1 });
+});
+
+test('holderRepairSql calls only governed RPCs and holds any step that departs from the plan', async () => {
+  const { holderRepairSql } = await load();
+  const source = { sourceDocument: 'HABITAT - RAMS/Permit Extract OFO.xlsx', sourceSha256: 'a'.repeat(64), sourceCheckedAt: '2025-11-17T21:32:59.000Z' };
+  const repair = {
+    attributions: [{ canonical_person_id: '11111111-1111-4111-8111-111111111111', full_name: "Rua O'Neill", permit_numbers: ['1'], expected: 'split' }],
+    new_permits: [{ permit: { permit_number: '2', holder_name: 'Ari Ward' }, expected: 'created_holder', expected_follow_up: null }],
+  };
+  const sql = holderRepairSql(repair, source);
+  assert.match(sql, /public\.attribute_permit_holder\(/);
+  assert.match(sql, /public\.import_person_permit\([^;]*NULL, true\)/);
+  assert.match(sql, /Unexpected repair outcome/);
+  assert.match(sql, /held_unexpected_outcome/);
+  assert.equal(sql.match(/EXCEPTION WHEN OTHERS/g).length, 2);
+  assert.doesNotMatch(sql, /INSERT INTO public\.|UPDATE public\.|DELETE FROM/i);
+  assert.throws(() => holderRepairSql({ ...repair, attributions: [{ ...repair.attributions[0], full_name: '$attributions$' }] }, source), /delimiter/);
+  assert.throws(() => holderRepairSql(repair, { ...source, sourceSha256: 'nothex' }), /SHA-256/);
+});
+
+test('summariseHolderRepair counts outcomes and keeps values out of error summaries', async () => {
+  const { summariseHolderRepair } = await load();
+  const summary = summariseHolderRepair([
+    { step: 'attribute', outcome: 'split', permits_moved: 2 },
+    { step: 'attribute', outcome: 'name_completed', permits_moved: 0 },
+    { step: 'attribute', outcome: 'held_unexpected_outcome', error: 'Unexpected repair outcome: split' },
+    { step: 'import', outcome: 'inserted', match_basis: 'permit_email_and_surname', follow_up: 'name_completed', permits_moved: 0 },
+    { step: 'import', outcome: 'inserted', match_basis: 'created_holder' },
+    { step: 'import', outcome: 'error', error: 'value "Jane Smith 12345" is too long' },
+  ], { mode: 'dry_run_rolled_back', planned: {}, before: { holders: 2 }, after: { holders: 3 } });
+  assert.deepEqual(summary.attributions, { split: 1, name_completed: 1, held_unexpected_outcome: 1 });
+  assert.deepEqual(summary.new_permits, { 'inserted:permit_email_and_surname': 1, 'inserted:created_holder': 1, error: 1 });
+  assert.deepEqual(summary.follow_ups, { name_completed: 1 });
+  assert.equal(summary.permits_moved, 2);
+  assert.equal(summary.unexpected, 1);
+  assert.deepEqual(Object.keys(summary.errors), ['value "…" is too long']);
+});
