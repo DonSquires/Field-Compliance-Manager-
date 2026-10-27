@@ -128,8 +128,10 @@ ALTER POLICY entity_links_select ON public.entity_links USING (
 
 -- The invoker view previously depended on an admin-only base table, so officers
 -- could not actually read permits. Project in a bounded, authorized definer
--- function without granting access to the underlying private columns.
-CREATE OR REPLACE FUNCTION public.read_person_permits_fieldwork()
+-- function without granting access to the underlying private columns. A plate
+-- lookup passes p_plate so the predicate runs inside the function rather than
+-- over the whole materialized projection.
+CREATE OR REPLACE FUNCTION public.read_person_permits_fieldwork(p_plate text DEFAULT NULL)
 RETURNS TABLE(
   id uuid, organization_id uuid, client_organization_id uuid, canonical_person_id uuid,
   holder_name text, permit_number text, permit_type text, applicant_type text, company_name text,
@@ -154,10 +156,17 @@ AS $function$
     public.person_permit_validity(pp.status, pp.date_from, pp.date_to)
   FROM public.person_permits pp
   LEFT JOIN public.canonical_people cp ON cp.id = pp.canonical_person_id
-  WHERE public.can_search_people(pp.organization_id);
+  WHERE (p_plate IS NULL OR pp.id IN (
+      SELECT ppv.permit_id
+      FROM public.person_permit_vehicles ppv
+      JOIN public.canonical_vehicles cv ON cv.id = ppv.canonical_vehicle_id
+      WHERE cv.plate_number = public.normalize_plate_number(p_plate)))
+    AND public.can_search_people(pp.organization_id);
 $function$;
-REVOKE ALL ON FUNCTION public.read_person_permits_fieldwork() FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.read_person_permits_fieldwork() TO authenticated;
+REVOKE ALL ON FUNCTION public.read_person_permits_fieldwork(text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.read_person_permits_fieldwork(text) TO authenticated;
+COMMENT ON FUNCTION public.read_person_permits_fieldwork(text) IS
+  'Operational permit projection for authorized person-search users; pass p_plate to read only permits listing that plate. Contact fields are null outside contact-detail roles.';
 CREATE OR REPLACE VIEW public.person_permits_fieldwork WITH (security_invoker = true) AS
   SELECT * FROM public.read_person_permits_fieldwork();
 COMMENT ON VIEW public.person_permits_fieldwork IS
@@ -393,39 +402,33 @@ GRANT EXECUTE ON FUNCTION public.get_vehicle_owner_links(uuid, uuid) TO authenti
 COMMENT ON FUNCTION public.get_vehicle_owner_links(uuid, uuid) IS
   'Scoped vehicle-person links: NZTA authorization exposes identity, not private contact/address/locality or free-text basis. Those require active operations administrator roles. Owner history remains source-time observations, never legal transfer dates.';
 
-CREATE OR REPLACE FUNCTION public.find_person_matches(
-  p_organization_id uuid, p_name text DEFAULT NULL, p_date_of_birth date DEFAULT NULL,
-  p_licence_number text DEFAULT NULL, p_phone text DEFAULT NULL, p_email text DEFAULT NULL,
-  p_exclude_person_record_id uuid DEFAULT NULL, p_limit integer DEFAULT 8
+-- Internal matcher shared by the public lookup and the recording duplicate guard.
+-- It has no caller authorization of its own, so no client role may execute it;
+-- callers decide whether contact details may participate in matching.
+CREATE OR REPLACE FUNCTION public._match_person_records(
+  p_organization_id uuid, p_name text, p_date_of_birth date, p_licence_number text,
+  p_phone text, p_email text, p_exclude_person_record_id uuid, p_limit integer, p_include_contacts boolean
 ) RETURNS TABLE(person_record_id uuid, display_name text, review_state text, matched_name text,
   match_basis text, score real, strength text, aliases text[], locality text, origin text, sighting_count bigint)
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
+LANGUAGE plpgsql STABLE SET search_path = ''
 AS $function$
 DECLARE
+  v_contacts boolean := coalesce(p_include_contacts, false);
   v_norm text := public.normalize_person_name(p_name);
   v_lower text := nullif(lower(regexp_replace(trim(coalesce(p_name, '')), '\s+', ' ', 'g')), '');
   v_first text;
   v_last text;
   v_licence text := nullif(upper(regexp_replace(coalesce(p_licence_number, ''), '[^A-Za-z0-9]', '', 'g')), '');
-  v_phone text := nullif(regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g'), '');
-  v_email text := nullif(lower(trim(coalesce(p_email, ''))), '');
-  v_contacts boolean := public.can_access_person_contacts(p_organization_id);
+  v_phone text := CASE WHEN coalesce(p_include_contacts, false) THEN nullif(regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g'), '') END;
+  v_email text := CASE WHEN coalesce(p_include_contacts, false) THEN nullif(lower(trim(coalesce(p_email, ''))), '') END;
 BEGIN
-  IF auth.uid() IS NULL OR p_organization_id IS NULL OR NOT public.org_access_allowed(p_organization_id)
-    OR NOT (public.can_search_people(p_organization_id) OR public.can_access_vehicle_owner_identity(p_organization_id)) THEN
-    RAISE EXCEPTION 'Person-search or vehicle-owner authorization required' USING ERRCODE = '42501';
-  END IF;
-  IF NOT v_contacts AND (v_phone IS NOT NULL OR v_email IS NOT NULL) THEN
-    RAISE EXCEPTION 'Contact-detail matching requires an operations administrator' USING ERRCODE = '42501';
-  END IF;
-  IF v_norm IS NULL AND v_licence IS NULL AND (v_phone IS NULL OR length(v_phone) < 7) AND v_email IS NULL THEN
-    RAISE EXCEPTION 'Enter a name or an authorized identity detail to match';
-  END IF;
+  IF p_organization_id IS NULL THEN RETURN; END IF;
+  IF v_phone IS NOT NULL AND length(v_phone) < 7 THEN v_phone := NULL; END IF;
+  IF v_norm IS NULL AND v_licence IS NULL AND v_phone IS NULL AND v_email IS NULL THEN RETURN; END IF;
   IF v_lower IS NOT NULL THEN
     v_first := split_part(v_lower, ' ', 1);
     v_last := CASE WHEN position(' ' IN v_lower) > 0 THEN regexp_replace(v_lower, '^.* ', '') END;
   END IF;
-  IF v_phone IS NOT NULL AND length(v_phone) < 7 THEN v_phone := NULL; END IF;
   RETURN QUERY
   WITH people AS (
     SELECT pr.id, pr.display_name, pr.review_state, pr.metadata,
@@ -510,7 +513,93 @@ BEGIN
   LIMIT least(greatest(coalesce(p_limit, 8), 1), 25);
 END;
 $function$;
+REVOKE ALL ON FUNCTION public._match_person_records(uuid, text, date, text, text, text, uuid, integer, boolean) FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.find_person_matches(
+  p_organization_id uuid, p_name text DEFAULT NULL, p_date_of_birth date DEFAULT NULL,
+  p_licence_number text DEFAULT NULL, p_phone text DEFAULT NULL, p_email text DEFAULT NULL,
+  p_exclude_person_record_id uuid DEFAULT NULL, p_limit integer DEFAULT 8
+) RETURNS TABLE(person_record_id uuid, display_name text, review_state text, matched_name text,
+  match_basis text, score real, strength text, aliases text[], locality text, origin text, sighting_count bigint)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+DECLARE
+  v_phone text := nullif(regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g'), '');
+  v_email text := nullif(lower(trim(coalesce(p_email, ''))), '');
+  v_contacts boolean := public.can_access_person_contacts(p_organization_id);
+BEGIN
+  IF auth.uid() IS NULL OR p_organization_id IS NULL OR NOT public.org_access_allowed(p_organization_id)
+    OR NOT (public.can_search_people(p_organization_id) OR public.can_access_vehicle_owner_identity(p_organization_id)) THEN
+    RAISE EXCEPTION 'Person-search or vehicle-owner authorization required' USING ERRCODE = '42501';
+  END IF;
+  IF NOT v_contacts AND (v_phone IS NOT NULL OR v_email IS NOT NULL) THEN
+    RAISE EXCEPTION 'Contact-detail matching requires an operations administrator' USING ERRCODE = '42501';
+  END IF;
+  IF public.normalize_person_name(p_name) IS NULL
+    AND nullif(upper(regexp_replace(coalesce(p_licence_number, ''), '[^A-Za-z0-9]', '', 'g')), '') IS NULL
+    AND (v_phone IS NULL OR length(v_phone) < 7) AND v_email IS NULL THEN
+    RAISE EXCEPTION 'Enter a name or an authorized identity detail to match';
+  END IF;
+  RETURN QUERY SELECT * FROM public._match_person_records(p_organization_id, p_name, p_date_of_birth,
+    p_licence_number, p_phone, p_email, p_exclude_person_record_id, p_limit, v_contacts);
+END;
+$function$;
 REVOKE ALL ON FUNCTION public.find_person_matches(uuid, text, date, text, text, text, uuid, integer) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.find_person_matches(uuid, text, date, text, text, text, uuid, integer) TO authenticated;
 COMMENT ON FUNCTION public.find_person_matches(uuid, text, date, text, text, text, uuid, integer) IS
   'Duplicate-prevention matching for authorized person-search or vehicle-owner users. Contact matching and returned locality are operations-administrator-only. No private contact values are returned.';
+
+-- Recording a person is not a lookup. Anyone allowed to record still gets
+-- duplicate protection; contact details only participate for contact-detail
+-- roles, and recorders without lookup authority are not told who matched.
+CREATE OR REPLACE FUNCTION public.assert_new_person_not_duplicate(p_organization_id uuid, p_fields jsonb)
+RETURNS void LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+DECLARE
+  v_names text;
+  v_contacts boolean;
+BEGIN
+  IF coalesce((p_fields->>'confirm_new_person')::boolean, false) THEN RETURN; END IF;
+  v_contacts := public.can_access_person_contacts(p_organization_id);
+  SELECT string_agg(m.display_name, ', ') INTO v_names
+  FROM public._match_person_records(p_organization_id, p_fields->>'display_name', nullif(p_fields->>'date_of_birth', '')::date,
+    p_fields->>'licence_number', p_fields->>'phone', p_fields->>'email', NULL, 5, v_contacts) m
+  WHERE m.score >= 0.85;
+  IF v_names IS NULL THEN RETURN; END IF;
+  IF public.can_search_people(p_organization_id) OR public.can_access_vehicle_owner_identity(p_organization_id) THEN
+    RAISE EXCEPTION 'POSSIBLE_DUPLICATE: % may already be recorded. Choose the existing person, or confirm this is a different person.', v_names;
+  END IF;
+  RAISE EXCEPTION 'POSSIBLE_DUPLICATE: Someone with these details may already be recorded. Confirm this is a different person, or ask an administrator to link the existing record.';
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.assert_new_person_not_duplicate(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+
+-- CCTV identity review lists people to link faces to. Names follow person-search
+-- authority; private profile details follow contact-detail authority.
+CREATE OR REPLACE FUNCTION public.get_cctv_review_person_records(p_organization_id uuid)
+RETURNS TABLE(id uuid, display_name text, review_state text, metadata jsonb)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+  WITH access AS (
+    SELECT public.can_access_person_contacts(p_organization_id) AS contacts,
+      public.can_search_people(p_organization_id) AS lookup
+  )
+  SELECT person.id, person.display_name, person.review_state,
+    CASE WHEN access.contacts
+      THEN person.metadata - 'face_reference' - 'embedding' - 'candidate_embedding' - 'appearance_embedding'
+      ELSE jsonb_strip_nulls(jsonb_build_object(
+        'origin', person.metadata->'origin',
+        'created_from', person.metadata->'created_from',
+        'merged_into_person_record_id', person.metadata->'merged_into_person_record_id',
+        'resolved_into_person_record_id', person.metadata->'resolved_into_person_record_id'))
+    END
+  FROM public.person_records person
+  CROSS JOIN access
+  WHERE person.organization_id = p_organization_id
+    AND auth.uid() IS NOT NULL
+    AND access.lookup
+    AND public.org_access_allowed(p_organization_id)
+  ORDER BY person.created_at
+$function$;
+REVOKE ALL ON FUNCTION public.get_cctv_review_person_records(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_cctv_review_person_records(uuid) TO authenticated, service_role;

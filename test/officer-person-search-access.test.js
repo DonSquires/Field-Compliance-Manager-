@@ -14,7 +14,8 @@ const catalogFunction = name => {
 };
 
 test('all new public identity functions revoke default execution and fieldwork remains an invoker view', () => {
-  for (const name of ['can_search_people', 'can_access_person_contacts', 'get_person_search_access', 'set_person_search_access', 'read_person_permits_fieldwork']) {
+  for (const name of ['can_search_people', 'can_access_person_contacts', 'get_person_search_access', 'set_person_search_access', 'read_person_permits_fieldwork',
+    '_match_person_records', 'assert_new_person_not_duplicate', 'get_cctv_review_person_records']) {
     assert.match(migration, new RegExp(`REVOKE ALL ON FUNCTION public\\.${name}\\([^;]*FROM PUBLIC, anon, authenticated, service_role;`));
   }
   assert.match(migration, /WITH \(security_invoker = true\)/);
@@ -29,9 +30,12 @@ test('person authorization, private projections and revocation execute as real d
   const name = `fcm-person-access-${randomUUID()}`;
   const docker = args => execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   const id = n => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-  const org = id(1), other = id(2), client = id(3), admin = id(10), officer = id(11), desk = id(12), outsider = id(13);
+  const org = id(1), other = id(2), client = id(3), admin = id(10), officer = id(11), desk = id(12), outsider = id(13), recorder = id(14);
   const person = id(20), record = id(21), permit = id(22), vehicle = id(23), document = id(24);
   const actor = user => `SELECT set_config('request.jwt.claim.sub','${user}',false); SET ROLE authenticated;`;
+  // Internal definer helpers run as their owner; this mirrors that while keeping the caller identity.
+  const asOwnerFor = user => `RESET ROLE; SELECT set_config('request.jwt.claim.sub','${user}',false);`;
+  const recordGuard = fields => `SELECT public.assert_new_person_not_duplicate('${org}','${JSON.stringify(fields)}')`;
   let created = false;
   try {
     docker(['run', '--detach', '--name', name, '--network', 'none',
@@ -66,11 +70,13 @@ test('person authorization, private projections and revocation execute as real d
       CREATE TABLE public.access_presets(id uuid PRIMARY KEY,grants jsonb);
       CREATE TABLE public.preset_assignments(user_id uuid,scope_org_id uuid,preset_id uuid,status text);
       ${['org_access_allowed', 'is_admin_for_org', 'resolve_access_grants', 'can_access_vehicle_owner_identity',
-        'notice_expiry_state', 'person_permit_validity', 'normalize_person_name', 'vehicle_owner_locality'].map(catalogFunction).join('\n')}
+        'notice_expiry_state', 'person_permit_validity', 'normalize_person_name', 'vehicle_owner_locality',
+        'normalize_plate_number'].map(catalogFunction).join('\n')}
       CREATE TABLE public.canonical_people(id uuid PRIMARY KEY,display_name text,normalized_name text,status text,
         review_state text,homeless_status text);
       CREATE TABLE public.canonical_vehicles(id uuid PRIMARY KEY,plate_number text,make text,model text,colour text);
-      CREATE TABLE public.person_records(id uuid PRIMARY KEY,organization_id uuid,display_name text,metadata jsonb,review_state text);
+      CREATE TABLE public.person_records(id uuid PRIMARY KEY,organization_id uuid,display_name text,metadata jsonb,review_state text,
+        created_at timestamptz DEFAULT now());
       CREATE TABLE public.canonical_person_links(canonical_person_id uuid,organization_id uuid,source_table text,source_id uuid);
       CREATE TABLE public.person_record_aliases(person_record_id uuid,organization_id uuid,alias text,alias_norm text,active boolean,created_at timestamptz);
       CREATE TABLE public.notices(id uuid,organization_id uuid,person_id uuid,notice_type text,notice_number text,
@@ -115,7 +121,7 @@ test('person authorization, private projections and revocation execute as real d
       INSERT INTO public.service_agreements VALUES('${org}','${client}',NULL,'operational');
       INSERT INTO public.canonical_people VALUES('${person}','Synthetic Holder','syntheticholder','active','verified',NULL);
       INSERT INTO public.person_records VALUES('${record}','${org}','Synthetic Holder',
-        '{"profile_details":{"phone":"PRIVATE_PHONE","email":"PRIVATE_EMAIL","address":"PRIVATE_ADDRESS","city":"PRIVATE_CITY"}}','verified');
+        '{"origin":"cctv_review","face_reference":"FACE_SENTINEL","profile_details":{"phone":"PRIVATE_PHONE","email":"PRIVATE_EMAIL","address":"PRIVATE_ADDRESS","city":"PRIVATE_CITY"}}','verified');
       INSERT INTO public.canonical_person_links VALUES('${person}','${org}','person_records','${record}');
       INSERT INTO public.person_record_aliases VALUES('${record}','${org}','Synthetic Alias','syntheticalias',true,now());
       INSERT INTO public.canonical_vehicles VALUES('${vehicle}','ABC123','Test','Vehicle','Blue');
@@ -139,6 +145,15 @@ test('person authorization, private projections and revocation execute as real d
       SELECT pg_temp.refuses($q$SELECT public.set_person_search_access('${officer}',true,'self grant')$q$,'administrator required');
       SELECT pg_temp.check((SELECT count(*)=0 FROM public.person_records),'raw contacts blocked');
       SELECT pg_temp.check((SELECT count(*)=0 FROM public.person_permits_fieldwork),'unapproved holder view blocked');
+      SELECT pg_temp.check((SELECT count(*)=0 FROM public.read_person_permits_fieldwork('ABC123')),'unapproved plate permits blocked');
+      SELECT pg_temp.check((SELECT count(*)=0 FROM public.get_cctv_review_person_records('${org}')),'CCTV names need person search');
+      SELECT pg_temp.refuses($q$SELECT * FROM public.find_person_matches('${org}','Synthetic Holder')$q$,'authorization required');
+      SELECT pg_temp.refuses($q$SELECT * FROM public._match_person_records('${org}','Synthetic Holder',NULL,NULL,NULL,NULL,NULL,5,true)$q$,'permission denied');
+      RESET ROLE;
+      ${actor(admin)}
+      SELECT pg_temp.check((SELECT bool_and(metadata ? 'profile_details' AND NOT metadata ? 'face_reference')
+        FROM public.get_cctv_review_person_records('${org}')),'CCTV admin keeps profile without biometrics');
+      SELECT pg_temp.refuses($q$SELECT * FROM public._match_person_records('${org}','Synthetic Holder',NULL,NULL,NULL,NULL,NULL,5,true)$q$,'permission denied');
       RESET ROLE;
       ${actor(admin)}
       SELECT public.set_person_search_access('${officer}',true,'Approved permit and trespass duties');
@@ -162,6 +177,12 @@ test('person authorization, private projections and revocation execute as real d
       SELECT pg_temp.check((SELECT bool_and(contact_email IS NULL AND contact_phone IS NULL AND address_text IS NULL)
         FROM public.person_permits_fieldwork),'view masks contacts');
       SELECT pg_temp.check((SELECT count(*)=0 FROM public.person_permits),'no base-table backdoor');
+      SELECT pg_temp.check((SELECT count(*)=1 AND bool_and(contact_phone IS NULL)
+        FROM public.read_person_permits_fieldwork('abc-123')),'plate-scoped permits normalize the plate and mask contacts');
+      SELECT pg_temp.check((SELECT count(*)=0 FROM public.read_person_permits_fieldwork('ZZZ999')),'other plates excluded');
+      SELECT pg_temp.check((SELECT count(*)=1 AND bool_and(metadata->>'origin'='cctv_review'
+          AND NOT metadata ? 'profile_details' AND NOT metadata ? 'face_reference')
+        FROM public.get_cctv_review_person_records('${org}')),'CCTV officer metadata redacted');
       SELECT pg_temp.check((SELECT bool_and(locality IS NULL) FROM public.find_person_matches('${org}','Synthetic Holder')),'matcher masks locality');
       SELECT pg_temp.refuses($q$SELECT public.find_person_matches('${org}',p_phone=>'123456789')$q$,'Contact-detail matching');
       RESET ROLE;
@@ -208,6 +229,21 @@ test('person authorization, private projections and revocation execute as real d
       ${actor(officer)}
       SELECT pg_temp.check(NOT public.can_search_people(),'inactive denied despite preset and NZTA');
       SELECT pg_temp.check((SELECT count(*)=0 FROM public.person_permits_fieldwork),'inactive view empty');
+      SELECT pg_temp.check((SELECT count(*)=0 FROM public.read_person_permits_fieldwork('ABC123')),'inactive plate permits empty');
+      RESET ROLE;
+      INSERT INTO public.user_profiles(id,role,organization_id) VALUES('${recorder}','officer','${org}');
+      INSERT INTO public.person_records(id,organization_id,display_name,metadata,review_state) VALUES
+        ('${id(28)}','${org}','Phone Only Person','{"profile_details":{"phone":"021 555 0101"}}','verified');
+      ${asOwnerFor(recorder)}
+      SELECT pg_temp.refuses($q$${recordGuard({ display_name: 'Synthetic Holder' })}$q$,'POSSIBLE_DUPLICATE: Someone with these details');
+      ${recordGuard({ display_name: 'Brand New Person', phone: '0215550101' })};
+      ${recordGuard({ display_name: 'Synthetic Holder', confirm_new_person: true })};
+      INSERT INTO public.staff_area_grants(user_id,scope_org_id,area,level,status)
+        VALUES('${recorder}','${org}','vehicle_owner_identity','manage','active');
+      SELECT pg_temp.refuses($q$${recordGuard({ display_name: 'Synthetic Holder' })}$q$,'POSSIBLE_DUPLICATE: Synthetic Holder may already be recorded');
+      ${recordGuard({ display_name: 'Brand New Person', phone: '021 555 0101', email: 'new@example.test' })};
+      ${asOwnerFor(admin)}
+      SELECT pg_temp.refuses($q$${recordGuard({ display_name: 'Brand New Person', phone: '021 555 0101' })}$q$,'POSSIBLE_DUPLICATE: Phone Only Person');
       RESET ROLE;
       SET ROLE anon;
       SELECT pg_temp.refuses($q$SELECT public.search_people('TEST100')$q$,'permission denied');
