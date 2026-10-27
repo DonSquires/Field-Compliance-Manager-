@@ -8,6 +8,7 @@ const { randomUUID } = require('node:crypto');
 const read = file => fs.readFileSync(path.join(__dirname, '../supabase/migrations', file), 'utf8');
 const permitSearch = read('20261101110000_permit_holder_person_search.sql');
 const migration = read('20261101120000_permit_holder_identity_repair.sql');
+const followUp = read('20261101130000_permit_import_related_names_and_differences.sql');
 
 function section(start, end) {
   const from = migration.indexOf(start);
@@ -38,6 +39,22 @@ test('the permit import still never changes a recorded permit holder', () => {
   assert.doesNotMatch(importer, /canonical_person_id\s*=/);
   assert.doesNotMatch(importer, /UPDATE public\.canonical_people/i);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.import_person_permit\(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean\) TO authenticated, service_role;/);
+});
+
+test('the permit import holds related names both ways and reports differences by field type', () => {
+  const from = followUp.indexOf('CREATE OR REPLACE FUNCTION public.import_person_permit');
+  assert.ok(from >= 0, 'the follow-up replaces the permit import');
+  const importer = followUp.slice(from, followUp.indexOf('COMMENT ON FUNCTION public.import_person_permit', from));
+  assert.match(importer, /public\.person_name_extends\(p\.display_name, v_holder_name\)\s+OR public\.person_name_extends\(v_holder_name, p\.display_name\)/);
+  assert.match(importer, /recorded under a longer related name/);
+  assert.match(importer, /public\.person_permit_compare_value\(v_field, v_old->v_field\)/);
+  assert.doesNotMatch(importer, /regexp_replace\(lower\(v_old->>v_field\)/);
+  assert.doesNotMatch(importer, /canonical_person_id\s*=/);
+  assert.doesNotMatch(importer, /UPDATE public\.canonical_people/i);
+  assert.doesNotMatch(followUp, /DROP FUNCTION/);
+  assert.match(followUp, /REVOKE ALL ON FUNCTION public\.person_permit_compare_value\(text, jsonb\) FROM PUBLIC, anon, authenticated, service_role;/);
+  assert.match(followUp, /REVOKE ALL ON FUNCTION public\.import_person_permit\(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean\) FROM PUBLIC, anon, authenticated, service_role;/);
+  assert.match(followUp, /GRANT EXECUTE ON FUNCTION public\.import_person_permit\(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean\) TO authenticated, service_role;/);
 });
 
 test('permit holder identity repair executes against disposable PostgreSQL', {
@@ -76,6 +93,8 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
     const wiremu = '66666666-6666-4666-8666-666666666666';
     const whare = '77777777-7777-4777-8777-777777777777';
     const oneill = '88888888-8888-4888-8888-888888888888';
+    const kahu = '99999999-9999-4999-8999-999999999991';
+    const berg = '99999999-9999-4999-8999-999999999992';
     const rams = 'HABITAT - RAMS/Bookings-rmsecurity/users (new list).csv';
     const hash = 'b'.repeat(64);
     const attribute = (person, fullName, numbers, withSameEmail = false, sha = hash) =>
@@ -156,7 +175,9 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
         ('${brown}','person:import:brown','Brown','brown'),('${lee1}','person:import:lee','Lee','lee'),
         ('${lee2}','person:import:lee-2','Lee','lee'),('${kerr}','person:import:kerr','Kerr','kerr'),
         ('${wiremu}','person:permit-holder:wiremu','Jane Wiremu','janewiremu'),
-        ('${whare}','person:import:te-whare','Te Whare','tewhare'),('${oneill}','person:import:oneill','O''Neill','oneill');
+        ('${whare}','person:import:te-whare','Te Whare','tewhare'),('${oneill}','person:import:oneill','O''Neill','oneill'),
+        ('${kahu}','person:permit-holder:kahu','Mary Jane Kahu','maryjanekahu'),
+        ('${berg}','person:import:van-der-berg','van der Berg','vanderberg');
       INSERT INTO public.person_permits(organization_id,client_organization_id,canonical_person_id,permit_number,contact_email,source_document) VALUES
         ('${rm}','${ofo}','${smith}','20001','a@example.test','${rams}'),('${rm}','${ofo}','${smith}','20002','A@example.test ','${rams}'),
         ('${rm}','${ofo}','${smith}','20003','b@example.test','${rams}'),
@@ -166,11 +187,19 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
         ('${rm}','${ofo}','${kerr}','80001','k@example.test','Another import.csv'),
         ('${rm}','${ofo}','${wiremu}','81001','jw@example.test','${rams}'),
         ('${rm}','${ofo}','${whare}','82001','tw@example.test','${rams}'),
-        ('${rm}','${ofo}','${oneill}','83001','on@example.test','${rams}');
+        ('${rm}','${ofo}','${oneill}','83001','on@example.test','${rams}'),
+        ('${rm}','${ofo}','${kahu}','85001','mj@example.test','Permit Extract OFO.xlsx'),
+        ('${rm}','${ofo}','${berg}','86001','vb@example.test','${rams}');
+      INSERT INTO public.person_permits(organization_id,client_organization_id,canonical_person_id,permit_number,contact_email,
+        contact_phone,address_text,forest_areas,activities,date_from,date_to,firearm_licence_number,keys_issued,source_document) VALUES
+        ('${rm}','${ofo}','${kerr}','90001','a.b@example.test','027 438 6946','1 Hoddy Road, Redwood Valley',ARRAY['North','East'],
+          ARRAY['Hunting','Firewood'],'2025-01-01','2026-01-01','AB-123456',true,'Another import.csv');
 
       ${permitSearch}
 
       ${migration}
+
+      ${followUp}
 
       CREATE FUNCTION pg_temp.check(ok boolean,label text) RETURNS void LANGUAGE plpgsql AS $fn$
       BEGIN IF NOT coalesce(ok,false) THEN RAISE EXCEPTION 'FAIL: %',label; END IF; END $fn$;
@@ -212,7 +241,7 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
       SELECT pg_temp.check((SELECT array_agg(canonical_key ORDER BY canonical_key) FROM public.canonical_people
         WHERE metadata->>'name_basis'='surname' AND metadata->>'name_basis_source'='${rams}')
         = ARRAY['person:import:brown','person:import:lee','person:import:lee-2','person:import:ngata','person:import:oneill',
-          'person:import:smith','person:import:te-whare'],'exactly the booking import''s holders are recorded by surname alone');
+          'person:import:smith','person:import:te-whare','person:import:van-der-berg'],'exactly the booking import''s holders are recorded by surname alone');
 
       INSERT INTO public.organizations VALUES ('${rm}','R&M'),('${ofo}','OneFortyOne'),('${other}','Other Org');
       INSERT INTO public.user_profiles VALUES ('${admin}','admin',NULL),('${officer}','admin_officer',NULL);
@@ -337,6 +366,50 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
       SELECT pg_temp.check((SELECT jsonb_array_length(body)=1 AND body->0->>'canonical_person_id'=
         (SELECT body->>'canonical_person_id' FROM result WHERE label='created') FROM result WHERE label='search'),
         'the new holder is found by full name');
+
+      SELECT pg_temp.check(public.person_permit_compare_value('forest_areas','["North","East"]')
+        IS DISTINCT FROM public.person_permit_compare_value('forest_areas','["North East"]'),'two areas are not one joined area');
+      SELECT pg_temp.check(public.person_permit_compare_value('forest_areas','["North","East"]')
+        = public.person_permit_compare_value('forest_areas','[" east ","NORTH","North"]'),'areas compare as a set of entries');
+      SELECT pg_temp.check(public.person_permit_compare_value('contact_email','"a.b@example.test"')
+        IS DISTINCT FROM public.person_permit_compare_value('contact_email','"ab@example.test"'),'distinct email addresses differ');
+      SELECT pg_temp.check(public.person_permit_compare_value('contact_email','" A.B@Example.test "')
+        = public.person_permit_compare_value('contact_email','"a.b@example.test"'),'email case and spacing are ignored');
+      SELECT pg_temp.check(public.person_permit_compare_value('contact_phone','"027 438-6946"')
+        = public.person_permit_compare_value('contact_phone','"0274386946"'),'a phone number compares by its digits');
+      SELECT pg_temp.check(public.person_permit_compare_value('address_text','"1 Hoddy Road, Redwood Valley"')
+        = public.person_permit_compare_value('address_text','"1 hoddy road redwood valley"'),'text punctuation and case are ignored');
+      SELECT pg_temp.check(public.person_permit_compare_value('address_text','"North East"')
+        IS DISTINCT FROM public.person_permit_compare_value('address_text','"Northeast"'),'text keeps its word boundaries');
+      SELECT pg_temp.check(public.person_permit_compare_value('firearm_licence_number','"ab-123456"')
+        = public.person_permit_compare_value('firearm_licence_number','"AB123456"'),'a licence number compares by its letters and digits');
+      SELECT pg_temp.check(public.person_permit_compare_value('keys_issued','true')
+        IS DISTINCT FROM public.person_permit_compare_value('keys_issued','false'),'yes and no differ');
+      SELECT pg_temp.check(public.person_permit_compare_value('date_to','"2026-01-01"')
+        IS DISTINCT FROM public.person_permit_compare_value('date_to','"2026-02-01"'),'different dates differ');
+      SELECT pg_temp.check(public.person_permit_compare_value('conditions',NULL) IS NULL
+        AND public.person_permit_compare_value('conditions','null') IS NULL,'no value has no comparable form');
+      SELECT pg_temp.check(NOT has_function_privilege('anon','public.person_permit_compare_value(text,jsonb)','EXECUTE'),'anon cannot call the comparison');
+
+      INSERT INTO result SELECT 'differences', ${permitImport({ permit_number: '90001', holder_name: 'Kerr', contact_email: 'ab@example.test',
+        contact_phone: '0274386946', address_text: '1 Hoddy Road Redwood Valley', forest_areas: ['North East'], activities: ['firewood', 'hunting'],
+        date_from: '2025-01-01', date_to: '2026-02-01', firearm_licence_number: 'ab123456', keys_issued: true })};
+      SELECT pg_temp.check((SELECT body->>'match_basis'='existing_permit'
+        AND body->'fields_differing'='["contact_email","forest_areas","date_to"]'::jsonb FROM result WHERE label='differences'),
+        'only real differences are reported, in field order');
+      SELECT pg_temp.check((SELECT contact_email='a.b@example.test' AND forest_areas=ARRAY['North','East'] AND date_to='2026-01-01'
+        AND contact_phone='027 438 6946' FROM public.person_permits WHERE permit_number='90001'),'recorded values are never overwritten');
+
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '85002', holder_name: 'Jane Kahu', contact_email: 'mj@example.test' }, true)}$q$,
+        'a related name is not recorded by surname alone');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '86002', holder_name: 'der Berg', contact_email: 'vb@example.test' }, true)}$q$,
+        'recorded under a longer related name');
+      SELECT pg_temp.check(NOT EXISTS (SELECT 1 FROM public.person_permits WHERE permit_number IN ('85002','86002'))
+        AND NOT EXISTS (SELECT 1 FROM public.canonical_people WHERE normalized_name IN ('janekahu','derberg')),
+        'a shorter related name is held, never created as another person');
+      INSERT INTO result SELECT 'longer', ${permitImport({ permit_number: '86003', holder_name: 'Piet van der Berg', contact_email: 'VB@example.test' }, true)};
+      SELECT pg_temp.check((SELECT body->>'match_basis'='permit_email_and_surname' AND body->>'canonical_person_id'='${berg}'
+        FROM result WHERE label='longer'),'a longer full name still joins the single surname holder with the same email');
     `;
     execFileSync('docker', ['exec', '-i', name, 'psql', '-h', '127.0.0.1', '-U', 'postgres',
       '-v', 'ON_ERROR_STOP=1', '-q'], { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });

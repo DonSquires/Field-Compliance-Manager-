@@ -1249,9 +1249,10 @@ node services\document-source-worker\reconcile-plan.mjs `
   Only a person positively marked as recorded by surname alone
   (`metadata.name_basis = 'surname'`, set by the migration on all 125 booking
   import holders, compound surnames included) is repaired or linked by
-  surname. A related name on a full-named holder is held, never linked or
-  duplicated. Names compare by whitespace parts, so O'Neill or Smith-Jones is
-  one part.
+  surname. A related name, longer or shorter, on any other holder is held,
+  never linked or duplicated. The shorter-name direction was added in
+  `20261101130000`. Names compare by whitespace parts, so O'Neill or
+  Smith-Jones is one part.
   The extract's 13 permits not yet on file then come in through
   `import_person_permit`. It now links a holder recorded by surname when the
   email agrees and only one such holder exists, then completes that name, or
@@ -1262,7 +1263,17 @@ node services\document-source-worker\reconcile-plan.mjs `
   linked (12 completing a name, 1 separating a holder). Left for review: 32
   surname-only holders with no permit in the extract, and 4 whose extract name
   does not extend the recorded one. One of those 4 has a bracketed second
-  name in the extract that is written without a space. Truth table:
+  name in the extract that is written without a space. Committed exactly as
+  planned:
+  - 92 names completed (80 by repair, 12 by a new permit);
+  - 15 holders separated (14 by repair, 1 by a new permit);
+  - 13 permits added;
+  - permit holders went from 125 to 140, and permits from 143 to 156;
+  - 33 holders remain recorded by surname alone, for review.
+
+  A replay plans nothing. A follow-up (`20261101130000`) reports permit field
+  differences field by field: lists as sets of entries, email addresses
+  exactly, telephone numbers by their digits. Truth table:
   `test/permit-holder-identity-repair-migration.test.js`.
 - Dispatch-job vehicle travel cost bridged into `finance_service_costs` (was
   previously fully disconnected from the P&L pipeline) + a "compare contract

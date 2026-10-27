@@ -319,8 +319,13 @@ function predictNewPermit(people, permit) {
   const exact = using.filter(([, person]) => nameKey(person.name) === key);
   if (exact.length > 1) return { expected: 'held_holder_not_resolved' };
   if (exact.length === 1) return { expected: 'permit_email_and_name', id: exact[0][0], person: exact[0][1] };
-  const related = using.filter(([, person]) => nameExtends(person.name, permit.holder_name));
-  if (related.length > 1 || related.some(([, person]) => !person.surname)) return { expected: 'held_holder_not_resolved' };
+  // A related name in either direction is held unless the holder is recorded by surname alone and
+  // this permit's name extends the recorded name ("Jane Smith" is never "Mary Jane Smith").
+  const related = using.filter(([, person]) =>
+    nameExtends(person.name, permit.holder_name) || nameExtends(permit.holder_name, person.name));
+  if (related.length > 1 || related.some(([, person]) => !person.surname || !nameExtends(person.name, permit.holder_name))) {
+    return { expected: 'held_holder_not_resolved' };
+  }
   if (related.length === 1) {
     const [id, holder] = related[0];
     const sameEmail = holder.permits.filter((held) => held.email === email);

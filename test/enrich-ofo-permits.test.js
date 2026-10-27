@@ -298,6 +298,25 @@ test('planHolderRepair repairs or links only people recorded by surname alone', 
   ]);
 });
 
+test('planHolderRepair holds a related name in either direction unless it extends a surname record', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('200', 'p-kahu', 'Mary Jane Kahu', 'mj@example.test', null),
+    holder('210', 'p-berg', 'van der Berg', 'vb@example.test'),
+    holder('220', 'p-reti', 'Reti', 'r@example.test'),
+  ], [
+    extract('201', 'Jane Kahu', 'mj@example.test'),
+    extract('211', 'der Berg', 'vb@example.test'),
+    extract('221', 'Mere Reti', 'r@example.test'),
+  ]);
+  assert.deepEqual(plan.new_permits.map(({ permit, expected, expected_holder }) =>
+    [permit.permit_number, expected, expected_holder]), [
+    ['201', 'held_holder_not_resolved', null],
+    ['211', 'held_holder_not_resolved', null],
+    ['221', 'permit_email_and_surname', 'p-reti'],
+  ]);
+});
+
 test('planHolderRepair holds a new permit when a same-email permit is proven to be someone else\'s', async () => {
   const { planHolderRepair } = await load();
   const plan = planHolderRepair([

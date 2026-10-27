@@ -752,7 +752,11 @@ a marked person can be completed, separated, or linked by surname, and
 completing a name removes the marker. A person who already carries a full
 name is never renamed and never takes a related name's permit: "Jane Smith"
 is not "Mary Jane Smith", so that permit is held for review rather than
-linked or created. Names are compared by whitespace-separated parts
+linked or created. The hold applies in both directions (review of the
+catalog refresh, 2026-10-27, migration `20261101130000`). "Jane Smith"
+arriving under the email of an existing "Mary Jane Smith" is held too. The
+only automatic link is a longer full name that extends a surname-only
+record. Names are compared by whitespace-separated parts
 (`person_name_parts`), so a punctuated or accented single name such as
 O'Neill, Smith-Jones or Müller is one part. It never passes as a full name,
 and Jones never extends Jane Smith-Jones.
@@ -762,13 +766,27 @@ permit links to a holder recorded by surname only when:
 
 - the email agrees;
 - the full name ends with that surname;
-- exactly one such holder exists, and no related holder with that email
-  carries a full name.
+- exactly one such holder exists, and no other holder with that email has a
+  related name, whether longer or shorter.
 
 The caller then completes that holder's name. With `p_create_holder` on, a
 named holder who matches no one is created as a new draft person. A
 one-word name never creates a person. Audit metadata carries permit numbers
 and identifiers, never names or emails.
+
+The import still only fills empty fields on a recorded permit. Since
+`20261101130000` it reports how the recorded values differ from the extract
+field by field, through `person_permit_compare_value`:
+
+- lists are compared as sets of entries, so `['North', 'East']` is not
+  `['North East']`;
+- email addresses are compared exactly, ignoring only case and surrounding
+  spaces;
+- telephone numbers are compared by their digits;
+- the firearms licence number is compared by its letters and digits;
+- other text is compared by its words.
+
+Previously every separator was stripped, which hid such differences.
 
 The repair script plans every step from a live snapshot and records the
 expected outcome, the holder it lands on, and that holder's complete permit
