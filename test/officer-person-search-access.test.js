@@ -197,7 +197,14 @@ test('person authorization, private projections and revocation execute as real d
       ${actor(officer)}
       SELECT pg_temp.check(public.can_search_people(),'explicit preset authorizes read');
       RESET ROLE;
+      ${actor(admin)}
+      SELECT public.set_person_search_access('${officer}',true,'Test inactive-account revocation');
+      RESET ROLE;
       UPDATE public.user_profiles SET deactivated_at=now() WHERE id='${officer}';
+      ${actor(admin)}
+      SELECT pg_temp.refuses($q$SELECT public.set_person_search_access('${officer}',true,'Re-enable inactive')$q$,'Cannot enable an inactive user');
+      SELECT pg_temp.check(public.set_person_search_access('${officer}',false,'Revoke while inactive')->>'direct'='false','inactive direct grant revocable');
+      RESET ROLE;
       ${actor(officer)}
       SELECT pg_temp.check(NOT public.can_search_people(),'inactive denied despite preset and NZTA');
       SELECT pg_temp.check((SELECT count(*)=0 FROM public.person_permits_fieldwork),'inactive view empty');

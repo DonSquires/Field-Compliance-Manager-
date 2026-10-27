@@ -136,7 +136,7 @@ export function RestrictedAccessSection({ userId, kind }: { userId: string; kind
     {error && <div className="user-spine-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="user-spine-message is-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
     {access === null ? error ? <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry access check</button> : <small role="status">Loading access…</small> : <>
-      <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving || access.active === false} onChange={(event) => setEnabled(event.target.checked)} /> <span>{person ? 'Person search — view names, trespass and warning notices, permits and operational links' : 'Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details'}</span></label>
+      <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving || (access.active === false && !enabled)} onChange={(event) => setEnabled(event.target.checked)} /> <span>{person ? 'Person search — view names, trespass and warning notices, permits and operational links' : 'Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details'}</span></label>
       {access.active === false && <small>This account is inactive. Person search is unavailable.</small>}
       {inherited && <small>{inherited}</small>}
       <label><span>Reason for change</span><input required value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: investigations officer, approved by operations manager" /></label>
