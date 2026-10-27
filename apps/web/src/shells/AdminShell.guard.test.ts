@@ -30,7 +30,7 @@ describe('AdminShell access and routing boundaries', () => {
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
-    expect(source).toContain("if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals') && !isAdminTierRole(role)) return false;");
+    expect(source).toContain("if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals' || page === 'nzta-register') && !isAdminTierRole(role)) return false;");
     expect(source).toContain('items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area)))');
   });
 

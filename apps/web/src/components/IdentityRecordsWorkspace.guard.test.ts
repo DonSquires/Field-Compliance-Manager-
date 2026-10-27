@@ -35,7 +35,7 @@ describe("identity person-of-interest workflow", () => {
     expect(workspace).toContain("Open linked person");
     expect(workspace).toContain("Open private NZTA source");
     expect(workspace).toContain(
-      "Historical source-time association; current",
+      "This is not proof of ownership; current",
     );
   });
 

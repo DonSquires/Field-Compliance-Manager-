@@ -79,9 +79,17 @@ describe('vehicle owner panel person hand-off', () => {
   });
 
   it('does not offer person search from a redacted owner card', async () => {
-    renderPanel([link({ details_visible: false, display_name: null })]);
+    renderPanel([link({ details_visible: false, display_name: null, nzta_restricted: false })]);
     expect(await screen.findByText('Owner identified')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Open notices and person record/ })).toBeNull();
+  });
+
+  it('hides an NZTA registered person until a purpose-stated reveal', async () => {
+    renderPanel([link({ details_visible: false, display_name: null })]);
+    fireEvent.click(await screen.findByRole('button', { name: /Reveal with a stated purpose/ }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Open notices and person record/ })).toBeNull();
+    expect(rpc.mock.calls.some(([name]) => name === 'reveal_nzta_registered_person')).toBe(false);
   });
 
   it('opens the officer person route only after explicit person authorization', async () => {

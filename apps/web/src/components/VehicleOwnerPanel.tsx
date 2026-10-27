@@ -6,6 +6,8 @@ import { canAccessFieldOpsArea } from '../lib/fieldOpsAreaAccess';
 import { supabase } from '../lib/supabase';
 import { isDuplicateError, type NewPersonFields, type PersonMatch } from '../lib/personIdentity';
 import { PersonIdentityPanel, PersonMatchSuggestions, PersonSearchPicker } from './PersonIdentity';
+import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from './NztaRevealDialog';
+import { NZTA_PERSON_LABEL, NZTA_PERSON_NOTE } from '../lib/nztaRegister';
 import './RecordFollowUp.css';
 
 type Relationship = 'owner' | 'registered_owner' | 'driver' | 'associated_person';
@@ -38,6 +40,7 @@ interface NztaCheck {
   relationship: string;
   display_name: string | null;
   source_authority: string | null;
+  revealed?: boolean;
 }
 
 const SOURCES: Array<[string, string]> = [
@@ -53,7 +56,7 @@ const ROLES: Array<[Exclude<Relationship, 'registered_owner'>, string]> = [
 ];
 
 const SOURCE_LABEL = Object.fromEntries(SOURCES);
-const ROLE_LABEL: Record<Relationship, string> = { owner: 'Owner', registered_owner: 'Registered owner', driver: 'Driver', associated_person: 'Associated person' };
+const ROLE_LABEL: Record<Relationship, string> = { owner: 'Owner', registered_owner: NZTA_PERSON_LABEL, driver: 'Driver', associated_person: 'Associated person' };
 const NZTA_NOTICE = 'NZTA register information is restricted. Only people your organisation has authorised for vehicle owner details can see it, and it may only be used for the lawful purpose it was obtained for. Do not share it with clients or other organisations.';
 const EMPTY_FIELDS = { display_name: '', phone: '', email: '', suburb: '', city: '', address: '' };
 const isOwner = (link: VehiclePersonLink) => link.relationship === 'owner' || link.relationship === 'registered_owner';
@@ -105,6 +108,8 @@ export const VehicleOwnerPanel: React.FC<{
   const [basis, setBasis] = useState('');
   const [openIdentityFor, setOpenIdentityFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [reveal, setReveal] = useState<NztaRevealResult | null>(null);
 
   // ATLAS CALLS: can_access_vehicle_owner_identity
   useEffect(() => {
@@ -217,7 +222,7 @@ export const VehicleOwnerPanel: React.FC<{
       <small>{SOURCE_LABEL[link.source ?? ''] ?? 'Source not recorded'}{link.basis ? ` · ${link.basis}` : ''} · recorded {new Date(link.recorded_at).toLocaleDateString('en-NZ')} by {link.recorded_by_name ?? 'staff'}
         {link.source_checked_at ? ` · NZTA observation ${new Date(link.source_checked_at).toLocaleDateString('en-NZ')} (not a transfer date)` : ''}
         {!observationId && link.observation_ids?.length ? ` · seen at ${link.observation_ids.length} sighting${link.observation_ids.length === 1 ? '' : 's'}` : ''}</small>
-      {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
+      {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{link.relationship === 'registered_owner' ? `${NZTA_PERSON_NOTE} ` : ''}{NZTA_NOTICE}</p>}
       <div className="vehicle-owner__actions">
         {canOpenPersonSearch && link.canonical_person_id && link.display_name && (
           <OpenPersonRecordButton canonicalPersonId={link.canonical_person_id} displayName={link.display_name} officer={!operationsRole} />
@@ -225,6 +230,16 @@ export const VehicleOwnerPanel: React.FC<{
         {link.person_record_id && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button>}
         {canRecord && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(link)}>No longer {ROLE_LABEL[link.relationship].toLowerCase()}</button>}
       </div>
+    </div>
+  ) : link.nzta_restricted && canView ? (
+    <div key={link.link_id} className="vehicle-owner__card is-redacted">
+      <div className="vehicle-owner__title">
+        <strong>{NZTA_PERSON_LABEL}</strong>
+        <span className="badge badge-warning" title={NZTA_NOTICE}>NZTA restricted</span>
+      </div>
+      <div className="vehicle-owner__meta">Hidden until you state why you need it. Each view is logged for NZTA audit.</div>
+      <small>NZTA check {link.source_checked_at ? new Date(link.source_checked_at).toLocaleDateString('en-NZ') : 'date not recorded'}. {NZTA_PERSON_NOTE}</small>
+      <div className="vehicle-owner__actions"><button type="button" className="btn btn-sm btn-primary" onClick={() => setRevealOpen(true)}>Reveal with a stated purpose</button></div>
     </div>
   ) : (
     <div key={link.link_id} className="vehicle-owner__card is-redacted">
@@ -253,6 +268,7 @@ export const VehicleOwnerPanel: React.FC<{
       {!canView && <p className="vehicle-profile-hint">Names require vehicle-owner authorization (an administrator can enable this under Users). Personal addresses and contact details remain with Admin, Admin officer and Master roles.</p>}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {personAccess.error && <p role="alert">{personAccess.error} <button type="button" className="btn btn-sm btn-secondary" onClick={personAccess.retry}>Check person access again</button></p>}
+      {reveal && <p className="vehicle-owner__notice" role="status">NZTA information visible until {new Date(reveal.revealed_until).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Your access has been logged.{nztaWarningText(reveal.warnings) ? ` ${nztaWarningText(reveal.warnings)}` : ''}</p>}
       {loading ? <p role="status">Loading people…</p> : active.length === 0
         ? <p>{observationId ? 'No one has been recorded at this sighting.' : 'No owner, driver or associated person recorded by your organisation.'}</p>
         : active.map(card)}
@@ -265,7 +281,8 @@ export const VehicleOwnerPanel: React.FC<{
       </details>}
       {checks.length > 0 && <details><summary>NZTA register checks ({checks.length})</summary>
         <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>
-        <ul>{checks.map((check) => <li key={check.check_id}>{new Date(check.checked_at).toLocaleDateString('en-NZ')} · {check.relationship.replace(/_/g, ' ')} · {check.display_name ?? 'Person not named'}{check.source_authority ? ` · ${check.source_authority}` : ''}</li>)}</ul>
+        <ul>{checks.map((check) => <li key={check.check_id}>{new Date(check.checked_at).toLocaleDateString('en-NZ')} · {check.relationship === 'registered_owner' ? NZTA_PERSON_LABEL : check.relationship.replace(/_/g, ' ')} · {check.revealed === false ? 'Hidden until revealed' : check.display_name ?? 'Person not named'}{check.source_authority ? ` · ${check.source_authority}` : ''}</li>)}</ul>
+        {checks.some((check) => check.revealed === false) && <button type="button" className="btn btn-sm btn-primary" onClick={() => setRevealOpen(true)}>Reveal with a stated purpose</button>}
       </details>}
       {adding && canRecord && (
         <form className="vehicle-owner__form" onSubmit={(event) => void save(event)}>
@@ -306,6 +323,9 @@ export const VehicleOwnerPanel: React.FC<{
           </fieldset>
         </form>
       )}
+      {revealOpen && <NztaRevealDialog subjectType="vehicle" subjectId={vehicleId} subjectLabel="this vehicle" organizationId={organizationId}
+        observationId={observationId} onClose={() => setRevealOpen(false)}
+        onRevealed={(result) => { setReveal(result); setRevealOpen(false); void load(); }} />}
       {openIdentityFor && <PersonIdentityPanel personRecordId={openIdentityFor} onClose={() => setOpenIdentityFor(null)} onChanged={() => void load()} />}
     </section>
   );

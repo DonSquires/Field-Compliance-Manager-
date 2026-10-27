@@ -79,7 +79,17 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
   </section></div>;
 }
 
-interface RestrictedAccess { direct: boolean; via_preset: boolean; via_role: boolean; via_grant?: boolean; active?: boolean; }
+interface RestrictedAccess {
+  direct: boolean; via_preset: boolean; via_role: boolean; via_grant?: boolean; active?: boolean;
+  /** NZTA s241 readiness, returned for vehicle-owner access only. */
+  training_current?: boolean; training_expires_on?: string | null;
+  confidentiality_current?: boolean; confidentiality_expires_on?: string | null;
+}
+
+const formatNzDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-NZ');
+
+const readinessText = (current: boolean | undefined, expires: string | null | undefined) =>
+  current && expires ? `Current until ${formatNzDate(expires)}` : expires ? `Expired ${formatNzDate(expires)}` : 'Not recorded';
 
 export function RestrictedAccessSection({ userId, kind }: { userId: string; kind: 'person' | 'vehicle' }) {
   const [access, setAccess] = useState<RestrictedAccess | null>(null);
@@ -130,6 +140,8 @@ export function RestrictedAccessSection({ userId, kind }: { userId: string; kind
     } finally { setSaving(false); }
   };
 
+  const nztaReady = person || (access?.training_current === true && access?.confidentiality_current === true);
+  const blockedGrant = !person && enabled && access !== null && !access.direct && !nztaReady;
   const inherited = access?.via_role ? 'Included with their operations role.' : access?.via_preset ? 'Also granted through their access preset.' : access?.via_grant ? 'Also granted through an inherited organization grant.' : null;
   return <form className="user-spine-email" onSubmit={(event) => void save(event)} aria-label={person ? 'Person search authorization' : 'Restricted information access'}>
     <div className="user-spine-section-title">{person ? <UserRoundCog size={18} /> : <Car size={18} />}<div><strong>{person ? 'Person search authorization' : 'Restricted information'}</strong><span>{person ? 'Read-only checks for operational duties. Separate from NZTA authorization.' : 'Vehicle owner identity beyond their role.'}</span></div></div>
@@ -139,8 +151,14 @@ export function RestrictedAccessSection({ userId, kind }: { userId: string; kind
       <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving || (access.active === false && !enabled)} onChange={(event) => setEnabled(event.target.checked)} /> <span>{person ? 'Person search — view names, trespass and warning notices, permits and operational links' : 'Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details'}</span></label>
       {access.active === false && <small>This account is inactive. Person search is unavailable.</small>}
       {inherited && <small>{inherited}</small>}
+      {!person && <dl className="user-spine-readiness" aria-label="NZTA register readiness">
+        <div><dt>NZTA register training</dt><dd className={access.training_current ? 'is-current' : 'is-missing'}>{readinessText(access.training_current, access.training_expires_on)}</dd></div>
+        <div><dt>Confidentiality acceptance</dt><dd className={access.confidentiality_current ? 'is-current' : 'is-missing'}>{readinessText(access.confidentiality_current, access.confidentiality_expires_on)}</dd></div>
+      </dl>}
+      {blockedGrant && <div className="user-spine-message is-error" role="alert"><AlertTriangle size={16} />Record current NZTA register training and a confidentiality acceptance under Investigations &amp; Evidence → NZTA register (s241) → People &amp; training → “Staff without access” before granting this access.</div>}
+      {!person && !nztaReady && (access.direct || access.via_role || access.via_preset || access.via_grant) && <small>This person already has access but is not NZTA-ready. Their reveals are still logged, flagged in the access log, and counted in the annual report.</small>}
       <label><span>Reason for change</span><input required value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: investigations officer, approved by operations manager" /></label>
-      <button type="submit" disabled={saving || !reason.trim() || enabled === access.direct}>{saving ? 'Saving' : person ? 'Save person search access' : 'Save restricted access'}</button>
+      <button type="submit" disabled={saving || !reason.trim() || enabled === access.direct || blockedGrant}>{saving ? 'Saving' : person ? 'Save person search access' : 'Save restricted access'}</button>
       <small>{person ? 'Field officers do not receive personal addresses or contact details. Only existing authorized organisations can be searched. Removing this checkbox does not remove inherited access.' : 'NZTA register information may only be used for the lawful purpose it was obtained for. Personal addresses and contact details remain with Admin, Admin officer and Master roles.'} Every change is audit-logged.</small>
     </>}
   </form>;

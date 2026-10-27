@@ -18,6 +18,11 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { PersonIdentityPanel } from "./PersonIdentity";
+import {
+  NztaRevealDialog,
+  nztaWarningText,
+  type NztaRevealResult,
+} from "./NztaRevealDialog";
 import "./IdentityRecordsWorkspace.css";
 
 type PersonRecord = {
@@ -78,10 +83,10 @@ type VehicleIdentityCheck = {
   check_id: string;
   checked_at: string;
   relationship: string;
-  person_record_id: string;
-  canonical_person_id: string;
+  person_record_id: string | null;
+  canonical_person_id: string | null;
   display_name: string | null;
-  identity_document_id: string;
+  identity_document_id: string | null;
   evidence_item_id: string | null;
   source_authority: string;
   vehicle_snapshot: Record<string, unknown>;
@@ -89,6 +94,8 @@ type VehicleIdentityCheck = {
   storage_path: string | null;
   file_name: string | null;
   reviewed_at: string;
+  /** False until a purpose-stated NZTA reveal is open for this vehicle. */
+  revealed?: boolean;
 };
 
 type IdentityDocument = {
@@ -541,6 +548,10 @@ export function IdentityRecordsWorkspace({
   const [vehicleIdentityCheckUrl, setVehicleIdentityCheckUrl] = useState<
     string | null
   >(null);
+  const [nztaRevealOpen, setNztaRevealOpen] = useState(false);
+  const [nztaReveal, setNztaReveal] = useState<
+    (NztaRevealResult & { vehicleId: string }) | null
+  >(null);
   const [vehicleActivity, setVehicleActivity] = useState<VehicleActivity[]>([]);
   const [vehicleActivityUrls, setVehicleActivityUrls] = useState<
     Record<string, string>
@@ -662,6 +673,28 @@ export function IdentityRecordsWorkspace({
     setSourceUrl(null);
     setIncidentId("");
     setIncidentIdentityNotes("");
+  };
+
+  // ATLAS CALLS: get_vehicle_identity_checks
+  const loadVehicleIdentityChecks = async (vehicleId: string) => {
+    const checks = await supabase.rpc("get_vehicle_identity_checks", {
+      p_organization_id: organizationId,
+      p_canonical_vehicle_id: vehicleId,
+    });
+    if (checks.error) {
+      setError(checks.error.message);
+      return;
+    }
+    const rows = (checks.data ?? []) as VehicleIdentityCheck[];
+    setVehicleIdentityChecks(rows);
+    setVehicleIdentityCheckUrl(null);
+    const latest = rows[0];
+    if (latest?.storage_bucket && latest.storage_path) {
+      const signed = await supabase.storage
+        .from(latest.storage_bucket)
+        .createSignedUrl(latest.storage_path, 600);
+      if (!signed.error) setVehicleIdentityCheckUrl(signed.data.signedUrl);
+    }
   };
 
   const selectVehicle = async (record: VehicleRecord | null) => {
@@ -2239,8 +2272,47 @@ export function IdentityRecordsWorkspace({
                         No approved NZTA Motor Vehicle Register source is linked
                         to this canonical vehicle.
                       </p>
+                    ) : vehicleIdentityChecks[0].revealed === false ? (
+                      <div className="identity-source-marker">
+                        <ShieldCheck size={16} aria-hidden="true" />
+                        <div>
+                          <strong>
+                            NZTA check on{" "}
+                            {new Date(
+                              vehicleIdentityChecks[0].checked_at,
+                            ).toLocaleString("en-NZ")}
+                          </strong>
+                          <p>
+                            The registered person and the source document stay
+                            hidden until you state why you need them. Each view
+                            is logged for NZTA audit.
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => setNztaRevealOpen(true)}
+                          >
+                            Reveal with a stated purpose
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <>
+                        {nztaReveal?.vehicleId === selectedVehicleId && (
+                          <p role="status">
+                            Visible until{" "}
+                            {new Date(
+                              nztaReveal.revealed_until,
+                            ).toLocaleTimeString("en-NZ", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                            . Your access has been logged.
+                            {nztaWarningText(nztaReveal.warnings)
+                              ? ` ${nztaWarningText(nztaReveal.warnings)}`
+                              : ""}
+                          </p>
+                        )}
                         <div className="identity-source-marker">
                           <ShieldCheck size={16} aria-hidden="true" />
                           <div>
@@ -2254,8 +2326,9 @@ export function IdentityRecordsWorkspace({
                                 "canonical person"}
                             </p>
                             <p>
-                              Historical source-time association; current
-                              registered-person status requires a new governed
+                              The person NZTA held on the register on the check
+                              date. This is not proof of ownership; current
+                              registered-person status requires a new lawful
                               check.
                             </p>
                           </div>
@@ -2301,6 +2374,24 @@ export function IdentityRecordsWorkspace({
                             </div>
                           )}
                       </>
+                    )}
+                    {nztaRevealOpen && selectedVehicleRecord && (
+                      <NztaRevealDialog
+                        subjectType="vehicle"
+                        subjectId={selectedVehicleRecord.id}
+                        subjectLabel={selectedVehicleRecord.plate_number}
+                        organizationId={organizationId}
+                        onClose={() => setNztaRevealOpen(false)}
+                        onRevealed={(result) => {
+                          setNztaRevealOpen(false);
+                          setNztaReveal({
+                            ...result,
+                            vehicleId: selectedVehicleRecord.id,
+                          });
+                          // Refresh only the NZTA checks so unsaved vehicle edits and the reason are kept.
+                          void loadVehicleIdentityChecks(selectedVehicleRecord.id);
+                        }}
+                      />
                     )}
                   </section>
                 )}

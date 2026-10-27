@@ -97,6 +97,54 @@ still requires the device position inside a verified site boundary. That is an
 attendance evidence and billing rule, not module access, and is left in place
 pending an owner ruling.
 
+## Owner ruling 2026-11-01: NZTA section 241 readiness (R&M Security and Investigations)
+
+R&M holds a section 241 authorisation (Gazette 2025-au4644) to use Motor
+Vehicle Register information for two purposes only: a **vehicle on a
+contracted property without a valid permit** (trespass) and **entry or damage
+seen on CCTV or patrol against posted signage**. Permit vetting, general
+investigations and marketing are not authorised purposes.
+
+- **What is restricted.** A name on its own is not NZTA information. The
+  NZTA-sourced *link* between a person and a vehicle, in either direction, is.
+  It is shown only to people holding the `vehicle_owner_identity` tick, and only
+  after they state a purpose and reason (`reveal_nzta_registered_person`). A
+  reveal opens a 15-minute window for that user and that vehicle or person, and
+  is written to `nzta_register_access_log`. A `notice_follow_up` reveal must
+  name the trespass or warning notice it follows up. The table path is closed
+  too: `entity_links_select` hides NZTA-restricted links without an open reveal,
+  `person_identity_documents_select` never returns `nzta_mvr_record` source
+  documents, and `get_vehicle_identity_checks` returns only allow-listed vehicle
+  facts from the stored snapshot until a reveal.
+- **The notice exception.** The client organisation a notice was issued for,
+  and the investigating user, may use the data for that notice. This is not
+  automatic: the notice still carries its own organisation scope, and the
+  investigator uses a `notice_follow_up` reveal.
+- **Readiness before a new grant.** A new `vehicle_owner_identity` grant
+  requires current NZTA register training and a current confidentiality
+  acceptance (`nzta_access_attestations`, each at most 12 months). These are
+  personal: they are recorded against the person's home organisation and count
+  wherever that person holds access. Existing grants are not revoked; they are
+  shown as not ready until recorded. The holder list mirrors the administrator
+  rule (home, parent, operational-provider and platform administrators) plus
+  direct and preset grants.
+- **Records NZTA can ask for.** Every Motochek lookup is entered in
+  `nzta_register_lookups` with the individual Motochek user, purpose,
+  explanation and outcome. Admin-tier roles review holders quarterly
+  (`nzta_access_reviews`) and produce the annual summary with per-zone signage
+  evidence (`get_nzta_s241_summary`). Historical checks imported before the
+  register existed are listed without a purpose, never back-filled.
+- **Anonymous access.** `canonical_person_public` is no longer readable by
+  `anon`. `canonical_vehicle_public` and `canonical_scv_public` are unchanged
+  pending a separate ruling.
+- **Wording.** NZTA records show the *registered person at the check date*, not
+  proof of ownership. Current status needs a new lawful check.
+
+Workspace: Admin → Investigations & Evidence → **NZTA register (s241)**
+(`apps/web/src/pages/NztaRegisterPage.tsx`). Migration
+`20261101160000_nzta_s241_readiness.sql`; contract test
+`test/nzta-s241-readiness.test.js`.
+
 ## 0. The re-founding — accountable service, not restriction (READ FIRST)
 
 > Ruled 2026-08-01, owner + Bob. This is a CONSTITUTIONAL CORRECTION to the
