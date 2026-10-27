@@ -43,6 +43,21 @@ describe('restricted user access', () => {
     expect(await screen.findByText(/Access remains through their role, preset or inherited grant/)).toBeTruthy();
   });
 
+  it('allows revoking an inactive user grant without allowing activation', async () => {
+    rpc.mockResolvedValueOnce({ data: { ...access, direct: true, active: false }, error: null });
+    render(<RestrictedAccessSection userId="inactive-officer" kind="person" />);
+    const checkbox = await screen.findByRole('checkbox');
+    expect(checkbox.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(checkbox);
+    expect(checkbox.hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText('Reason for change'), { target: { value: 'End inactive account authority' } });
+    rpc.mockResolvedValueOnce({ data: { ...access, active: false }, error: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Save person search access' }));
+    expect(await screen.findByText('Authorization removed.')).toBeTruthy();
+    expect(rpc).toHaveBeenLastCalledWith('set_person_search_access', { p_user_id: 'inactive-officer', p_enabled: false, p_reason: 'End inactive account authority' });
+    expect(screen.getByRole('checkbox').hasAttribute('disabled')).toBe(true);
+  });
+
   it('preserves the NZTA setter and reports a save failure', async () => {
     render(<RestrictedAccessSection userId="officer" kind="vehicle" />);
     fireEvent.click(await screen.findByRole('checkbox'));
