@@ -1216,7 +1216,8 @@ node services\document-source-worker\reconcile-plan.mjs `
   vehicle links, 125 canonical people), surfaced in `OfficerVehicleLookupPage`
   and `VehicleSearchPage`.
 - **OFO permit workbook enrichment** (2026-10-27, migration
-  `20261101110000`; built, applying through the release lane). The OFO
+  `20261101110000`; live, applied by hand with its ledger row because the
+  release lane's database token is rejected). The OFO
   "Permit Extract" workbook has 112 permits, all with start and finish dates;
   85 list 92 vehicles. `scripts/enrich-ofo-permits.mjs` sends each permit
   through the audited, fill-only `import_person_permit` RPC: blanks are
@@ -1230,6 +1231,30 @@ node services\document-source-worker\reconcile-plan.mjs `
   Person search now finds permit holders, including by exact permit number,
   and shows their permits; the Person, Vehicle and Officer lookup pages share
   one permit card. A permit holder is never shown as a vehicle's owner.
+  Committed: 99 permits enriched, 2 vehicles newly linked and 74 already
+  linked. Validity across R&M's 143 permits: 92 expired, 7 expiring within 30
+  days, 44 with no recorded dates. 13 permits not yet on file were held
+  because their holders were recorded by surname alone. A replay changes
+  nothing.
+- **Permit holder identity repair** (2026-10-27, migration
+  `20261101120000`). The RAMS booking import recorded 125 permit holders by
+  surname alone and merged different people who share a surname. The OFO
+  extract names the holder of each permit, so
+  `scripts/enrich-ofo-permits.mjs --repair-holders` groups each record's
+  permits by that full name and calls the audited, admin-only
+  `attribute_permit_holder` RPC. When every permit on a record is accounted for,
+  the given names are added in front of the recorded surname. Otherwise each
+  named holder moves to a person of their own. A name must end with the
+  recorded name, and a person another organisation records is never renamed.
+  The extract's 13 permits not yet on file then come in through
+  `import_person_permit`. It now links a holder recorded by surname when the
+  email agrees and only one such holder exists, then completes that name, or
+  creates the named holder. Every step carries its planned outcome, and the
+  database rolls back and holds any step that departs from it. Planned against
+  the live snapshot: 81 names completed, 14 holders separated, 13 permits
+  linked. Left for review: 30 surname-only holders with no permit in the
+  extract, and 3 whose extract name does not extend the recorded one. Truth
+  table: `test/permit-holder-identity-repair-migration.test.js`.
 - Dispatch-job vehicle travel cost bridged into `finance_service_costs` (was
   previously fully disconnected from the P&L pipeline) + a "compare contract
   price to actual cost" action in `FinanceControlPanel`.
