@@ -11,9 +11,35 @@ npm run test:e2e:human
 
 The default run uses the existing Supabase fixtures. It covers the admin shell and officer entry point on the configured desktop and mobile Playwright projects.
 
+## Bob's automatic production verification
+
+Owner ruling 2026-10-27: Bob runs Dr Bob himself after production deploys. No
+owner or admiral request is required. The control plane polls Vercel for the
+newest production deployment and acts only when it is `READY` with a Git SHA.
+It waits for the release lane to record that SHA, unless the lane has been stuck
+for 30 minutes, then waits for Builder execution, main health and other Dr Bob
+runs to become idle. Each SHA receives one `suite` run requested by
+`bob:production-verify`, using the dedicated test identity and the read-only
+live phase.
+
+Runs use private detached snapshots under the Builder workspace root, pinned to
+the deployment commit. Shared checkout refreshes therefore cannot change files
+under a running browser walk. `/health` reports `activeHumanTests` and the
+latest production verification status without credentials. The release lane
+does not restart the control plane while `activeHumanTests` is nonzero.
+
+Passing or failing tests are recorded once per SHA. Interrupted, timed-out or
+infrastructure-coded worker failures retry at most three times before
+`gave_up`. If production changes during the run, the older verdict becomes
+`superseded` and the newer SHA receives its own run. Disable the monitor with
+`BOB_PRODUCTION_HUMAN_TEST=false`; adjust polling with
+`BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS` (minimum 60 seconds). A failure is
+evidence for Builder investigation. It is not an automatic repair, approval or
+release decision.
+
 ## Run through Bob
 
-An admiral can ask Bob to start a Dr Bob human test. Bob calls the governed
+An admiral can also ask Bob to start a Dr Bob human test. Bob calls the governed
 Builder control room, which starts the existing browser worker against a
 commit-pinned checkout and immediately returns a durable run ID. The run is
 persisted through control-plane restarts with one of these states:

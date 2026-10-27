@@ -149,6 +149,16 @@ test('fresh health checkouts get real directories for nested mounts before Docke
   assert.throws(() => prepareWorkerMounts(sourceDir, 'main-health'), /must be a directory/);
 });
 
+test('Dr Bob browser profiles get the nested node_modules mountpoint in their pinned snapshot', t => {
+  for (const profile of ['human-qa', 'human-qa-live']) {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), `bob-${profile}-mounts-`));
+    t.after(() => fs.rmSync(sourceDir, { recursive: true, force: true }));
+    prepareWorkerMounts(sourceDir, profile);
+    assert.ok(fs.lstatSync(path.join(sourceDir, 'apps/web/node_modules')).isDirectory());
+    assert.equal(fs.existsSync(path.join(sourceDir, '.bob')), false);
+  }
+});
+
 test('main health runs every check after a root failure and returns an aggregate failure', t => {
   const { spawnSync } = require('node:child_process');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-steps-'));

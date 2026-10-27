@@ -11,6 +11,19 @@
 
 ## 1. What Bob is
 
+**Autonomous Dr Bob verification, owner ruling 2026-10-27.** Bob has his own
+service-owned authority to run Dr Bob human tests. A person does not request or
+approve a post-production verification run. After a production deployment is
+settled and the governed release lane has reached the same SHA (or a bounded
+grace period has expired), the control plane starts one fixture-then-live suite
+for that SHA when no Builder job, main-health check or Dr Bob run is active. It
+uses only the dedicated configured test identity, a private snapshot pinned to
+the deployment commit and the read-only live phase. Receipts and health may
+expose run status and counts but never credentials. Infrastructure failures retry
+boundedly; an application failure is recorded once. This authority does not
+approve code, open repairs, mutate tenant data, impersonate real users, weaken
+the release lane or treat a passing walk as proof of every workflow.
+
 **Whole-job acceptance, owner decision 2026-10-26.** The owner selected fixing
 Builder's acceptance gate before another correction of the partial-success
 repair. A lane skip routes work; it cannot waive a mandatory outcome. Before

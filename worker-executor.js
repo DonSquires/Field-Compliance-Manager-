@@ -178,7 +178,7 @@ async function executeWorker(options, { spawnImpl = spawn } = {}) {
 }
 
 function prepareWorkerMounts(sourceDir, profile) {
-  if (profile !== 'main-health' && profile !== 'vibe-human-qa') return;
+  if (!['main-health', 'vibe-human-qa', 'human-qa', 'human-qa-live'].includes(profile)) return;
   // Docker cannot create nested mountpoints inside the read-only source bind.
   for (const relative of profile === 'main-health' ? ['node_modules', '.bob', 'apps/web/node_modules'] : ['apps/web/node_modules']) {
     const target = path.join(sourceDir, relative);

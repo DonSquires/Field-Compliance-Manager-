@@ -29,8 +29,16 @@ test('Bob human testing is backed by durable control-plane start and status rece
   assert.match(conductor, /target_route: '\/admin\/builder'/);
   assert.match(controlPlane, /const phaseModes = mode === 'suite' \? \['fixture', 'live'\]/);
   assert.match(controlPlane, /HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true'/);
-  assert.match(controlPlane, /repositoryTreeSha\(source\.sourceDir, source\.sha, 'apps\/web'\)/);
-  assert.match(controlPlane, /sourceWebTree !== deployedWebTree/);
+  assert.match(controlPlane, /const testSha = expectedSha \|\| readTarget\.sha;/);
+  assert.match(controlPlane, /workspaceRoot: path\.join\(builderWorkspaceRoot, 'human-tests'\),\s*targetSha: testSha,/);
+  assert.match(controlPlane, /const source = \{ sha: testSha, sourceDir: snapshot\.workspacePath \};/);
+});
+
+test('Bob verifies settled production deployments with Dr Bob on his own initiative', () => {
+  assert.match(controlPlane, /requestedBy: 'bob:production-verify', expectedSha: sha/);
+  assert.match(controlPlane, /activeHumanTests: activeHumanTestCount\(\)/);
+  assert.match(controlPlane, /productionHumanTest: productionHumanTestStatus\(\)/);
+  assert.match(controlPlane, /productionHumanTests: \[\.\.\.productionHumanTests\.values\(\)\]/);
 });
 
 test('live human testing requires the dedicated configured test identity', () => {

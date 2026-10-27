@@ -107,12 +107,21 @@ function pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath
     if (retained.size >= retentionCount) break;
     retained.add(candidate.workspacePath);
   }
+  // A retired snapshot that is no longer a clean pinned checkout (an interrupted removal, an edited
+  // copy) is kept for inspection, never deleted blind, and never blocks the active snapshot: one damaged
+  // leftover wedged every main-health check on "must be clean" (2026-10-27).
+  const unverified = [];
   for (const candidate of candidates) {
     if (retained.has(candidate.workspacePath)) continue;
     const targetSha = path.basename(candidate.workspacePath).slice('snapshot-'.length);
-    verifySnapshot(candidate.workspacePath, targetSha);
-    git(sourceDir, ['worktree', 'remove', '--force', candidate.workspacePath]);
+    try {
+      verifySnapshot(candidate.workspacePath, targetSha);
+      git(sourceDir, ['worktree', 'remove', '--force', candidate.workspacePath]);
+    } catch (error) {
+      unverified.push({ path: path.basename(candidate.workspacePath), error: redactGitError(error && error.message).replace(/[\r\n]+/g, ' ').slice(0, 200) });
+    }
   }
+  return unverified;
 }
 
 function createDetachedWorkspace({ sourceDir, workspaceRoot, targetSha, retentionCount = 8 }) {
@@ -124,15 +133,15 @@ function createDetachedWorkspace({ sourceDir, workspaceRoot, targetSha, retentio
 
   if (fs.existsSync(workspacePath)) {
     verifySnapshot(workspacePath, targetSha);
-    pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
-    return { workspacePath, head: targetSha, existing: true };
+    const unverifiedSnapshots = pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
+    return { workspacePath, head: targetSha, existing: true, unverifiedSnapshots };
   }
 
   verifySourceCommit(sourceDir, targetSha);
   git(sourceDir, ['worktree', 'add', '--detach', workspacePath, targetSha]);
   verifySnapshot(workspacePath, targetSha);
-  pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
-  return { workspacePath, head: targetSha, existing: false };
+  const unverifiedSnapshots = pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
+  return { workspacePath, head: targetSha, existing: false, unverifiedSnapshots };
 }
 
 function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, branchName = branchNameForJob(jobId), recoverInterrupted = false }) {
