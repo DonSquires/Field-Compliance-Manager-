@@ -51,6 +51,10 @@ grants it to `admin_officer` (`20261101150000_admin_officer_parity.sql`,
 chooser only picks which workspace opens; it is not an access boundary.
 An admin officer's authorised private contact fields remain available in the
 field portal as well as the admin portal.
+Inactive identities cannot approve actions or manage identities. A financial
+subscription alone never grants operational approval authority over the
+subscriber. Human entity writes must verify authority over the existing target
+and its parent organisation, not rely on a service-role client to supply it.
 
 **Module access is two switches, nothing else.** A person may open a module when:
 

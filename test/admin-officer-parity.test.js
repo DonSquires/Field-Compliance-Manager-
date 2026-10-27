@@ -12,11 +12,17 @@ const catalogFunction = name => {
   assert.ok(start >= 0, name);
   return schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
 };
-const catalogPolicy = name => {
-  const line = schema.split('\n').find(l => l.startsWith(`CREATE POLICY "${name}" ON "public"."notifications"`));
-  assert.ok(line, name);
-  return line;
+const catalogPolicy = (name, table = 'notifications') => {
+  const start = schema.indexOf(`CREATE POLICY "${name}" ON "public"."${table}"`);
+  assert.ok(start >= 0, name);
+  return schema.slice(start, schema.indexOf(';', start) + 1);
 };
+const ADMIN_READ_POLICIES = [
+  ['bob_job_runs_select', 'bob_job_runs'],
+  ['bob_job_rollback_refs_select', 'bob_job_rollback_refs'],
+  ['Admins can view audit records for their org', 'user_management_audit'],
+  ['sba_select', 'staff_branch_authorisations'],
+];
 
 const PARITY_FUNCTIONS = [
   '_entitled_org_ids_for', 'accept_client_invitation', 'apply_bob_tentative_roster_block', 'can_approve_action',
@@ -46,6 +52,9 @@ test('every admin grant in the parity migration also names admin_officer', () =>
   }
   for (const policy of ['notifications_select', 'notifications_update']) {
     assert.match(migration, new RegExp(`ALTER POLICY "${policy}" ON "public"\\."notifications"`));
+  }
+  for (const [policy, table] of ADMIN_READ_POLICIES) {
+    assert.ok(migration.includes(`ALTER POLICY "${policy}" ON "public"."${table}"`));
   }
   assert.doesNotMatch(migration, /\b(GRANT|REVOKE|DROP)\b/);
 });
@@ -117,6 +126,17 @@ test('admin_officer resolves exactly like admin as a real database role', {
       CREATE TABLE public.crm_onboarding_ledgers(id uuid);
       CREATE TABLE public.leave_requests(id uuid);
       CREATE TABLE public.reference_codes(id uuid);
+      CREATE TABLE public.bob_job_runs(id uuid PRIMARY KEY,job_id uuid,organization_id uuid);
+      CREATE TABLE public.bob_job_rollback_refs(id uuid PRIMARY KEY,job_id uuid);
+      CREATE TABLE public.user_management_audit(id uuid PRIMARY KEY,target_user_id uuid);
+      CREATE TABLE public.staff_branch_authorisations(id uuid PRIMARY KEY,user_id uuid,branch_org_id uuid,status text);
+      CREATE FUNCTION public.user_managed_branch_ids() RETURNS uuid[] LANGUAGE sql AS $f$ SELECT '{}'::uuid[] $f$;
+      GRANT SELECT ON public.user_profiles TO authenticated;
+      ${ADMIN_READ_POLICIES.map(([policy, table]) => `
+        ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY;
+        ${catalogPolicy(policy, table)}
+        GRANT SELECT ON public.${table} TO authenticated;
+      `).join('\n')}
 
       SET check_function_bodies = off;
       ${migration}
@@ -130,6 +150,12 @@ test('admin_officer resolves exactly like admin as a real database role', {
         ('${admin}','admin','${org}',NULL),('${adminOfficer}','admin_officer','${org}',NULL),
         ('${officer}','officer','${org}',NULL),('${otherAdminOfficer}','admin_officer','${other}',NULL),
         ('${inactiveAdminOfficer}','admin_officer','${org}',now()),('${clientAdmin}','client_admin','${other}',NULL);
+      UPDATE public.user_profiles SET employer_organization_id=organization_id;
+      INSERT INTO public.bob_job_runs VALUES ('${n(1)}','${id(301)}','${org}'),('${n(2)}','${id(302)}','${other}');
+      INSERT INTO public.bob_job_rollback_refs VALUES ('${n(1)}','${id(301)}'),('${n(2)}','${id(302)}');
+      INSERT INTO public.user_management_audit VALUES ('${n(1)}','${officer}'),('${n(2)}','${otherAdminOfficer}');
+      INSERT INTO public.staff_branch_authorisations VALUES
+        ('${n(1)}','${officer}','${child}','active'),('${n(2)}','${otherAdminOfficer}','${other}','active');
       INSERT INTO public.notifications(id,organization_id,recipient_user_id,recipient_role) VALUES
         ('${n(1)}','${org}',NULL,'admin'),('${n(2)}','${org}',NULL,'officer'),('${n(3)}','${org}',NULL,'admin_officer'),
         ('${n(4)}','${other}',NULL,'admin'),('${n(5)}','${org}','${adminOfficer}',NULL);
@@ -139,6 +165,21 @@ test('admin_officer resolves exactly like admin as a real database role', {
       SELECT pg_temp.check(public.can_approve_action('${adminOfficer}','${org}'),'admin officer approves own org work');
       SELECT pg_temp.check(NOT public.can_approve_action('${officer}','${org}'),'officer cannot approve');
       SELECT pg_temp.check(NOT public.can_approve_action('${otherAdminOfficer}','${org}'),'other tenant admin officer cannot approve');
+      SELECT pg_temp.check(NOT public.can_approve_action('${inactiveAdminOfficer}','${org}'),'inactive admin officer cannot approve');
+      INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,agreement_type)
+        VALUES('${id(190)}','${org}','${other}','financial');
+      SELECT pg_temp.check(NOT public.can_approve_action('${adminOfficer}','${other}'),'billing agreement cannot authorise approval');
+      UPDATE public.service_agreements SET agreement_type='operational' WHERE id='${id(190)}';
+      SELECT pg_temp.check(public.can_approve_action('${adminOfficer}','${other}'),'operational agreement permits approval');
+      DELETE FROM public.service_agreements WHERE id='${id(190)}';
+
+      ${[admin, adminOfficer].map(user => `
+        ${actor(user)}
+        ${ADMIN_READ_POLICIES.map(([, table]) => `
+          SELECT pg_temp.check((SELECT array_agg(id) FROM public.${table})=ARRAY['${n(1)}']::uuid[],
+            'admin parity and tenant boundary for ${table}');
+        `).join('\n')}
+      `).join('\n')}
 
       ${actor(admin)}
       SELECT pg_temp.check(public.is_admin_for_org('${org}') AND public.is_admin_for_org('${child}'),'admin administers org and branch');
@@ -167,6 +208,9 @@ test('admin_officer resolves exactly like admin as a real database role', {
       ${actor(inactiveAdminOfficer)}
       SELECT pg_temp.check(NOT public.is_admin_for_org('${org}'),'deactivated admin officer refused');
       SELECT pg_temp.check(NOT public.org_access_allowed('${child}'),'deactivated admin officer has no reach');
+      ${ADMIN_READ_POLICIES.map(([, table]) => `
+        SELECT pg_temp.check((SELECT count(*) FROM public.${table})=0,'inactive admin officer cannot read ${table}');
+      `).join('\n')}
       RESET ROLE;
 
       ${[adminOfficer, inactiveAdminOfficer].map((inviter, i) => `
