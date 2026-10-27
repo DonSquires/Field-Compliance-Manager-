@@ -752,11 +752,17 @@ a marked person can be completed, separated, or linked by surname, and
 completing a name removes the marker. A person who already carries a full
 name is never renamed and never takes a related name's permit: "Jane Smith"
 is not "Mary Jane Smith", so that permit is held for review rather than
-linked or created. The hold applies in both directions (review of the
-catalog refresh, 2026-10-27, migration `20261101130000`). "Jane Smith"
-arriving under the email of an existing "Mary Jane Smith" is held too. The
-only automatic link is a longer full name that extends a surname-only
-record. Names are compared by whitespace-separated parts
+linked or created.
+
+**Two-way hold (clarification, 2026-10-27).** This came from the Copilot
+pull-request review of #264. Don Squires accepted and delivered it under his
+standing direction for the R&M import, in migration `20261101130000`. It
+narrows the ruling above and does not widen it. The hold applies in both
+directions: "Jane Smith" arriving under the email of an existing
+"Mary Jane Smith" is held too. The only automatic link is a longer full
+name that extends a surname-only record.
+
+Names are compared by whitespace-separated parts
 (`person_name_parts`), so a punctuated or accented single name such as
 O'Neill, Smith-Jones or Müller is one part. It never passes as a full name,
 and Jones never extends Jane Smith-Jones.
