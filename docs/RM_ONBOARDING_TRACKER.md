@@ -1246,15 +1246,24 @@ node services\document-source-worker\reconcile-plan.mjs `
   the given names are added in front of the recorded surname. Otherwise each
   named holder moves to a person of their own. A name must end with the
   recorded name, and a person another organisation records is never renamed.
+  Only a person positively marked as recorded by surname alone
+  (`metadata.name_basis = 'surname'`, set by the migration on all 125 booking
+  import holders, compound surnames included) is repaired or linked by
+  surname. A related name on a full-named holder is held, never linked or
+  duplicated. Names compare by whitespace parts, so O'Neill or Smith-Jones is
+  one part.
   The extract's 13 permits not yet on file then come in through
   `import_person_permit`. It now links a holder recorded by surname when the
   email agrees and only one such holder exists, then completes that name, or
-  creates the named holder. Every step carries its planned outcome, and the
-  database rolls back and holds any step that departs from it. Planned against
-  the live snapshot: 81 names completed, 14 holders separated, 13 permits
-  linked. Left for review: 30 surname-only holders with no permit in the
-  extract, and 3 whose extract name does not extend the recorded one. Truth
-  table: `test/permit-holder-identity-repair-migration.test.js`.
+  creates the named holder. Every step carries its planned outcome, holder and
+  complete permit set. Follow-ups name their permits explicitly. The database
+  rolls back and holds any step that departs from the plan. Planned against
+  the live snapshot: 80 names completed, 14 holders separated, 13 permits
+  linked (12 completing a name, 1 separating a holder). Left for review: 32
+  surname-only holders with no permit in the extract, and 4 whose extract name
+  does not extend the recorded one. One of those 4 has a bracketed second
+  name in the extract that is written without a space. Truth table:
+  `test/permit-holder-identity-repair-migration.test.js`.
 - Dispatch-job vehicle travel cost bridged into `finance_service_costs` (was
   previously fully disconnected from the P&L pipeline) + a "compare contract
   price to actual cost" action in `FinanceControlPanel`.

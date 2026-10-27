@@ -19,7 +19,9 @@
  *                     surname alone, using the full name the extract gives for each permit,
  *                     then bring in the extract's permits not yet on file (rolled back
  *                     unless --commit). Never guesses: a name must extend the recorded
- *                     name, and any step whose outcome differs from the plan is held.
+ *                     name of a person recorded by surname alone, a permit the extract
+ *                     names for someone else is never swept along, and any step whose
+ *                     outcome, holder or permit set differs from the plan is held.
  *
  * Plans and reports hold personal information and must live outside the repository.
  * Nothing is sent to an external service.
@@ -285,7 +287,9 @@ async function runApply({ plan, source, commit, report }) {
   return summary;
 }
 
-export const nameWords = (value) => String(value ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+/** Mirrors public.person_name_parts: whitespace-separated parts, so O'Neill and Smith-Jones are one part. */
+export const nameWords = (value) => String(value ?? '').toLowerCase().split(/\s+/)
+  .map((part) => part.replace(/[^a-z0-9]+/g, '')).filter(Boolean);
 // Mirrors public.normalize_person_name: "Mary-Jane Smith" and "Maryjane Smith" are the same name.
 const nameKey = (value) => nameWords(value).join('');
 /** Mirrors public.person_name_extends: the recorded name is the trailing part of a longer full name. */
@@ -300,22 +304,29 @@ const preferredSpelling = (names) => {
   const counts = tally(names, (name) => name);
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))[0];
 };
+const numbersOf = (permits) => permits.map((permit) => permit.number).sort(byPermitNumber);
 
-/** Predict what public.import_person_permit(..., p_create_holder => true) and its follow-up will do. */
+/**
+ * Predict what public.import_person_permit(..., p_create_holder => true) and its follow-up will do.
+ * A surname link also names the exact permits the follow-up attributes, and is held here when one
+ * of them is proven by the extract to belong to someone else.
+ */
 function predictNewPermit(people, permit) {
+  const key = nameKey(permit.holder_name);
   const email = emailOf(permit.contact_email);
-  if (!nameKey(permit.holder_name)) return { expected: 'held_holder_not_resolved' };
-  const using = email ? [...people.values()].filter((person) => person.permits.some((held) => held.email === email)) : [];
-  const exact = using.filter((person) => nameKey(person.name) === nameKey(permit.holder_name));
+  if (!key) return { expected: 'held_holder_not_resolved' };
+  const using = email ? [...people.entries()].filter(([, person]) => person.permits.some((held) => held.email === email)) : [];
+  const exact = using.filter(([, person]) => nameKey(person.name) === key);
   if (exact.length > 1) return { expected: 'held_holder_not_resolved' };
-  if (exact.length === 1) return { expected: 'permit_email_and_name', person: exact[0] };
-  const surname = using.filter((person) => nameExtends(person.name, permit.holder_name));
-  if (surname.length > 1) return { expected: 'held_holder_not_resolved' };
-  if (surname.length === 1) {
-    const holder = surname[0];
-    const sameEmail = holder.permits.filter((held) => held.email === email).length + 1;
-    return { expected: 'permit_email_and_surname', person: holder,
-      expected_follow_up: sameEmail === holder.permits.length + 1 ? 'name_completed' : 'split' };
+  if (exact.length === 1) return { expected: 'permit_email_and_name', id: exact[0][0], person: exact[0][1] };
+  const related = using.filter(([, person]) => nameExtends(person.name, permit.holder_name));
+  if (related.length > 1 || related.some(([, person]) => !person.surname)) return { expected: 'held_holder_not_resolved' };
+  if (related.length === 1) {
+    const [id, holder] = related[0];
+    const sameEmail = holder.permits.filter((held) => held.email === email);
+    if (sameEmail.some((held) => held.evidence && held.evidence !== key)) return { expected: 'held_conflicting_evidence', planned_hold: true };
+    return { expected: 'permit_email_and_surname', id, person: holder, same_email: sameEmail,
+      expected_follow_up: sameEmail.length === holder.permits.length ? 'name_completed' : 'split' };
   }
   if (nameWords(permit.holder_name).length < 2) return { expected: 'held_holder_not_resolved' };
   return { expected: 'created_holder' };
@@ -333,23 +344,27 @@ function predictNewPermit(people, permit) {
  * attributable group moves to a person of its own and the record stays as it is.
  * Permits in the extract but not on file then come in through the import, which
  * links them by email and name, by email and surname (then completes that name), or
- * creates the named holder. Every step carries its predicted outcome so the
- * database rolls back any step that would behave differently.
+ * creates the named holder. Only a person recorded by surname alone (name_basis) is
+ * repaired or linked by surname. Every step carries its predicted outcome, the holder
+ * it lands on and that holder's complete permit set, so the database rolls back any
+ * step that would behave differently from the plan.
  */
 export function planHolderRepair(holders, permits) {
   const workbook = new Map(permits.filter((permit) => permit.permit_number).map((permit) => [permit.permit_number, permit]));
   const records = new Map();
   for (const row of holders) {
-    const record = records.get(row.canonical_person_id) ?? { id: row.canonical_person_id, name: row.display_name, permits: [] };
-    record.permits.push({ number: row.permit_number, email: emailOf(row.contact_email) });
+    const record = records.get(row.canonical_person_id)
+      ?? { id: row.canonical_person_id, name: row.display_name, surname: row.name_basis === 'surname', permits: [] };
+    record.permits.push({ number: row.permit_number, email: emailOf(row.contact_email),
+      evidence: nameKey(workbook.get(row.permit_number)?.holder_name) || null });
     records.set(row.canonical_person_id, record);
   }
   const categories = {};
   const bump = (key) => { categories[key] = (categories[key] ?? 0) + 1; };
   const attributions = [];
   for (const record of records.values()) {
-    const evidence = record.permits.filter((permit) => nameKey(workbook.get(permit.number)?.holder_name));
-    if (!evidence.length) { bump(nameWords(record.name).length < 2 ? 'no_evidence_surname_only' : 'no_evidence_full_name'); continue; }
+    const evidence = record.permits.filter((permit) => permit.evidence);
+    if (!evidence.length) { bump(record.surname ? 'no_evidence_surname_only' : 'no_evidence_full_name'); continue; }
     const groups = new Map();
     for (const permit of evidence) {
       const spelling = oneLine(workbook.get(permit.number).holder_name);
@@ -377,6 +392,7 @@ export function planHolderRepair(holders, permits) {
       bump([...groups.values()].every((group) => group.state === 'already_named') ? 'already_named' : 'name_does_not_extend');
       continue;
     }
+    if (!record.surname) { bump('not_recorded_by_surname'); continue; }
     for (const group of attributable) group.permits.sort(byPermitNumber);
     const keep = leftover.length ? null
       : [...attributable].sort((a, b) => b.permits.length - a.permits.length || byPermitNumber(a.permits[0], b.permits[0]))[0];
@@ -388,36 +404,50 @@ export function planHolderRepair(holders, permits) {
   }
 
   // Replay the attributions on a copy of the snapshot to predict each new permit.
-  const people = new Map([...records.values()].map((record) => [record.id, { name: record.name, permits: [...record.permits] }]));
+  const people = new Map([...records.values()].map((record) =>
+    [record.id, { name: record.name, surname: record.surname, permits: [...record.permits] }]));
+  const plannedId = () => `planned:${people.size}`;
   const split = (from, name, numbers) => {
     const moving = from.permits.filter((permit) => numbers.includes(permit.number));
     from.permits = from.permits.filter((permit) => !numbers.includes(permit.number));
-    people.set(`planned:${people.size}`, { name, permits: moving });
+    people.set(plannedId(), { name, surname: false, permits: moving });
+    return moving;
   };
   for (const step of attributions) {
     const person = people.get(step.canonical_person_id);
     if (step.expected === 'split') split(person, step.full_name, step.permit_numbers);
-    else person.name = step.full_name;
+    else Object.assign(person, { name: step.full_name, surname: false });
   }
   const onFile = new Set(holders.map((row) => row.permit_number));
   const newPermits = [];
+  const heldInPlan = [];
   for (const permit of permits) {
     if (!permit.permit_number || onFile.has(permit.permit_number)) continue;
     const prediction = predictNewPermit(people, permit);
-    newPermits.push({ permit, expected: prediction.expected, expected_follow_up: prediction.expected_follow_up ?? null });
-    const held = { number: permit.permit_number, email: emailOf(permit.contact_email) };
-    if (prediction.expected === 'created_holder') people.set(`planned:${people.size}`, { name: permit.holder_name, permits: [held] });
-    else if (prediction.person) {
-      prediction.person.permits.push(held);
-      if (prediction.expected_follow_up === 'name_completed') prediction.person.name = permit.holder_name;
-      else if (prediction.expected_follow_up === 'split') {
-        split(prediction.person, permit.holder_name, prediction.person.permits.filter((p) => p.email === held.email).map((p) => p.number));
+    if (prediction.planned_hold) { heldInPlan.push({ permit_number: permit.permit_number, expected: prediction.expected }); continue; }
+    const step = { permit, expected: prediction.expected, expected_follow_up: prediction.expected_follow_up ?? null,
+      follow_up_permits: null, expected_holder: null, expected_permits: null };
+    const held = { number: permit.permit_number, email: emailOf(permit.contact_email), evidence: nameKey(permit.holder_name) };
+    if (prediction.expected === 'created_holder') {
+      people.set(plannedId(), { name: permit.holder_name, surname: false, permits: [held] });
+      step.expected_permits = [held.number];
+    } else if (prediction.person) {
+      const holder = prediction.person;
+      holder.permits.push(held);
+      step.expected_holder = prediction.id.startsWith('planned:') ? null : prediction.id;
+      step.expected_permits = numbersOf(holder.permits);
+      if (prediction.expected === 'permit_email_and_surname') {
+        step.follow_up_permits = numbersOf([...prediction.same_email, held]);
+        if (step.expected_follow_up === 'name_completed') Object.assign(holder, { name: permit.holder_name, surname: false });
+        else step.expected_permits = numbersOf(split(holder, permit.holder_name, step.follow_up_permits));
       }
     }
+    newPermits.push(step);
   }
   return {
     attributions,
     new_permits: newPermits,
+    held_new_permits: heldInPlan,
     summary: {
       holders: records.size,
       categories,
@@ -426,6 +456,7 @@ export function planHolderRepair(holders, permits) {
       permits_attributed: attributions.reduce((sum, step) => sum + step.permit_numbers.length, 0),
       new_permits: tally(newPermits, (step) => step.expected),
       new_permit_follow_ups: tally(newPermits.filter((step) => step.expected_follow_up), (step) => step.expected_follow_up),
+      new_permits_held_in_plan: tally(heldInPlan, (step) => step.expected),
     },
   };
 }
@@ -437,7 +468,14 @@ const HELD_OUTCOME = `CASE WHEN SQLERRM LIKE 'Permit holder not resolved%' THEN 
              WHEN SQLERRM LIKE 'Permit client conflict%' THEN 'held_client_conflict'
              WHEN SQLERRM LIKE 'Unexpected repair outcome%' THEN 'held_unexpected_outcome' ELSE 'error' END`;
 
-/** One savepoint per step; a step whose outcome differs from the plan is rolled back and held. */
+/** The holder's complete permit set must equal the plan's; any difference holds the step. */
+const permitSetGuard = (holderExpression, expectedJson) => `IF (SELECT array_agg(permit.permit_number ORDER BY permit.permit_number) FROM public.person_permits permit
+          WHERE permit.organization_id = '${RM_ORGANIZATION_ID}' AND permit.canonical_person_id = (${holderExpression})::uuid)
+        IS DISTINCT FROM (SELECT array_agg(listed ORDER BY listed) FROM jsonb_array_elements_text(${expectedJson}) listed) THEN
+        RAISE EXCEPTION 'Unexpected repair outcome: the holder''s permits differ from the plan';
+      END IF;`;
+
+/** One savepoint per step; a step whose outcome, holder or permit set differs from the plan is rolled back and held. */
 export function holderRepairSql(repair, { sourceDocument, sourceSha256, sourceCheckedAt }) {
   if (!/^[0-9a-f]{64}$/.test(sourceSha256)) throw new Error('A SHA-256 source hash is required');
   const source = `${literal(sourceDocument)}, '${sourceSha256}'`;
@@ -456,6 +494,9 @@ BEGIN
       IF v_result->>'outcome' NOT IN (v_step->>'expected', 'unchanged') THEN
         RAISE EXCEPTION 'Unexpected repair outcome: %', v_result->>'outcome';
       END IF;
+      IF v_result->>'outcome' <> 'unchanged' THEN
+        ${permitSetGuard("v_result->>'canonical_person_id'", "v_step->'permit_numbers'")}
+      END IF;
       INSERT INTO holder_repair_results VALUES ('attribute', v_step->'permit_numbers'->>0, v_result->>'outcome', NULL,
         v_step->>'expected', NULL, (v_result->>'permits_moved')::integer, NULL);
     EXCEPTION WHEN OTHERS THEN
@@ -471,13 +512,17 @@ BEGIN
       IF v_result->>'match_basis' IS DISTINCT FROM v_step->>'expected' THEN
         RAISE EXCEPTION 'Unexpected repair outcome: %', v_result->>'match_basis';
       END IF;
+      IF v_step->>'expected_holder' IS NOT NULL AND v_result->>'canonical_person_id' IS DISTINCT FROM v_step->>'expected_holder' THEN
+        RAISE EXCEPTION 'Unexpected repair outcome: the permit joined a different holder';
+      END IF;
       IF v_result->>'match_basis' = 'permit_email_and_surname' THEN
         v_follow := public.attribute_permit_holder('${RM_ORGANIZATION_ID}'::uuid, (v_result->>'canonical_person_id')::uuid,
-          v_step->'permit'->>'holder_name', ARRAY[v_step->'permit'->>'permit_number'], ${source}, true);
+          v_step->'permit'->>'holder_name', ARRAY(SELECT jsonb_array_elements_text(v_step->'follow_up_permits')), ${source}, false);
         IF v_follow->>'outcome' IS DISTINCT FROM v_step->>'expected_follow_up' THEN
           RAISE EXCEPTION 'Unexpected repair outcome: %', v_follow->>'outcome';
         END IF;
       END IF;
+      ${permitSetGuard("coalesce(v_follow->>'canonical_person_id', v_result->>'canonical_person_id')", "v_step->'expected_permits'")}
       INSERT INTO holder_repair_results VALUES ('import', v_step->'permit'->>'permit_number', v_result->>'outcome',
         v_result->>'match_basis', v_step->>'expected', v_follow->>'outcome', (v_follow->>'permits_moved')::integer, NULL);
     EXCEPTION WHEN OTHERS THEN
@@ -490,14 +535,13 @@ $repair$;`;
 }
 
 const HOLDER_SNAPSHOT = `SELECT permit.permit_number, permit.canonical_person_id::text AS canonical_person_id, person.display_name,
-  lower(trim(permit.contact_email)) AS contact_email
+  person.metadata->>'name_basis' AS name_basis, lower(trim(permit.contact_email)) AS contact_email
 FROM public.person_permits permit
 JOIN public.canonical_people person ON person.id = permit.canonical_person_id
 WHERE permit.organization_id = '${RM_ORGANIZATION_ID}' AND person.status = 'active' AND person.merged_into_id IS NULL
 ORDER BY permit.permit_number`;
 const HOLDER_AGGREGATES = `SELECT count(DISTINCT permit.canonical_person_id) AS holders,
-  count(DISTINCT permit.canonical_person_id) FILTER (WHERE cardinality(array_remove(
-    regexp_split_to_array(lower(coalesce(person.display_name, '')), '[^a-z0-9]+'), '')) < 2) AS surname_only_holders,
+  count(DISTINCT permit.canonical_person_id) FILTER (WHERE person.metadata->>'name_basis' = 'surname') AS surname_only_holders,
   count(*) AS permits
 FROM public.person_permits permit
 JOIN public.canonical_people person ON person.id = permit.canonical_person_id
@@ -523,7 +567,8 @@ async function runHolderRepair({ plan, source, commit, report }) {
   const repair = planHolderRepair(holders, plan.permits);
   const read = `SELECT jsonb_build_object('results', coalesce((SELECT jsonb_agg(to_jsonb(r)) FROM holder_repair_results r), '[]'::jsonb),
   'after', (SELECT to_jsonb(a) FROM (${HOLDER_AGGREGATES}) a)) AS out;`;
-  console.log(`checked plan: ${repair.attributions.length} attributions, ${repair.new_permits.length} new permits`);
+  console.log(`checked plan: ${repair.attributions.length} attributions, ${repair.new_permits.length} new permits, `
+    + `${repair.held_new_permits.length} held in plan`);
   const { results, after } = cliQuery(`BEGIN;\n${CLAIMS}\n${holderRepairSql(repair, source)}\n${read}\n${commit ? 'COMMIT' : 'ROLLBACK'};`)[0].out;
   const summary = summariseHolderRepair(results, {
     mode: commit ? 'committed' : 'dry_run_rolled_back', planned: repair.summary, before, after,

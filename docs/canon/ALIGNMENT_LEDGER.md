@@ -738,16 +738,32 @@ It refuses:
 
 - a name that does not end with the recorded name;
 - permits the person does not hold;
-- renaming a person whom another organisation records.
+- renaming a person whom another organisation records;
+- any person not positively recorded by surname alone.
 
 It never deletes a person.
+
+**Surname basis (review ruling, 2026-11-01).** "Recorded by surname alone" is
+a positive marker, not a guess from word count. The migration marks
+`metadata.name_basis = 'surname'` on every person the booking import created
+(an import key and a permit from the RAMS bookings file); live, that is all
+125 holders. A compound surname such as "Te Whare" is still a surname. Only
+a marked person can be completed, separated, or linked by surname, and
+completing a name removes the marker. A person who already carries a full
+name is never renamed and never takes a related name's permit: "Jane Smith"
+is not "Mary Jane Smith", so that permit is held for review rather than
+linked or created. Names are compared by whitespace-separated parts
+(`person_name_parts`), so a punctuated or accented single name such as
+O'Neill, Smith-Jones or Müller is one part. It never passes as a full name,
+and Jones never extends Jane Smith-Jones.
 
 `import_person_permit` gains `p_create_holder`, which defaults to off. A new
 permit links to a holder recorded by surname only when:
 
 - the email agrees;
 - the full name ends with that surname;
-- exactly one such holder exists.
+- exactly one such holder exists, and no related holder with that email
+  carries a full name.
 
 The caller then completes that holder's name. With `p_create_holder` on, a
 named holder who matches no one is created as a new draft person. A
@@ -755,8 +771,13 @@ one-word name never creates a person. Audit metadata carries permit numbers
 and identifiers, never names or emails.
 
 The repair script plans every step from a live snapshot and records the
-expected outcome. The database rolls back and holds any step whose actual
-outcome differs, so the run cannot drift from the reviewed plan.
+expected outcome, the holder it lands on, and that holder's complete permit
+set. A follow-up completion names its permits explicitly and never sweeps in
+other permits that share the email. A new permit is held in the plan if a
+permit with the same email is proven by the extract to belong to someone
+else. The database rolls back and holds any step whose outcome, holder or
+permit set differs from the plan, so the run cannot drift from the reviewed
+plan.
 
 Four extract permits for family members first appeared to share an email
 with a differently named relative. They share it only with an older,
