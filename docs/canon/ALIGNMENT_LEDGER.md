@@ -536,6 +536,27 @@ warnings expire within 30 days, 472 have expired, 8 trespass notices are drafts
 and the 26 letters carry no expiry; 50 of 517 people have a notice in force or
 expiring.
 
+**Acceptance correction (owner approved 2026-10-27).** A fresh live read matched
+all 2,627 name repairs and 85 merges to their source plan, including 432 active
+company-owner records with their company names and 196 records labelled
+`Owner withheld by NZTA`. All expected labels and categories agree in the
+organisation records and canonical records. The 546 imported notices persist
+with their source hashes and person links; that batch covers 507 people (the
+517 figure above includes earlier imports).
+
+The signed-in Person search check exposed two unfinished Word templates that
+the importer mistook for named warnings. Their addressee blocks contain
+`name and address`, including one corrupted prefix; neither identifies a person.
+The owner approved quarantine, not deletion or a claim that a real warning was
+withdrawn. Migration `20261027032744` moves only those source-hash- and
+import-key-bound notices to draft, marks their isolated synthetic identity
+records rejected/retired, preserves source provenance and creates audit receipts.
+It refuses changed or reused identities. Existing expiry notifications are
+corrected rather than deleted or silently marked read. The parser now holds
+unfinished addressee fields before any name fallback. A template filename alone
+does not exclude completed, named correspondence. Release and live verification of this correction are required before
+the two entries can be counted as removed from active expiry alerts.
+
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
 > "We should only have 1 person canonical record, 1 vehicle canonical record and
