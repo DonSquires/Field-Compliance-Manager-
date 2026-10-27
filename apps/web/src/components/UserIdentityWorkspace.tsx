@@ -72,55 +72,76 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
       </form>
     </div>
     <form className="user-spine-email" onSubmit={saveEmail}><div className="user-spine-section-title"><Mail size={18} /><div><strong>Email and sign-in</strong><span>The address this person signs in with, and where their invitation is sent.</span></div></div><div className="user-spine-email-grid"><label><span>Email address</span><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Reason for change</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} placeholder="Corrected typo, name change, new work address" /></label></div><button type="submit" disabled={saving !== null || !email.trim() || !emailReason.trim() || email.trim().toLowerCase() === (user.email ?? '').toLowerCase()}>{saving === 'email' ? 'Saving' : 'Change email'}</button><small>If they have never signed in, the address is corrected and their invitation re-sent to it. If they have signed in before, the new address must be confirmed before it replaces the old one — their profile, role and history stay as they are.</small></form>
-    <VehicleOwnerAccessSection userId={user.id} />
+    <RestrictedAccessSection key={`person-${user.id}`} userId={user.id} kind="person" />
+    <RestrictedAccessSection key={`vehicle-${user.id}`} userId={user.id} kind="vehicle" />
     <StaffBranchAccessPanel userId={user.id} branches={branches} onChanged={onChanged} />
     <footer><span><BriefcaseBusiness size={14} />Employment, credentials, and work readiness remain governed in People &amp; HR.</span><span><BadgeCheck size={14} />Every change requires a reason and is retained in the identity audit trail.</span></footer>
   </section></div>;
 }
 
-interface VehicleOwnerAccess { direct: boolean; via_preset: boolean; via_role: boolean; granted_at: string | null; }
+interface RestrictedAccess { direct: boolean; via_preset: boolean; via_role: boolean; via_grant?: boolean; active?: boolean; }
 
-/** Per-user authorisation for the vehicle_owner_identity access area (owner details, including NZTA-restricted owners). */
-function VehicleOwnerAccessSection({ userId }: { userId: string }) {
-  const [access, setAccess] = useState<VehicleOwnerAccess | null>(null);
+export function RestrictedAccessSection({ userId, kind }: { userId: string; kind: 'person' | 'vehicle' }) {
+  const [access, setAccess] = useState<RestrictedAccess | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const person = kind === 'person';
+  const readRpc = person ? 'get_person_search_access' : 'get_vehicle_owner_access';
+  const writeRpc = person ? 'set_person_search_access' : 'set_vehicle_owner_access';
 
-  // ATLAS CALLS: get_vehicle_owner_access
+  // ATLAS CALLS: get_vehicle_owner_access, get_person_search_access
   useEffect(() => {
     let cancelled = false;
-    void supabase.rpc('get_vehicle_owner_access', { p_user_id: userId }).then(({ data, error: loadError }) => {
-      if (cancelled) return;
-      if (loadError) { setError(loadError.message); return; }
-      const row = data as VehicleOwnerAccess;
-      setAccess(row); setEnabled(row.direct);
-    });
+    setAccess(null); setError(null); setNotice(null); setReason('');
+    const load = async () => {
+      try {
+        const { data, error: loadError } = await supabase.rpc(readRpc, { p_user_id: userId });
+        if (loadError) throw new Error(loadError.message);
+        if (!data || typeof data.direct !== 'boolean') throw new Error('Invalid access response');
+        if (cancelled) return;
+        const row = data as RestrictedAccess;
+        setAccess(row); setEnabled(row.direct);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Could not load access. Retry or contact your administrator.');
+      }
+    };
+    void load();
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, readRpc, attempt]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError(null); setNotice(null);
-    // ATLAS CALLS: set_vehicle_owner_access
-    const { data, error: saveError } = await supabase.rpc('set_vehicle_owner_access', { p_user_id: userId, p_enabled: enabled, p_reason: reason.trim() });
-    if (saveError) setError(saveError.message);
-    else { const row = data as VehicleOwnerAccess; setAccess(row); setEnabled(row.direct); setReason(''); setNotice(row.direct ? 'Vehicle owner details enabled for this person.' : 'Vehicle owner details access removed.'); }
-    setSaving(false);
+    try {
+      // ATLAS CALLS: set_vehicle_owner_access, set_person_search_access
+      const { data, error: saveError } = await supabase.rpc(writeRpc, { p_user_id: userId, p_enabled: enabled, p_reason: reason.trim() });
+      if (saveError) throw new Error(saveError.message);
+      if (!data || typeof data.direct !== 'boolean') throw new Error('Invalid access response; refresh to confirm the saved state');
+      const row = data as RestrictedAccess;
+      setAccess(row); setEnabled(row.direct); setReason('');
+      setNotice(row.direct ? 'Direct authorization enabled.' : row.via_role || row.via_preset || row.via_grant
+        ? 'Direct authorization removed. Access remains through their role, preset or inherited grant.'
+        : 'Authorization removed.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save access. Check your authorization and retry.');
+    } finally { setSaving(false); }
   };
 
-  const inherited = access?.via_role ? 'Included with their administrator role.' : access?.via_preset ? 'Also granted through their access preset.' : null;
-  return <form className="user-spine-email" onSubmit={(event) => void save(event)} aria-label="Restricted information access">
-    <div className="user-spine-section-title"><Car size={18} /><div><strong>Restricted information</strong><span>Personal information this person may see and record beyond their role.</span></div></div>
+  const inherited = access?.via_role ? 'Included with their operations role.' : access?.via_preset ? 'Also granted through their access preset.' : access?.via_grant ? 'Also granted through an inherited organization grant.' : null;
+  return <form className="user-spine-email" onSubmit={(event) => void save(event)} aria-label={person ? 'Person search authorization' : 'Restricted information access'}>
+    <div className="user-spine-section-title">{person ? <UserRoundCog size={18} /> : <Car size={18} />}<div><strong>{person ? 'Person search authorization' : 'Restricted information'}</strong><span>{person ? 'Read-only checks for operational duties. Separate from NZTA authorization.' : 'Vehicle owner identity beyond their role.'}</span></div></div>
     {error && <div className="user-spine-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="user-spine-message is-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
-    {access === null && !error ? <small role="status">Loading access…</small> : <>
-      <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving} onChange={(event) => setEnabled(event.target.checked)} /> <span>Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details</span></label>
+    {access === null ? error ? <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry access check</button> : <small role="status">Loading access…</small> : <>
+      <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving || access.active === false} onChange={(event) => setEnabled(event.target.checked)} /> <span>{person ? 'Person search — view names, trespass and warning notices, permits and operational links' : 'Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details'}</span></label>
+      {access.active === false && <small>This account is inactive. Person search is unavailable.</small>}
       {inherited && <small>{inherited}</small>}
       <label><span>Reason for change</span><input required value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: investigations officer, approved by operations manager" /></label>
-      <button type="submit" disabled={saving || !reason.trim() || enabled === Boolean(access?.direct)}>{saving ? 'Saving' : 'Save restricted access'}</button>
-      <small>NZTA register information may only be used for the lawful purpose it was obtained for. Owner addresses are shown as suburb and town/city only. Every change is audit-logged.</small>
+      <button type="submit" disabled={saving || !reason.trim() || enabled === access.direct}>{saving ? 'Saving' : person ? 'Save person search access' : 'Save restricted access'}</button>
+      <small>{person ? 'Field officers do not receive personal addresses or contact details. Only existing authorized organisations can be searched. Removing this checkbox does not remove inherited access.' : 'NZTA register information may only be used for the lawful purpose it was obtained for. Personal addresses and contact details remain with Admin, Admin officer and Master roles.'} Every change is audit-logged.</small>
     </>}
   </form>;
 }

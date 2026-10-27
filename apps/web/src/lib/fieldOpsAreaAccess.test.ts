@@ -8,6 +8,9 @@ describe('Field Operations area entitlement', () => {
     expect(canAccessFieldOpsArea('operational-continuity', () => false)).toBe(true);
     expect(canAccessFieldOpsArea('debrief-followup', () => false)).toBe(true);
     expect(canAccessFieldOpsArea('officer-activity', () => false)).toBe(true);
+    for (const role of ['admin', 'admin_officer', 'master', 'grand_master']) {
+      expect(canAccessFieldOpsArea('vehicle-search', () => false, role)).toBe(true);
+    }
   });
 
   it('restricts person search to operations roles', () => {

@@ -77,6 +77,7 @@ const OfficerLeavePage = React.lazy(() => import('../pages/OfficerLeavePage'));
 const OfficerTimesheetPage = React.lazy(() => import('../pages/OfficerTimesheetPage'));
 const OfficerCredentialsPage = React.lazy(() => import('../pages/OfficerCredentialsPage'));
 const OfficerVehicleLookupPage = React.lazy(() => import('../pages/OfficerVehicleLookupPage'));
+const OfficerPersonSearchPage = React.lazy(() => import('../pages/OfficerPersonSearchPage'));
 const OfficerWorkshopPage = React.lazy(() => import('../pages/OfficerWorkshopPage'));
 const OfficerNoiseControlPage = React.lazy(() => import('../pages/OfficerNoiseControlPage'));
 const OfficerParkingPage = React.lazy(() => import('../pages/OfficerParkingPage'));
@@ -97,7 +98,7 @@ type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'access_control' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
-  | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
+  | 'vehicle_lookup' | 'person_search' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
@@ -123,11 +124,12 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   dispatch: { label: 'Dispatch', description: 'Live jobs and response', icon: Radio },
   debrief: { label: 'Debrief', description: 'Close the shift and follow up', icon: MessageSquare },
   vehicle_lookup: { label: 'Vehicle', description: 'Search vehicle history', icon: Car },
+  person_search: { label: 'Person search', description: 'Authorized notice and permit checks', icon: UserRound },
   credentials: { label: 'Credentials', description: 'View capability and expiry', icon: BadgeCheck },
   workshop: { label: 'Workshop', description: 'Your builds and maintenance visits', icon: Wrench },
 };
 
-const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map', 'bob']);
+const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'bob']);
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
@@ -438,6 +440,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerCredentialsPage />;
       case 'vehicle_lookup':
         return <OfficerVehicleLookupPage />;
+      case 'person_search':
+        return <OfficerPersonSearchPage />;
       case 'workshop':
         return <OfficerWorkshopPage />;
       case 'noise_control':

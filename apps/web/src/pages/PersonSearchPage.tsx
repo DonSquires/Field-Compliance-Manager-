@@ -1,10 +1,10 @@
 /**
- * PersonSearchPage.tsx (Admin field-ops sub-area: 'person-search')
+ * PersonSearchPage.tsx (shared operations and authorized officer lookup)
  *
  * Canonical schema:
  * - search_people (canonical_people + person_record_aliases + notices +
  *   entity_links + person_permits, scoped to the caller's organisations;
- *   address and NZTA register checks only for vehicle-owner identity access;
+ *   private contacts only for operations roles; NZTA separately authorized;
  *   a permit holder is found by name, alias or exact permit number)
  * - get_notice_expiry_register (issued trespass/warning notices expiring soon
  *   or recently expired; fed daily into notifications by
@@ -50,7 +50,7 @@ const PERSON_FILTERS: Array<{ id: PersonFilter; label: string }> = [
 const currentPermitCount = (match: PersonMatch) =>
   (match.permits ?? []).filter((permit) => permitIsCurrent(permitValidity(permit))).length;
 
-const PersonSearchPage: React.FC = () => {
+const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -86,7 +86,7 @@ const PersonSearchPage: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { void loadRegister(); }, [loadRegister]);
+  useEffect(() => { if (!officer) void loadRegister(); }, [loadRegister, officer]);
 
   const runSearch = useCallback(async (text: string, focusPersonId?: string | null) => {
     if (!personSearchQueryIsValid(text)) {
@@ -123,8 +123,10 @@ const PersonSearchPage: React.FC = () => {
     void runSearch(routedQuery, routedPersonId);
   }, [routedPersonId, routedQuery, runSearch]);
 
-  const openVehicle = (canonicalVehicleId: string) => {
-    navigate(`/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(canonicalVehicleId)}`);
+  const openVehicle = (canonicalVehicleId: string, plateNumber: string) => {
+    navigate(officer
+      ? `/officer/vehicle_lookup?plate=${encodeURIComponent(plateNumber)}`
+      : `/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(canonicalVehicleId)}`);
   };
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -168,7 +170,7 @@ const PersonSearchPage: React.FC = () => {
         <aside className="person-search-scope" aria-label="Search scope">
           <span>Search scope</span>
           <strong>Authorised organisations</strong>
-          <small>Results and restricted identity details follow your organisation access.</small>
+          <small>{officer ? 'Read-only notice and permit checks. Personal addresses and contact details stay with the administration team.' : 'Results and restricted identity details follow your organisation access.'}</small>
         </aside>
       </header>
 
@@ -371,10 +373,10 @@ const PersonSearchPage: React.FC = () => {
                       <li key={permit.id}>
                         <PermitAccessCard
                           permit={permit}
-                          showContact
+                          showContact={!officer && selected.contact_details_authorised === true}
                           actionsDisabled={searching}
                           onOpenVehicle={(vehicle) => {
-                            if (vehicle.canonical_vehicle_id) openVehicle(vehicle.canonical_vehicle_id);
+                            if (vehicle.canonical_vehicle_id) openVehicle(vehicle.canonical_vehicle_id, vehicle.plate_number);
                           }}
                         />
                       </li>
@@ -382,7 +384,7 @@ const PersonSearchPage: React.FC = () => {
                   </ul>
                 )}
                 {selectedPermits.length > 0 && (
-                  <p className="person-search-legal-note">Validity is worked out from the permit dates in New Zealand time; the finishing date is the last valid day. Contact details are as captured on the application and may not be current.</p>
+                  <p className="person-search-legal-note">Validity is worked out from the permit dates in New Zealand time; the finishing date is the last valid day. {officer ? 'For contact details, ask the administration team.' : 'Contact details are as captured on the application and may not be current.'}</p>
                 )}
               </section>
 
@@ -409,7 +411,7 @@ const PersonSearchPage: React.FC = () => {
                             type="button"
                             className="btn btn-sm btn-secondary person-vehicle__open"
                             aria-label={`Open vehicle ${vehicle.plate_number} in vehicle search`}
-                            onClick={() => openVehicle(vehicle.canonical_vehicle_id)}
+                            onClick={() => openVehicle(vehicle.canonical_vehicle_id, vehicle.plate_number)}
                           >
                             <Car size={14} aria-hidden="true" /> Open vehicle
                           </button>
@@ -429,7 +431,7 @@ const PersonSearchPage: React.FC = () => {
                   {!selected.nzta ? <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p> : (
                     <>
                       <dl className="person-nzta-facts">
-                        <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>
+                        {!officer && selected.contact_details_authorised === true && <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>}
                         <div><dt>Last checked</dt><dd>{formatNzDate(selected.nzta.last_checked_at)}</dd></div>
                       </dl>
                       {selected.nzta.checks.length > 0 && (
@@ -456,7 +458,7 @@ const PersonSearchPage: React.FC = () => {
         </section>
       </section>
 
-      <section className="person-search-register" aria-labelledby="person-search-register-title">
+      {!officer && <section className="person-search-register" aria-labelledby="person-search-register-title">
         <header className="person-search-register-head">
           <div>
             <p className="eyebrow">Expiry monitoring</p>
@@ -507,7 +509,7 @@ const PersonSearchPage: React.FC = () => {
             </table>
           </div>
         )}
-      </section>
+      </section>}
     </main>
   );
 };

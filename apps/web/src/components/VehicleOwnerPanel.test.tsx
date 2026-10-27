@@ -5,7 +5,7 @@ import { VehicleOwnerPanel, type VehiclePersonLink } from './VehicleOwnerPanel';
 
 const { rpc, auth } = vi.hoisted(() => ({
   rpc: vi.fn(),
-  auth: { profile: { role: 'admin' as string | undefined, organizationId: 'org' } },
+  auth: { profile: { id: 'user-1', role: 'admin' as string | undefined, organizationId: 'org' } },
 }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
@@ -47,6 +47,7 @@ const renderPanel = (links: VehiclePersonLink[]) => {
   rpc.mockImplementation(async (name: string) => {
     if (name === 'can_access_vehicle_owner_identity') return { data: true, error: null };
     if (name === 'get_vehicle_owner_links') return { data: links, error: null };
+    if (name === 'can_search_people') return { data: false, error: null };
     return { data: [], error: null };
   });
   return render(
@@ -81,5 +82,16 @@ describe('vehicle owner panel person hand-off', () => {
     renderPanel([link({ details_visible: false, display_name: null })]);
     expect(await screen.findByText('Owner identified')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Open notices and person record/ })).toBeNull();
+  });
+
+  it('opens the officer person route only after explicit person authorization', async () => {
+    auth.profile.role = 'officer';
+    renderPanel([link()]);
+    const original = rpc.getMockImplementation();
+    rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'can_search_people'
+      ? Promise.resolve({ data: true, error: null }) : original?.(name, ...args));
+    fireEvent(window, new Event('focus'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open notices and person record for Test Owner' }));
+    expect(screen.getByTestId('location').textContent).toBe('/officer/person_search?person=person-1');
   });
 });

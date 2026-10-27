@@ -11,6 +11,34 @@
 > Sits BELOW `FOUNDATION.md` and `docs/ACCESS_DOCTRINE.md` (the principle layer)
 > and BELOW them in authority; it is the executable expression of that doctrine.
 
+## Owner ruling 2026-10-27: operational person lookup and private contacts
+
+Field officers may search people to check trespass, warnings and permits only
+after an organisation administrator explicitly authorises them. The
+`person_search` area uses the existing staff grant/preset matrix at the user's
+home organisation; the checkbox grants `view`, defaults off, and requires an
+audited reason for grant or removal. It supplies functional authority, not
+new tenant reach: every result still requires existing organisation access.
+Inherited preset/ancestor grants and role access must be explained, not falsely
+reported as revoked when only a direct checkbox is removed.
+
+This permission is separate from `vehicle_owner_identity` (NZTA). It confers
+neither NZTA rights nor identity editing. An inactive account has no lookup
+authority. Person search in the officer portal is read-only; the bulk notice
+review queue remains an operations-office workflow.
+
+The owner explicitly confirmed that personal addresses and contact details
+remain with **Admin, Admin officer, Master and Grand Master**, within their
+authorised organisations, across **both Person and Vehicle lookup**, even
+when a field officer has NZTA authorisation. This supersedes older rulings
+allowing owner locality/address disclosure to non-administrators. Enforce it
+in RPCs, projections and raw-record access, not just presentation. Permit
+holders and vehicle owners remain distinct identities and relationships.
+
+Vehicle search is a shared operational registry workflow, available to admins
+independently of parking or freedom-camping subscriptions. This is not a grant
+of platform powers or cross-tenant Master access.
+
 ## 0. The re-founding — accountable service, not restriction (READ FIRST)
 
 > Ruled 2026-08-01, owner + Bob. This is a CONSTITUTIONAL CORRECTION to the

@@ -19,7 +19,6 @@ const AREA_MODULE_REQUIREMENTS: Partial<Record<FieldOpsSubArea, ModuleRequiremen
   'live-map': { anyOf: ['dispatch'] },
   'welfare-alerts': { anyOf: ['welfare'], safetyRelevant: true },
   'breach-review': { anyOf: ['freedom_camping', 'parking_enforcement'] },
-  'vehicle-search': { anyOf: ['freedom_camping', 'parking_enforcement'] },
   'observation-search': { anyOf: ['freedom_camping', 'parking_enforcement', 'cctv'] },
   'cctv-console': { anyOf: ['cctv'] },
   'cctv-triage': { anyOf: ['cctv'] },
