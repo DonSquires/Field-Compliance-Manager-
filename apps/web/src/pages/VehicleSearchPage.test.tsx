@@ -4,11 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import VehicleSearchPage from './VehicleSearchPage';
 
-const { from, rpc, ilike, eq, historyOr, historyResult, photoIn, storageFrom, createSignedUrls } = vi.hoisted(() => ({
+const { from, rpc, ilike, eq, historyOr, historyResult, photoIn, storageFrom, createSignedUrls, loadPermits } = vi.hoisted(() => ({
   photoIn: vi.fn(), storageFrom: vi.fn(), createSignedUrls: vi.fn(),
   from: vi.fn(), rpc: vi.fn(), ilike: vi.fn(), eq: vi.fn(), historyOr: vi.fn(), historyResult: vi.fn(),
+  loadPermits: vi.fn(),
 }));
 vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, storage: { from: storageFrom } } }));
+vi.mock('../lib/vehiclePermits', () => ({ loadVehiclePermits: loadPermits }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { organizationId: 'org', id: 'user' } }) }));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: () => null }));
 vi.mock('../components/VehicleProfile', () => ({ default: ({ summary, children }: { summary?: React.ReactNode; children?: React.ReactNode }) => <section aria-label="Vehicle profile">{summary}{children}</section> }));
@@ -17,6 +19,7 @@ describe('vehicle search candidate selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     historyResult.mockReturnValue({ data: [], error: null });
+    loadPermits.mockResolvedValue({ data: [], error: null });
     createSignedUrls.mockResolvedValue({ data: [{ path: 'org/user/photo.jpg', signedUrl: 'https://signed.test/photo.jpg', error: null }], error: null });
     storageFrom.mockReturnValue({ createSignedUrls });
     rpc.mockResolvedValue({ data: [
@@ -55,6 +58,7 @@ describe('vehicle search candidate selection', () => {
     expect(eq).toHaveBeenCalledWith('entity_id', 'vehicle-2');
     expect(historyOr).toHaveBeenCalledWith('observations', 'canonical_vehicle_id.eq.vehicle-2,plate_number_upper.eq.RJ298');
     expect(ilike).toHaveBeenCalledWith('breach_alerts', 'plate_number', 'RJ298');
+    expect(loadPermits).toHaveBeenCalledWith('RJ298');
     expect(screen.queryByRole('region', { name: 'Matching vehicles' })).toBeNull();
     fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: '%YG%4' } });
     expect(screen.getByText('RJ298', { selector: '.plate-banner' })).toBeTruthy();
