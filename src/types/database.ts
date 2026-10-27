@@ -34252,6 +34252,7 @@ export type Database = {
           permit_number: string | null
           permit_type: string | null
           status: string | null
+          validity_state: string | null
           vehicle_plates: string[] | null
         }
         Relationships: [
@@ -35545,6 +35546,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      attribute_permit_holder: {
+        Args: {
+          p_canonical_person_id: string
+          p_full_name: string
+          p_organization_id: string
+          p_permit_numbers: string[]
+          p_source_document: string
+          p_source_sha256: string
+          p_with_same_email?: boolean
+        }
+        Returns: Json
       }
       batch_publish_roster_slots: {
         Args: {
@@ -42803,6 +42816,19 @@ export type Database = {
         }
         Returns: Json
       }
+      import_person_permit: {
+        Args: {
+          p_canonical_person_id?: string
+          p_client_organization_id: string
+          p_create_holder?: boolean
+          p_organization_id: string
+          p_permit: Json
+          p_source_checked_at?: string
+          p_source_document: string
+          p_source_sha256: string
+        }
+        Returns: Json
+      }
       insert_adhoc_stop: {
         Args: {
           p_client_request_id: string
@@ -45928,6 +45954,24 @@ export type Database = {
           window_close: string
           window_open: string
         }[]
+      }
+      person_name_extends: {
+        Args: { p_full: string; p_recorded: string }
+        Returns: boolean
+      }
+      person_name_parts: { Args: { p_name: string }; Returns: string[] }
+      person_permit_compare_value: {
+        Args: { p_field: string; p_value: Json }
+        Returns: Json
+      }
+      person_permit_validity: {
+        Args: {
+          p_date_from: string
+          p_date_to: string
+          p_status: string
+          p_window_days?: number
+        }
+        Returns: string
       }
       platform_list_subscribers: {
         Args: never
