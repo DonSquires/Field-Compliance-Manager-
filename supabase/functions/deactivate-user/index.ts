@@ -66,7 +66,7 @@ serve(async (req)=>{
       }, 401);
     }
     // Get current user's profile
-    const { data: currentProfile, error: profileError } = await adminClient.from('user_profiles').select('id, organization_id, role').eq('id', user.id).single();
+    const { data: currentProfile, error: profileError } = await adminClient.from('user_profiles').select('id, organization_id, role').eq('id', user.id).is('deactivated_at', null).single();
     if (profileError || !currentProfile) {
       return json({
         error: 'User profile not found'

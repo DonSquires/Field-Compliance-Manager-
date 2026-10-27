@@ -41,6 +41,6 @@ describe('module access rule', () => {
   it('passes the safety flag through to the organisation switch', () => {
     const calls: Array<boolean | undefined> = [];
     canUseModule({ moduleKey: 'welfare', role: 'admin', moduleAccess: [], safetyRelevant: true, isModuleEnabled: (_key, options) => { calls.push(options?.safetyRelevant); return false; } });
-    expect(calls.every((flag) => flag === true)).toBe(true);
+    expect(calls).toEqual([true]);
   });
 });

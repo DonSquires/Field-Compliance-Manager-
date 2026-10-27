@@ -50,6 +50,13 @@ test('every admin grant in the parity migration also names admin_officer', () =>
   assert.doesNotMatch(migration, /\b(GRANT|REVOKE|DROP)\b/);
 });
 
+test('identity-management handlers require an active caller before granting authority', () => {
+  for (const name of ['create-user', 'deactivate-user', 'invite-org', 'resend-invite']) {
+    const source = fs.readFileSync(path.join(__dirname, `../supabase/functions/${name}/index.ts`), 'utf8');
+    assert.match(source, /const \{ data: (?:callerProfile|currentProfile)[^\n]*\.eq\('id', (?:caller|user)\.id\)\.is\('deactivated_at', null\)\.single\(\)/, name);
+  }
+});
+
 test('admin_officer resolves exactly like admin as a real database role', {
   skip: process.env.BOB_TEST_POSTGRES !== '1',
 }, async () => {
@@ -58,6 +65,7 @@ test('admin_officer resolves exactly like admin as a real database role', {
   const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const org = id(1), child = id(2), other = id(3);
   const admin = id(10), adminOfficer = id(11), officer = id(12), otherAdminOfficer = id(13), inactiveAdminOfficer = id(14);
+  const clientAdmin = id(15);
   const n = k => id(100 + k);
   const actor = user => `RESET ROLE; SELECT set_config('request.jwt.claim.sub','${user}',false); SET ROLE authenticated;`;
   const visible = ids => `(SELECT coalesce(array_agg(id ORDER BY id), '{}') FROM public.notifications) = ARRAY[${ids.map(k => `'${n(k)}'`).join(',')}]::uuid[]`;
@@ -80,8 +88,11 @@ test('admin_officer resolves exactly like admin as a real database role', {
         $f$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $f$;
       CREATE TABLE public.organizations(id uuid PRIMARY KEY,name text,parent_organization_id uuid);
       CREATE TABLE public.user_profiles(id uuid PRIMARY KEY,role text,organization_id uuid,employer_organization_id uuid,
-        authorized_organization_ids uuid[] DEFAULT '{}',deactivated_at timestamptz);
-      CREATE TABLE public.service_agreements(provider_organization_id uuid,client_organization_id uuid,ends_on date,agreement_type text);
+        authorized_organization_ids uuid[] DEFAULT '{}',deactivated_at timestamptz,display_name text);
+      CREATE TABLE public.service_agreements(id uuid PRIMARY KEY,name text,invitation_status text,
+        provider_organization_id uuid,client_organization_id uuid,ends_on date,agreement_type text);
+      CREATE TABLE public.audit_log(organization_id uuid,actor_user_id uuid,action text,target_table text,
+        target_id uuid,metadata jsonb,created_at timestamptz DEFAULT clock_timestamp());
       CREATE TABLE public.provider_client_access_grants(provider_organization_id uuid,client_organization_id uuid,ends_at timestamptz);
       CREATE FUNCTION public.get_descendant_organizations(p uuid) RETURNS uuid[] LANGUAGE sql STABLE AS $f$
         WITH RECURSIVE tree AS (SELECT id FROM public.organizations WHERE id=p UNION ALL
@@ -91,7 +102,13 @@ test('admin_officer resolves exactly like admin as a real database role', {
         SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND role='grand_master' AND deactivated_at IS NULL) $f$;
       ${catalogFunction('current_user_role')}
       ${catalogFunction('org_access_allowed')}
-      CREATE TABLE public.notifications(id uuid PRIMARY KEY,organization_id uuid,recipient_user_id uuid,recipient_role text,read_at timestamptz);
+      CREATE TABLE public.notifications(id uuid PRIMARY KEY,organization_id uuid,recipient_user_id uuid,recipient_role text,
+        read_at timestamptz,dedup_key text);
+      CREATE FUNCTION public.enqueue_notification(p_organization_id uuid,p_category text,p_title text,p_body text,
+        p_severity text,p_recipient_user_id uuid,p_recipient_role text,p_link_page text,p_link_payload jsonb,p_dedup_key text)
+        RETURNS uuid LANGUAGE sql AS $f$
+          INSERT INTO public.notifications(id,organization_id,recipient_user_id,recipient_role,dedup_key)
+          VALUES(gen_random_uuid(),p_organization_id,p_recipient_user_id,p_recipient_role,p_dedup_key) RETURNING id $f$;
       ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
       ${catalogPolicy('notifications_select')}
       ${catalogPolicy('notifications_update')}
@@ -112,7 +129,7 @@ test('admin_officer resolves exactly like admin as a real database role', {
       INSERT INTO public.user_profiles(id,role,organization_id,deactivated_at) VALUES
         ('${admin}','admin','${org}',NULL),('${adminOfficer}','admin_officer','${org}',NULL),
         ('${officer}','officer','${org}',NULL),('${otherAdminOfficer}','admin_officer','${other}',NULL),
-        ('${inactiveAdminOfficer}','admin_officer','${org}',now());
+        ('${inactiveAdminOfficer}','admin_officer','${org}',now()),('${clientAdmin}','client_admin','${other}',NULL);
       INSERT INTO public.notifications(id,organization_id,recipient_user_id,recipient_role) VALUES
         ('${n(1)}','${org}',NULL,'admin'),('${n(2)}','${org}',NULL,'officer'),('${n(3)}','${org}',NULL,'admin_officer'),
         ('${n(4)}','${other}',NULL,'admin'),('${n(5)}','${org}','${adminOfficer}',NULL);
@@ -151,6 +168,18 @@ test('admin_officer resolves exactly like admin as a real database role', {
       SELECT pg_temp.check(NOT public.is_admin_for_org('${org}'),'deactivated admin officer refused');
       SELECT pg_temp.check(NOT public.org_access_allowed('${child}'),'deactivated admin officer has no reach');
       RESET ROLE;
+
+      ${[adminOfficer, inactiveAdminOfficer].map((inviter, i) => `
+        INSERT INTO public.service_agreements(id,name,invitation_status,provider_organization_id,client_organization_id,agreement_type)
+          VALUES('${id(200 + i)}','Client service','invited','${org}','${other}','operational');
+        INSERT INTO public.audit_log(actor_user_id,action,target_id)
+          VALUES('${inviter}','crm_client_invitation_prepared','${id(200 + i)}');
+        ${actor(clientAdmin)}
+        SELECT pg_temp.check((public.accept_client_invitation()->>'accepted')::integer=1,'client accepts invitation');
+        RESET ROLE;
+        SELECT pg_temp.check(count(*)=${i},'inactive inviter gets an active admin notification fallback')
+          FROM public.notifications WHERE dedup_key='crm_client_accepted:${id(200 + i)}:admin';
+      `).join('\n')}
     `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres'], {

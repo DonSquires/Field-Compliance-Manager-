@@ -133,7 +133,7 @@ begin
         p_dedup_key => 'crm_client_accepted:' || v_row.id::text || ':' || v_inviter::text);
     end if;
     -- the inviter already has their own row; an admin inviter would otherwise read the same news twice
-    if v_inviter is null or not exists (select 1 from public.user_profiles p where p.id = v_inviter and p.role IN ('admin', 'admin_officer')) then
+    if v_inviter is null or not exists (select 1 from public.user_profiles p where p.id = v_inviter and p.role IN ('admin', 'admin_officer') and p.deactivated_at is null) then
     perform public.enqueue_notification(
       p_organization_id => v_row.provider_organization_id, p_category => 'crm_client',
       p_title => coalesce(v_client_name, 'A client') || ' has accepted the invitation',

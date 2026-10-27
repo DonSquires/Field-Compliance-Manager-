@@ -5,8 +5,9 @@ const test = require('node:test');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/FieldOperationsPage.tsx'), 'utf8');
 
-test('FieldOperationsPage resolves the active place-first module context before loading operational counts', () => {
-  assert.match(source, /useActiveModuleContext/);
+test('FieldOperationsPage retains agreement context without a place-based module gate', () => {
+  assert.doesNotMatch(source, /useActiveModuleContext/);
+  assert.match(source, /const dispatchAvailable = dispatchEnabled;/);
   assert.match(source, /useServiceRelationships/);
   assert.match(source, /selectedAgreementZones/);
 });

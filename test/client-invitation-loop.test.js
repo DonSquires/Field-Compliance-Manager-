@@ -47,7 +47,7 @@ test('invite-org takes authority and role from resolve_org_invitation, run as th
   assert.match(inviteOrg, /p_role: role,/);
   assert.match(inviteOrg, /employer_organization_id: targetOrgId,/);
   assert.doesNotMatch(inviteOrg, /\.from\('service_agreements'\)\.select\('id, ends_on'\)/);
-  assert.match(inviteOrg, /const CAN_INVITE_ORG = \[\s*'grand_master',\s*'master',\s*'admin'\s*\];/);
+  assert.match(inviteOrg, /const CAN_INVITE_ORG = \[\s*'grand_master',\s*'master',\s*'admin',\s*'admin_officer'\s*\];/);
   // recovery stays owner-only
   assert.match(inviteOrg, /if \(callerProfile\.role !== 'grand_master'\) \{[\s\S]{0,600}'org_recovery_denied'/);
 });
@@ -98,7 +98,7 @@ test("the client's administrator manages their own people from the client portal
   assert.match(panel, /Your service provider's staff never have accounts at your organisation; they see your places through the service agreement\./);
   // the administrator cannot remove their own access from here
   assert.match(panel, /const me = person\.id === currentUserId;/);
-  assert.match(deactivate, /'admin',\s*'client_admin'\s*\];/);
+  assert.match(deactivate, /'admin',\s*'admin_officer',\s*'client_admin'\s*\];/);
   assert.match(deactivate, /if \(currentProfile\.role === 'client_admin' && !String\(targetUser\.role\)\.startsWith\('client_'\)\)/);
 });
 

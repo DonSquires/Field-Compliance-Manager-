@@ -235,7 +235,7 @@ serve(async (req)=>{
     }, 401);
     // ── 2. Get caller profile + role gate ────────────────────────────────
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, email').eq('id', caller.id).single();
+    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, email').eq('id', caller.id).is('deactivated_at', null).single();
     if (!callerProfile || !CAN_INVITE_ORG.includes(callerProfile.role)) {
       return json({
         error: 'Not authorised for this action'
