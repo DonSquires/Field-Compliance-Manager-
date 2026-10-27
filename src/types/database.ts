@@ -20005,6 +20005,364 @@ export type Database = {
           },
         ]
       }
+      nzta_access_attestations: {
+        Row: {
+          attestation_type: string
+          completed_on: string
+          created_at: string
+          expires_on: string
+          id: string
+          notes: string | null
+          organization_id: string
+          provider: string | null
+          recorded_by: string
+          user_id: string
+          withdrawn_at: string | null
+          withdrawn_by: string | null
+          withdrawn_reason: string | null
+        }
+        Insert: {
+          attestation_type: string
+          completed_on: string
+          created_at?: string
+          expires_on: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          provider?: string | null
+          recorded_by: string
+          user_id: string
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+          withdrawn_reason?: string | null
+        }
+        Update: {
+          attestation_type?: string
+          completed_on?: string
+          created_at?: string
+          expires_on?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          provider?: string | null
+          recorded_by?: string
+          user_id?: string
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+          withdrawn_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nzta_access_attestations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_access_attestations_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_access_attestations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_access_attestations_withdrawn_by_fkey"
+            columns: ["withdrawn_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nzta_access_reviews: {
+        Row: {
+          actions: string | null
+          findings: string
+          holders: Json
+          id: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          reviewed_at: string
+          reviewed_by: string
+        }
+        Insert: {
+          actions?: string | null
+          findings: string
+          holders?: Json
+          id?: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          reviewed_at?: string
+          reviewed_by: string
+        }
+        Update: {
+          actions?: string | null
+          findings?: string
+          holders?: Json
+          id?: string
+          organization_id?: string
+          period_end?: string
+          period_start?: string
+          reviewed_at?: string
+          reviewed_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nzta_access_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_access_reviews_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nzta_register_access_log: {
+        Row: {
+          actor_user_id: string
+          confidentiality_current: boolean
+          expires_at: string
+          explanation: string
+          id: string
+          lookup_id: string | null
+          notice_id: string | null
+          observation_id: string | null
+          organization_id: string
+          purpose: string
+          revealed_at: string
+          subject_id: string
+          subject_type: string
+          training_current: boolean
+        }
+        Insert: {
+          actor_user_id: string
+          confidentiality_current: boolean
+          expires_at: string
+          explanation: string
+          id?: string
+          lookup_id?: string | null
+          notice_id?: string | null
+          observation_id?: string | null
+          organization_id: string
+          purpose: string
+          revealed_at?: string
+          subject_id: string
+          subject_type: string
+          training_current: boolean
+        }
+        Update: {
+          actor_user_id?: string
+          confidentiality_current?: boolean
+          expires_at?: string
+          explanation?: string
+          id?: string
+          lookup_id?: string | null
+          notice_id?: string | null
+          observation_id?: string | null
+          organization_id?: string
+          purpose?: string
+          revealed_at?: string
+          subject_id?: string
+          subject_type?: string
+          training_current?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nzta_register_access_log_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_access_log_lookup_id_fkey"
+            columns: ["lookup_id"]
+            isOneToOne: false
+            referencedRelation: "nzta_register_lookups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_access_log_notice_id_fkey"
+            columns: ["notice_id"]
+            isOneToOne: false
+            referencedRelation: "notices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_access_log_observation_id_fkey"
+            columns: ["observation_id"]
+            isOneToOne: false
+            referencedRelation: "observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_access_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nzta_register_lookups: {
+        Row: {
+          canonical_vehicle_id: string | null
+          created_at: string
+          created_by: string
+          evidence_item_id: string | null
+          explanation: string
+          id: string
+          location_id: string | null
+          looked_up_at: string
+          motochek_user: string
+          notice_id: string | null
+          observation_id: string | null
+          organization_id: string
+          outcome: string
+          outcome_notes: string | null
+          outcome_recorded_at: string | null
+          outcome_recorded_by: string | null
+          plate_number: string | null
+          purpose: string
+          updated_at: string
+          vehicle_identity_check_id: string | null
+          vin: string | null
+        }
+        Insert: {
+          canonical_vehicle_id?: string | null
+          created_at?: string
+          created_by: string
+          evidence_item_id?: string | null
+          explanation: string
+          id?: string
+          location_id?: string | null
+          looked_up_at: string
+          motochek_user: string
+          notice_id?: string | null
+          observation_id?: string | null
+          organization_id: string
+          outcome?: string
+          outcome_notes?: string | null
+          outcome_recorded_at?: string | null
+          outcome_recorded_by?: string | null
+          plate_number?: string | null
+          purpose: string
+          updated_at?: string
+          vehicle_identity_check_id?: string | null
+          vin?: string | null
+        }
+        Update: {
+          canonical_vehicle_id?: string | null
+          created_at?: string
+          created_by?: string
+          evidence_item_id?: string | null
+          explanation?: string
+          id?: string
+          location_id?: string | null
+          looked_up_at?: string
+          motochek_user?: string
+          notice_id?: string | null
+          observation_id?: string | null
+          organization_id?: string
+          outcome?: string
+          outcome_notes?: string | null
+          outcome_recorded_at?: string | null
+          outcome_recorded_by?: string | null
+          plate_number?: string | null
+          purpose?: string
+          updated_at?: string
+          vehicle_identity_check_id?: string | null
+          vin?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nzta_register_lookups_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_notice_id_fkey"
+            columns: ["notice_id"]
+            isOneToOne: false
+            referencedRelation: "notices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_observation_id_fkey"
+            columns: ["observation_id"]
+            isOneToOne: false
+            referencedRelation: "observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_outcome_recorded_by_fkey"
+            columns: ["outcome_recorded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nzta_register_lookups_vehicle_identity_check_id_fkey"
+            columns: ["vehicle_identity_check_id"]
+            isOneToOne: false
+            referencedRelation: "vehicle_identity_checks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       obligation_proof_artifacts: {
         Row: {
           artifact_type: string
@@ -42324,6 +42682,22 @@ export type Database = {
         Args: { p_limit?: number; p_offset?: number; p_search?: string }
         Returns: Json
       }
+      get_nzta_access_holders: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_nzta_reveal_seconds_remaining: {
+        Args: {
+          p_organization_id?: string
+          p_subject_id: string
+          p_subject_type: string
+        }
+        Returns: number
+      }
+      get_nzta_s241_summary: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: Json
+      }
       get_observation_annotations: {
         Args: { p_observation_ids: string[] }
         Returns: {
@@ -42665,6 +43039,7 @@ export type Database = {
           identity_document_id: string
           person_record_id: string
           relationship: string
+          revealed: boolean
           reviewed_at: string
           source_authority: string
           storage_bucket: string
@@ -42979,6 +43354,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      link_nzta_register_lookup_check: {
+        Args: { p_check_id: string; p_lookup_id: string; p_reason: string }
+        Returns: undefined
+      }
       link_observation_entities: {
         Args: {
           p_canonical_vehicle_id?: string
@@ -43081,6 +43460,73 @@ export type Database = {
           id: string
           organization_id: string
           role: string
+        }[]
+      }
+      list_nzta_access_reviews: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      list_nzta_follow_up_notices: {
+        Args: {
+          p_organization_id?: string
+          p_subject_id: string
+          p_subject_type: string
+        }
+        Returns: {
+          issued_at: string
+          notice_id: string
+          notice_number: string
+          notice_type: string
+          organization_id: string
+        }[]
+      }
+      list_nzta_register_access_log: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_organization_id: string
+          p_to?: string
+        }
+        Returns: {
+          actor_name: string
+          confidentiality_current: boolean
+          expires_at: string
+          explanation: string
+          log_id: string
+          lookup_id: string
+          notice_number: string
+          purpose: string
+          revealed_at: string
+          subject_label: string
+          subject_type: string
+          training_current: boolean
+        }[]
+      }
+      list_nzta_register_lookups: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_organization_id: string
+          p_to?: string
+        }
+        Returns: {
+          can_edit: boolean
+          entry_id: string
+          entry_kind: string
+          explanation: string
+          looked_up_at: string
+          motochek_user: string
+          notice_number: string
+          observation_id: string
+          outcome: string
+          outcome_notes: string
+          place_name: string
+          plate_number: string
+          purpose: string
+          recorded_at: string
+          recorded_by_name: string
+          vehicle_identity_check_id: string
+          vin: string
         }[]
       }
       list_person_subject_history_for_agreement: {
@@ -45783,6 +46229,42 @@ export type Database = {
         Args: { p_expires_at: string; p_status: string; p_window_days?: number }
         Returns: string
       }
+      nzta_access_readiness: {
+        Args: { p_organization_id: string; p_user_id: string }
+        Returns: Json
+      }
+      nzta_attachment_restricted: {
+        Args: { p_attachment_id: string }
+        Returns: boolean
+      }
+      nzta_document_restricted: {
+        Args: { p_document_id: string }
+        Returns: boolean
+      }
+      nzta_evidence_restricted: {
+        Args: { p_evidence_item_id: string }
+        Returns: boolean
+      }
+      nzta_notice_matches_subject: {
+        Args: {
+          p_notice_id: string
+          p_subject_id: string
+          p_subject_type: string
+        }
+        Returns: boolean
+      }
+      nzta_reveal_active: {
+        Args: {
+          p_organization_ids: string[]
+          p_subject_id: string
+          p_subject_type: string
+        }
+        Returns: boolean
+      }
+      nzta_storage_object_restricted: {
+        Args: { p_bucket: string; p_name: string }
+        Returns: boolean
+      }
       observation_search_text: {
         Args: {
           p_colour: string
@@ -47184,6 +47666,45 @@ export type Database = {
         Args: { p_assessment_id: string; p_classification: Json }
         Returns: Json
       }
+      record_nzta_access_attestation: {
+        Args: {
+          p_attestation_type: string
+          p_completed_on: string
+          p_expires_on?: string
+          p_notes?: string
+          p_organization_id?: string
+          p_provider?: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      record_nzta_access_review: {
+        Args: {
+          p_actions?: string
+          p_findings: string
+          p_organization_id: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: string
+      }
+      record_nzta_register_lookup: {
+        Args: {
+          p_evidence_item_id?: string
+          p_explanation: string
+          p_location_id?: string
+          p_looked_up_at: string
+          p_motochek_user: string
+          p_notice_id?: string
+          p_observation_id?: string
+          p_organization_id: string
+          p_plate_number: string
+          p_purpose: string
+          p_vehicle_identity_check_id?: string
+          p_vin: string
+        }
+        Returns: string
+      }
       record_observation_person_mention: {
         Args: {
           p_basis?: string
@@ -48423,6 +48944,19 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      reveal_nzta_registered_person: {
+        Args: {
+          p_explanation: string
+          p_lookup_id?: string
+          p_notice_id?: string
+          p_observation_id?: string
+          p_organization_id?: string
+          p_purpose: string
+          p_subject_id: string
+          p_subject_type: string
+        }
+        Returns: Json
       }
       review_biosecurity_photo_classification: {
         Args: {
@@ -49696,6 +50230,15 @@ export type Database = {
           place_created: boolean
           protected_party_recorded: boolean
         }[]
+      }
+      set_nzta_register_lookup_outcome: {
+        Args: {
+          p_lookup_id: string
+          p_notes?: string
+          p_notice_id?: string
+          p_outcome: string
+        }
+        Returns: undefined
       }
       set_operating_branch_module: {
         Args: {
@@ -51824,6 +52367,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      withdraw_nzta_access_attestation: {
+        Args: { p_attestation_id: string; p_reason: string }
+        Returns: undefined
       }
       workshop_actor_org: {
         Args: { p_organization_id: string }
