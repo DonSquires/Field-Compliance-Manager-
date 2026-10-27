@@ -684,3 +684,32 @@ published/sent packs, never drafts. Portal-delivered packs refuse duplicate
 email delivery; email packs require explicit publication; sent packs remain
 immutable. Reviewed editorial content is used by PDF and email renderers. Truth
 table: `supabase/tests/20260926010000_report_pack_review_and_delivery.sql`.
+
+### 2026-10-27 — Permit holders are people, and one permit card serves every surface (Don Squires)
+
+> "I just added xlsx file you can use to enrich person records and vehicle
+> numberplates."
+
+**Build status (migration `20261101110000`, pending live application).** The
+OFO "Permit Extract" workbook is the source of truth for the 112 forest-access
+permits it contains. A new admin-only, audited `import_person_permit` RPC fills
+blank permit, person-contact and vehicle fields from that workbook and inserts
+permits that are not yet recorded. It never replaces a recorded value, never
+changes a permit's holder, and refuses a holder whose email is already used by
+a differently named canonical person. Those rows are held for review, not
+merged. Replays are no-ops.
+
+Permit validity is derived, not typed: `person_permit_validity` reads status
+and the NZ calendar date. A finishing date is inclusive. The states are
+revoked, suspended, expired, not started, dates not recorded, expiring within
+30 days, and valid. `person_permits_fieldwork` exposes it as `validity_state`.
+`search_people` now finds a person by an exact permit number and returns their
+permits with linked vehicles. Firearm licence numbers stay in the locked base
+table and are never returned to field users.
+
+The Person, Vehicle and Officer vehicle lookup pages all render the same
+`PermitAccessCard`. A permit's holder is shown as the permit holder, never as
+the vehicle's owner: NZTA ownership remains the owner record. The TPFL
+workbook is a forest-area catalogue only, and the employee sheet is not
+imported. Truth table:
+`test/permit-holder-person-search-migration.test.js`.

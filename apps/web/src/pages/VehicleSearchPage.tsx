@@ -13,8 +13,9 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
+import { PermitAccessCard } from '../components/PermitAccessCard';
 import VehicleProfile from '../components/VehicleProfile';
 import { ObservationIndicators, useObservationAnnotations } from '../components/ObservationIndicators';
 import { RecordUpdatesPanel } from '../components/RecordUpdatesPanel';
@@ -28,6 +29,9 @@ import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalId
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
 import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
+import { canAccessFieldOpsArea } from '../lib/fieldOpsAreaAccess';
+import type { PermitSummary } from '../lib/permits';
+import { loadVehiclePermits } from '../lib/vehiclePermits';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './VehicleSearchPage.css';
@@ -119,22 +123,10 @@ interface VehicleBreach {
   zone_name: string | null;
 }
 
-interface PermitRecord {
-  id: string;
-  holder_name: string | null;
-  permit_number: string;
-  permit_type: string | null;
-  forest_areas: string[] | null;
-  date_from: string | null;
-  date_to: string | null;
-  status: string;
-  firearm_licence_valid: boolean | null;
-  conditions: string | null;
-  vehicle_plates: string[] | null;
-}
-
 const VehicleSearchPage: React.FC = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
+  const canOpenPersonSearch = canAccessFieldOpsArea('person-search', () => true, profile?.role);
   const [searchParams] = useSearchParams();
   const isPopout = searchParams.get('popout') === '1';
   const [plate, setPlate] = useState('');
@@ -151,7 +143,7 @@ const VehicleSearchPage: React.FC = () => {
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(observations.map((obs) => obs.id));
   const selectedObservation = observations.find((obs) => obs.id === selectedObservationId) ?? null;
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
-  const [permits, setPermits] = useState<PermitRecord[]>([]);
+  const [permits, setPermits] = useState<PermitSummary[]>([]);
   const [searched, setSearched] = useState(false);
   const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
   const [observationPhotos, setObservationPhotos] = useState<Record<string, string>>({});
@@ -234,11 +226,7 @@ const VehicleSearchPage: React.FC = () => {
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', resolvedPlate)
           .maybeSingle(),
-        supabase
-          .from('person_permits_fieldwork')
-          .select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions, vehicle_plates')
-          .contains('vehicle_plates', [resolvedPlate])
-          .order('date_to', { ascending: false }),
+        loadVehiclePermits(resolvedPlate),
         supabase
           .from('observations')
           .select('id, organization_id, observed_at, is_compliant, compliance_reason, compliance_status, nights_this_zone, plate_number, module_key, vehicle_make, vehicle_model, vehicle_colour, photo_url, zone:zone_id(name)')
@@ -266,7 +254,7 @@ const VehicleSearchPage: React.FC = () => {
       }
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
-      setPermits((permitRes.data as PermitRecord[]) || []);
+      setPermits(permitRes.data);
 
       setObservations(
         ((obsRes.data as any[]) || []).map((row) => ({
@@ -787,48 +775,28 @@ const VehicleSearchPage: React.FC = () => {
 
               {/* Forest / Site Access Permits */}
               {permits.length > 0 && (
-                <div className="contact-card">
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Forest / Site Access Permits ({permits.length})</h3>
-                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
-                    {permits.map((p) => (
-                      <div
-                        key={p.id}
-                        style={{
-                          background: 'var(--color-bg-primary)',
-                          border: p.status === 'active' ? '1px solid var(--color-success)' : '1px solid var(--color-border)',
-                          padding: '10px 14px',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
-                          <div>
-                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
-                              Permit #{p.permit_number} {p.permit_type ? `· ${p.permit_type}` : ''}
-                            </div>
-                            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                              {p.holder_name || 'Holder not recorded'}
-                              {p.forest_areas && p.forest_areas.length > 0 ? ` · ${p.forest_areas.join(', ')}` : ''}
-                            </div>
-                            {(p.date_from || p.date_to) && (
-                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                                Valid {p.date_from ? new Date(p.date_from).toLocaleDateString() : '?'} – {p.date_to ? new Date(p.date_to).toLocaleDateString() : 'no end date'}
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            <span className={`badge ${p.status === 'active' ? 'badge-success' : p.status === 'expired' ? 'badge-warning' : 'badge-danger'}`}>
-                              {p.status.toUpperCase()}
-                            </span>
-                            {p.firearm_licence_valid === false && <span className="badge badge-danger">NO VALID FIREARMS LICENCE</span>}
-                          </div>
-                        </div>
-                        {p.conditions && (
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px', whiteSpace: 'pre-wrap' }}>{p.conditions}</div>
-                        )}
-                      </div>
+                <section className="contact-card" aria-labelledby="vehicle-permits-title">
+                  <h3 id="vehicle-permits-title" style={{ margin: '0 0 4px 0', fontSize: '15px' }}>Forest and site access permits ({permits.length})</h3>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                    The holder is the person named on the permit, which is not evidence of who owns this vehicle.
+                  </p>
+                  <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                    {permits.map((permit) => (
+                      <PermitAccessCard
+                        key={permit.id}
+                        permit={permit}
+                        showHolder
+                        currentPlate={selectedPlate}
+                        onOpenPerson={canOpenPersonSearch ? (holder) => {
+                          if (!holder.canonical_person_id) return;
+                          navigate(`/admin/field-ops?area=person-search&person=${encodeURIComponent(holder.canonical_person_id)}`, {
+                            state: { personQuery: holder.holder_name ?? undefined },
+                          });
+                        } : undefined}
+                      />
                     ))}
                   </div>
-                </div>
+                </section>
               )}
 
               {/* Recent Observations Timeline */}

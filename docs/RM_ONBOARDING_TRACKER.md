@@ -1215,6 +1215,21 @@ node services\document-source-worker\reconcile-plan.mjs `
 - 141 real forest-access permits imported from OFO's live RAMS export (92
   vehicle links, 125 canonical people), surfaced in `OfficerVehicleLookupPage`
   and `VehicleSearchPage`.
+- **OFO permit workbook enrichment** (2026-10-27, migration
+  `20261101110000`; built, applying through the release lane). The OFO
+  "Permit Extract" workbook has 112 permits, all with start and finish dates;
+  85 list 92 vehicles. `scripts/enrich-ofo-permits.mjs` sends each permit
+  through the audited, fill-only `import_person_permit` RPC: blanks are
+  filled, recorded values are kept, holders are never changed, and a holder
+  whose email belongs to a differently named person is held for review. One
+  vehicle cell written as free text could not be parsed into plates and is
+  left for manual entry. "Keys issued" is recorded as yes/no. Firearm licence
+  numbers go only to the locked base table. Permits that exist only in the
+  earlier RAMS CSV have no dates, so they show "Dates not recorded". The TPFL
+  workbook is a forest-area catalogue and the employee sheet is not imported.
+  Person search now finds permit holders, including by exact permit number,
+  and shows their permits; the Person, Vehicle and Officer lookup pages share
+  one permit card. A permit holder is never shown as a vehicle's owner.
 - Dispatch-job vehicle travel cost bridged into `finance_service_costs` (was
   previously fully disconnected from the P&L pipeline) + a "compare contract
   price to actual cost" action in `FinanceControlPanel`.
