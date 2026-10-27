@@ -195,6 +195,14 @@ function summarizeHumanTest(result) {
   return summary;
 }
 
+// The live runner prints one preflight verdict per deployment check; the worst one stands, so a
+// run that could not confirm what production serves is never mistaken for an application verdict.
+function humanTestDeploymentPreflight(result) {
+  const output = `${result?.stdout || ''}\n${result?.stderr || ''}`;
+  const outcomes = new Set([...output.matchAll(/\[HUMAN DEPLOYMENT PREFLIGHT\] result=(matched|stale|unavailable|unverified)\b/g)].map((match) => match[1]));
+  return ['unavailable', 'stale', 'unverified', 'matched'].find((outcome) => outcomes.has(outcome)) ?? null;
+}
+
 function redact(value) {
   return value
     .replace(/authorization\s*[:=]\s*Bearer\s+[^\s,;]+/gi, 'authorization=[REDACTED]')
@@ -202,4 +210,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, prepareWorkerMounts, hostPath, redact, summarizeHumanTest, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, prepareWorkerMounts, hostPath, redact, summarizeHumanTest, humanTestDeploymentPreflight, workerCommand };

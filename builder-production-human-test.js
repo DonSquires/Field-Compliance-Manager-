@@ -8,6 +8,8 @@
 const SHA_RE = /^[a-f0-9]{40}$/i;
 const INFRASTRUCTURE_EXIT_CODES = new Set([125, 126, 127, 137, 143]);
 const TERMINAL = new Set(['passed', 'failed', 'gave_up', 'superseded']);
+const UNCONFIRMED_PREFLIGHT = new Set(['unavailable', 'stale', 'unverified']);
+const DEFAULT_RETAINED_VERDICTS = 50;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RELEASE_GRACE_MS = 30 * 60 * 1000;
 
@@ -15,36 +17,56 @@ function clip(value, maximum = 300) {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').slice(0, maximum);
 }
 
-// The newest production deployment is what the production alias moves to. Only a READY newest
-// deployment is settled: while one builds (or after one failed) the live preflight would see a stale
-// SHA and report a deployment mismatch rather than the application's behaviour.
-async function resolveVercelProductionDeployment({ token, projectId, teamId, fetchImpl = globalThis.fetch }) {
+const IN_PROGRESS_STATES = new Set(['BUILDING', 'INITIALIZING', 'QUEUED']);
+
+function deploymentCommitSha(deployment) {
+  return String(deployment?.meta?.githubCommitSha || deployment?.gitSource?.sha || '').toLowerCase();
+}
+
+// What a person is served is the deployment the production hostname is aliased to, not merely the
+// newest production deployment (a newer one may have failed or been cancelled). While a newer
+// production deployment is still building, nothing is settled: the alias is about to move.
+async function resolveVercelProductionDeployment({ token, projectId, teamId, targetUrl, fetchImpl = globalThis.fetch }) {
   if (!token || !projectId || typeof fetchImpl !== 'function') return { status: 'unconfigured' };
-  const query = new URLSearchParams({ projectId, target: 'production', limit: '5' });
-  if (teamId) query.set('teamId', teamId);
-  let response;
-  try {
-    response = await fetchImpl(`https://api.vercel.com/v6/deployments?${query}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch (error) {
-    return { status: 'unavailable', error: clip(`Vercel deployment lookup failed: ${error instanceof Error ? error.message : error}`) };
+  let hostname;
+  try { hostname = new URL(targetUrl).hostname; } catch { return { status: 'unconfigured' }; }
+  const headers = { Authorization: `Bearer ${token}` };
+  const get = async (url) => {
+    try {
+      const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20_000) });
+      return { response, body: response.ok ? await response.json().catch(() => ({})) : null };
+    } catch (error) {
+      return { error: clip(`Vercel deployment lookup failed: ${error instanceof Error ? error.message : error}`) };
+    }
+  };
+  const listQuery = new URLSearchParams({ projectId, target: 'production', limit: '5' });
+  if (teamId) listQuery.set('teamId', teamId);
+  const listed = await get(`https://api.vercel.com/v6/deployments?${listQuery}`);
+  if (listed.error) return { status: 'unavailable', error: listed.error };
+  if (!listed.response.ok) return { status: 'unavailable', error: `Vercel deployment lookup returned HTTP ${listed.response.status}` };
+  const newest = Array.isArray(listed.body?.deployments) ? listed.body.deployments[0] : null;
+  const newestState = String(newest?.state || newest?.readyState || '').toUpperCase();
+  if (IN_PROGRESS_STATES.has(newestState)) {
+    const sha = deploymentCommitSha(newest);
+    return { status: 'settling', state: newestState, sha: SHA_RE.test(sha) ? sha : null };
   }
-  if (!response.ok) return { status: 'unavailable', error: `Vercel deployment lookup returned HTTP ${response.status}` };
-  const body = await response.json().catch(() => ({}));
-  const newest = Array.isArray(body?.deployments) ? body.deployments[0] : null;
-  if (!newest) return { status: 'unavailable', error: 'Vercel returned no production deployment' };
-  const state = String(newest.state || newest.readyState || '').toUpperCase();
-  const sha = String(newest.meta?.githubCommitSha || newest.gitSource?.sha || '').toLowerCase();
+  const aliasQuery = new URLSearchParams();
+  if (teamId) aliasQuery.set('teamId', teamId);
+  const served = await get(`https://api.vercel.com/v13/deployments/${encodeURIComponent(hostname)}?${aliasQuery}`);
+  if (served.error) return { status: 'unavailable', error: served.error };
+  if (!served.response.ok) return { status: 'unavailable', error: `Vercel alias lookup for ${hostname} returned HTTP ${served.response.status}` };
+  const deployment = served.body || {};
+  if (deployment.projectId !== projectId) return { status: 'unavailable', error: `${hostname} is not served by the configured Vercel project` };
+  const state = String(deployment.readyState || deployment.state || '').toUpperCase();
+  const sha = deploymentCommitSha(deployment);
   if (state !== 'READY') return { status: 'settling', state: state || 'UNKNOWN', sha: SHA_RE.test(sha) ? sha : null };
   if (!SHA_RE.test(sha)) return { status: 'unavailable', error: 'Production deployment has no Git commit SHA' };
   return {
     status: 'ready',
     sha,
-    ref: typeof newest.meta?.githubCommitRef === 'string' ? newest.meta.githubCommitRef : null,
-    deployment_id: newest.uid || newest.id || null,
-    ready_at: Number.isFinite(Number(newest.ready)) ? new Date(Number(newest.ready)).toISOString() : null,
+    ref: typeof deployment.meta?.githubCommitRef === 'string' ? deployment.meta.githubCommitRef : null,
+    deployment_id: deployment.uid || deployment.id || null,
+    ready_at: Number.isFinite(Number(deployment.ready)) ? new Date(Number(deployment.ready)).toISOString() : null,
   };
 }
 
@@ -54,6 +76,10 @@ function classifyRun(run) {
   if (run.status === 'interrupted') return { outcome: 'infrastructure', error: clip(run.error || 'run was interrupted') };
   if (run.status === 'timeout') return { outcome: 'infrastructure', error: 'run timed out' };
   const failedPhase = Array.isArray(run.phases) ? run.phases.find((phase) => phase.status !== 'succeeded') : null;
+  // The live preflight could not confirm production serves this SHA: the walk is not evidence about it.
+  if (failedPhase?.mode === 'live' && UNCONFIRMED_PREFLIGHT.has(failedPhase.deployment_preflight)) {
+    return { outcome: 'infrastructure', error: `live deployment preflight was ${failedPhase.deployment_preflight}` };
+  }
   const exitCode = Number.isInteger(failedPhase?.exit_code) ? failedPhase.exit_code : run.exit_code;
   if (!failedPhase || !Number.isInteger(exitCode) || exitCode === 0 || INFRASTRUCTURE_EXIT_CODES.has(exitCode)) {
     return { outcome: 'infrastructure', error: clip(run.error || `worker infrastructure exited ${exitCode ?? 'without a code'}`) };
@@ -80,15 +106,16 @@ function createProductionHumanTestMonitor({
   const iso = () => new Date(now()).toISOString();
   const observe = (observation) => { lastObservation = { ...observation, observed_at: iso() }; return observation; };
 
-  // A run whose deployment was replaced mid-walk fails the live preflight as "stale"; that is a
-  // superseded verdict, not an application failure, and the newer SHA gets its own run.
-  async function settle(state, run, productionSha) {
+  // Production moved to another SHA while this one was walked: whatever the walk saw, part of it may
+  // have been the newer deployment, so the verdict is superseded (never passed or failed) and the
+  // newer SHA gets its own run. Only a confirmed READY production SHA can supersede.
+  async function settle(state, run, readyProductionSha) {
     const verdict = classifyRun(run);
     const summary = run?.summary || null;
-    const superseded = Boolean(productionSha) && productionSha !== state.sha;
+    const superseded = Boolean(readyProductionSha) && readyProductionSha !== state.sha;
     let next;
-    if (verdict.outcome === 'passed') next = { ...state, status: 'passed', completed_at: iso(), summary };
-    else if (superseded) next = { ...state, status: 'superseded', completed_at: iso(), summary, superseded_by: productionSha, error: verdict.error ?? null };
+    if (superseded) next = { ...state, status: 'superseded', completed_at: iso(), summary, superseded_by: readyProductionSha, run_outcome: verdict.outcome, error: verdict.error ?? null };
+    else if (verdict.outcome === 'passed') next = { ...state, status: 'passed', completed_at: iso(), summary };
     else if (verdict.outcome === 'failed') next = { ...state, status: 'failed', completed_at: iso(), summary, failed_phase: verdict.failed_phase, exit_code: verdict.exit_code };
     else next = { ...state, status: state.attempts >= maxAttempts ? 'gave_up' : 'retry', completed_at: iso(), error: verdict.error };
     await writeState(next);
@@ -96,14 +123,14 @@ function createProductionHumanTestMonitor({
     return { sha: next.sha, outcome: next.status, run_id: next.run_id };
   }
 
-  async function settleFinishedRuns(productionSha) {
+  async function settleFinishedRuns(readyProductionSha) {
     let current = null;
     for (const state of await listStates()) {
       if (state?.status !== 'running' || !state.run_id) continue;
       const run = await getRun(state.run_id);
       if (run && (run.status === 'queued' || run.status === 'running')) continue;
-      const settled = await settle(state, run, productionSha);
-      if (state.sha === productionSha) current = settled;
+      const settled = await settle(state, run, readyProductionSha);
+      if (readyProductionSha && state.sha === readyProductionSha) current = settled;
     }
     return current;
   }
@@ -113,7 +140,7 @@ function createProductionHumanTestMonitor({
     inFlight = true;
     try {
       const production = await resolveProduction();
-      const settledCurrent = await settleFinishedRuns(production?.sha || null);
+      const settledCurrent = await settleFinishedRuns(production?.status === 'ready' ? production.sha : null);
       if (settledCurrent) return observe(settledCurrent);
       if (production?.status !== 'ready') {
         return observe({ outcome: 'waiting_for_deployment', reason: production?.status || 'unknown', state: production?.state, error: production?.error });
@@ -143,14 +170,25 @@ function createProductionHumanTestMonitor({
       const idle = await isIdle();
       if (!idle?.idle) return observe({ sha, outcome: 'waiting_for_idle', reason: idle?.reason || 'runtime busy' });
 
+      // Persist the attempt before launching, so a crash between launch and recording the run id
+      // still counts it and the retry budget stays bounded across control-plane restarts.
+      const previous = state;
+      if (Number(state.attempts || 0) >= maxAttempts) {
+        state = { ...state, status: 'gave_up', completed_at: iso(), error: state.error || 'retry budget exhausted; the last start was interrupted' };
+        await writeState(state);
+        log({ sha, outcome: state.status, error: state.error });
+        return observe({ sha, outcome: state.status, error: state.error });
+      }
       const attempts = Number(state.attempts || 0) + 1;
+      state = { ...state, status: 'starting', attempts, starting_at: iso() };
+      await writeState(state);
       let started;
       try {
         started = await startRun({ sha });
       } catch (error) {
         const detail = clip(error instanceof Error ? error.message : error);
         if (error?.status === 409) {
-          state = { ...state, status: 'pending', waiting_reason: detail };
+          state = { ...previous, status: 'pending', waiting_reason: detail };
           await writeState(state);
           return observe({ sha, outcome: 'waiting_for_source', reason: detail });
         }
@@ -159,7 +197,10 @@ function createProductionHumanTestMonitor({
         log({ sha, outcome: state.status, error: detail });
         return observe({ sha, outcome: state.status, error: detail });
       }
-      if (started?.existing) return observe({ sha, outcome: 'waiting_for_active_run', run_id: started.run?.id ?? null });
+      if (started?.existing) {
+        await writeState(previous);
+        return observe({ sha, outcome: 'waiting_for_active_run', run_id: started.run?.id ?? null });
+      }
       state = {
         ...state,
         status: 'running',
@@ -186,8 +227,18 @@ function createProductionHumanTestMonitor({
   return { tick, lastObservation: () => lastObservation };
 }
 
+// Which verdicts to forget: only terminal ones beyond the newest `keep`. A pending, starting,
+// running, or retrying SHA is never evicted, or its run and retry budget would be lost.
+function evictableProductionStates(states, keep = DEFAULT_RETAINED_VERDICTS) {
+  return [...states]
+    .filter((state) => TERMINAL.has(state?.status))
+    .sort((left, right) => String(right.first_seen_at).localeCompare(String(left.first_seen_at)))
+    .slice(keep);
+}
+
 module.exports = {
   createProductionHumanTestMonitor,
+  evictableProductionStates,
   resolveVercelProductionDeployment,
   classifyRun,
   DEFAULT_MAX_ATTEMPTS,

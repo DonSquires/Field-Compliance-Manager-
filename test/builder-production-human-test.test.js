@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createProductionHumanTestMonitor, resolveVercelProductionDeployment, classifyRun } = require('../builder-production-human-test');
+const { createProductionHumanTestMonitor, evictableProductionStates, resolveVercelProductionDeployment, classifyRun } = require('../builder-production-human-test');
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -35,17 +35,26 @@ function harness({ production = { status: 'ready', sha: SHA_A }, releasedSha = S
   return { monitor, context };
 }
 
-test('the Vercel resolver only treats a READY newest production deployment as settled', async () => {
+test('the Vercel resolver settles on the deployment the production alias serves', async () => {
   const calls = [];
-  const fetchImpl = (body, status = 200) => async (url, options) => {
+  const routed = (routes) => async (url, options) => {
     calls.push({ url, options });
+    const key = Object.keys(routes).find((prefix) => url.startsWith(prefix));
+    const [status, body] = key ? routes[key] : [404, {}];
     return { ok: status === 200, status, json: async () => body };
   };
-  assert.deepEqual(await resolveVercelProductionDeployment({ token: '', projectId: 'p' }), { status: 'unconfigured' });
+  const LIST = 'https://api.vercel.com/v6/deployments';
+  const ALIAS = 'https://api.vercel.com/v13/deployments/www.example.test';
+  const base = { token: 'secret-token', projectId: 'prj', targetUrl: 'https://www.example.test' };
+  assert.deepEqual(await resolveVercelProductionDeployment({ token: '', projectId: 'p', targetUrl: base.targetUrl }), { status: 'unconfigured' });
+  assert.deepEqual(await resolveVercelProductionDeployment({ token: 't', projectId: 'p' }), { status: 'unconfigured' });
 
   const ready = await resolveVercelProductionDeployment({
-    token: 'secret-token', projectId: 'prj', teamId: 'team',
-    fetchImpl: fetchImpl({ deployments: [{ uid: 'dpl_1', state: 'READY', ready: 1_800_000_000_000, meta: { githubCommitSha: SHA_A.toUpperCase(), githubCommitRef: 'main' } }] }),
+    ...base, teamId: 'team',
+    fetchImpl: routed({
+      [LIST]: [200, { deployments: [{ state: 'READY', meta: { githubCommitSha: SHA_A } }] }],
+      [ALIAS]: [200, { projectId: 'prj', uid: 'dpl_1', readyState: 'READY', ready: 1_800_000_000_000, meta: { githubCommitSha: SHA_A.toUpperCase(), githubCommitRef: 'main' } }],
+    }),
   });
   assert.equal(ready.status, 'ready');
   assert.equal(ready.sha, SHA_A);
@@ -53,17 +62,34 @@ test('the Vercel resolver only treats a READY newest production deployment as se
   assert.match(calls[0].url, /projectId=prj/);
   assert.match(calls[0].url, /target=production/);
   assert.match(calls[0].url, /teamId=team/);
+  assert.match(calls[1].url, /^https:\/\/api\.vercel\.com\/v13\/deployments\/www\.example\.test\?teamId=team$/);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer secret-token');
 
+  // A failed newest deployment never moved the alias: production still serves the older READY one.
+  const afterFailure = await resolveVercelProductionDeployment({
+    ...base,
+    fetchImpl: routed({
+      [LIST]: [200, { deployments: [{ state: 'ERROR', meta: { githubCommitSha: SHA_B } }, { state: 'READY', meta: { githubCommitSha: SHA_A } }] }],
+      [ALIAS]: [200, { projectId: 'prj', readyState: 'READY', meta: { githubCommitSha: SHA_A } }],
+    }),
+  });
+  assert.equal(afterFailure.status, 'ready');
+  assert.equal(afterFailure.sha, SHA_A);
+
   const building = await resolveVercelProductionDeployment({
-    token: 't', projectId: 'p',
-    fetchImpl: fetchImpl({ deployments: [{ readyState: 'BUILDING', meta: { githubCommitSha: SHA_B } }, { state: 'READY', meta: { githubCommitSha: SHA_A } }] }),
+    ...base,
+    fetchImpl: routed({ [LIST]: [200, { deployments: [{ readyState: 'BUILDING', meta: { githubCommitSha: SHA_B } }, { state: 'READY', meta: { githubCommitSha: SHA_A } }] }] }),
   });
   assert.deepEqual(building, { status: 'settling', state: 'BUILDING', sha: SHA_B });
 
-  assert.equal((await resolveVercelProductionDeployment({ token: 't', projectId: 'p', fetchImpl: fetchImpl({}, 403) })).status, 'unavailable');
-  assert.equal((await resolveVercelProductionDeployment({ token: 't', projectId: 'p', fetchImpl: fetchImpl({ deployments: [{ state: 'READY', meta: {} }] }) })).status, 'unavailable');
-  const network = await resolveVercelProductionDeployment({ token: 'secret-token', projectId: 'p', fetchImpl: async () => { throw new Error('socket closed'); } });
+  const ok = [200, { deployments: [] }];
+  for (const routes of [
+    { [LIST]: [403, {}] },
+    { [LIST]: ok, [ALIAS]: [404, {}] },
+    { [LIST]: ok, [ALIAS]: [200, { projectId: 'someone-else', readyState: 'READY', meta: { githubCommitSha: SHA_A } }] },
+    { [LIST]: ok, [ALIAS]: [200, { projectId: 'prj', readyState: 'READY', meta: {} }] },
+  ]) assert.equal((await resolveVercelProductionDeployment({ ...base, fetchImpl: routed(routes) })).status, 'unavailable', JSON.stringify(routes));
+  const network = await resolveVercelProductionDeployment({ ...base, fetchImpl: async () => { throw new Error('socket closed'); } });
   assert.equal(network.status, 'unavailable');
   assert.doesNotMatch(JSON.stringify(network), /secret-token/);
 });
@@ -78,7 +104,10 @@ test('run classification separates application failures from infrastructure faul
     { status: 'timeout', phases: [{ status: 'timeout', exit_code: null }] },
     { status: 'failed', phases: [{ mode: 'fixture', status: 'failed', exit_code: 137 }] },
     { status: 'failed', phases: [], error: 'docker unavailable' },
+    { status: 'failed', phases: [{ mode: 'fixture', status: 'succeeded', exit_code: 0 }, { mode: 'live', status: 'failed', exit_code: 1, deployment_preflight: 'unavailable' }] },
+    { status: 'failed', phases: [{ mode: 'fixture', status: 'succeeded', exit_code: 0 }, { mode: 'live', status: 'failed', exit_code: 1, deployment_preflight: 'stale' }] },
   ]) assert.equal(classifyRun(run).outcome, 'infrastructure', JSON.stringify(run));
+  assert.equal(classifyRun({ status: 'failed', phases: [{ mode: 'live', status: 'failed', exit_code: 1, deployment_preflight: 'matched' }] }).outcome, 'failed');
 });
 
 test('Bob starts one production suite per settled SHA without anyone requesting it', async () => {
@@ -173,4 +202,56 @@ test('an existing active run started elsewhere is waited for, not duplicated', a
   const { monitor, context } = harness({ startRun: async () => ({ existing: true, run: { id: 'owner-run' } }) });
   assert.deepEqual(await monitor.tick(), { sha: SHA_A, outcome: 'waiting_for_active_run', run_id: 'owner-run' });
   assert.equal(context.states.get(SHA_A).status, 'pending');
+});
+
+test('a run that passes after production moved is superseded, never recorded as passed', async () => {
+  const { monitor, context } = harness();
+  await monitor.tick();
+  context.production = { status: 'ready', sha: SHA_B };
+  context.releasedSha = SHA_B;
+  context.finish('run-1', { status: 'succeeded', summary: { passed: 40, failed: 0, skipped: 0 } });
+  await monitor.tick();
+  assert.equal(context.states.get(SHA_A).status, 'superseded');
+  assert.equal(context.states.get(SHA_A).run_outcome, 'passed');
+});
+
+test('a production deployment that is still settling never supersedes a finished run', async () => {
+  const { monitor, context } = harness();
+  await monitor.tick();
+  context.production = { status: 'settling', state: 'BUILDING', sha: SHA_B };
+  context.finish('run-1', { status: 'failed', phases: [{ mode: 'live', status: 'failed', exit_code: 1, deployment_preflight: 'matched' }] });
+  assert.equal((await monitor.tick()).outcome, 'waiting_for_deployment');
+  assert.equal(context.states.get(SHA_A).status, 'failed');
+});
+
+test('the attempt is persisted before launch and a restart never exceeds the retry budget', async () => {
+  let seenDuringStart = null;
+  const { monitor, context } = harness({
+    maxAttempts: 2,
+    startRun: async ({ sha }) => {
+      seenDuringStart = { ...context.states.get(sha) };
+      return { existing: false, run: { id: 'run-1', status: 'running' } };
+    },
+  });
+  await monitor.tick();
+  assert.equal(seenDuringStart.status, 'starting');
+  assert.equal(seenDuringStart.attempts, 1);
+
+  // The control plane died after launching the final attempt but before recording its run id.
+  const restarted = harness({ maxAttempts: 2 });
+  restarted.context.states.set(SHA_A, { sha: SHA_A, status: 'starting', attempts: 2, first_seen_at: '2026-10-27T00:00:00.000Z' });
+  assert.equal((await restarted.monitor.tick()).outcome, 'gave_up');
+  assert.deepEqual(restarted.context.starts, []);
+});
+
+test('retention forgets only old terminal verdicts, never an active SHA', () => {
+  const states = [];
+  for (let index = 0; index < 60; index += 1) {
+    states.push({ sha: index.toString(16).padStart(40, '0'), status: index % 5 === 0 ? 'running' : 'passed', first_seen_at: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString() });
+  }
+  const evicted = evictableProductionStates(states, 40);
+  assert.equal(evicted.length, 8);
+  assert.ok(evicted.every((state) => state.status === 'passed'));
+  assert.ok(evicted.every((state) => state.first_seen_at < '2026-10-01T00:10:00.000Z'));
+  assert.deepEqual(evictableProductionStates([{ sha: SHA_A, status: 'retry' }, { sha: SHA_B, status: 'starting' }], 0), []);
 });

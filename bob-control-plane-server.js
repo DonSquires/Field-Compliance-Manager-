@@ -32,9 +32,9 @@ const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
-const { executeWorker, summarizeHumanTest } = require('./worker-executor');
+const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
-const { createProductionHumanTestMonitor, resolveVercelProductionDeployment } = require('./builder-production-human-test');
+const { createProductionHumanTestMonitor, evictableProductionStates, resolveVercelProductionDeployment } = require('./builder-production-human-test');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
@@ -416,6 +416,17 @@ function repositoryTreeSha(sourceDir, sha, treePath) {
   }
 }
 
+function repositoryCommitOnMain(sourceDir, sha, mainSha) {
+  if (!/^[a-f0-9]{40}$/i.test(String(sha || '')) || !/^[a-f0-9]{40}$/i.test(String(mainSha || ''))) return false;
+  if (sha.toLowerCase() === mainSha.toLowerCase()) return true;
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', sha, mainSha], { cwd: sourceDir, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null, targetRoute = null }) {
   const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
   if (active) return { existing: true, run: safeHumanTestRun(active) };
@@ -425,6 +436,11 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
   const testSha = expectedSha || readTarget.sha;
   if (!repositoryTreeSha(readTarget.sourceDir, testSha, 'apps/web')) {
     throw new BuilderStepError(409, `Human-test deployment commit ${testSha.slice(0, 12)} is not yet in Bob's source repository`);
+  }
+  // The live phase hands the worker the test identity and Vercel token: only reviewed code merged
+  // to main may hold them, never an arbitrary branch commit named by a caller.
+  if (mode !== 'fixture' && !repositoryCommitOnMain(readTarget.sourceDir, testSha, readTarget.sha)) {
+    throw new BuilderStepError(409, `Live Dr Bob only tests commits merged to main; ${testSha.slice(0, 12)} is not on main ${String(readTarget.sha).slice(0, 12)} yet`);
   }
   // A private detached snapshot: the shared checkout is force-checked-out and cleaned by main
   // health and chat reads, which must never change files under a running browser walk.
@@ -497,6 +513,7 @@ async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null,
           status: result.status,
           exit_code: result.exitCode,
           summary: summarizeHumanTest(result),
+          ...(phaseMode === 'live' ? { deployment_preflight: humanTestDeploymentPreflight(result) } : {}),
         };
         run.phases.push(phase);
         phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n${result.stdout || ''}\n${result.stderr || ''}`);
@@ -955,13 +972,16 @@ const productionHumanTestEnabled = process.env.BOB_PRODUCTION_HUMAN_TEST !== 'fa
   && Boolean(builderWorkerImage && builderSourceConfigured)
   && liveHumanTestConfigured();
 const productionHumanTestIntervalMs = Math.max(60_000, Number(process.env.BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS) || 5 * 60_000);
+const productionHumanTestStartupDelayMs = Math.min(600_000, Math.max(1_000, Number(process.env.BOB_PRODUCTION_HUMAN_TEST_STARTUP_DELAY_MS) || 120_000));
 const releasedShaFile = process.env.BOB_RELEASE_DEPLOYED_SHA_FILE || path.join(stateDir, 'release-lane', 'deployed_sha');
+// One authenticated production page observed read-only, so the live route check never silently skips.
+const productionHumanTestRoute = /^\/[A-Za-z0-9/_-]*$/.test(String(process.env.BOB_PRODUCTION_HUMAN_TEST_ROUTE || ''))
+  ? process.env.BOB_PRODUCTION_HUMAN_TEST_ROUTE
+  : '/admin/builder';
 
 function saveProductionHumanTestState(state) {
   productionHumanTests.set(state.sha, state);
-  const retained = [...productionHumanTests.values()]
-    .sort((left, right) => String(right.first_seen_at).localeCompare(String(left.first_seen_at)));
-  for (const stale of retained.slice(50)) productionHumanTests.delete(stale.sha);
+  for (const stale of evictableProductionStates(productionHumanTests.values())) productionHumanTests.delete(stale.sha);
   saveState();
 }
 
@@ -975,6 +995,7 @@ const productionHumanTestMonitor = createProductionHumanTestMonitor({
     token: process.env.VERCEL_TOKEN,
     projectId: process.env.VERCEL_PROJECT_ID,
     teamId: process.env.VERCEL_TEAM_ID,
+    targetUrl: process.env.HUMAN_TEST_BASE_URL,
   }),
   readReleasedSha: async () => {
     try { return fs.readFileSync(releasedShaFile, 'utf8').trim().toLowerCase() || null; } catch { return null; }
@@ -982,7 +1003,7 @@ const productionHumanTestMonitor = createProductionHumanTestMonitor({
   readState: async (sha) => productionHumanTests.get(sha) ?? null,
   writeState: async (state) => saveProductionHumanTestState(state),
   listStates: async () => [...productionHumanTests.values()],
-  startRun: ({ sha }) => startHumanTestRun({ mode: 'suite', scope: 'full', requestedBy: 'bob:production-verify', expectedSha: sha }),
+  startRun: ({ sha }) => startHumanTestRun({ mode: 'suite', scope: 'full', requestedBy: 'bob:production-verify', expectedSha: sha, targetRoute: productionHumanTestRoute }),
   getRun: async (id) => humanTestRuns.get(id) ?? null,
   isIdle: async () => {
     if (activeHumanTestCount()) return { idle: false, reason: 'a Dr Bob run is already in flight' };
@@ -997,6 +1018,7 @@ function productionHumanTestStatus() {
   const latest = latestProductionHumanTest();
   return {
     enabled: productionHumanTestEnabled,
+    route: productionHumanTestRoute,
     latest: latest ? {
       sha: latest.sha,
       status: latest.status,
@@ -1994,5 +2016,5 @@ if (autopilotEnabled && builderSupabase) {
 if (productionHumanTestEnabled) {
   const productionHumanTestTimer = setInterval(() => { productionHumanTestMonitor.tick().catch(() => {}); }, productionHumanTestIntervalMs);
   productionHumanTestTimer.unref?.();
-  setTimeout(() => { productionHumanTestMonitor.tick().catch(() => {}); }, 120_000).unref?.();
+  setTimeout(() => { productionHumanTestMonitor.tick().catch(() => {}); }, productionHumanTestStartupDelayMs).unref?.();
 }

@@ -13,14 +13,19 @@ The default run uses the existing Supabase fixtures. It covers the admin shell a
 
 ## Bob's automatic production verification
 
-Owner ruling 2026-10-27: Bob runs Dr Bob himself after production deploys. No
-owner or admiral request is required. The control plane polls Vercel for the
-newest production deployment and acts only when it is `READY` with a Git SHA.
-It waits for the release lane to record that SHA, unless the lane has been stuck
-for 30 minutes, then waits for Builder execution, main health and other Dr Bob
-runs to become idle. Each SHA receives one `suite` run requested by
-`bob:production-verify`, using the dedicated test identity and the read-only
-live phase.
+Owner ruling 2026-10-27 (Don Squires, owner): Bob runs Dr Bob himself after
+production deploys. No owner or admiral request is required. The control plane
+polls Vercel for the deployment serving the `HUMAN_TEST_BASE_URL` alias in the
+configured project. It waits while the newest production deployment is still
+queued or building, and acts only when the serving deployment is `READY` with a
+Git SHA. A project mismatch, missing SHA or failed lookup is reported as
+`unavailable`, never as a deployment to test. It waits for the release lane to
+record that SHA, unless the lane has been stuck for 30 minutes, then waits for
+Builder execution, main health and other Dr Bob runs to become idle. Each SHA
+receives one `suite` run requested by `bob:production-verify`, using the
+dedicated test identity and the read-only live phase. The live phase observes
+`BOB_PRODUCTION_HUMAN_TEST_ROUTE`, which defaults to `/admin/builder`, so the
+authenticated route check never silently skips.
 
 Runs use private detached snapshots under the Builder workspace root, pinned to
 the deployment commit. Shared checkout refreshes therefore cannot change files
@@ -30,12 +35,32 @@ does not restart the control plane while `activeHumanTests` is nonzero.
 
 Passing or failing tests are recorded once per SHA. Interrupted, timed-out or
 infrastructure-coded worker failures retry at most three times before
-`gave_up`. If production changes during the run, the older verdict becomes
-`superseded` and the newer SHA receives its own run. Disable the monitor with
-`BOB_PRODUCTION_HUMAN_TEST=false`; adjust polling with
-`BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS` (minimum 60 seconds). A failure is
-evidence for Builder investigation. It is not an automatic repair, approval or
-release decision.
+`gave_up`. A live phase that fails because its deployment preflight was
+`unavailable`, `stale` or `unverified` is classified as infrastructure and
+retried, not recorded as an application failure. The attempt is persisted
+before the worker starts, so a control-plane crash during a start still spends
+budget. If a different SHA is confirmed `READY` on production when the run
+finishes, the older verdict becomes `superseded` and the newer SHA receives its
+own run; a settling or unavailable deployment never supersedes. The newest 50
+terminal verdicts are retained; pending and running states are never evicted.
+
+Disable the monitor with `BOB_PRODUCTION_HUMAN_TEST=false`; adjust polling with
+`BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS` (minimum 60 seconds) and the first check
+after startup with `BOB_PRODUCTION_HUMAN_TEST_STARTUP_DELAY_MS` (1 second to 10
+minutes, default 2 minutes). A failure is evidence for Builder investigation. It
+is not an automatic repair, approval or release decision.
+
+Known limits:
+
+- The live worker runs repository test code from a commit that is already on
+  `main`, and holds the dedicated test password and `VERCEL_TOKEN` in its Node
+  process while it does. Neither reaches the browser context or a receipt.
+  Moving the deployment preflight into the control plane, or issuing
+  short-lived least-privilege test credentials, would remove that exposure.
+- The release lane's idle check and the monitor's start are not one atomic
+  step. If a release restarts the control plane during a start, the run is
+  marked `interrupted` and retried within the bounded budget, and a newer
+  production SHA supersedes it.
 
 ## Run through Bob
 
@@ -54,8 +79,11 @@ receipt instead of creating duplicate work.
 An explicit instruction to run Dr Bob is deterministically dispatched to this
 tool even if the planner proposes research or prose instead. `suite` mode runs
 the fixture-backed phase first and, only if it passes, runs the read-only live
-phase under the same durable run ID. The request can pin a 40-character
-`expected_sha` and an approved admin route such as `/admin/builder`; a source
+phase under the same durable run ID. `live` and `suite` runs are refused with
+HTTP 409 before any snapshot is created or credential is used unless the
+commit is already merged to `main`; an unreviewed branch commit can only run in
+`fixture` mode. The request can pin a 40-character `expected_sha` and an
+approved admin route such as `/admin/builder`; a source
 SHA mismatch fails before a browser worker starts unless the newer source and
 deployed commits have the exact same `apps/web` Git tree. This permits
 server-only Bob commits without pretending they changed the deployed web
@@ -79,15 +107,26 @@ npm run test:e2e:human:live
 
 Set `HUMAN_TEST_BASE_URL` to point at another deployment. Live mode performs navigation and observation only. It does not submit, save, approve, resolve, publish, assign, delete, or sign out.
 
+The browser runner enforces this. With `HUMAN_TEST_LIVE=true`, the session is
+read-only and cannot opt out: safe-button clicks, field fills, submit
+follow-through and button walks are skipped and recorded with the reason
+`live-read-only`. Only tab and admin-navigation changes are performed. Checks
+that depend on local Supabase fixtures (officer modules, admin route families,
+desktop companion, officer and client control groups) are skipped in live mode.
+
 ## Deployment preflight
 
 Before a live human journey, Bob performs a server-side deployment preflight. If
 `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available to the test process, it
-checks the target production deployment state and compares its Git SHA with
-`HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
-`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale deployment must block
-the test rather than produce a warning. Vercel credentials never enter the
-browser context.
+looks up the deployment serving the target hostname (falling back to the
+project's production deployments), checks its state, and compares its Git SHA
+with `HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
+`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale or unverifiable
+deployment must block the test rather than produce a warning; a serving
+deployment without a Git SHA is then an error. The preflight prints a
+`[HUMAN DEPLOYMENT PREFLIGHT] result=matched|stale|unavailable|unverified`
+line that the control plane records on the live phase. Vercel credentials never
+enter the browser context.
 
 Bob's governed live and suite dispatch requires those Vercel settings and sets
 `HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. A missing preflight, stale SHA, or

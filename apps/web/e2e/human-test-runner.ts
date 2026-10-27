@@ -23,7 +23,18 @@ interface HumanSkippedAction {
   route: string;
   index: number;
   label: string;
-  reason: 'write-or-destructive' | 'disabled' | 'covered-by-modal' | 'not-present-after-route-restore';
+  reason: 'write-or-destructive' | 'disabled' | 'covered-by-modal' | 'not-present-after-route-restore' | 'live-read-only';
+}
+
+export interface HumanTestSessionOptions {
+  /** Live production walks observe only: no page-button clicks, field entry, or submit follow-through. */
+  readOnly?: boolean;
+}
+
+type VercelDeployment = Record<string, unknown>;
+
+function deploymentSha(deployment: VercelDeployment | undefined): string {
+  return String((deployment?.meta as Record<string, unknown> | undefined)?.githubCommitSha ?? (deployment?.gitSource as Record<string, unknown> | undefined)?.sha ?? '');
 }
 
 const SAFE_SAMPLE_VALUES: Record<string, string> = {
@@ -56,8 +67,11 @@ export class HumanTestSession {
   private readonly abortedRequests: string[] = [];
   private readonly failedRequests: string[] = [];
   private readonly httpErrors: string[] = [];
+  readonly readOnly: boolean;
 
-  constructor(private readonly page: Page, private readonly testInfo: TestInfo) {
+  constructor(private readonly page: Page, private readonly testInfo: TestInfo, options: HumanTestSessionOptions = {}) {
+    // Fail closed: a live run is always read-only; fixture runs may opt in to prove the guard.
+    this.readOnly = process.env.HUMAN_TEST_LIVE === 'true' || options.readOnly === true;
     page.on('console', (message) => {
       if (message.type() === 'error') this.consoleErrors.push(compact(message.text()));
     });
@@ -99,29 +113,55 @@ export class HumanTestSession {
     if (!token || !projectId) {
       console.log('[HUMAN DEPLOYMENT PREFLIGHT] unverified: VERCEL_TOKEN/VERCEL_PROJECT_ID not supplied');
       if (process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true') {
+        console.log('[HUMAN DEPLOYMENT PREFLIGHT] result=unavailable reason=Vercel credentials not supplied');
         this.findings.push({ severity: 'error', message: 'Deployment preflight could not verify the target deployment commit.', url: targetUrl, step: this.currentStep });
       }
       return;
     }
     const teamId = process.env.VERCEL_TEAM_ID;
-    const query = new URLSearchParams({ projectId, limit: '20', target: 'production' });
-    if (teamId) query.set('teamId', teamId);
-    const response = await fetch(`https://api.vercel.com/v6/deployments?${query}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!response.ok) {
-      this.findings.push({ severity: 'error', message: `Deployment preflight failed with HTTP ${response.status}.`, url: targetUrl, step: this.currentStep });
+    const headers = { Authorization: `Bearer ${token}` };
+    const hostname = new URL(targetUrl).hostname;
+    const requireMatch = process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true';
+    const unavailable = (reason: string) => {
+      console.log(`[HUMAN DEPLOYMENT PREFLIGHT] result=unavailable reason=${reason}`);
+      this.findings.push({ severity: requireMatch ? 'error' : 'warning', message: `Deployment preflight unavailable: ${reason}.`, url: targetUrl, step: this.currentStep });
+    };
+    // The deployment the production hostname is aliased to is what a person is actually served.
+    let deployment: VercelDeployment | undefined;
+    try {
+      const aliasQuery = new URLSearchParams();
+      if (teamId) aliasQuery.set('teamId', teamId);
+      const aliasResponse = await fetch(`https://api.vercel.com/v13/deployments/${encodeURIComponent(hostname)}?${aliasQuery}`, { headers });
+      if (aliasResponse.ok) {
+        const candidate = await aliasResponse.json() as VercelDeployment;
+        if (candidate.projectId === projectId) deployment = candidate;
+      }
+      if (!deployment) {
+        const query = new URLSearchParams({ projectId, limit: '20', target: 'production' });
+        if (teamId) query.set('teamId', teamId);
+        const response = await fetch(`https://api.vercel.com/v6/deployments?${query}`, { headers });
+        if (!response.ok) return unavailable(`deployment lookup returned HTTP ${response.status}`);
+        const body = await response.json() as { deployments?: VercelDeployment[] };
+        deployment = (body.deployments ?? []).find((item) => {
+          const aliases = Array.isArray(item.aliases) ? item.aliases.map(String) : [];
+          return aliases.includes(hostname) || item.url === hostname || item.name === hostname;
+        }) ?? (body.deployments ?? []).find((item) => String(item.state ?? item.readyState ?? '').toUpperCase() === 'READY');
+      }
+    } catch (error) {
+      return unavailable(`deployment lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const deployedSha = deploymentSha(deployment);
+    console.log(`[HUMAN DEPLOYMENT PREFLIGHT] target=${hostname} state=${String(deployment?.readyState ?? deployment?.state ?? 'unknown')} deployed_sha=${deployedSha || 'unknown'} expected_sha=${expectedSha || 'not supplied'}`);
+    if (!deployedSha) {
+      if (requireMatch) return unavailable('the serving deployment has no Git commit SHA');
       return;
     }
-    const body = await response.json() as { deployments?: Array<Record<string, unknown>> };
-    const hostname = new URL(targetUrl).hostname;
-    const deployment = (body.deployments ?? []).find((item) => {
-      const aliases = Array.isArray(item.aliases) ? item.aliases.map(String) : [];
-      return aliases.includes(hostname) || item.url === hostname || item.name === hostname;
-    }) ?? body.deployments?.[0];
-    const deployedSha = String((deployment?.meta as Record<string, unknown> | undefined)?.githubCommitSha ?? (deployment?.gitSource as Record<string, unknown> | undefined)?.sha ?? '');
-    console.log(`[HUMAN DEPLOYMENT PREFLIGHT] target=${hostname} state=${String(deployment?.state ?? 'unknown')} deployed_sha=${deployedSha || 'unknown'} expected_sha=${expectedSha || 'not supplied'}`);
-    if (expectedSha && deployedSha && !deployedSha.startsWith(expectedSha) && !expectedSha.startsWith(deployedSha)) {
-      this.findings.push({ severity: process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true' ? 'error' : 'warning', message: `Deployment is stale: expected ${expectedSha}, serving ${deployedSha}.`, url: targetUrl, step: this.currentStep });
+    if (expectedSha && !deployedSha.startsWith(expectedSha) && !expectedSha.startsWith(deployedSha)) {
+      console.log('[HUMAN DEPLOYMENT PREFLIGHT] result=stale');
+      this.findings.push({ severity: requireMatch ? 'error' : 'warning', message: `Deployment is stale: expected ${expectedSha}, serving ${deployedSha}.`, url: targetUrl, step: this.currentStep });
+      return;
     }
+    console.log(`[HUMAN DEPLOYMENT PREFLIGHT] result=${expectedSha ? 'matched' : 'unverified'}`);
   }
 
   async observe(label: string): Promise<void> {
@@ -228,6 +268,10 @@ export class HumanTestSession {
   }
 
   async clickSafe(label: string | RegExp): Promise<boolean> {
+    if (this.readOnly) {
+      console.log(`[HUMAN SKIP] Live read-only: did not click ${String(label)}`);
+      return false;
+    }
     const candidate = this.page.getByRole('button', { name: label }).or(this.page.getByRole('link', { name: label })).first();
     if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) return false;
     const name = compact(await candidate.textContent({ timeout: 1000 }).catch(() => null)) || String(label);
@@ -243,6 +287,10 @@ export class HumanTestSession {
   }
 
   async fillSafeField(): Promise<boolean> {
+    if (this.readOnly) {
+      console.log('[HUMAN SKIP] Live read-only: no field entry');
+      return false;
+    }
     const fields = this.page.locator('input:visible, textarea:visible, select:visible').filter({ hasNot: this.page.locator('[type="password"]') });
     const count = await fields.count();
     let filled = false;
@@ -278,6 +326,10 @@ export class HumanTestSession {
   }
 
   async followThroughSafeSubmit(): Promise<boolean> {
+    if (this.readOnly) {
+      console.log('[HUMAN SKIP] Live read-only: no submit follow-through');
+      return false;
+    }
     const proceed = this.page.locator('button:visible').filter({ hasText: /^(save|submit|create|add|next|continue|confirm|apply|send|publish|register|record|post|issue|invite|link|connect|enable|activate|start|complete|finish|approve|accept|resolve|acknowledge|claim|assign|update|run|verify|mark|check\s+now|generate|prepare|work\s+out|process|reconcile|import|sync|pay|export|download|print|lock|close|end\s+(shift|access)|revoke|request|check\s+in|clock\s+(in|out)|scan|move|rename|copy|return|promote|archive|retry|deactivate|disable)\b/i }).first();
     if (!(await proceed.isVisible({ timeout: 1000 }).catch(() => false))) return false;
     if (await proceed.isDisabled().catch(() => true)) return false;
@@ -339,6 +391,14 @@ export class HumanTestSession {
       });
     });
     console.log(`[HUMAN BUTTON AUDIT] ${route}: ${buttons.length} visible page-content buttons; shell controls are covered by role navigation checks`);
+    if (this.readOnly) {
+      await this.observe(`live read-only route: ${route}`);
+      for (const button of buttons) {
+        this.skippedActions.push({ route, index: button.index, label: button.label || `button-${button.index}`, reason: 'live-read-only' });
+      }
+      console.log(`[HUMAN BUTTON SKIP] ${route}: ${buttons.length} buttons observed, not clicked (live read-only)`);
+      return;
+    }
     for (const button of buttons) {
       await this.navigateTo(route);
       await this.page.waitForLoadState('domcontentloaded');
