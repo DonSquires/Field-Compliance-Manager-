@@ -1,0 +1,185 @@
+.permit-card {
+  display: grid;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  min-width: 0;
+}
+
+.permit-card.is-ok {
+  border-left-color: var(--color-success);
+}
+
+.permit-card.is-watch {
+  border-left-color: var(--color-warning);
+}
+
+.permit-card.is-critical {
+  border-left-color: var(--color-danger);
+}
+
+.permit-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.permit-card__head > div:first-child {
+  min-width: 0;
+}
+
+.permit-card__head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.permit-card__head p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.permit-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permit-card__badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.permit-card__badge.is-ok {
+  border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success) 10%, var(--color-bg-primary));
+  color: var(--color-success);
+}
+
+.permit-card__badge.is-watch {
+  border-color: color-mix(in srgb, var(--color-warning) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-primary));
+  color: var(--color-warning);
+}
+
+.permit-card__badge.is-critical {
+  border-color: color-mix(in srgb, var(--color-danger) 60%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-bg-primary));
+  color: var(--color-danger);
+}
+
+.permit-card__facts,
+.permit-card__lists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 0;
+}
+
+.permit-card__facts div {
+  min-width: 110px;
+}
+
+.permit-card__lists div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.permit-card dt {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.permit-card dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.permit-card__block {
+  display: grid;
+  gap: 6px;
+}
+
+.permit-card__block > strong {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.permit-card__conditions {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.permit-card__vehicles {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permit-card__vehicles li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.permit-card__plate {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permit-card__muted {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.permit-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.permit-card__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 520px) {
+  .permit-card__foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .permit-card__foot .permit-card__action {
+    justify-content: center;
+  }
+}

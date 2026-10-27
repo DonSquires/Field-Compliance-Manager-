@@ -234,6 +234,7 @@
 
 .person-search-results,
 .person-notice-list,
+.person-permit-list,
 .person-vehicle-list {
   display: grid;
   gap: 7px;
@@ -305,6 +306,11 @@
 .person-search-result__notice.is-active {
   border-color: var(--color-status-critical);
   color: var(--color-status-critical-text);
+}
+
+.person-search-result__notice.is-permit {
+  border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+  color: var(--color-success);
 }
 
 .person-search-empty,

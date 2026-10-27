@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router-dom';
 import PersonSearchPage from './PersonSearchPage';
 import { describeDaysRemaining, noticeStillBarsEntry, noticeTypeLabel, personSearchQueryIsValid } from '../lib/personSearch';
@@ -73,10 +73,10 @@ describe('person search', () => {
       ? { data: [], error: null }
       : { data: [person({ nzta_authorised: true, nzta: { address: '1 Example Road', last_checked_at: '2026-01-02T00:00:00Z', checks: [] } })], error: null });
     renderPage();
-    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    expect(await screen.findByText('Enter at least two letters or numbers of a name.')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'test' } });
+    expect(await screen.findByText('Enter at least two letters or numbers of a name, alias or permit number.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByRole('heading', { name: 'NZTA register details' })).toBeTruthy();
     expect(screen.getByText(/lawful purposes/)).toBeTruthy();
@@ -130,7 +130,7 @@ describe('person search', () => {
         }),
       ], error: null });
     renderPage();
-    fireEvent.change(screen.getByLabelText('Name or alias'), { target: { value: 'test' } });
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByRole('button', { name: /Second Person/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Linked vehicle/ }));
@@ -166,7 +166,7 @@ describe('person search', () => {
     renderPage({ pathname: '/admin/field-ops', search: '?area=person-search&person=person-1', state: { personQuery: 'Test Person' } });
     expect(await screen.findByText('Recorded in Client Forest')).toBeTruthy();
     expect(rpc).toHaveBeenCalledWith('search_people', { p_query: 'Test Person', p_limit: 25 });
-    expect((screen.getByLabelText('Name or alias') as HTMLInputElement).value).toBe('Test Person');
+    expect((screen.getByLabelText('Name, alias or permit number') as HTMLInputElement).value).toBe('Test Person');
     expect(screen.getByTestId('location').textContent).not.toContain('Test');
   });
 
@@ -181,5 +181,56 @@ describe('person search', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Test Person' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Open vehicle ABC123 in vehicle search' }));
     expect(screen.getByTestId('location').textContent).toBe('/admin/field-ops?area=vehicle-search&vehicle=vehicle-1');
+  });
+
+  it('finds a permit holder by permit number and shows the permit, its vehicles and validity', async () => {
+    const permit = {
+      permit_id: 'permit-1', organization_name: 'Field Services', client_organization_name: 'Client Forest',
+      permit_number: '10001', permit_type: 'Recreational', applicant_type: 'Individual', company_name: null,
+      status: 'active', validity_state: 'valid', date_from: '2025-07-01', date_to: '2099-06-30',
+      forest_areas: ['North Block'], activities: ['Hunting', 'Walking'], hunting_season: 'Roar',
+      firearm_licence_valid: false, chainsaw_safety_equipment: null, keys_issued: true,
+      conditions: 'Stay on formed roads.', contact_email: 'holder@example.test', contact_phone: null,
+      address_text: '1 Example Road', compliance_checked_at: '2025-11-17T21:32:59Z', source_document: 'Permit Extract.xlsx',
+      vehicles: [{ canonical_vehicle_id: 'vehicle-9', plate_number: 'PRM123', make: 'Ford', model: 'Ranger', colour: 'Grey' }],
+    };
+    rpc.mockImplementation(async (name: string) => name === 'get_notice_expiry_register'
+      ? { data: [], error: null }
+      : { data: [
+        person({ canonical_person_id: 'person-3', display_name: 'Pat Holder', notices: [], vehicles: [], has_notice_in_force: false, permits: [permit] }),
+        person({ canonical_person_id: 'person-4', display_name: 'Older Server Row', notices: [], vehicles: [], has_notice_in_force: false }),
+      ], error: null });
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: '10001' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    const holder = await screen.findByRole('button', { name: /Pat Holder/ });
+    expect(holder.textContent).toContain('Current permit');
+    expect(holder.textContent).toContain('1 permit');
+    expect(rpc).toHaveBeenCalledWith('search_people', { p_query: '10001', p_limit: 25 });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Permit holder/ }));
+    expect(screen.queryByRole('button', { name: /Older Server Row/ })).toBeNull();
+    fireEvent.click(holder);
+    const card = await screen.findByRole('article', { name: 'Permit 10001' });
+    expect(within(card).getByText('Valid')).toBeTruthy();
+    expect(card.textContent).toContain('Recreational');
+    expect(card.textContent).toContain('for Client Forest');
+    expect(card.textContent).toContain('No valid firearms licence');
+    expect(card.textContent).toContain('North Block');
+    expect(card.textContent).toContain('Hunting, Walking');
+    expect(card.textContent).toContain('Stay on formed roads.');
+    expect(card.textContent).toContain('Captured on the application');
+    expect(card.textContent).toContain('holder@example.test');
+    expect(card.textContent).toContain('Source: Permit Extract.xlsx, checked 18 Nov 2025');
+    expect(screen.queryByText(/No access permits are recorded/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open vehicle PRM123' }));
+    expect(screen.getByTestId('location').textContent).toBe('/admin/field-ops?area=vehicle-search&vehicle=vehicle-9');
+  });
+
+  it('treats a search response without permits as having none', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Test Person' }));
+    expect(await screen.findByText('No access permits are recorded in your authorised organisations.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Permit holder/ }).hasAttribute('disabled')).toBe(true);
   });
 });

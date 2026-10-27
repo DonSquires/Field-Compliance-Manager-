@@ -3,8 +3,9 @@
  *
  * Canonical schema:
  * - search_people (canonical_people + person_record_aliases + notices +
- *   entity_links, scoped to the caller's organisations; address and NZTA
- *   register checks only for vehicle-owner identity access)
+ *   entity_links + person_permits, scoped to the caller's organisations;
+ *   address and NZTA register checks only for vehicle-owner identity access;
+ *   a permit holder is found by name, alias or exact permit number)
  * - get_notice_expiry_register (issued trespass/warning notices expiring soon
  *   or recently expired; fed daily into notifications by
  *   sweep_notice_expiry_alerts)
@@ -19,13 +20,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Car, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
+import { PermitAccessCard } from '../components/PermitAccessCard';
 import { supabase } from '../lib/supabase';
+import { permitIsCurrent, permitValidity } from '../lib/permits';
 import {
   describeDaysRemaining,
   formatNzDate,
   noticeExpiryLabel,
   noticeStillBarsEntry,
   noticeTypeLabel,
+  personPermitSummaries,
   personSearchQueryIsValid,
   type NoticeRegisterRow,
   type PersonMatch,
@@ -33,14 +37,18 @@ import {
 import './PageStyles.css';
 import './PersonSearchPage.css';
 
-type PersonFilter = 'all' | 'in_force' | 'notice_history' | 'vehicles';
+type PersonFilter = 'all' | 'in_force' | 'notice_history' | 'permits' | 'vehicles';
 
 const PERSON_FILTERS: Array<{ id: PersonFilter; label: string }> = [
   { id: 'all', label: 'All people' },
   { id: 'in_force', label: 'Notice in force' },
   { id: 'notice_history', label: 'Notice history' },
+  { id: 'permits', label: 'Permit holder' },
   { id: 'vehicles', label: 'Linked vehicle' },
 ];
+
+const currentPermitCount = (match: PersonMatch) =>
+  (match.permits ?? []).filter((permit) => permitIsCurrent(permitValidity(permit))).length;
 
 const PersonSearchPage: React.FC = () => {
   const navigate = useNavigate();
@@ -82,7 +90,7 @@ const PersonSearchPage: React.FC = () => {
 
   const runSearch = useCallback(async (text: string, focusPersonId?: string | null) => {
     if (!personSearchQueryIsValid(text)) {
-      setError('Enter at least two letters or numbers of a name.');
+      setError('Enter at least two letters or numbers of a name, alias or permit number.');
       return;
     }
     setSearching(true);
@@ -96,7 +104,7 @@ const PersonSearchPage: React.FC = () => {
         setError('Person search did not complete. Check your access or connection, then retry.');
         return;
       }
-      const matches = (data ?? []) as PersonMatch[];
+      const matches = ((data ?? []) as PersonMatch[]).map((match) => ({ ...match, permits: match.permits ?? [] }));
       setResults(matches);
       const focus = focusPersonId && matches.some((match) => match.canonical_person_id === focusPersonId)
         ? focusPersonId
@@ -134,15 +142,18 @@ const PersonSearchPage: React.FC = () => {
     all: results?.length ?? 0,
     in_force: results?.filter((match) => match.notices.some((notice) => noticeStillBarsEntry(notice.expiry_state))).length ?? 0,
     notice_history: results?.filter((match) => match.notices.length > 0).length ?? 0,
+    permits: results?.filter((match) => (match.permits ?? []).length > 0).length ?? 0,
     vehicles: results?.filter((match) => match.vehicles.length > 0).length ?? 0,
   }), [results]);
   const filteredMatches = useMemo(() => (results ?? []).filter((match) => {
     if (filter === 'in_force') return match.notices.some((notice) => noticeStillBarsEntry(notice.expiry_state));
     if (filter === 'notice_history') return match.notices.length > 0;
+    if (filter === 'permits') return (match.permits ?? []).length > 0;
     if (filter === 'vehicles') return match.vehicles.length > 0;
     return true;
   }), [filter, results]);
   const selected = filteredMatches.find((match) => match.canonical_person_id === selectedId) ?? null;
+  const selectedPermits = useMemo(() => (selected ? personPermitSummaries(selected) : []), [selected]);
   const expiringCount = register?.filter((row) => row.expiry_state === 'expiring_soon').length ?? 0;
   const expiredCount = register?.filter((row) => row.expiry_state === 'expired').length ?? 0;
 
@@ -152,7 +163,7 @@ const PersonSearchPage: React.FC = () => {
         <div>
           <p className="eyebrow">Field operations / identity registry</p>
           <h1>Person search</h1>
-          <p className="subtitle">Review a person’s notice history, expiry status and linked vehicles across organisations you can access.</p>
+          <p className="subtitle">Review a person’s notice history, expiry status, access permits and linked vehicles across organisations you can access.</p>
         </div>
         <aside className="person-search-scope" aria-label="Search scope">
           <span>Search scope</span>
@@ -165,11 +176,11 @@ const PersonSearchPage: React.FC = () => {
         <div className="person-search-command__intro">
           <div>
             <h2 id="person-search-title">Find a person</h2>
-            <p id="person-search-help">Search by full or partial name, surname first or last, or a known alias. People with an active or expiring notice appear first.</p>
+            <p id="person-search-help">Search by full or partial name, surname first or last, a known alias, or an exact permit number. People with an active or expiring notice appear first.</p>
           </div>
         </div>
         <form className="person-search-form" onSubmit={handleSubmit} role="search">
-          <label htmlFor="person-search-input" className="sr-only">Name or alias</label>
+          <label htmlFor="person-search-input" className="sr-only">Name, alias or permit number</label>
           <div className="person-search-input-wrap">
             <Search size={18} aria-hidden="true" />
             <input
@@ -178,7 +189,7 @@ const PersonSearchPage: React.FC = () => {
               autoComplete="off"
               aria-invalid={Boolean(error && !personSearchQueryIsValid(query))}
               aria-describedby={error ? 'person-search-help person-search-error' : 'person-search-help'}
-              placeholder="Name or alias"
+              placeholder="Name, alias or permit number"
               value={query}
               disabled={searching}
               onChange={(event) => setQuery(event.target.value)}
@@ -231,13 +242,13 @@ const PersonSearchPage: React.FC = () => {
           {!searching && results?.length === 0 && (
             <div className="person-search-empty" role="status">
               <strong>No matching people found</strong>
-              <p>Check the spelling or try a known alias. Search is limited to organisations you are authorised to access.</p>
+              <p>Check the spelling, or try a known alias or the exact permit number. Search is limited to organisations you are authorised to access.</p>
             </div>
           )}
           {!searching && results && results.length > 0 && (
             <>
               <p className="person-search-result-count" role="status">
-                {results.length === 25 ? 'Showing the first 25 matches. Refine the name or alias to find another record.' : `${results.length} ${results.length === 1 ? 'person' : 'people'} matched.`}
+                {results.length === 25 ? 'Showing the first 25 matches. Refine the name, alias or permit number to find another record.' : `${results.length} ${results.length === 1 ? 'person' : 'people'} matched.`}
               </p>
               <div className="person-search-filters" role="group" aria-label="Filter matching people">
                 {PERSON_FILTERS.map((option) => (
@@ -262,9 +273,12 @@ const PersonSearchPage: React.FC = () => {
                 <ul className="person-search-results">
                   {filteredMatches.map((match) => {
                     const barring = match.notices.filter((notice) => noticeStillBarsEntry(notice.expiry_state));
+                    const permitCount = (match.permits ?? []).length;
+                    const currentPermits = currentPermitCount(match);
                     const recordStatus = barring.length > 0
                       ? `${barring.length} notice${barring.length === 1 ? '' : 's'} in force`
                       : match.notices.length > 0 ? `${match.notices.length} notice${match.notices.length === 1 ? '' : 's'} on record` : 'No notices on record';
+                    const badge = barring.length > 0 ? 'Notice in force' : currentPermits > 0 ? 'Current permit' : permitCount > 0 ? 'Permit holder' : 'Record';
                     return (
                       <li key={match.canonical_person_id}>
                         <button
@@ -275,9 +289,13 @@ const PersonSearchPage: React.FC = () => {
                         >
                           <span className="person-search-result__top">
                             <strong>{match.display_name}</strong>
-                            <span className={`person-search-result__notice${barring.length > 0 ? ' is-active' : ''}`}>{barring.length > 0 ? 'Notice in force' : 'Record'}</span>
+                            <span className={`person-search-result__notice${barring.length > 0 ? ' is-active' : currentPermits > 0 ? ' is-permit' : ''}`}>{badge}</span>
                           </span>
-                          <span>{recordStatus}{match.vehicles.length > 0 ? ` · ${match.vehicles.length} linked vehicle${match.vehicles.length === 1 ? '' : 's'}` : ''}</span>
+                          <span>
+                            {recordStatus}
+                            {permitCount > 0 ? ` · ${permitCount} permit${permitCount === 1 ? '' : 's'}` : ''}
+                            {match.vehicles.length > 0 ? ` · ${match.vehicles.length} linked vehicle${match.vehicles.length === 1 ? '' : 's'}` : ''}
+                          </span>
                           <small>{match.organizations.join(', ') || 'Organisation not recorded'}</small>
                         </button>
                       </li>
@@ -295,7 +313,7 @@ const PersonSearchPage: React.FC = () => {
               <strong>{searching ? 'Loading person records' : results?.length ? 'Select a person' : 'Person record'}</strong>
               <p>{searching
                 ? 'The previous result has been cleared while the new search completes.'
-                : results?.length ? 'Choose a match to review their notices, linked vehicles and permitted identity details.'
+                : results?.length ? 'Choose a match to review their notices, access permits, linked vehicles and permitted identity details.'
                   : 'A selected record will show notice status, source dates and linked operational information here.'}</p>
             </div>
           )}
@@ -340,6 +358,32 @@ const PersonSearchPage: React.FC = () => {
                   </ul>
                 )}
                 <p className="person-search-legal-note">Only issued trespass and warning notices count as entry restrictions. Permit refusal and contact request letters are shown for context.</p>
+              </section>
+
+              <section className="person-search-profile-section" aria-labelledby="person-permits-title">
+                <header className="person-search-section-head">
+                  <div><p className="eyebrow">Access permissions</p><h3 id="person-permits-title">Forest and site access permits</h3></div>
+                  <span className="person-search-count">{selectedPermits.length}</span>
+                </header>
+                {selectedPermits.length === 0 ? <p className="person-search-section-empty">No access permits are recorded in your authorised organisations.</p> : (
+                  <ul className="person-permit-list">
+                    {selectedPermits.map((permit) => (
+                      <li key={permit.id}>
+                        <PermitAccessCard
+                          permit={permit}
+                          showContact
+                          actionsDisabled={searching}
+                          onOpenVehicle={(vehicle) => {
+                            if (vehicle.canonical_vehicle_id) openVehicle(vehicle.canonical_vehicle_id);
+                          }}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {selectedPermits.length > 0 && (
+                  <p className="person-search-legal-note">Validity is worked out from the permit dates in New Zealand time; the finishing date is the last valid day. Contact details are as captured on the application and may not be current.</p>
+                )}
               </section>
 
               <section className="person-search-profile-section" aria-labelledby="person-vehicles-title">

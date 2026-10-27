@@ -1,3 +1,5 @@
+import type { PermitSummary, PermitVehicle } from './permits';
+
 export type NoticeExpiryState = 'draft' | 'withdrawn' | 'no_expiry' | 'in_force' | 'expiring_soon' | 'expired';
 
 export interface PersonNotice {
@@ -31,6 +33,12 @@ export interface PersonNzta {
   checks: Array<{ plate_number: string; checked_at: string }>;
 }
 
+/** A permit as returned inside search_people; the card reads it as a PermitSummary keyed by id. */
+export type PersonPermit = Omit<PermitSummary, 'id' | 'vehicles'> & {
+  permit_id: string;
+  vehicles: PermitVehicle[];
+};
+
 export interface PersonMatch {
   canonical_person_id: string;
   display_name: string;
@@ -41,6 +49,8 @@ export interface PersonMatch {
   organizations: string[];
   notices: PersonNotice[];
   vehicles: PersonVehicle[];
+  /** Absent until the permit-holder search migration is live. */
+  permits?: PersonPermit[];
   nzta_authorised: boolean;
   nzta: PersonNzta | null;
 }
@@ -100,3 +110,6 @@ export const describeDaysRemaining = (days: number | null): string => {
 };
 
 export const personSearchQueryIsValid = (query: string): boolean => query.replace(/[^a-z0-9]/gi, '').length >= 2;
+
+export const personPermitSummaries = (match: PersonMatch): PermitSummary[] =>
+  (match.permits ?? []).map(({ permit_id, ...permit }) => ({ ...permit, id: permit_id, canonical_person_id: match.canonical_person_id }));
