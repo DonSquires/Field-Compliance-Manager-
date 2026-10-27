@@ -39,6 +39,77 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Author verification loop and browser attribution (2026-10-27)
+
+Before: successor job `402bfd7e-17f6-4b82-83c2-0a2048ec1722` (created when
+housekeeping cancelled `d29aaf78` on `main_moved`) failed with autopilot
+`blocked`: "Verifier recovery paused after two infrastructure or attribution
+failures." The author log (`kimi-k2.7-code`, 96 transcript entries) showed
+four refused test commands (`cd apps/web && npm test -- --run …`,
+`cd apps/web && npm test`, `node --test apps/web/src/…test.tsx`); the refusal
+listed descriptions, not the exact `npm test --prefix apps/web -- <file>` form,
+so no test ran. Four finish refusals followed because DR-1/DR-3 named
+`apps/web/e2e/builder-chat-research.spec.ts`. On its last turn the author used
+`write_file` over that spec: five existing regression tests (three source
+declarations, one looped three times) were deleted and one test waiting on the
+invented `data-testid="builder-chat-panel"` was added. Its own summary said no
+tests ran. The verifier then saw a browser failure that existed only with the
+patch, but browser steps never computed `new_failures`, so a different failure
+set was classified `unresolved`, refunded as infrastructure and paused instead
+of returning to the author.
+
+During: four fixes, no SQL change.
+- Attribution: `introducedBrowserFailures()` compares complete patched and
+  baseline Playwright evidence (no infrastructure failures on either side) and
+  reports patched failures whose test does not fail at the pinned commit.
+  `baselineCheck` records them as `new_failures`, so
+  `classifyVerificationFailure` returns an engineering failure and the author
+  receives `previous_attempt_failed_verification`. Same-signature failures stay
+  `baseline`; other mismatches stay `unresolved`.
+- Run commands: unambiguous Vitest/lint forms (`cd apps/web && …`,
+  `npm test -- apps/web/…`, `npx vitest run …`, `node --test apps/web/…tsx`,
+  `npx tsc --noEmit`) are rewritten to the allowlisted
+  `npm test --prefix apps/web -- <file>` / `npm run lint --prefix apps/web`
+  and the result records `normalized_from`. A `cd` chain is rewritten only
+  when every part becomes an allowlisted web command, so relative `git` paths
+  never silently move to the repository root. Anything else is still refused,
+  and the refusal now lists exact copyable forms. The finish gate counts
+  `npm test --prefix apps/web -- …` runs as test evidence.
+- Test preservation: a test's title is its regression contract.
+  `write_file`, `replace_in_file`, `delete_file` and both `apply_patch`
+  formats refuse an edit that drops a test title present at the pinned commit
+  and still present in the worktree. For git-format patches the touched paths
+  come from git's own parse (`git apply --numstat` plus explicit rename/copy
+  sources), so renames, non-`a/`/`b/` prefixes and mode-only sections are
+  checked, and a refused patch is restored in full. Tests the author added may
+  change freely, and an assertion may change in place under its title.
+  `finish` checks with `--no-renames` and refuses while any pinned title is
+  missing, including one dropped by a seeded patch or a rename done through a
+  run command. Prompt
+  `agentic-engineer-v16` gives the exact commands, says e2e specs run only in
+  the verifier, and requires reusing a passing test's setup and selectors that
+  exist in component source.
+- Verifier spec selection: a real `frontend-verify` run of a spec-only patch
+  (one added test waiting on an invented `data-testid`) in the production worker
+  image reported success after running only the four smoke specs, because
+  `targetedE2eSpecs` selected specs only from changed `apps/web/src` component
+  stems. Changed, still-present `apps/web/e2e/*.spec.ts` files now run first
+  (the Vibe human test already did this), and stem matches fill the remaining
+  targeted slots.
+
+After: the guard extracts all three source declarations from the real spec
+and refuses the job's overwrite. Worker fidelity was checked rather than
+assumed. Pinned web code, spec, fixtures and Playwright/Vite config are
+identical between `6606e512` (the failed job's pin) and `9b1327fb`. The worker
+browser command passed 21/21 locally on 16 CPUs (57 s), pinned to two CPUs
+(1.7 min), with a cold Vite dependency cache (1.7 min), and inside
+`fcm/bob-worker:current` with the production limits (4 GB, 2 CPUs, 256 PIDs,
+read-only root, tmpfs, `bob-workers` network, offline fixtures) in 1.7 min. The
+earlier two failed/one flaky reload tests therefore did not reproduce from code,
+CPU count, cache state or container limits. They remain a recorded flake risk.
+The production job remains unapproved; its test-deleting patch must not be
+approved, and it resumes only through the native Builder Chat after release.
+
 ### Whole-job acceptance reconciliation (2026-10-26)
 
 Before: production UI review of original job
