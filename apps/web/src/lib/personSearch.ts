@@ -52,6 +52,7 @@ export interface PersonMatch {
   /** Absent until the permit-holder search migration is live. */
   permits?: PersonPermit[];
   nzta_authorised: boolean;
+  contact_details_authorised?: boolean;
   nzta: PersonNzta | null;
 }
 

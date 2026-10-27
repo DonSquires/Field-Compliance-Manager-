@@ -14,7 +14,9 @@
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { usePersonSearchAccess } from '../hooks/usePersonSearchAccess';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { PermitAccessCard } from '../components/PermitAccessCard';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -81,6 +83,10 @@ interface VehicleBreach {
 }
 
 const OfficerVehicleLookupPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const routedPlate = normalizePlateNumber(searchParams.get('plate') ?? '');
+  const personAccess = usePersonSearchAccess();
   const { selectedAgreementZones } = useServiceRelationships();
   const [plate, setPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -94,11 +100,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanPlate = normalizePlateNumber(plate);
-    if (!cleanPlate) return;
-
+  const runSearch = useCallback(async (cleanPlate: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -215,6 +217,19 @@ const OfficerVehicleLookupPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  }, [selectedAgreementZones]);
+
+  useEffect(() => {
+    if (!routedPlate) return;
+    setPlate(routedPlate);
+    void runSearch(routedPlate);
+  }, [routedPlate, runSearch]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPlate = normalizePlateNumber(plate);
+    if (!cleanPlate) { setError('Enter a vehicle registration to search.'); return; }
+    void runSearch(cleanPlate);
   };
 
   return (
@@ -254,6 +269,10 @@ const OfficerVehicleLookupPage: React.FC = () => {
           {loading ? 'Searching…' : 'Search Plate'}
         </button>
       </form>
+      {!personAccess.allowed && <p role={personAccess.error ? 'alert' : 'status'}>
+        {personAccess.loading ? 'Checking access to permit-holder information...' : personAccess.error ?? 'Person-search authorization is required to see permit holders and their records. Vehicle registry and compliance checks remain available.'}
+        {!personAccess.loading && <button type="button" className="btn btn-sm btn-secondary" onClick={personAccess.retry}>Check person access again</button>}
+      </p>}
 
       {searched && !loading && !error && (
         <div style={{ marginTop: '20px' }}>
@@ -394,7 +413,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
               </div>
 
               {/* Forest / Site Access Permits */}
-              {permits.length > 0 && (
+              {personAccess.allowed && permits.length > 0 && (
                 <section className="contact-card" aria-labelledby="officer-vehicle-permits-title">
                   <h3 id="officer-vehicle-permits-title" style={{ margin: '0 0 4px 0', fontSize: '15px' }}>Forest and site access permits ({permits.length})</h3>
                   <p style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-secondary)' }}>
@@ -402,7 +421,12 @@ const OfficerVehicleLookupPage: React.FC = () => {
                   </p>
                   <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
                     {permits.map((permit) => (
-                      <PermitAccessCard key={permit.id} permit={permit} showHolder currentPlate={searchedPlate} />
+                      <PermitAccessCard key={permit.id} permit={permit} showHolder currentPlate={searchedPlate}
+                        onOpenPerson={(holderPermit) => {
+                          if (holderPermit.canonical_person_id && holderPermit.holder_name) {
+                            navigate(`/officer/person_search?person=${encodeURIComponent(holderPermit.canonical_person_id)}`, { state: { personQuery: holderPermit.holder_name } });
+                          }
+                        }} />
                     ))}
                   </div>
                 </section>

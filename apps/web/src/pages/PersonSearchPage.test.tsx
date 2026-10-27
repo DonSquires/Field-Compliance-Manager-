@@ -37,6 +37,7 @@ const person = (overrides: Record<string, unknown> = {}) => ({
     relationship: 'observed_with', since: null, source: null, source_checked_at: null,
   }],
   nzta_authorised: false,
+  contact_details_authorised: true,
   nzta: null,
   ...overrides,
 });
@@ -110,6 +111,18 @@ describe('person search', () => {
     expect(noticeTypeLabel('trespass')).toBe('Trespass notice');
     expect(noticeTypeLabel('permit_refusal')).toBe('Permit refusal letter');
     expect(noticeTypeLabel('contact_request')).toBe('Contact request letter');
+  });
+
+  it('keeps the officer workflow read-only and routes vehicles within the officer portal', async () => {
+    render(<MemoryRouter initialEntries={['/officer/person_search']}><PersonSearchPage officer /><LocationProbe /></MemoryRouter>);
+    expect(rpc).not.toHaveBeenCalledWith('get_notice_expiry_register', expect.anything());
+    expect(screen.queryByText('Notice review queue')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByRole('heading', { name: 'Test Person' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open vehicle ABC123 in vehicle search' }));
+    expect(screen.getByTestId('location').textContent).toBe('/officer/vehicle_lookup?plate=ABC123');
+    expect(screen.queryByText('Notice review queue')).toBeNull();
   });
 
   it('filters matches and labels NZTA owner dates as observations, not transfer dates', async () => {

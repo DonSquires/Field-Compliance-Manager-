@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { usePersonSearchAccess } from '../hooks/usePersonSearchAccess';
 import { canAccessFieldOpsArea } from '../lib/fieldOpsAreaAccess';
 import { supabase } from '../lib/supabase';
 import { isDuplicateError, type NewPersonFields, type PersonMatch } from '../lib/personIdentity';
@@ -57,15 +58,14 @@ const NZTA_NOTICE = 'NZTA register information is restricted. Only people your o
 const EMPTY_FIELDS = { display_name: '', phone: '', email: '', suburb: '', city: '', address: '' };
 const isOwner = (link: VehiclePersonLink) => link.relationship === 'owner' || link.relationship === 'registered_owner';
 
-// Rendered only for person-search roles, so the router hook never runs where person search is unavailable.
-const OpenPersonRecordButton: React.FC<{ canonicalPersonId: string; displayName: string }> = ({ canonicalPersonId, displayName }) => {
+const OpenPersonRecordButton: React.FC<{ canonicalPersonId: string; displayName: string; officer: boolean }> = ({ canonicalPersonId, displayName, officer }) => {
   const navigate = useNavigate();
   return (
     <button
       type="button"
       className="btn btn-sm btn-secondary"
       aria-label={`Open notices and person record for ${displayName}`}
-      onClick={() => navigate(`/admin/field-ops?area=person-search&person=${encodeURIComponent(canonicalPersonId)}`, { state: { personQuery: displayName } })}
+      onClick={() => navigate(officer ? `/officer/person_search?person=${encodeURIComponent(canonicalPersonId)}` : `/admin/field-ops?area=person-search&person=${encodeURIComponent(canonicalPersonId)}`, { state: { personQuery: displayName } })}
     >
       Notices and record
     </button>
@@ -77,8 +77,8 @@ const OpenPersonRecordButton: React.FC<{ canonicalPersonId: string; displayName:
  * (one current owner), drivers and associated people (any number), optionally
  * tied to the sighting where they were established. Authorised users (the
  * vehicle_owner_identity access area, or administrators) see full details and
- * can record people; everyone else in the organisation sees only that a person
- * has been identified and their suburb and town/city.
+ * can record people; private contacts and addresses remain with operations
+ * administrators. Other users see only that a person has been identified.
  */
 export const VehicleOwnerPanel: React.FC<{
   vehicleId: string;
@@ -88,7 +88,9 @@ export const VehicleOwnerPanel: React.FC<{
   onChanged?: () => void;
 }> = ({ vehicleId, organizationId, observationId = null, onChanged }) => {
   const { profile } = useAuth();
-  const canOpenPersonSearch = canAccessFieldOpsArea('person-search', () => true, profile?.role);
+  const operationsRole = canAccessFieldOpsArea('person-search', () => true, profile?.role);
+  const personAccess = usePersonSearchAccess(!operationsRole);
+  const canOpenPersonSearch = operationsRole || personAccess.allowed;
   const [access, setAccess] = useState<{ view: boolean; record: boolean } | null>(null);
   const [people, setPeople] = useState<VehiclePersonLink[]>([]);
   const [checks, setChecks] = useState<NztaCheck[]>([]);
@@ -218,7 +220,7 @@ export const VehicleOwnerPanel: React.FC<{
       {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
       <div className="vehicle-owner__actions">
         {canOpenPersonSearch && link.canonical_person_id && link.display_name && (
-          <OpenPersonRecordButton canonicalPersonId={link.canonical_person_id} displayName={link.display_name} />
+          <OpenPersonRecordButton canonicalPersonId={link.canonical_person_id} displayName={link.display_name} officer={!operationsRole} />
         )}
         {link.person_record_id && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button>}
         {canRecord && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(link)}>No longer {ROLE_LABEL[link.relationship].toLowerCase()}</button>}
@@ -230,7 +232,7 @@ export const VehicleOwnerPanel: React.FC<{
         <strong>{isOwner(link) ? 'Owner identified' : `${ROLE_LABEL[link.relationship]} identified`}</strong>
         <span className="badge badge-info">{ROLE_LABEL[link.relationship]}</span>
       </div>
-      <div className="vehicle-owner__meta">{link.locality ? `Registered to ${link.locality}` : 'Locality not recorded'}</div>
+      <div className="vehicle-owner__meta">Personal addresses and contact details are restricted to the administration team.</div>
       <small>Your organisation has identified this person on {new Date(link.recorded_at).toLocaleDateString('en-NZ')}. Their details are shown only to authorised users.</small>
       {link.person_record_id && <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button></div>}
     </div>
@@ -248,8 +250,9 @@ export const VehicleOwnerPanel: React.FC<{
           ))}
         </div>}
       </div>
-      {!canView && <p className="vehicle-profile-hint">Names and contact details are personal information, shown only to people your organisation has authorised for vehicle owner details (an administrator can enable this under Users).</p>}
+      {!canView && <p className="vehicle-profile-hint">Names require vehicle-owner authorization (an administrator can enable this under Users). Personal addresses and contact details remain with Admin, Admin officer and Master roles.</p>}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
+      {personAccess.error && <p role="alert">{personAccess.error} <button type="button" className="btn btn-sm btn-secondary" onClick={personAccess.retry}>Check person access again</button></p>}
       {loading ? <p role="status">Loading people…</p> : active.length === 0
         ? <p>{observationId ? 'No one has been recorded at this sighting.' : 'No owner, driver or associated person recorded by your organisation.'}</p>
         : active.map(card)}
