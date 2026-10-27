@@ -73,13 +73,10 @@ async function startServer(overrides = {}) {
   baseUrl = `http://127.0.0.1:${port}`;
   serverProcess = spawn(process.execPath, ['bob-control-plane-server.js'], {
     cwd: root,
+    // A clean environment: the developer's or runner's real credentials never reach the server.
     env: {
-      ...process.env,
       PATH: `${path.join(work, 'bin')}${path.delimiter}${process.env.PATH}`,
-      SUPABASE_URL: '',
-      SUPABASE_SERVICE_ROLE_KEY: '',
-      OLLAMA_API_TOKEN: '',
-      OLLAMA_API_KEY: '',
+      HOME: work,
       PORT: String(port),
       BOB_ADMIN_TOKEN: adminToken,
       BOB_RUNNER_TOKEN: crypto.randomBytes(16).toString('hex'),
@@ -93,7 +90,7 @@ async function startServer(overrides = {}) {
       BOB_BUILDER_WORKSPACE_ROOT: workspaceRoot,
       BOB_GITHUB_SSH_KEY_FILE: path.join(work, 'missing-key'),
       BOB_GITHUB_KNOWN_HOSTS_FILE: path.join(work, 'missing-known-hosts'),
-      GITHUB_TOKEN: 'fixture-github-value',
+      BOB_GITHUB_ACCESS_TOKEN: 'fixture-github-value',
       GITHUB_OWNER: 'example',
       GITHUB_REPO: 'app',
       HUMAN_TEST_BASE_URL: 'https://www.example.test',
