@@ -143,6 +143,10 @@ export function parseLetter({ text, title, createdAt }) {
   let blockStart = 0;
   lines.slice(0, blockEnd).forEach((line, index) => { if (HEADER_LINE.test(line)) blockStart = index + 1; });
   const block = lines.slice(blockStart, blockEnd).filter((line) => !HEADER_LINE.test(line) && !/^(to|attention|attn)\s*:?$/i.test(line));
+  if (block.some((line) => /name\s*(?:and|&)\s*address/i.test(line))) {
+    return { name: null, nameBasis: null, address: null, issued: null, issuedBasis: null,
+      plate: null, kind: null, reason: 'template_addressee' };
+  }
   const nameTokens = (line) => line.replace(/^(to|attn|attention)\s*:\s*/i, '').split(/\s+/).filter((token) => !HONORIFIC.test(token));
   const addresseeLine = block[0] && !/\d/.test(block[0]) && /^[A-Za-z\u00c0-\u024f .'-]+$/.test(block[0]) ? block[0] : null;
   const addressee = addresseeLine ? nameTokens(addresseeLine).map(titleCase) : [];

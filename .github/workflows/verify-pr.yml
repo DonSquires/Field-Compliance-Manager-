@@ -31,8 +31,8 @@ jobs:
       - run: npm run calibrate
       - run: node scripts/check-migration-versions.js
       - run: node --test --test-concurrency=4 test/*.test.js
-      - name: Builder research PostgreSQL authorization
-        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js
+      - name: PostgreSQL authorization and notice quarantine
+        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js test/notice-template-quarantine-migration.test.js
 
   web:
     name: Web types, build and unit tests
