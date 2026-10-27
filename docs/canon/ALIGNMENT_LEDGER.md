@@ -553,8 +553,9 @@ import-key-bound notices to draft, marks their isolated synthetic identity
 records rejected/retired, preserves source provenance and creates audit receipts.
 It refuses changed or reused identities. Existing expiry notifications are
 corrected rather than deleted or silently marked read. The parser now holds
-unfinished addressee fields before any name fallback. A template filename alone
-does not exclude completed, named correspondence. Release and live verification of this correction are required before
+unfinished addressee fields through the salutation, regardless of date position,
+before any name fallback. A template filename alone does not exclude completed,
+named correspondence. Release and live verification of this correction are required before
 the two entries can be counted as removed from active expiry alerts.
 
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)

@@ -72,14 +72,16 @@ test('parseTrespassForm holds a form whose date cannot be read rather than inven
 test('parseLetter never turns unfinished addressee labels into people or uses a filename fallback', async () => {
   const { parseLetter } = await load();
   for (const placeholder of ['name and address', 'tanuname and address', 'Name & Address']) {
-    const parsed = parseLetter({
-      text: `R & M Security and Investigations Ltd\n${placeholder}\n05 November 2024\nDear Mr.\nThis is a warning.`,
-      title: 'Sam Example warning letter.docx',
-      createdAt: '2024-11-05T00:00:00Z',
-    });
-    assert.equal(parsed.name, null);
-    assert.equal(parsed.kind, null);
-    assert.equal(parsed.reason, 'template_addressee');
+    for (const addressee of [`${placeholder}\n05 November 2024`, `05 November 2024\n${placeholder}`]) {
+      const parsed = parseLetter({
+        text: `R & M Security and Investigations Ltd\n${addressee}\nDear Mr.\nThis is a warning.`,
+        title: 'Sam Example warning letter.docx',
+        createdAt: '2024-11-05T00:00:00Z',
+      });
+      assert.equal(parsed.name, null);
+      assert.equal(parsed.kind, null);
+      assert.equal(parsed.reason, 'template_addressee');
+    }
   }
 });
 
@@ -88,11 +90,12 @@ test('buildPlan holds unfinished addressees but keeps completed letters even in 
   const letter = (relative, text) => ({ sha256: relative, relative, method: 'docx', client: 'ofo', folder_kind: 'letter', text });
   const plan = await buildPlan([
     letter('Example warning.docx', 'name and address\n05 November 2024\nDear Mr.\nThis is a warning.'),
+    letter('Sam Example warning letter.docx', '05 November 2024\nname and address\nDear Mr.\nThis is a warning.'),
     letter('Template warning.docx', 'Sam Sample\n06 November 2024\nDear Mr Sample\nThis is a warning.'),
-    letter('Sam Example warning.docx', 'Sam Example\n05 November 2024\nDear Mr Example\nThis is a warning.'),
+    letter('Sam Example warning.docx', 'Sam Example\n05 November 2024\nDear Mr Example\nThis is a warning. Please confirm your name and address.'),
   ]);
   assert.deepEqual(plan.notices.map(row => row.name).sort(), ['Sam Example', 'Sam Sample']);
-  assert.deepEqual(plan.held.map(row => row.reason), ['template_addressee']);
+  assert.deepEqual(plan.held.map(row => row.reason), ['template_addressee', 'template_addressee']);
 });
 
 test('parseRegisterRows reads the enquiry report with its own expiry and withdrawn status', async () => {
