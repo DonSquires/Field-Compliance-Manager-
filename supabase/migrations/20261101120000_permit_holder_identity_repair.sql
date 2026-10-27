@@ -16,6 +16,32 @@
 -- another organisation records, keeps the previous name on the person, and audits every change
 -- without personal values. public.import_person_permit gains the email-and-surname rule and an
 -- opt-in, governed creation of a new holder.
+--
+-- Both act only on a person positively recorded by surname alone (metadata name_basis = 'surname').
+-- That is every holder the booking import created: its export carried each applicant's surname
+-- alone, and none of those recorded names equals the full name the permit extract gives. A compound
+-- surname ("Te Whare", "van der Berg") is still a surname. A person already carrying a full name is
+-- never renamed and never takes a related name's permit ("Jane Smith" is not "Mary Jane Smith").
+-- Names are compared by their whitespace-separated parts, so a punctuated or accented single name
+-- (O'Neill, Smith-Jones, Müller) is one part and never passes as a full name.
+
+CREATE OR REPLACE FUNCTION public.person_name_parts(p_name text)
+RETURNS text[]
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$
+  SELECT coalesce(array_agg(parts.part ORDER BY parts.ord), '{}'::text[])
+  FROM (
+    SELECT regexp_replace(lower(listed.token), '[^a-z0-9]+', '', 'g') AS part, listed.ord
+    FROM unnest(regexp_split_to_array(trim(coalesce(p_name, '')), '\s+')) WITH ORDINALITY AS listed(token, ord)
+  ) parts
+  WHERE parts.part <> ''
+$$;
+COMMENT ON FUNCTION public.person_name_parts(text) IS
+  'The whitespace-separated parts of a person''s name, each compared as public.normalize_person_name does (O''Neill -> {oneill}; Mary-Jane Smith -> {maryjane, smith}). A punctuated or accented single name stays one part.';
+REVOKE ALL ON FUNCTION public.person_name_parts(text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.person_name_parts(text) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.person_name_extends(p_recorded text, p_full text)
 RETURNS boolean
@@ -23,18 +49,29 @@ LANGUAGE sql
 IMMUTABLE
 SET search_path = ''
 AS $$
-  WITH words AS (
-    SELECT array_remove(regexp_split_to_array(lower(coalesce(p_recorded, '')), '[^a-z0-9]+'), '') AS recorded,
-           array_remove(regexp_split_to_array(lower(coalesce(p_full, '')), '[^a-z0-9]+'), '') AS full_name
+  WITH parts AS (
+    SELECT public.person_name_parts(p_recorded) AS recorded, public.person_name_parts(p_full) AS full_name
   )
   SELECT cardinality(recorded) > 0 AND cardinality(full_name) > cardinality(recorded)
     AND full_name[cardinality(full_name) - cardinality(recorded) + 1 : cardinality(full_name)] = recorded
-  FROM words
+  FROM parts
 $$;
 COMMENT ON FUNCTION public.person_name_extends(text, text) IS
-  'True when the recorded name''s words are the trailing words of a longer full name (Smith -> Jane Smith). Used to add proven given names to a surname-only person; never matches equal or unrelated names.';
+  'True when the recorded name''s parts are the trailing parts of a longer full name (Smith -> Jane Smith). Used to add proven given names to a surname-only person; never matches equal or unrelated names, or a longer surname (Jones -> Jane Smith-Jones).';
 REVOKE ALL ON FUNCTION public.person_name_extends(text, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.person_name_extends(text, text) TO authenticated, service_role;
+
+-- Every holder the booking import created is recorded by surname alone.
+UPDATE public.canonical_people person
+SET metadata = person.metadata || jsonb_build_object('name_basis', 'surname',
+      'name_basis_source', 'HABITAT - RAMS/Bookings-rmsecurity/users (new list).csv'),
+    updated_at = clock_timestamp()
+WHERE person.canonical_key LIKE 'person:import:%'
+  AND NOT (person.metadata ? 'name_basis')
+  AND NOT (person.metadata ? 'name_completed')
+  AND EXISTS (SELECT 1 FROM public.person_permits permit
+              WHERE permit.canonical_person_id = person.id
+                AND permit.source_document = 'HABITAT - RAMS/Bookings-rmsecurity/users (new list).csv');
 
 CREATE OR REPLACE FUNCTION public.attribute_permit_holder(
   p_organization_id uuid,
@@ -71,7 +108,7 @@ BEGIN
   END IF;
   IF v_source IS NULL THEN RAISE EXCEPTION 'The source document is required'; END IF;
   IF v_hash IS NULL OR v_hash !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'A SHA-256 source hash is required'; END IF;
-  IF cardinality(array_remove(regexp_split_to_array(lower(coalesce(v_name, '')), '[^a-z0-9]+'), '')) < 2 THEN
+  IF cardinality(public.person_name_parts(v_name)) < 2 THEN
     RAISE EXCEPTION 'A full name of at least two words is required';
   END IF;
   v_evidence := array(
@@ -122,11 +159,13 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'Permit holder name conflict: the person already carries this name, so it cannot separate their permits';
   END IF;
+  IF v_person.metadata->>'name_basis' IS DISTINCT FROM 'surname' THEN
+    RAISE EXCEPTION 'Permit holder name conflict: the person is not recorded by surname alone';
+  END IF;
   IF NOT public.person_name_extends(v_person.display_name, v_name) THEN
     RAISE EXCEPTION 'Permit holder name conflict: the full name must end with the recorded name';
   END IF;
-  v_added := cardinality(array_remove(regexp_split_to_array(lower(v_name), '[^a-z0-9]+'), ''))
-    - cardinality(array_remove(regexp_split_to_array(lower(coalesce(v_person.display_name, '')), '[^a-z0-9]+'), ''));
+  v_added := cardinality(public.person_name_parts(v_name)) - cardinality(public.person_name_parts(v_person.display_name));
 
   IF cardinality(v_numbers) = cardinality(v_held) THEN
     IF EXISTS (SELECT 1 FROM public.person_permits permit
@@ -146,9 +185,9 @@ BEGIN
     UPDATE public.canonical_people p SET
       display_name = v_name,
       normalized_name = public.normalize_person_name(v_name),
-      metadata = p.metadata || jsonb_build_object('name_completed', jsonb_build_object(
-        'previous_display_name', v_person.display_name, 'source_document', v_source, 'source_sha256', v_hash,
-        'permit_numbers', to_jsonb(v_numbers), 'completed_at', now())),
+      metadata = (p.metadata - 'name_basis' - 'name_basis_source') || jsonb_build_object('name_completed', jsonb_build_object(
+        'previous_display_name', v_person.display_name, 'previous_name_basis', v_person.metadata->>'name_basis',
+        'source_document', v_source, 'source_sha256', v_hash, 'permit_numbers', to_jsonb(v_numbers), 'completed_at', now())),
       updated_at = clock_timestamp()
     WHERE p.id = v_person.id;
     v_target := v_person.id;
@@ -182,7 +221,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION public.attribute_permit_holder(uuid, uuid, text, text[], text, text, boolean) IS
-  'Organisation-administrator repair of a permit holder''s identity from a permit extract that names the holder of each listed permit. When the listed permits (plus, on request, the record''s other permits applied for under the same email) are all the record''s permits, the given names are added in front of the recorded name; otherwise they move to a new person of their own. Refuses names that do not extend the recorded name, permits the person does not hold, and renaming a person another organisation records. Keeps the previous name on the person; audited with source file and SHA-256 and no personal values.';
+  'Organisation-administrator repair of a permit holder''s identity from a permit extract that names the holder of each listed permit. When the listed permits (plus, on request, the record''s other permits applied for under the same email) are all the record''s permits, the given names are added in front of the recorded name; otherwise they move to a new person of their own. Refuses a person not recorded by surname alone (metadata name_basis), names that do not extend the recorded name, permits the person does not hold, and renaming a person another organisation records. Keeps the previous name on the person; audited with source file and SHA-256 and no personal values.';
 REVOKE ALL ON FUNCTION public.attribute_permit_holder(uuid, uuid, text, text[], text, text, boolean) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.attribute_permit_holder(uuid, uuid, text, text[], text, text, boolean) TO authenticated, service_role;
 
@@ -376,6 +415,8 @@ BEGIN
           v_basis := 'permit_email_and_name';
         ELSE
           -- A holder recorded by surname alone is the same person when the email agrees and only one such holder exists.
+          -- A related name on a person who already carries a full name ("Jane Smith" for "Mary Jane Smith") is
+          -- neither linked nor duplicated: it is held for review.
           v_candidates := array(
             SELECT DISTINCT permit.canonical_person_id
             FROM public.person_permits permit
@@ -385,6 +426,10 @@ BEGIN
               AND public.person_name_extends(p.display_name, v_holder_name)
               AND p.status = 'active' AND p.merged_into_id IS NULL
           );
+          IF EXISTS (SELECT 1 FROM public.canonical_people p
+                     WHERE p.id = ANY (v_candidates) AND p.metadata->>'name_basis' IS DISTINCT FROM 'surname') THEN
+            RAISE EXCEPTION 'Permit holder not resolved: a holder with this application email and a related name is not recorded by surname alone';
+          END IF;
           IF cardinality(v_candidates) > 1 THEN
             RAISE EXCEPTION 'Permit holder not resolved: % existing permit holders share this surname and application email', cardinality(v_candidates);
           END IF;
@@ -399,7 +444,7 @@ BEGIN
         IF NOT coalesce(p_create_holder, false) THEN
           RAISE EXCEPTION 'Permit holder not resolved: no existing permit holder shares this name and application email';
         END IF;
-        IF cardinality(array_remove(regexp_split_to_array(lower(v_holder_name), '[^a-z0-9]+'), '')) < 2 THEN
+        IF cardinality(public.person_name_parts(v_holder_name)) < 2 THEN
           RAISE EXCEPTION 'Permit holder not resolved: a new holder needs a full name';
         END IF;
         v_person := gen_random_uuid();
@@ -486,6 +531,6 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION public.import_person_permit(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean) IS
-'Organisation-administrator import of a forest/site access permit extract row. Replay-safe by (organisation, permit number); fill-only (recorded values are never overwritten, differences are reported); never changes a permit''s holder. A new permit goes to an explicit active person, else the single existing permit holder whose application email and name agree, else the single holder with that email recorded by surname alone (reported as holder_name_incomplete so the name can be completed through attribute_permit_holder), else - only when p_create_holder is true and the holder has a full name - a new draft person. Plates are normalised and matched to the shared vehicle register; a new plate is created with the applicant''s description and an existing vehicle is never changed. Audited with source file and SHA-256.';
+'Organisation-administrator import of a forest/site access permit extract row. Replay-safe by (organisation, permit number); fill-only (recorded values are never overwritten, differences are reported); never changes a permit''s holder. A new permit goes to an explicit active person, else the single existing permit holder whose application email and name agree, else the single holder with that email recorded by surname alone (metadata name_basis; reported as holder_name_incomplete so the name can be completed through attribute_permit_holder) - a related name on a holder who already carries a full name is held, never linked or duplicated - else - only when p_create_holder is true and the holder has a full name of at least two parts - a new draft person. Plates are normalised and matched to the shared vehicle register; a new plate is created with the applicant''s description and an existing vehicle is never changed. Audited with source file and SHA-256.';
 REVOKE ALL ON FUNCTION public.import_person_permit(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.import_person_permit(uuid, uuid, jsonb, text, text, timestamptz, uuid, boolean) TO authenticated, service_role;

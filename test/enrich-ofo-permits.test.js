@@ -155,8 +155,20 @@ test('nameExtends mirrors public.person_name_extends', async () => {
   assert.equal(nameExtends(null, 'Jane Smith'), false);
 });
 
-const holder = (permit_number, canonical_person_id, display_name, contact_email) =>
-  ({ permit_number, canonical_person_id, display_name, contact_email });
+test('nameExtends compares whitespace parts, so punctuation never adds a word', async () => {
+  const { nameExtends, nameWords } = await load();
+  assert.deepEqual(nameWords("O'Neill"), ['oneill']);
+  assert.deepEqual(nameWords('Smith-Jones'), ['smithjones']);
+  assert.equal(nameExtends("O'Neill", "Rua O'Neill"), true);
+  assert.equal(nameExtends("O'Neill", 'Rua ONeill'), true);
+  assert.equal(nameExtends('Smith-Jones', 'Ana Smith-Jones'), true);
+  assert.equal(nameExtends('Jones', 'Jane Smith-Jones'), false);
+  assert.equal(nameExtends('Müller', 'Hans Müller'), true);
+  assert.equal(nameExtends('Te Whare', 'Hemi Te Whare'), true);
+});
+
+const holder = (permit_number, canonical_person_id, display_name, contact_email, name_basis = 'surname') =>
+  ({ permit_number, canonical_person_id, display_name, contact_email, name_basis });
 const extract = (permit_number, holder_name, contact_email) => ({ permit_number, holder_name, contact_email });
 
 test('planHolderRepair completes a surname record only when every permit is accounted for', async () => {
@@ -195,7 +207,7 @@ test('planHolderRepair never guesses who an unproven permit belongs to', async (
     holder('402', 'p-lee', 'Lee', 'family@example.test'),
     holder('500', 'p-hall', 'Hall', 'h@example.test'),
     holder('600', 'p-reid', 'Reid', 'r@example.test'),
-    holder('700', 'p-kim', 'Ana Kim', 'k@example.test'),
+    holder('700', 'p-kim', 'Ana Kim', 'k@example.test', null),
   ], [
     extract('300', 'Ann Brown', 'ann@example.test'),
     extract('400', 'Kim Lee', 'family@example.test'), extract('401', 'Sam Lee', 'family@example.test'),
@@ -246,6 +258,59 @@ test('planHolderRepair predicts how each new permit finds its holder', async () 
     ['907', 'permit_email_and_name', null],
   ]);
   assert.deepEqual(plan.summary.new_permit_follow_ups, { name_completed: 2, split: 1 });
+  assert.deepEqual(plan.new_permits.map((step) => [step.permit.permit_number, step.expected_holder, step.follow_up_permits, step.expected_permits]), [
+    ['900', 'p-ngata', null, ['800', '900']],
+    ['901', null, null, ['901']],
+    ['902', 'p-hall', ['810', '902'], ['810', '902']],
+    ['903', 'p-reid', ['820', '903'], ['820', '903']],
+    ['904', 'p-cole', ['831', '904'], ['831', '904']],
+    ['905', null, null, null],
+    ['906', null, null, null],
+    ['907', 'p-hall', null, ['810', '902', '907']],
+  ]);
+  assert.deepEqual(plan.held_new_permits, []);
+});
+
+test('planHolderRepair repairs or links only people recorded by surname alone', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('100', 'p-smith', 'Jane Smith', 'js@example.test', null),
+    holder('110', 'p-wiremu', 'Jane Wiremu', 'jw@example.test', null),
+    holder('120', 'p-whare', 'Te Whare', 'tw@example.test'),
+    holder('130', 'p-whare-2', 'Te Whare', 'aroha@example.test'),
+    holder('140', 'p-oneill', "O'Neill", 'on@example.test'),
+  ], [
+    extract('100', 'Mary Jane Smith', 'js@example.test'),
+    extract('111', 'Mary Jane Wiremu', 'jw@example.test'),
+    extract('120', 'Hemi Te Whare', 'tw@example.test'),
+    extract('131', 'Aroha Te Whare', 'aroha@example.test'),
+    extract('140', "Rua O'Neill", 'on@example.test'),
+  ]);
+  assert.deepEqual(plan.attributions, [
+    { canonical_person_id: 'p-whare', full_name: 'Hemi Te Whare', permit_numbers: ['120'], expected: 'name_completed' },
+    { canonical_person_id: 'p-oneill', full_name: "Rua O'Neill", permit_numbers: ['140'], expected: 'name_completed' },
+  ]);
+  assert.deepEqual(plan.summary.categories, { not_recorded_by_surname: 1, no_evidence_full_name: 1, completed: 2, no_evidence_surname_only: 1 });
+  assert.deepEqual(plan.new_permits.map(({ permit, expected, expected_follow_up, expected_holder }) =>
+    [permit.permit_number, expected, expected_follow_up, expected_holder]), [
+    ['111', 'held_holder_not_resolved', null, null],
+    ['131', 'permit_email_and_surname', 'name_completed', 'p-whare-2'],
+  ]);
+});
+
+test('planHolderRepair holds a new permit when a same-email permit is proven to be someone else\'s', async () => {
+  const { planHolderRepair } = await load();
+  const plan = planHolderRepair([
+    holder('100', 'p-smith', 'Smith', 'family@example.test'),
+  ], [
+    extract('100', 'Sam Smyth', 'family@example.test'),
+    extract('101', 'Jane Smith', 'family@example.test'),
+  ]);
+  assert.deepEqual(plan.attributions, []);
+  assert.deepEqual(plan.summary.categories, { name_does_not_extend: 1 });
+  assert.deepEqual(plan.new_permits, []);
+  assert.deepEqual(plan.held_new_permits, [{ permit_number: '101', expected: 'held_conflicting_evidence' }]);
+  assert.deepEqual(plan.summary.new_permits_held_in_plan, { held_conflicting_evidence: 1 });
 });
 
 test('holderRepairSql calls only governed RPCs and holds any step that departs from the plan', async () => {
@@ -253,11 +318,18 @@ test('holderRepairSql calls only governed RPCs and holds any step that departs f
   const source = { sourceDocument: 'HABITAT - RAMS/Permit Extract OFO.xlsx', sourceSha256: 'a'.repeat(64), sourceCheckedAt: '2025-11-17T21:32:59.000Z' };
   const repair = {
     attributions: [{ canonical_person_id: '11111111-1111-4111-8111-111111111111', full_name: "Rua O'Neill", permit_numbers: ['1'], expected: 'split' }],
-    new_permits: [{ permit: { permit_number: '2', holder_name: 'Ari Ward' }, expected: 'created_holder', expected_follow_up: null }],
+    new_permits: [{ permit: { permit_number: '2', holder_name: 'Ari Ward' }, expected: 'permit_email_and_surname', expected_follow_up: 'name_completed',
+      expected_holder: '22222222-2222-4222-8222-222222222222', follow_up_permits: ['2', '3'], expected_permits: ['2', '3'] }],
   };
   const sql = holderRepairSql(repair, source);
   assert.match(sql, /public\.attribute_permit_holder\(/);
   assert.match(sql, /public\.import_person_permit\([^;]*NULL, true\)/);
+  assert.equal(sql.match(/public\.attribute_permit_holder\([^;]*?, false\)/g).length, 2);
+  assert.match(sql, /jsonb_array_elements_text\(v_step->'follow_up_permits'\)/);
+  assert.doesNotMatch(sql, /ARRAY\[v_step->'permit'->>'permit_number'\]/);
+  assert.match(sql, /v_step->>'expected_holder'/);
+  assert.equal(sql.match(/permits differ from the plan/g).length, 2);
+  assert.match(sql, /jsonb_array_elements_text\(v_step->'expected_permits'\)/);
   assert.match(sql, /Unexpected repair outcome/);
   assert.match(sql, /held_unexpected_outcome/);
   assert.equal(sql.match(/EXCEPTION WHEN OTHERS/g).length, 2);

@@ -72,6 +72,11 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
     const brown = '33333333-3333-4333-8333-333333333333';
     const lee1 = '44444444-4444-4444-8444-444444444441';
     const lee2 = '44444444-4444-4444-8444-444444444442';
+    const kerr = '55555555-5555-4555-8555-555555555555';
+    const wiremu = '66666666-6666-4666-8666-666666666666';
+    const whare = '77777777-7777-4777-8777-777777777777';
+    const oneill = '88888888-8888-4888-8888-888888888888';
+    const rams = 'HABITAT - RAMS/Bookings-rmsecurity/users (new list).csv';
     const hash = 'b'.repeat(64);
     const attribute = (person, fullName, numbers, withSameEmail = false, sha = hash) =>
       `public.attribute_permit_holder('${rm}','${person}','${fullName}',ARRAY[${numbers.map(n => `'${n}'`).join(',')}]::text[],` +
@@ -146,6 +151,23 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
         WHERE public.org_access_allowed(pp.organization_id);
       CREATE FUNCTION public.search_people(p_query text, p_limit integer DEFAULT 25) RETURNS jsonb LANGUAGE sql AS $fn$ SELECT '[]'::jsonb $fn$;
 
+      INSERT INTO public.canonical_people(id,canonical_key,display_name,normalized_name) VALUES
+        ('${smith}','person:import:smith','Smith','smith'),('${ngata}','person:import:ngata','Ngata','ngata'),
+        ('${brown}','person:import:brown','Brown','brown'),('${lee1}','person:import:lee','Lee','lee'),
+        ('${lee2}','person:import:lee-2','Lee','lee'),('${kerr}','person:import:kerr','Kerr','kerr'),
+        ('${wiremu}','person:permit-holder:wiremu','Jane Wiremu','janewiremu'),
+        ('${whare}','person:import:te-whare','Te Whare','tewhare'),('${oneill}','person:import:oneill','O''Neill','oneill');
+      INSERT INTO public.person_permits(organization_id,client_organization_id,canonical_person_id,permit_number,contact_email,source_document) VALUES
+        ('${rm}','${ofo}','${smith}','20001','a@example.test','${rams}'),('${rm}','${ofo}','${smith}','20002','A@example.test ','${rams}'),
+        ('${rm}','${ofo}','${smith}','20003','b@example.test','${rams}'),
+        ('${rm}','${ofo}','${ngata}','40001','n@example.test','${rams}'),('${rm}','${ofo}','${ngata}','40002','n@example.test','${rams}'),
+        ('${rm}','${ofo}','${brown}','30001','br@example.test','${rams}'),('${rm}','${ofo}','${brown}','30002','br@example.test','${rams}'),
+        ('${rm}','${ofo}','${lee1}','60001','l@example.test','${rams}'),('${rm}','${ofo}','${lee2}','60002','l@example.test','${rams}'),
+        ('${rm}','${ofo}','${kerr}','80001','k@example.test','Another import.csv'),
+        ('${rm}','${ofo}','${wiremu}','81001','jw@example.test','${rams}'),
+        ('${rm}','${ofo}','${whare}','82001','tw@example.test','${rams}'),
+        ('${rm}','${ofo}','${oneill}','83001','on@example.test','${rams}');
+
       ${permitSearch}
 
       ${migration}
@@ -179,20 +201,22 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
       SELECT pg_temp.check(NOT public.person_name_extends('Smith','Smith Jane'),'the recorded name must end the full name');
       SELECT pg_temp.check(NOT public.person_name_extends('Tama Ngata','Hine Ngata'),'a different given name is not an extension');
       SELECT pg_temp.check(NOT coalesce(public.person_name_extends(NULL,'Jane Smith'), true),'no recorded name never matches');
+      SELECT pg_temp.check(public.person_name_parts('  Rua   O''Neill ')=ARRAY['rua','oneill'],'a name splits on whitespace only');
+      SELECT pg_temp.check(public.person_name_parts('Smith-Jones')=ARRAY['smithjones'],'a hyphenated surname is one part');
+      SELECT pg_temp.check(cardinality(public.person_name_parts(NULL))=0 AND cardinality(public.person_name_parts(' - '))=0,'no name has no parts');
+      SELECT pg_temp.check(NOT public.person_name_extends('Jones','Jane Smith-Jones'),'a shorter surname never extends a hyphenated one');
+      SELECT pg_temp.check(public.person_name_extends('O''Neill','Rua O''Neill'),'a punctuated surname is extended by a given name');
+      SELECT pg_temp.check(public.person_name_extends('Müller','Hans Müller'),'an accented surname is extended by a given name');
+      SELECT pg_temp.check(public.person_name_extends('Te Whare','Hemi Te Whare'),'a compound surname is extended by a given name');
+
+      SELECT pg_temp.check((SELECT array_agg(canonical_key ORDER BY canonical_key) FROM public.canonical_people
+        WHERE metadata->>'name_basis'='surname' AND metadata->>'name_basis_source'='${rams}')
+        = ARRAY['person:import:brown','person:import:lee','person:import:lee-2','person:import:ngata','person:import:oneill',
+          'person:import:smith','person:import:te-whare'],'exactly the booking import''s holders are recorded by surname alone');
 
       INSERT INTO public.organizations VALUES ('${rm}','R&M'),('${ofo}','OneFortyOne'),('${other}','Other Org');
       INSERT INTO public.user_profiles VALUES ('${admin}','admin',NULL),('${officer}','admin_officer',NULL);
       INSERT INTO public.test_access VALUES ('${admin}','${rm}',true),('${admin}','${ofo}',false),('${officer}','${rm}',false);
-      INSERT INTO public.canonical_people(id,canonical_key,display_name,normalized_name) VALUES
-        ('${smith}','person:import:smith','Smith','smith'),('${ngata}','person:import:ngata','Ngata','ngata'),
-        ('${brown}','person:import:brown','Brown','brown'),('${lee1}','person:import:lee','Lee','lee'),
-        ('${lee2}','person:import:lee-2','Lee','lee');
-      INSERT INTO public.person_permits(organization_id,client_organization_id,canonical_person_id,permit_number,contact_email) VALUES
-        ('${rm}','${ofo}','${smith}','20001','a@example.test'),('${rm}','${ofo}','${smith}','20002','A@example.test '),
-        ('${rm}','${ofo}','${smith}','20003','b@example.test'),
-        ('${rm}','${ofo}','${ngata}','40001','n@example.test'),('${rm}','${ofo}','${ngata}','40002','n@example.test'),
-        ('${rm}','${ofo}','${brown}','30001','br@example.test'),('${rm}','${ofo}','${brown}','30002','br@example.test'),
-        ('${rm}','${ofo}','${lee1}','60001','l@example.test'),('${rm}','${ofo}','${lee2}','60002','l@example.test');
       INSERT INTO public.canonical_person_links VALUES ('${brown}','person_records',gen_random_uuid(),'${other}');
 
       SELECT pg_temp.act(NULL);
@@ -212,7 +236,8 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
         'every permit proven: the name is completed in place');
       SELECT pg_temp.check((SELECT display_name='Tama Ngata' AND normalized_name='tamangata' AND canonical_key='person:import:ngata'
         AND metadata->'name_completed'->>'previous_display_name'='Ngata' AND metadata->'name_completed'->'permit_numbers'='["40001","40002"]'::jsonb
-        FROM public.canonical_people WHERE id='${ngata}'),'name completed, key kept, previous name recorded');
+        AND metadata->'name_completed'->>'previous_name_basis'='surname' AND NOT (metadata ? 'name_basis') AND NOT (metadata ? 'name_basis_source')
+        FROM public.canonical_people WHERE id='${ngata}'),'name completed, key kept, previous name recorded, no longer surname-only');
       INSERT INTO result SELECT 'complete_replay', ${attribute(ngata, 'Tama Ngata', ['40001', '40002'])};
       SELECT pg_temp.check((SELECT body->>'outcome'='unchanged' FROM result WHERE label='complete_replay'),'a replay is unchanged');
       SELECT pg_temp.check((SELECT count(*)=1 FROM public.audit_log WHERE action='permit_holder_name_completed'),'a replay writes no audit');
@@ -271,12 +296,41 @@ test('permit holder identity repair executes against disposable PostgreSQL', {
       INSERT INTO result SELECT 'existing_replay', ${permitImport({ permit_number: '40001', holder_name: 'Tama Ngata', contact_email: 'n@example.test' }, true)};
       SELECT pg_temp.check((SELECT body->>'outcome'='unchanged' FROM result WHERE label='existing_replay'),'an import replay is unchanged');
 
+      SELECT pg_temp.refuses($q$SELECT ${attribute(kerr, 'Ana Kerr', ['80001'])}$q$,'not recorded by surname alone');
+      SELECT pg_temp.refuses($q$SELECT ${attribute(wiremu, 'Mary Jane Wiremu', ['81001'])}$q$,'not recorded by surname alone');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '81002', holder_name: 'Mary Jane Wiremu', contact_email: 'jw@example.test' }, true)}$q$,
+        'a related name is not recorded by surname alone');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '80002', holder_name: 'Ana Kerr', contact_email: 'k@example.test' }, true)}$q$,
+        'a related name is not recorded by surname alone');
+      SELECT pg_temp.refuses($q$SELECT ${attribute(oneill, "Rua-O''Neill", ['83001'])}$q$,'at least two words');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '84001', holder_name: "O'Neill", contact_email: 'new@example.test' }, true)}$q$,
+        'a new holder needs a full name');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '84002', holder_name: 'Smith-Jones', contact_email: 'new@example.test' }, true)}$q$,
+        'a new holder needs a full name');
+      SELECT pg_temp.refuses($q$SELECT ${permitImport({ permit_number: '84003', holder_name: 'Müller', contact_email: 'new@example.test' }, true)}$q$,
+        'a new holder needs a full name');
+      SELECT pg_temp.check((SELECT display_name='Kerr' AND NOT (metadata ? 'name_completed') FROM public.canonical_people WHERE id='${kerr}')
+        AND (SELECT display_name='Jane Wiremu' FROM public.canonical_people WHERE id='${wiremu}')
+        AND NOT EXISTS (SELECT 1 FROM public.person_permits WHERE permit_number IN ('80002','81002','84001','84002','84003')),
+        'a person not recorded by surname alone is never renamed, linked by surname or doubled');
+
+      INSERT INTO result SELECT 'compound', ${permitImport({ permit_number: '82002', holder_name: 'Hemi Te Whare', contact_email: 'TW@example.test' }, true)};
+      SELECT pg_temp.check((SELECT body->>'match_basis'='permit_email_and_surname' AND body->>'canonical_person_id'='${whare}'
+        FROM result WHERE label='compound'),'a new permit joins the single compound-surname holder with the same email');
+      INSERT INTO result SELECT 'compound_complete', ${attribute(whare, 'Hemi Te Whare', ['82001', '82002'])};
+      SELECT pg_temp.check((SELECT body->>'outcome'='name_completed' FROM result WHERE label='compound_complete')
+        AND (SELECT display_name='Hemi Te Whare' AND NOT (metadata ? 'name_basis') FROM public.canonical_people WHERE id='${whare}'),
+        'a compound surname is completed with the given name');
+      INSERT INTO result SELECT 'punctuated', ${attribute(oneill, "Rua O''Neill", ['83001'])};
+      SELECT pg_temp.check((SELECT body->>'outcome'='name_completed' FROM result WHERE label='punctuated')
+        AND (SELECT display_name='Rua O''Neill' FROM public.canonical_people WHERE id='${oneill}'),'a punctuated surname is completed');
+
       SELECT pg_temp.check((SELECT count(*)=2 FROM public.audit_log WHERE action='permit_holder_split'),'each split is audited once');
-      SELECT pg_temp.check((SELECT count(*)=2 FROM public.audit_log WHERE action='permit_holder_name_completed'),'each completion is audited once');
-      SELECT pg_temp.check((SELECT count(*)=4 FROM public.audit_log WHERE action='person_permit_imported')
+      SELECT pg_temp.check((SELECT count(*)=4 FROM public.audit_log WHERE action='permit_holder_name_completed'),'each completion is audited once');
+      SELECT pg_temp.check((SELECT count(*)=5 FROM public.audit_log WHERE action='person_permit_imported')
         AND (SELECT count(*)=1 FROM public.audit_log WHERE action='person_permit_enriched'),'each import change is audited once');
       SELECT pg_temp.check(NOT EXISTS (SELECT 1 FROM public.audit_log
-        WHERE metadata::text ~* 'smith|ngata|brown|jane|tama|hine|rua|walker|example\\.test'),'audit metadata holds no personal values');
+        WHERE metadata::text ~* 'smith|ngata|brown|jane|tama|hine|rua|walker|whare|hemi|neill|kerr|wiremu|example\\.test'),'audit metadata holds no personal values');
       SELECT pg_temp.check((SELECT holder_name='Tama Ngata' FROM public.person_permits_fieldwork WHERE permit_number='40001'),
         'the field view shows the completed name');
       INSERT INTO result SELECT 'search', public.search_people('Hine Ngata');
