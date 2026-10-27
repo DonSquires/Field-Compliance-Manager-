@@ -198,7 +198,8 @@ test('person authorization, private projections and revocation execute as real d
       ${actor(desk)}
       SELECT pg_temp.check(public.search_people('TEST100')->0->'permits'->0->>'address_text'='PRIVATE_ADDRESS','admin officer contacts authorized');
       SELECT pg_temp.check((SELECT count(*)=1 FROM public.person_records),'admin officer profile read');
-      SELECT pg_temp.refuses($q$SELECT public.set_person_search_access('${officer}',true,'not an admin')$q$,'administrator required');
+      -- Owner ruling: an admin officer has full administrator parity, including person-search grants.
+      SELECT public.set_person_search_access('${officer}',true,'Admin officer parity grant');
       RESET ROLE;
       ${actor(outsider)}
       SELECT pg_temp.refuses($q$SELECT public.set_person_search_access('${officer}',true,'cross tenant')$q$,'administrator required');
