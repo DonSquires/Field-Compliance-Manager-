@@ -151,6 +151,19 @@ function sameBrowserFailures(patched, baseline) {
   return patched.failures.every(failure => keys.has(`${failure.test}::${failure.signature}`));
 }
 
+/**
+ * Browser tests that fail with the patch but not at all on the unpatched tree belong to the patch's
+ * author. Job 402bfd7e's new spec waited for a selector the app never renders; because the worker's
+ * baseline was red for other tests, the failure was paused as unresolved instead of returned for repair.
+ * The same test failing differently at baseline is not claimed here: that stays unresolved.
+ */
+function introducedBrowserFailures(patched, baseline) {
+  if (!patched?.complete || !baseline?.complete || !patched.failures.length) return [];
+  if ([...patched.failures, ...baseline.failures].some(failure => failure.infrastructure)) return [];
+  const failingAtBaseline = new Set(baseline.failures.map(failure => failure.test));
+  return [...new Set(patched.failures.filter(failure => !failingAtBaseline.has(failure.test)).map(failure => failure.test))];
+}
+
 // The repository's own CI runs this smoke subset (apps/web package.json test:e2e:ci-smoke); the full
 // 75-spec suite across two browser projects does not fit any verifier budget (job ecfb4dc4 was
 // killed at the 15-minute lease with lint+build+unit done and e2e still running).
@@ -172,6 +185,12 @@ function kebab(name) {
 function targetedE2eSpecs(changedFiles, webDir) {
   const e2eDir = path.join(webDir, 'e2e');
   if (!fs.existsSync(e2eDir)) return [];
+  // A spec the patch adds or edits is the most direct evidence and always runs (job 402bfd7e's
+  // spec-only probe ran only the smoke set, so its broken new test was never exercised).
+  const changedSpecs = [...new Set((changedFiles || []).map(String)
+    .filter((file) => /^apps\/web\/e2e\/[A-Za-z0-9][A-Za-z0-9._-]*\.spec\.ts$/.test(file))
+    .map((file) => file.slice('apps/web/'.length))
+    .filter((spec) => fs.existsSync(path.join(webDir, spec))))].sort();
   const stems = new Set();
   for (const file of changedFiles) {
     const match = String(file).match(/^apps\/web\/src\/.*\/([A-Za-z0-9_]+)\.(?:tsx?|css)$/);
@@ -179,10 +198,12 @@ function targetedE2eSpecs(changedFiles, webDir) {
     const stem = match[1].replace(/(Page|Panel|View|Screen|Component|Modal|Card)$/, '');
     if (stem.length >= 5) stems.add(stem);
   }
-  if (!stems.size) return [];
+  if (!stems.size) return changedSpecs;
   const specs = fs.readdirSync(e2eDir).filter((entry) => entry.endsWith('.spec.ts')).sort();
-  const selected = [];
+  const selected = [...changedSpecs];
   for (const spec of specs) {
+    if (selected.length >= Math.max(E2E_TARGETED_MAX, changedSpecs.length)) break;
+    if (selected.includes(`e2e/${spec}`)) continue;
     const specKebab = kebab(spec);
     let text = null;
     for (const stem of stems) {
@@ -190,7 +211,6 @@ function targetedE2eSpecs(changedFiles, webDir) {
       if (text === null) { try { text = fs.readFileSync(path.join(e2eDir, spec), 'utf8'); } catch { text = ''; } }
       if (text.includes(stem)) { selected.push(`e2e/${spec}`); break; }
     }
-    if (selected.length >= E2E_TARGETED_MAX) break;
   }
   return selected;
 }
@@ -340,6 +360,9 @@ function baselineCheck({ workDir, patchPath, args, progressPath, commands, patch
         && patched.status === result.status
         && `${patched.stdout || ''}\n${patched.stderr || ''}`.trim() === `${result.stdout || ''}\n${result.stderr || ''}`.trim()
         && !INFRASTRUCTURE_PATTERNS.some(pattern => pattern.test(`${result.stdout || ''}\n${result.stderr || ''}`)));
+  const newBrowserFailures = alsoFails && !provenSameFailure && args[1] === 'test:e2e'
+    ? introducedBrowserFailures(patched.test_failures, result.test_failures)
+    : [];
   return {
     command: label,
     checked: true,
@@ -349,7 +372,12 @@ function baselineCheck({ workDir, patchPath, args, progressPath, commands, patch
     all_failing_files: allFailing,
     proven_same_failure: provenSameFailure,
     test_failures: result.test_failures ?? null,
-    reason: provenSameFailure ? `${label} has matching failures on the pinned commit without this patch${failing.length ? `: ${failing.join(', ')}` : ''}` : alsoFails ? 'Baseline also failed, but matching failure evidence is absent; patch attribution remains unresolved' : null,
+    ...(newBrowserFailures.length ? { new_failures: newBrowserFailures } : {}),
+    reason: provenSameFailure
+      ? `${label} has matching failures on the pinned commit without this patch${failing.length ? `: ${failing.join(', ')}` : ''}`
+      : newBrowserFailures.length
+        ? `Browser tests fail only with this patch (they pass or do not exist on the pinned commit): ${newBrowserFailures.slice(0, 8).join('; ')}`
+        : alsoFails ? 'Baseline also failed, but matching failure evidence is absent; patch attribution remains unresolved' : null,
     stdout: redactLog(String(result.stdout || '').slice(-8000)),
     stderr: redactLog(String(result.stderr || '').slice(-8000))
   };
@@ -386,5 +414,6 @@ module.exports = {
   failingTestFiles,
   tolerateBaselineFailures,
   browserFailureSignatures,
-  sameBrowserFailures
+  sameBrowserFailures,
+  introducedBrowserFailures
 };

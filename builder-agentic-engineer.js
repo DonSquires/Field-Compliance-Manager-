@@ -29,7 +29,7 @@ const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generation-failure');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v15';
+const PROMPT_VERSION = 'agentic-engineer-v16';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -56,6 +56,92 @@ const RUN_ALLOWLIST = [
   /^npm test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
+const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
+const RUN_REFUSED = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs.`;
+const WEB_TEST_ARG = /^[A-Za-z0-9_./*=-]+$/;
+
+function isWebTestPath(workspacePath, arg) {
+  if (/^(?:\.\/)?apps\/web\//.test(arg)) return true;
+  if (!workspacePath || !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(arg)) return false;
+  return !fs.existsSync(path.join(workspacePath, arg)) && fs.existsSync(path.join(workspacePath, 'apps/web', arg));
+}
+
+function normalizeRunPart(part, inWeb, workspacePath) {
+  if (RUN_ALLOWLIST.some((pattern) => pattern.test(part))) return part;
+  const check = part.match(/^(?:npm run (lint|build)|npx tsc --noEmit)( --prefix apps\/web)?$/);
+  if (check && (inWeb || check[2])) return `npm run ${check[1] || 'lint'} --prefix apps/web`;
+  const runner = part.match(/^(?:npm (?:run )?test|npx vitest(?: run)?|node --test)( --prefix apps\/web)?(?: --)?(?: (.+))?$/);
+  if (!runner) return part;
+  const args = String(runner[2] ?? '').split(' ').filter((arg) => arg && !['--', '--run', 'run'].includes(arg));
+  const files = args.filter((arg) => !arg.startsWith('-'));
+  const web = inWeb || Boolean(runner[1]) || (files.length > 0 && files.every((arg) => isWebTestPath(workspacePath, arg)));
+  if (!web || !files.length) return part;
+  const relative = args.map((arg) => arg.replace(/^(?:\.\/)?apps\/web\//, ''));
+  return relative.every((arg) => WEB_TEST_ARG.test(arg)) ? `npm test --prefix apps/web -- ${relative.join(' ')}` : part;
+}
+
+// Models reach for familiar shell idioms. Job 402bfd7e spent its last four turns on
+// "cd apps/web && npm test -- --run src/…" and handed off without running a test. Unambiguous
+// Vitest/lint/build forms are rewritten to the allowlisted form; everything else is still refused.
+function normalizeRunCommand(command, workspacePath = null) {
+  const text = String(command ?? '').trim().replace(/\s+/g, ' ');
+  const cd = text.match(/^cd (?:\.\/)?apps\/web\/?(?: &&|;) (.+)$/);
+  const parts = (cd ? cd[1] : text).split(/ && /).map((part) => normalizeRunPart(part.trim(), Boolean(cd), workspacePath));
+  // Dropping the cd changes what relative git paths mean, so only fully allowlisted web commands are rewritten.
+  if (cd && !parts.every((part) => /--prefix apps\/web\b/.test(part) && RUN_ALLOWLIST.some((pattern) => pattern.test(part)))) return text;
+  return parts.join(' && ');
+}
+
+// A test file's titles are its regression contract. Job 402bfd7e overwrote a five-test Playwright spec
+// with a single new test on its last turn to satisfy the finish gate; nothing noticed the deletion.
+const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$/;
+const TEST_TITLE = /(?<![\w$.])(?:test|it|describe)(?:\.(?:describe|only|skip|fixme|fail|slow|serial|parallel|concurrent|todo))*\s*\(\s*(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
+
+/** Every path a unified diff touches, as git itself parses it, plus explicit rename/copy sources (a 100% rename's numstat names only its destination). */
+function patchTouchedPaths(cwd, flags, patchPath) {
+  const raw = execFileSync('git', ['apply', '--numstat', '-z', ...flags, patchPath], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  const fields = raw.split('\0');
+  const paths = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index];
+    if (!entry) continue;
+    const tab = entry.split('\t');
+    if (tab.length >= 3 && tab.slice(2).join('\t') === '') { paths.push(fields[index + 1], fields[index + 2]); index += 2; }
+    else paths.push(tab.slice(2).join('\t'));
+  }
+  const sources = [...fs.readFileSync(patchPath, 'utf8').matchAll(/^(?:rename|copy) from (.+)$/gm)].map((match) => {
+    const name = match[1];
+    if (!name.startsWith('"')) return name;
+    try { return JSON.parse(name); } catch { return name; }
+  });
+  return [...new Set([...paths, ...sources].filter(Boolean))];
+}
+
+function testTitleCounts(content) {
+  const counts = new Map();
+  for (const match of String(content ?? '').matchAll(TEST_TITLE)) counts.set(match[2], (counts.get(match[2]) || 0) + 1);
+  return counts;
+}
+
+/** Titles of tests present at the pinned commit that `next` drops. Tests the author added may change freely. */
+function droppedPinnedTests({ pinned, current, next }) {
+  if (pinned == null) return [];
+  const now = current === undefined ? null : testTitleCounts(current);
+  const after = testTitleCounts(next);
+  const dropped = [];
+  for (const [title, count] of testTitleCounts(pinned)) {
+    const floor = now ? Math.min(count, now.get(title) || 0) : count;
+    if ((after.get(title) || 0) < floor) dropped.push(title);
+  }
+  return dropped;
+}
+
+function droppedTestsMessage(file, dropped) {
+  const named = dropped.slice(0, 6).map((title) => JSON.stringify(title)).join(', ');
+  return `${file} would remove existing regression tests (${named}${dropped.length > 6 ? `, +${dropped.length - 6} more` : ''})`;
+}
+
+const PRESERVE_TESTS = 'Existing tests are the repository\'s evidence and must keep passing: keep every existing test and its title, and add new tests alongside them (replace_in_file to insert; never write_file over an existing test file). If the approved behavior changes what an existing test asserts, edit that assertion in place under the same title. run {"command":"git show HEAD:<file>"} shows the pinned version.';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
 
 function git(cwd, args, options = {}) {
@@ -255,7 +341,8 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
-    '4. VERIFY: run the relevant tests (run "node --test test/<file>.test.js"), node --check on changed files, and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
+    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; web lint/types "npm run lint --prefix apps/web". Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
+    '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; when you add one, copy the setup and navigation of a passing test in the same spec and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid. Prefer a Vitest test under apps/web/src that you can run yourself.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen in this run. After the pull request merges, the release lane applies new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas; report those only from their receipts.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
     '7. DATA PATHS ARE CHECKED: a caller-scoped client (callerClient/userClient) reading a table whose row-level security admits only the service role returns no rows for a real user — the verifier fails such a patch. Before reading a table with the caller\'s client, search supabase/schema.sql for `CREATE POLICY ... ON "public"."<table>"`; if only service_role can see it, go through the path that verifies the caller and then reads with the service role (for Builder tables: callFn(\'bob-builder-control-room\', authHeader, { action: \'list\' }) as create_builder_job does).',
@@ -279,7 +366,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- apply_patch {diff}                     apply a git unified diff or a "*** Begin Patch"/"*** Update File: <path>" envelope; use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
-    `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands (npm run test or npm test), git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
+    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
@@ -290,7 +377,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
       '- firewall_change {op: add|remove, rule: {chain: input|worker_egress, action: allow|deny, protocol?, port?, source? (input), destination? (worker_egress), comment}, purpose}   applies LIVE immediately, outside the patch, and is audited (owner ruling 2026-10-21). Use it only when the task needs it (a test or service must reach / must not reach a host); name every change in your finish summary. SSH/80/443/Tailscale lockouts are refused.',
       ...(firewall.tailnet ? ['- tailnet_status {} | tailnet_acl {op: get|set, policy?, if_match?, purpose?}   Tailscale devices and ACL policy (strict JSON string). set validates first, needs the etag from get as if_match, is LIVE and audited, requires an explicit unrestricted grant to the configured owner, and preserves existing Tailscale SSH rules.'] : []),
     ] : []),
-    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name the full path of a changed file in the approved scope AND a changed regression test proving that outcome. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Whole-job reconciliation blocks review/release for ANY missing requirement, even after a lane skip. Scope conflicts require explicit specification correction, not invented requirement IDs or silently waived outcomes. A complete replacement patch must retain all required behavior from earlier corrections; retained seeds are not acceptance proof. Passing narrow tests does not prove the full workflow: exercise the actual before/during/after path and failure controls. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could; that reason cannot satisfy whole-job acceptance). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
+    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name the full path of a changed file in the approved scope AND a changed regression test proving that outcome. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Whole-job reconciliation blocks review/release for ANY missing requirement, even after a lane skip. Scope conflicts require explicit specification correction, not invented requirement IDs or silently waived outcomes. A complete replacement patch must retain all required behavior from earlier corrections; retained seeds are not acceptance proof. Passing narrow tests does not prove the full workflow: exercise the actual before/during/after path and failure controls. A change that touches tests is refused unless a `node --test` (or `npm test --prefix apps/web -- <file>`) run passed in this session (or tests_not_run_reason says plainly why none could; that reason cannot satisfy whole-job acceptance). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -616,7 +703,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     if (/^npm (?:i|install)\b/.test(text)) {
       return { error: 'command not allowed in this lane: dependency installation is blocked; use the allowlisted npm run/npm test commands and report missing tooling as a workspace issue' };
     }
-    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, bounded apps/web test/lint/build commands (npm run test or npm test), git status|diff|log|show|blame' };
+    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: RUN_REFUSED };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
@@ -690,6 +777,34 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     try { fs.rmSync(path.resolve(workspacePath, file), { force: true }); } catch { /* already gone */ }
   };
 
+  const snapshotPath = (file) => {
+    const absolute = path.resolve(workspacePath, file);
+    const stat = fs.lstatSync(absolute, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink()) return { file, absolute, link: fs.readlinkSync(absolute), content: null, mode: null };
+    return { file, absolute, content: stat?.isFile() ? fs.readFileSync(absolute) : null, mode: stat?.isFile() ? stat.mode : null };
+  };
+  const restorePath = ({ absolute, link, content, mode }) => {
+    fs.rmSync(absolute, { force: true });
+    if (link !== undefined) { fs.mkdirSync(path.dirname(absolute), { recursive: true }); fs.symlinkSync(link, absolute); return; }
+    if (content === null) return;
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, content);
+    fs.chmodSync(absolute, mode);
+  };
+  const pinnedTestSource = (file) => {
+    if (!TEST_SOURCE.test(file)) return null;
+    try { return git(workspacePath, ['show', `HEAD:${file}`]); } catch { return null; }
+  };
+  // Refuses an edit that drops a test present at the pinned commit and still present in the worktree.
+  const testPreservation = (file, next, current = undefined) => {
+    const pinned = pinnedTestSource(file);
+    if (pinned == null) return null;
+    const absolute = path.resolve(workspacePath, file);
+    const now = current !== undefined ? current : fs.existsSync(absolute) ? fs.readFileSync(absolute, 'utf8') : '';
+    const dropped = droppedPinnedTests({ pinned, current: now ?? '', next: next ?? '' });
+    return dropped.length ? `refused: ${droppedTestsMessage(file, dropped)}. ${PRESERVE_TESTS}` : null;
+  };
+
   return {
     async generate_visual_baselines({ paths, reason }) {
       if (lane === 'backend') return { error: 'Visual baselines belong to the frontend lane' };
@@ -761,6 +876,8 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (violation) return { error: `refused: ${violation}` };
       if (typeof content !== 'string') return { error: 'content must be a string' };
       if (isMigrationPath(normalized) && fs.existsSync(absolute)) return { error: `refused: ${normalized} exists; migrations may only be added as new files` };
+      const droppedTests = testPreservation(normalized, content);
+      if (droppedTests) return { error: droppedTests };
       fs.mkdirSync(path.dirname(absolute), { recursive: true });
       fs.writeFileSync(absolute, content);
       return { path: normalized, bytes: Buffer.byteLength(content) };
@@ -798,6 +915,8 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
           }
           updated += current.slice(cursor);
           if (updated === current) return { error: NO_OP_EDIT };
+          const droppedNormalized = testPreservation(normalized, updated, current);
+          if (droppedNormalized) return { error: droppedNormalized };
           fs.writeFileSync(absolute, updated);
           return { path: normalized, replaced: spans.length, bytes: Buffer.byteLength(updated), matched: prefixed ? 'line_numbers_and_whitespace_normalized' : 'whitespace_normalized' };
         }
@@ -816,6 +935,8 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (occurrences > 1 && !all) return { error: `old_text occurs ${occurrences} times in ${normalized}; include more surrounding lines to make it unique, or pass all=true` };
       const updated = all ? current.split(old_text).join(new_text) : current.replace(old_text, () => new_text);
       if (updated === current) return { error: NO_OP_EDIT };
+      const droppedTests = testPreservation(normalized, updated, current);
+      if (droppedTests) return { error: droppedTests };
       fs.writeFileSync(absolute, updated);
       return { path: normalized, replaced: all ? occurrences : 1, bytes: Buffer.byteLength(updated) };
     },
@@ -866,6 +987,10 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
             virtual.set(target.normalized, { absolute: target.absolute, content: updated.content });
           } else virtual.set(normalized, { absolute, content: updated.content });
         }
+        for (const [file, { content }] of virtual) {
+          const droppedTests = testPreservation(file, content ?? '');
+          if (droppedTests) return { error: `patch ${droppedTests}` };
+        }
         const originals = [...virtual.values()].map(({ absolute }) => ({ absolute, content: fs.existsSync(absolute) ? fs.readFileSync(absolute) : null }));
         try {
           for (const { absolute, content } of virtual.values()) {
@@ -885,6 +1010,9 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       }
       const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-agent-patch-')), 'patch.diff');
       const strategies = [[], ['--recount'], ['--recount', '--ignore-whitespace']];
+      // Touched paths come from git's own parse (any a/ b/ i/ w/ prefix, renames, mode-only changes),
+      // so a refused patch is restored in full rather than only where its header text matched a regex.
+      let touched = [];
       let failure = '';
       try {
         fs.writeFileSync(patchPath, text.endsWith('\n') ? text : `${text}\n`);
@@ -892,6 +1020,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
         for (const flags of strategies) {
           try {
             git(workspacePath, ['apply', '--check', '--whitespace=nowarn', ...flags, patchPath]);
+            touched = patchTouchedPaths(workspacePath, flags, patchPath).map(snapshotPath);
             git(workspacePath, ['apply', '--whitespace=nowarn', ...flags, patchPath]);
             applied = true;
             break;
@@ -903,6 +1032,12 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       } finally {
         fs.rmSync(path.dirname(patchPath), { recursive: true, force: true });
       }
+      const droppedTests = touched.filter(({ file }) => TEST_SOURCE.test(file))
+        .map(({ file, absolute, content }) => testPreservation(file, fs.existsSync(absolute) ? fs.readFileSync(absolute, 'utf8') : '', content === null ? '' : content.toString('utf8'))).filter(Boolean);
+      if (droppedTests.length) {
+        touched.forEach(restorePath);
+        return { error: `patch ${droppedTests[0]} (the whole patch was reverted)` };
+      }
       const violations = changedFiles().filter((file) => !before.has(file)).map((file) => policyCheck(file)).filter(Boolean);
       for (const violation of violations) revertPath(violation.split(':')[0]);
       return violations.length ? { error: `patch touched refused paths (reverted): ${violations.join('; ')}` } : { applied: true, changed_files: changedFiles() };
@@ -913,14 +1048,19 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       const violation = policyCheck(normalized);
       if (violation) return { error: `refused: ${violation}` };
       if (!fs.existsSync(absolute)) return { error: `not found: ${normalized}` };
+      const droppedTests = testPreservation(normalized, '');
+      if (droppedTests) return { error: droppedTests };
       fs.rmSync(absolute, { force: true });
       return { deleted: normalized };
     },
     async run({ command }) {
       // `a && b` of allowlisted commands runs them in order, stopping at the first failure (job 79b4c08f
       // lost a turn to "command not allowed" on exactly that). Each part is checked on its own.
-      const parts = String(command ?? '').split(/\s*&&\s*/).map((part) => part.trim()).filter(Boolean);
-      if (parts.length <= 1) return run(command);
+      const requested = String(command ?? '').trim().replace(/\s+/g, ' ');
+      const normalized = normalizeRunCommand(requested, workspacePath);
+      const rewritten = normalized !== requested ? { normalized_from: requested } : {};
+      const parts = normalized.split(/\s*&&\s*/).map((part) => part.trim()).filter(Boolean);
+      if (parts.length <= 1) return { ...(await run(normalized)), ...rewritten };
       const results = [];
       for (const part of parts) {
         const result = await run(part);
@@ -929,7 +1069,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       }
       const last = results.at(-1);
       const failed = Boolean(last.error) || last.exit_code !== 0;
-      return { command: parts.join(' && '), steps: results, exit_code: last.error ? null : last.exit_code, error: last.error, stopped_at: failed ? parts[results.length - 1] : undefined };
+      return { command: parts.join(' && '), ...rewritten, steps: results, exit_code: last.error ? null : last.exit_code, error: last.error, stopped_at: failed ? parts[results.length - 1] : undefined };
     },
     read_canon() {
       const read = (file) => {
@@ -1165,6 +1305,17 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   if (!files.length) return { error: 'finish refused: no changes in the worktree. Implement the change first, or finish with an explanation only by setting args.no_change_reason.' };
   const violations = files.map((file) => tools.__policyCheck(file)).filter(Boolean);
   if (violations.length) return { error: `finish refused: ${violations.join('; ')}. Revert those files (git checkout -- <path>) and finish again.` };
+  // A seeded repair or earlier edit may already have dropped pinned tests; the handoff must restore them.
+  // --no-renames: a renamed or disabled pinned test file must still be checked under its pinned path.
+  const touchedTests = git(workspacePath, ['diff', '--cached', '--no-renames', '--name-only']).split('\n').filter((file) => file && TEST_SOURCE.test(file));
+  const droppedTests = touchedTests.flatMap((file) => {
+    let pinned;
+    try { pinned = git(workspacePath, ['show', `HEAD:${file}`]); } catch { return []; }
+    const absolute = path.join(workspacePath, file);
+    const dropped = droppedPinnedTests({ pinned, next: fs.existsSync(absolute) ? fs.readFileSync(absolute, 'utf8') : '' });
+    return dropped.length ? [droppedTestsMessage(file, dropped)] : [];
+  });
+  if (droppedTests.length) return { error: `finish refused: ${droppedTests.join('; ')}. ${PRESERVE_TESTS}` };
   const modified = git(workspacePath, ['diff', '--cached', '--name-only', '--diff-filter=MD']).split('\n').filter(Boolean);
   const badMigrations = modified.filter((file) => isMigrationPath(file));
   if (badMigrations.length) return { error: `finish refused: migrations may only be added, never modified or deleted: ${badMigrations.join(', ')}` };
@@ -1190,11 +1341,11 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
   const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
-  const passingTestRuns = sessionRuns.filter((r) => /^(?:node --test\b|npm run test --prefix apps\/web -- )/.test(r.command) && r.exit_code === 0);
+  const passingTestRuns = sessionRuns.filter((r) => /^(?:node --test\b|npm (?:run )?test --prefix apps\/web -- )/.test(r.command) && r.exit_code === 0);
   const touchesTests = files.some((file) => /^test\/|\.test\.(?:[cm]?js|tsx?)$/.test(file));
   const testsNotRunReason = String(args.tests_not_run_reason ?? '').trim();
   if (touchesTests && !passingTestRuns.length && !testsNotRunReason) {
-    return { error: 'finish refused: this change touches tests but no `node --test …` run passed in this session. Run the relevant test file (run {"command":"node --test test/<file>.test.js"}) and finish again, or set args.tests_not_run_reason to say plainly why it cannot run here.' };
+    return { error: 'finish refused: this change touches tests but no `node --test …` run passed in this session. Run the relevant test file (run {"command":"node --test test/<file>.test.js"} or, for web tests, {"command":"npm test --prefix apps/web -- src/<path>.test.tsx"}) and finish again, or set args.tests_not_run_reason to say plainly why it cannot run here.' };
   }
   const tests = (Array.isArray(args.tests) ? args.tests : typeof args.tests === 'string' ? args.tests.split(/\r?\n/) : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 20);
   const proposal = {
@@ -1212,7 +1363,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
       })).slice(0, 100)
       : [],
     // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
-    verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm run (?:test|lint|build) --prefix apps\/web\b)/.test(r.command)).slice(-20),
+    verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm (?:test|run (?:test|lint|build)) --prefix apps\/web\b)/.test(r.command)).slice(-20),
     visual_baselines: typeof tools.__visualBaselines === 'function' ? tools.__visualBaselines() : [],
     tests_not_run_reason: testsNotRunReason || undefined,
     rollback_notes: Array.isArray(args.rollback_notes) && args.rollback_notes.length ? args.rollback_notes.map(String).slice(0, 10) : [files.some((file) => file.startsWith('supabase/migrations/')) ? 'Before merge: close the pull request; nothing is live. After merge the release lane applies the migration, so undo it with a new forward migration and revert the code.' : 'Revert the pull request; this run applies no live data, migrations, or deployments.'],
@@ -1751,4 +1902,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
