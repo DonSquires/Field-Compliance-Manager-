@@ -6,6 +6,7 @@
  * inventing ownership. Contacts and delivery use their existing governed writers.
  */
 
+import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -1583,7 +1584,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </aside>
         <section className="crm-selected-client" aria-label="Selected client">
           {selectedEntry ? <><header><div><h2>{selectedEntry.name}</h2><small>{selectedEntry.type.replaceAll('_', ' ')} · identity is not owned by the provider</small></div><button type="button" onClick={() => setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status })}>Full account workspace</button></header>
-            <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={Boolean(profile && ['admin', 'master', 'grand_master'].includes(profile.role))} onDirtyChange={contactDirty} />
+            <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={isAdminTierRole(profile?.role)} onDirtyChange={contactDirty} />
             {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ClientSetupPage key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenCoverage={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
           </> : <p>Select or create a client organization to configure its contacts and sites.</p>}
         </section>

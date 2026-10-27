@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -273,7 +274,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [jobAction, setJobAction] = useState<'retry' | 'reprocess' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+  const isAdmin = isAdminTierRole(profile?.role);
 
   const chooseWorkspaceMode = useCallback((mode: ReviewWorkspaceMode) => {
     setWorkspaceMode(mode);

@@ -21,6 +21,16 @@ correctness *is* enforcement legality. Modules are attributes layered on the
 boundary as data, never a fork of the geometry
 (`docs/canon/PLATFORM_ENGINES_AND_MODULE_PROFILE.md`).
 
+> Owner ruling 2026-10-27: geofences are **context only**. A boundary decides
+> which rules, evidence requirements and billing apply where work happens; it
+> never decides whether a person may open a module or run a person or vehicle
+> search. "Reveals which modules apply" means which module rules govern this
+> place, not which modules the person can use — module access is the
+> organisation switch plus the personal tick (`docs/canon/ACCESS_MODEL.md`,
+> same date). Static guarding arrive/depart still requires the device inside a
+> verified site boundary as attendance evidence; that rule is pending an owner
+> ruling.
+
 ## P1 — Load-bearing, no silent fallbacks
 
 > Owner ruling (MR !1051): the entire build depends on the geofence being present
@@ -151,3 +161,5 @@ camping overnight, parking daytime). Zones (area + rules) and checkpoints (point
 5. Blast-radius check (Atlas + `supabase/schema.sql`) before touching
    `resolve_context`, the boundary columns, or their writers — they carry billing
    and enforcement.
+6. Never use a boundary, place resolution or active place rules to hide or block a
+   module or a search (owner ruling 2026-10-27). Show the place as context instead.

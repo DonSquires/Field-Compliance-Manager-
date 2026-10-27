@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHref, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -88,7 +89,7 @@ const StaffProfilePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const canManagePay = Boolean(actor && ['grand_master', 'master', 'admin'].includes(actor.role));
+  const canManagePay = isAdminTierRole(actor?.role);
 
   const loadProfile = useCallback(async () => {
     if (!staffId) {

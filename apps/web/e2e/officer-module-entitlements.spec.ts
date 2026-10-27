@@ -58,7 +58,7 @@ test('the standalone access-control route renders its wired officer workflow', a
 });
 
 test('the standalone access-control route does not expose officer event entry to admins', async ({ page }) => {
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['access_control'] });
   await page.route('**/rest/v1/rpc/resolve_active_rules', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ organization_id: '33333333-3333-4333-8333-333333333333', module_key: 'access_control', enabled: true }]) });
   });
@@ -94,4 +94,55 @@ test('every advertised standalone specialty route renders officer page content',
     await expect(page.locator('.module-shell-title').getByText(module.label, { exact: true })).toBeVisible();
     await expect(page.locator('.module-shell-content').getByRole('heading').first()).toBeVisible();
   }
+});
+
+test('a canonical module tick opens the officer page instead of a dead end', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await installSupabaseFixtures(page, { officerModules: ['parking_enforcement'] });
+  await signInAsOfficer(page, '/officer/modules');
+
+  const cards = page.locator('.officer-module-card');
+  await expect(cards).toHaveCount(1);
+  await cards.getByRole('button', { name: /Parking Enforcement/ }).click();
+  await expect(page).toHaveURL(/\/officer\/parking$/);
+  await expect(page.getByRole('heading', { name: 'Parking', exact: true })).toBeVisible();
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
+for (const configured of [true, false]) {
+  test(`admin officer can discover and open modules without personal ticks (configured: ${configured})`, async ({ page }) => {
+    await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'officer'));
+    await installSupabaseFixtures(page, { adminRole: 'admin_officer', officerModules: ['noise_control'] });
+    if (!configured) {
+      await page.route('**/rest/v1/organization_modules*', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      });
+    }
+    await signInAsAdmin(page, '/officer/modules');
+    await page.locator('.officer-module-card').getByRole('button', { name: /Noise Control/ }).click();
+    await expect(page).toHaveURL(/\/officer\/noise_control$/);
+    await expect(page.getByRole('heading', { name: 'Noise Control', exact: true })).toBeVisible();
+  });
+}
+
+test('place rules supply context but never block a ticked, organisation-enabled module', async ({ page }) => {
+  await installSupabaseFixtures(page, { officerModules: ['noise_control'] });
+  await page.route('**/rest/v1/rpc/resolve_active_rules', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ organization_id: '33333333-3333-4333-8333-333333333333', module_key: 'noise_control', enabled: false, policy_status: 'active', resolution_status: 'outside_all_geofences' }]) });
+  });
+  await signInAsOfficer(page, '/officer/noise_control');
+  await expect(page).toHaveURL(/\/officer\/noise_control$/);
+  await expect(page.getByRole('heading', { name: 'Noise Control', exact: true })).toBeVisible();
+
+  await page.goto('/modules/noise_control');
+  await expect(page.locator('.module-shell-title').getByText('Noise Control', { exact: true })).toBeVisible();
+});
+
+test('an organisation-enabled module without the personal tick stays closed', async ({ page }) => {
+  // The fixture organisation enables workshop; the fixture officer holds no workshop tick.
+  await installSupabaseFixtures(page);
+  await signInAsOfficer(page, '/officer/workshop');
+  await expect(page).toHaveURL(/\/officer$/);
+  await page.goto('/officer/modules');
+  await expect(page.getByText('No enabled field modules are available.')).toBeVisible();
 });

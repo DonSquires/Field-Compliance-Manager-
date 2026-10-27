@@ -46,10 +46,13 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain('const canAccessOfficerModule = useCallback');
     expect(source).toContain("if (!canAccessOfficerModule(module)) {");
     expect(source).toContain("navigate('/officer', { replace: true });");
-    expect(source).toContain('grantedModules.includes');
+    expect(source).toContain('grantedModules');
     expect(source).toContain('module === \'modules\'');
-    expect(source).toContain('useActiveModuleContext');
-    expect(source).toContain('moduleContext.enabled');
+    expect(source).toContain('canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled })');
+    expect(source).toContain('officerRouteModuleKey');
+    // Place/rule resolution is context only; it never grants or removes module access.
+    expect(source).not.toContain('useActiveModuleContext');
+    expect(source).not.toContain('moduleContext.enabled');
   });
 
   it('exposes stateful accessible semantics on persistent controls', () => {

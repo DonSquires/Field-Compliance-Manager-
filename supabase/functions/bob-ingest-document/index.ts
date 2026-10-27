@@ -40,7 +40,8 @@ const MAX_ROWS = 20_000;
 const CAN_INGEST = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 // NO hardcoded target list. The target table + its columns + required columns
 // are resolved from the LIVE schema at request time (see resolveTarget). This

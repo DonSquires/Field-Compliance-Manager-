@@ -17,7 +17,7 @@
  * to show a gated feature, and safety-relevant modules fail closed on every
  * state except a positively confirmed "configured" + enabled.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 export type ModuleGateStatus = 'loading' | 'error' | 'unconfigured' | 'configured';
@@ -77,11 +77,11 @@ export function useEnabledModules(organizationId: string | null | undefined): En
     };
   }, [organizationId]);
 
-  function isModuleEnabled(moduleKey: string, options?: { safetyRelevant?: boolean }): boolean {
+  const isModuleEnabled = useCallback((moduleKey: string, options?: { safetyRelevant?: boolean }): boolean => {
     if (status === 'configured') return enabledModules.has(moduleKey);
     if (options?.safetyRelevant) return false; // fail closed: loading, error, and unconfigured all deny
     return status === 'unconfigured'; // non-critical rollout allowance; loading/error still deny
-  }
+  }, [enabledModules, status]);
 
   return { status, enabledModules, isModuleEnabled };
 }

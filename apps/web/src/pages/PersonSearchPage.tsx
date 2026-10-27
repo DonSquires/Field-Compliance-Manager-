@@ -170,7 +170,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
         <aside className="person-search-scope" aria-label="Search scope">
           <span>Search scope</span>
           <strong>Authorised organisations</strong>
-          <small>{officer ? 'Read-only notice and permit checks. Personal addresses and contact details stay with the administration team.' : 'Results and restricted identity details follow your organisation access.'}</small>
+          <small>{officer ? 'Read-only notice and permit checks. Personal addresses and contact details require administrator authority in either portal.' : 'Results and restricted identity details follow your organisation access.'}</small>
         </aside>
       </header>
 
@@ -373,7 +373,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                       <li key={permit.id}>
                         <PermitAccessCard
                           permit={permit}
-                          showContact={!officer && selected.contact_details_authorised === true}
+                          showContact={selected.contact_details_authorised === true}
                           actionsDisabled={searching}
                           onOpenVehicle={(vehicle) => {
                             if (vehicle.canonical_vehicle_id) openVehicle(vehicle.canonical_vehicle_id, vehicle.plate_number);
@@ -384,7 +384,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                   </ul>
                 )}
                 {selectedPermits.length > 0 && (
-                  <p className="person-search-legal-note">Validity is worked out from the permit dates in New Zealand time; the finishing date is the last valid day. {officer ? 'For contact details, ask the administration team.' : 'Contact details are as captured on the application and may not be current.'}</p>
+                  <p className="person-search-legal-note">Validity is worked out from the permit dates in New Zealand time; the finishing date is the last valid day. {selected.contact_details_authorised ? 'Contact details are as captured on the application and may not be current.' : 'For contact details, ask the administration team.'}</p>
                 )}
               </section>
 
@@ -431,7 +431,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                   {!selected.nzta ? <p className="person-search-section-empty">No NZTA register check is recorded for this person.</p> : (
                     <>
                       <dl className="person-nzta-facts">
-                        {!officer && selected.contact_details_authorised === true && <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>}
+                        {selected.contact_details_authorised === true && <div><dt>Address at last check</dt><dd>{selected.nzta.address ?? 'Not recorded'}</dd></div>}
                         <div><dt>Last checked</dt><dd>{formatNzDate(selected.nzta.last_checked_at)}</dd></div>
                       </dl>
                       {selected.nzta.checks.length > 0 && (

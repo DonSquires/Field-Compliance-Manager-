@@ -49,7 +49,8 @@ import { useAuth } from '../context/AuthContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
-import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
+import { canUseModule, officerRouteModuleKey } from '../lib/moduleAccess';
+import { isAdminTierRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
@@ -150,10 +151,9 @@ const OfficerShell: React.FC = () => {
   const location = useLocation();
   const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
-  const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone, setLocationMode } = useServiceRelationships();
   const [activeModule, setActiveModule] = useState<ActiveModule>(null);
-  const moduleContext = useActiveModuleContext(activeModule ?? null);
 
   const getGps = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
@@ -180,7 +180,6 @@ const OfficerShell: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
-  const [grantedModules, setGrantedModules] = useState<string[]>([]);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
@@ -199,12 +198,15 @@ const OfficerShell: React.FC = () => {
     if (!module) return true;
     if (module === 'modules') return true;
     if (CORE_OFFICER_MODULES.has(module)) return true;
-    if (moduleContext.moduleKey === module && moduleContext.policyStatus && moduleContext.policyStatus !== 'needs_resolution') {
-      return moduleContext.enabled;
-    }
-    return grantedModules.includes(module)
-      || (moduleStatus === 'configured' && enabledModules.has(module) && (profile?.moduleAccess ?? []).includes(module));
-  }, [enabledModules, grantedModules, moduleContext.enabled, moduleContext.moduleKey, moduleContext.policyStatus, moduleStatus, profile?.moduleAccess]);
+    return canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled });
+  }, [isModuleEnabled, profile?.moduleAccess, profile?.role]);
+
+  // Directory: admin-tier roles see every organisation-enabled field module; everyone else sees their ticked modules.
+  const grantedModules = useMemo(() => {
+    const candidates = isAdminTierRole(profile?.role) ? Object.keys(MODULE_METADATA) : (profile?.moduleAccess ?? []);
+    return Array.from(new Set(candidates.map(officerRouteModuleKey))).filter((module) => MODULE_METADATA[module]
+      && canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled }));
+  }, [isModuleEnabled, profile?.moduleAccess, profile?.role]);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
@@ -236,12 +238,6 @@ const OfficerShell: React.FC = () => {
       setOfficerState('standby');
     }
   }, [location.pathname, activeShift, grantedModules, moduleStatus, canAccessOfficerModule, moduleFromUrl, navigate]);
-
-  // Direct module access requires both the officer's grant and the organisation entitlement.
-  useEffect(() => {
-    const directAccess = profile?.moduleAccess ?? [];
-    setGrantedModules(Array.from(enabledModules).filter((module) => directAccess.includes(module)));
-  }, [enabledModules, profile?.moduleAccess]);
 
   useEffect(() => {
     if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;

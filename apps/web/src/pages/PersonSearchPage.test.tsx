@@ -84,6 +84,20 @@ describe('person search', () => {
     expect(screen.getByText(/1 Example Road/)).toBeTruthy();
   });
 
+  it.each([true, false])('uses server contact authority (%s), not portal choice, for private details', async (authorized) => {
+    rpc.mockResolvedValue({ data: [person({
+      contact_details_authorised: authorized,
+      nzta_authorised: true,
+      nzta: { address: '1 Private Test Road', last_checked_at: '2026-01-02T00:00:00Z', checks: [] },
+    })], error: null });
+    render(<MemoryRouter><PersonSearchPage officer /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByRole('heading', { name: 'Test Person' });
+    expect(Boolean(screen.queryByText('1 Private Test Road'))).toBe(authorized);
+    expect(screen.queryByText('Notice review queue')).toBeNull();
+  });
+
   it('blocks register lookups while a person search is in flight', async () => {
     let completeSearch!: (value: { data: ReturnType<typeof person>[]; error: null }) => void;
     const pending = new Promise<{ data: ReturnType<typeof person>[]; error: null }>((resolve) => { completeSearch = resolve; });

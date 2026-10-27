@@ -260,7 +260,7 @@ const ApprovalsActivityPage: React.FC = () => {
       if (clientsResponse.error) throw clientsResponse.error;
       if (staffResponse.error) throw staffResponse.error;
       if (investigationsResponse.error) throw investigationsResponse.error;
-      const scopeOrganizationId = profile?.role === 'admin'
+      const scopeOrganizationId = profile?.role === 'admin' || profile?.role === 'admin_officer'
         ? profile.organizationId
         : operatingOrganizationId ?? profile?.organizationId ?? null;
       const activity = ((activityResponse.data as ApprovalRow[]) ?? []).filter((row) => !scopeOrganizationId || row.organization_id === scopeOrganizationId);

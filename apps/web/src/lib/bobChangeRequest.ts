@@ -1,3 +1,4 @@
+import { ADMIN_TIER_ROLES } from './roles';
 import { supabase } from './supabase';
 import { captureVisiblePageLabels } from './bobPageContext';
 
@@ -12,7 +13,7 @@ export const CHANGE_REQUEST_KINDS: Array<{ value: ChangeRequestKind; label: stri
 
 // Mirrors bob-triage-report CAN_REPORT; the function enforces it server-side.
 export const CHANGE_REQUEST_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer', 'officer']);
-export const CHANGE_REQUEST_REVIEW_ROLES = new Set(['grand_master', 'master', 'admin']);
+export const CHANGE_REQUEST_REVIEW_ROLES = ADMIN_TIER_ROLES;
 export const CHANGE_REQUEST_TEXT_LIMIT = 1000;
 
 export function canRequestChange(role: string | null | undefined) {

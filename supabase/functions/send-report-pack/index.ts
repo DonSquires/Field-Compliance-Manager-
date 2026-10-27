@@ -33,7 +33,8 @@ const CORS = {
 const CAN_SEND = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 
 type JsonMap = Record<string, unknown>;

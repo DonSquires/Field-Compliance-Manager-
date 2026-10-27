@@ -32,7 +32,7 @@ jobs:
       - run: node scripts/check-migration-versions.js
       - run: node --test --test-concurrency=4 test/*.test.js
       - name: PostgreSQL authorization, notice quarantine and permit holders
-        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js test/notice-template-quarantine-migration.test.js test/permit-holder-person-search-migration.test.js test/permit-holder-identity-repair-migration.test.js
+        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js test/notice-template-quarantine-migration.test.js test/permit-holder-person-search-migration.test.js test/permit-holder-identity-repair-migration.test.js test/officer-person-search-access.test.js test/admin-officer-parity.test.js
 
   web:
     name: Web types, build and unit tests
@@ -82,6 +82,8 @@ jobs:
         run: npx playwright test e2e/builder-chat-research.spec.ts --workers=2 --global-timeout=120000
       - name: Existing operational smoke suite
         run: npm run test:e2e:ci-smoke -- --global-timeout=900000
+      - name: Admin officer parity and private lookups (desktop and mobile)
+        run: npx playwright test e2e/field-operations-role-scope.spec.ts e2e/officer-person-search.spec.ts --workers=2 --global-timeout=120000
       - name: Retain fixture browser evidence
         if: always()
         uses: actions/upload-artifact@v4

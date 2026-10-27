@@ -7,6 +7,7 @@
  * queue) + timesheets (hours, approval, payroll export).
  */
 
+import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useHref, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -326,7 +327,6 @@ const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
   { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
 ];
 
-const ADMIN_OFFICER_TABS = new Set<RosterTab>(['staff', 'onboarding', 'credentials', 'leave', 'shift-templates', 'roster-rules', 'coverage', 'oncall', 'timesheets', 'assets']);
 
 const tabGroupFor = (tab: RosterTab): RosterTabGroup => TAB_GROUPS.find((group) => group.tabs.includes(tab))?.id ?? 'workforce';
 
@@ -464,10 +464,10 @@ const RosterHRPage: React.FC = () => {
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
   const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
-  const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && ['grand_master', 'master', 'admin'].includes(profile.role));
-  const canManagePayRoles = Boolean(profile && ['grand_master', 'master', 'admin'].includes(profile.role));
+  const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && isAdminTierRole(profile.role));
+  const canManagePayRoles = isAdminTierRole(profile?.role);
   const requestedTab = new URLSearchParams(location.search).get('tab') as RosterTab | null;
-  const roleTabs = profile?.role === 'admin_officer' ? ADMIN_OFFICER_TABS : new Set<RosterTab>(TABS.map((item) => item.id));
+  const roleTabs = new Set<RosterTab>(TABS.map((item) => item.id));
   const visibleTabGroups = TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => roleTabs.has(item)) })).filter((group) => group.tabs.length > 0);
   const initialTab = requestedTab && roleTabs.has(requestedTab) ? requestedTab : 'staff';
   const [tab, setTab] = useState<RosterTab>(initialTab);
