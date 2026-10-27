@@ -25,7 +25,7 @@
  * Nothing is sent to an external service.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const BASE = process.env.RM_DOCUMENTS_ROOT || 'C:/Users/squir/R & M Security and Investigations/RemSec - Documents';
@@ -265,7 +265,7 @@ async function linkedCli() {
   return (sql) => {
     try { return rawQuery(sql); } catch (error) {
       const text = String(error.stderr || '') + String(error.stdout || '') + String(error.message);
-      if (process.env.PERMIT_IMPORT_ERROR_LOG) writeFileSync(outsideRepo(process.env.PERMIT_IMPORT_ERROR_LOG, 'error log'), text);
+      if (process.env.PERMIT_IMPORT_ERROR_LOG) writePrivate(process.env.PERMIT_IMPORT_ERROR_LOG, 'error log', text);
       throw new Error(redact(text.split('\n').find((line) => /ERROR|error:/i.test(line)) ?? 'query failed').slice(0, 300));
     }
   };
@@ -281,7 +281,7 @@ async function runApply({ plan, source, commit, report }) {
     console.log(`${commit ? 'applied' : 'checked'} ${results.length}/${plan.permits.length}`);
   }
   const summary = summariseResults(results, { mode: commit ? 'committed' : 'dry_run_rolled_back', planned: plan.permits.length });
-  if (report) writeFileSync(outsideRepo(report, 'apply report'), JSON.stringify({ summary, results, held_in_plan: plan.held }, null, 2));
+  if (report) writePrivate(report, 'apply report', JSON.stringify({ summary, results, held_in_plan: plan.held }, null, 2));
   return summary;
 }
 
@@ -528,7 +528,7 @@ async function runHolderRepair({ plan, source, commit, report }) {
   const summary = summariseHolderRepair(results, {
     mode: commit ? 'committed' : 'dry_run_rolled_back', planned: repair.summary, before, after,
   });
-  if (report) writeFileSync(outsideRepo(report, 'repair report'), JSON.stringify({ summary, repair, results }, null, 2));
+  if (report) writePrivate(report, 'repair report', JSON.stringify({ summary, repair, results }, null, 2));
   return summary;
 }
 
@@ -539,6 +539,13 @@ const isWithinRepo = (file) => {
 function outsideRepo(file, label) {
   if (isWithinRepo(file)) throw new Error(`The ${label} holds personal information and must live outside the repository`);
   return file;
+}
+/** Plans, reports and error logs hold personal information: owner-only, outside the repository. */
+export function writePrivate(file, label, content) {
+  const target = outsideRepo(file, label);
+  writeFileSync(target, content, { mode: 0o600 });
+  // The mode above applies only on creation; tighten a file that already existed.
+  chmodSync(target, 0o600);
 }
 const argument = (name) => { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] : undefined; };
 
@@ -552,7 +559,7 @@ async function main() {
     sourceCheckedAt: workbook.modified,
   };
   if (process.argv.includes('--plan')) {
-    if (argument('--output')) writeFileSync(outsideRepo(argument('--output'), 'plan'), JSON.stringify({ source, ...plan }, null, 2));
+    if (argument('--output')) writePrivate(argument('--output'), 'plan', JSON.stringify({ source, ...plan }, null, 2));
     console.log(JSON.stringify({ source: { ...source, sourceSha256: source.sourceSha256.slice(0, 16) }, ...plan.summary }, null, 2));
     return;
   }
