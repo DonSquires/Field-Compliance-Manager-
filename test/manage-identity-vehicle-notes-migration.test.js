@@ -12,10 +12,16 @@ const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
 const liveStart = schema.indexOf('CREATE OR REPLACE FUNCTION "public"."manage_identity_vehicle"');
-const liveFunction = schema.slice(liveStart, schema.indexOf('$function$;', liveStart) + '$function$;'.length);
+const keepRule = "org_notes = CASE WHEN NOT coalesce(p_fields ? 'notes', false) THEN org_notes\n      WHEN v_note IS NULL";
+const eraseRule = 'org_notes = CASE WHEN v_note IS NULL';
+const migratedFunction = migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION'), migration.indexOf('$function$;') + '$function$;'.length);
+// The pre-fix definition is rebuilt from the migration, because schema.sql is regenerated from the live catalog
+// after release and then already carries the fix.
+const preFixFunction = migratedFunction.replace(keepRule, eraseRule);
 
 test('the migration changes only the omitted-notes rule and keeps the existing grants', () => {
   assert.ok(liveStart > 0);
+  assert.notEqual(preFixFunction, migratedFunction, 'the pre-fix definition differs only by the omitted-notes rule');
   assert.match(migration, /org_notes = CASE WHEN NOT coalesce\(p_fields \? 'notes', false\) THEN org_notes\n\s+WHEN v_note IS NULL THEN org_notes - p_organization_id::text\n\s+ELSE jsonb_set\(/);
   assert.match(migration, /SECURITY DEFINER\n SET search_path TO 'public'/);
   assert.doesNotMatch(migration, /\b(GRANT|REVOKE|DROP)\b/);
@@ -79,8 +85,8 @@ test('an omitted note is kept and an empty note still clears, against disposable
       BEGIN IF NOT coalesce(ok, false) THEN RAISE EXCEPTION 'FAIL: %', label; END IF; END $fn$;
       SELECT set_config('request.jwt.claim.sub', '${admin}', false);
 
-      -- The live definition: an omitted note erases the organisation's note.
-      ${liveFunction}
+      -- The pre-fix definition: an omitted note erases the organisation's note.
+      ${preFixFunction}
       ${call(orgA, { make: 'Toyota', notes: 'Gate code 1234 note' }, 'Registered in the workspace')};
       SELECT pg_temp.check(${note(orgA)} = 'Gate code 1234 note', 'the workspace sets a note');
       ${call(orgA, {}, 'NZTA registered-owner identity reviewed')};
