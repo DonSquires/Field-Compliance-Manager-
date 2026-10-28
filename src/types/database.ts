@@ -39117,6 +39117,10 @@ export type Database = {
         Args: { p_organization_id?: string }
         Returns: boolean
       }
+      can_view_rnm_identity_for_organization: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
       cancel_document_source_ingestion: {
         Args: { p_run_id: string }
         Returns: {
