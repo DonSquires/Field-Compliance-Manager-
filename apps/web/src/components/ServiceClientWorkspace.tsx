@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { latestFieldVerification, placeFailure, type FieldPlaceWorkspace } from '../lib/fieldPlaces';
 import { isAdminTierRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
-import { workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
+import { readWorkflowContext, workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
 import '../styles/PlaceWorkspace.css';
 
 interface Client {
@@ -29,7 +29,7 @@ export function ServiceClientWorkspace(props: Props) {
   const { profile, operatingOrganizationId } = useAuth();
   const location = useLocation();
   const account = props.accountId ?? new URLSearchParams(location.search).get('account') ?? '';
-  const provider = props.providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId;
+  const provider = props.providerOrganizationId ?? readWorkflowContext(location.search).providerId ?? operatingOrganizationId ?? profile?.organizationId;
   if (!provider || !isAdminTierRole(profile?.role)) return <p role="alert">Provider administrator access is required to set up a client.</p>;
   return <ClientEditor key={`${provider}:${account}`} {...props} accountId={account} providerId={provider} />;
 }
@@ -132,8 +132,8 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
   };
   const leave = useCallback((destination: string, locationId?: string) => {
     if (hasDraft && !window.confirm('Leave without saving the client or new-location changes?')) return;
-    onNavigate(destination, { accountId: client?.id, locationId });
-  }, [hasDraft, client?.id, onNavigate]);
+    onNavigate(destination, { accountId: client?.id, locationId, providerId });
+  }, [hasDraft, client?.id, providerId, onNavigate]);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -150,7 +150,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
       setClient(response.data as Client); setEngagementSaved(response.data.engagement_confirmed); setDirty(false);
       request.current = crypto.randomUUID();
       setNotice('Client saved. Add locations below; prices, schedules and invitations can follow.');
-      if (!embedded && !accountId) navigate(`${route.pathname}${workflowContextQuery({ accountId: response.data.id })}`, { replace: true, state: { serviceClientSaved: true } });
+      if (!embedded && !accountId) navigate(`${route.pathname}${workflowContextQuery({ accountId: response.data.id, providerId })}`, { replace: true, state: { serviceClientSaved: true } });
     } catch (failure) { setError(placeFailure(failure)); }
     finally { setBusy(false); }
   };
@@ -179,7 +179,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
     {notice && <p className="place-message" role="status">{notice}</p>}
     {!client && matches.length > 0 && <section className="place-message" aria-label="Existing client matches"><p>Already on the books? Open the existing client instead of creating a duplicate.</p>
       {matches.map(match => <button key={match.id} type="button" onClick={() => {
-        if (!dirty || window.confirm('Discard this new-client draft and open the existing client?')) onNavigate('client-setup', { accountId: match.id });
+        if (!dirty || window.confirm('Discard this new-client draft and open the existing client?')) onNavigate('client-setup', { accountId: match.id, providerId });
       }}>{match.name}</button>)}</section>}
     <form onSubmit={event => void save(event)} aria-label="Client details">
       <fieldset disabled={busy || Boolean(accountId && !client)}>

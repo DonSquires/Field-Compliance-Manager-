@@ -90,6 +90,10 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   **Map, areas and restrictions** opens the existing specialist editor.
   Delivery editing requires an existing client. A delivery link without one
   opens the same simple setup form, not the former organisation/contact wizard.
+  Provider context follows the client into its profile and delivery editor.
+  Where several sites share a location, choose the intended active site before
+  opening scheduling. Area-only locations open agreement/service configuration
+  rather than defaulting to another site's schedule.
 - On the officer home page, use **Places**. Select the client and existing
   location, or add a new one. If several site/area boundaries share the
   location, choose the intended boundary. Capture GPS, inspect the map and
@@ -102,6 +106,7 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   or legal rules were verified. Existing boundaries and officer history remain.
   To move or re-verify that reference point, capture it again through **Places**;
   the specialist boundary editor cannot overwrite its verification provenance.
+  Reference points are not delivery locations, work areas or restriction targets.
   Offline captures are not queued by this workflow; wait for the save receipt.
 - A stale-record error requires reloading before retrying. Multiple current
   agreements require an administrator to review the intended engagement

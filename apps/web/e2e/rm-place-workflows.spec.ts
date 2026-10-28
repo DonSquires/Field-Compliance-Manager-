@@ -6,11 +6,14 @@ const CLIENT = 'c1c1c1c1-0000-4000-8000-000000000001';
 const HOUSE = 'a1a1a1a1-0000-4000-8000-000000000001';
 const SITE = '51515151-0000-4000-8000-000000000001';
 const POINT = '51515151-0000-4000-8000-000000000002';
+const SECOND_SITE = '51515151-0000-4000-8000-000000000003';
+const BRANCH = '51515151-0000-4000-8000-000000000004';
 const updated = '2026-08-29T12:00:00.000Z';
 
 async function workspace(page: Page, populated = true) {
   await installSupabaseFixtures(page, { officerModules: [] });
   const writes: Array<{ name: string; body: Record<string, unknown> }> = [];
+  const reads: Array<Record<string, unknown>> = [];
   const client = { id: CLIENT, name: 'Fixture client', contact_email: '', contact_phone: '', account_notes: '', updated_at: updated };
   const place: FieldPlace = {
     id: HOUSE, name: 'Main yard', organization_id: CLIENT, address: null, notes: null, updated_at: updated, canonical_place_id: HOUSE,
@@ -31,7 +34,16 @@ async function workspace(page: Page, populated = true) {
     if (new URL(route.request().url()).searchParams.get('client_organization_id') === `eq.${CLIENT}`) await route.fulfill({ json: [{ id: 'agreement-fixture', invitation_status: 'not_invited', external_refs: { engagement_confirmation: { confirmed_by: 'test-admin' } }, starts_on: null, ends_on: null }] });
     else await route.fallback();
   });
-  await page.route('**/rest/v1/rpc/get_field_place_workspace', route => route.fulfill({ json: { clients: [{ id: CLIENT, name: client.name }], places, total: places.length } }));
+  await page.route('**/rest/v1/rpc/get_field_place_workspace', route => {
+    reads.push(route.request().postDataJSON());
+    return route.fulfill({ json: { clients: [{ id: CLIENT, name: client.name }], places, total: places.length } });
+  });
+  await page.route('**/rest/v1/client_sites?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('client_organization_id') === `eq.${CLIENT}`) await route.fulfill({ json: place.sites.map(item => ({ ...item, location_id: HOUSE })) });
+    else await route.fallback();
+  });
+  await page.route('**/rest/v1/service_agreement_delivery_schedules?*', route => route.fulfill({ json: [] }));
+  await page.route('**/rest/v1/rate_rules?*', route => route.fulfill({ json: [] }));
   await page.route('**/rest/v1/rpc/save_service_client', async route => {
     const body = route.request().postDataJSON();
     writes.push({ name: 'save_service_client', body });
@@ -49,6 +61,8 @@ async function workspace(page: Page, populated = true) {
     writes.push({ name: 'save_service_location_profile', body });
     place.name = body.p_name; place.notes = body.p_notes;
     if (body.p_site_profile) place.sites[0].site_brief = body.p_site_profile.site_brief;
+    const zone = place.zones.find(item => item.id === body.p_zone_id);
+    if (zone) zone.name = body.p_name;
     if (body.p_resolved_address) place.address = body.p_resolved_address.label;
     await route.fulfill({ json: { location_id: HOUSE, updated_at: updated } });
   });
@@ -66,7 +80,7 @@ async function workspace(page: Page, populated = true) {
       timestamp: Date.now(), toJSON: () => ({}),
     }) });
   });
-  return { writes, place };
+  return { writes, place, reads };
 }
 
 test('one-page client setup adds a location and opens its editable home profile', async ({ page }) => {
@@ -138,4 +152,35 @@ test('failed map tiles cannot produce a verification', async ({ page }) => {
   await expect(page.getByRole('checkbox', { name: /checked this point on the map/ })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Save officer verification' })).toBeDisabled();
   expect(writes).toEqual([]);
+});
+
+test('branch context survives profile navigation and multiple sites require a deliberate scheduling choice', async ({ page }) => {
+  const { place, reads } = await workspace(page);
+  place.sites.push({ ...place.sites[0], id: SECOND_SITE, name: 'Rear gate' });
+  await signInAsAdmin(page, `/admin/client-setup?account=${CLIENT}&provider=${BRANCH}`);
+  await page.getByRole('region', { name: 'Client locations' }).getByRole('button', { name: 'Main yard', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`location=${HOUSE}.*provider=${BRANCH}`));
+  await expect(page.getByRole('heading', { name: 'Main yard', exact: true, level: 1 })).toBeVisible();
+  expect(reads.at(-1)).toMatchObject({ p_provider_id: BRANCH, p_location_id: HOUSE });
+  await expect(page.getByRole('button', { name: 'Scheduling and services', exact: true })).toBeDisabled();
+  await page.getByRole('combobox', { name: 'Site for scheduling' }).selectOption(SECOND_SITE);
+  await page.getByRole('button', { name: 'Scheduling and services', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`site=${SECOND_SITE}.*provider=${BRANCH}.*view=delivery`));
+  await expect(page.getByRole('heading', { name: 'Rear gate', exact: true })).toBeVisible();
+});
+
+test('a single-area profile updates its area and never opens an unrelated site schedule', async ({ page }) => {
+  const { place, writes } = await workspace(page);
+  place.sites = [];
+  place.zones = [{ id: POINT, name: 'Main yard', active: true, module_key: 'patrol', lat: null, lng: null,
+    boundary: null, boundary_status: 'provisional', boundary_verification: 'unverified',
+    is_verification_point: false, radius_meters: null, verified_at: null, verified_by: null, capture: null, configuration_version: 4 }];
+  await signInAsAdmin(page, `/admin/locations?location=${HOUSE}`);
+  await expect(page.getByRole('heading', { name: 'Main yard', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Scheduling and services', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Agreements and services', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Location name' }).fill('Renamed area');
+  await page.getByRole('button', { name: 'Save location', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Renamed area', exact: true, level: 1 })).toBeVisible();
+  expect(writes.at(-1)?.body).toMatchObject({ p_zone_id: POINT, p_zone_version: 4, p_site_id: null, p_name: 'Renamed area' });
 });

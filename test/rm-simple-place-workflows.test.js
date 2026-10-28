@@ -60,8 +60,9 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
         $f$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $f$;
       ${tables.map(tableDDL).join('\n')}
+      ${['module_catalog', 'zone_closures'].map(tableDDL).join('\n')}
       ${constraints}
-      ${['get_descendant_organizations', 'is_admin_for_org', 'crm_actor_can_manage_account', 'ensure_canonical_place',
+      ${['get_descendant_organizations', 'is_admin_for_org', 'crm_actor_can_manage_account', 'crm_actor_can_manage_location', 'ensure_canonical_place',
         'canonical_place_for_house', 'address_match_key', 'tg_locations_place_identity', 'tg_client_sites_place_house',
         'tg_location_zones_place_house', 'manage_crm_site_profile', '_gbh_next_version', '_geofence_active_at',
         'autolink_client_site_service_agreement', 'sync_service_agreement_location_from_site', 'ensure_site_financial_config_from_site',
@@ -118,6 +119,9 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
         WHERE l.id=(SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site');
       INSERT INTO public.test_receipts VALUES ('capture',jsonb_build_object('lat',-41.2701,'lng',173.2801,'accuracy',35,'confirmed_lat',-41.27,'confirmed_lng',173.28,'captured_at',clock_timestamp()));
       ${actor(officer)}
+      SELECT public.expect_error($q$SELECT public.get_field_place_workspace(null)$q$,'active field');
+      SELECT public.expect_error($q$SELECT public.capture_field_place('${id(19)}','${provider}',null,null,null,
+        'site','Missing client',(SELECT data FROM public.test_receipts WHERE key='capture'),true)$q$,'confirmed operational client');
       INSERT INTO public.test_receipts VALUES ('verified',public.capture_field_place('${id(23)}','${provider}',
         (SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),
         (SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site'),
@@ -155,6 +159,10 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       SELECT public.expect_error($q$SELECT public.get_field_place_workspace('${provider}')$q$,'active field');
       ${actor(adminOfficer)}
       SELECT public.assert_ok((public.get_field_place_workspace('${provider}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'))->>'total')::int=3,'admin officer parity');
+      SELECT public.assert_ok((public.get_field_place_workspace('${provider}',p_location_id=>(SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site'))->>'total')::int=1,'profile resolves owner through the authorized scoped reader');
+      SELECT public.assert_ok(jsonb_array_length(public.get_crm_operational_place_editor((SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site'))->'zones')=0,'reference markers are not work areas or restriction targets');
+      SELECT public.assert_ok(jsonb_array_length(public.get_crm_operational_geography()->'sites')=1,'attested client geometry is available without a portal invitation');
+      SELECT public.assert_ok(jsonb_array_length(public.get_crm_operational_geography()->'zones')=2,'geography retains areas but not reference markers');
       SELECT public.save_service_location_profile('${provider}',
         (SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site'),
         (SELECT (data->>'updated_at')::timestamptz FROM public.test_receipts WHERE key='verified'),
@@ -165,6 +173,9 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       SELECT public.assert_ok((SELECT count(*)=1 FROM public.geofence_boundary_history WHERE entity_id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')),'admin profile retains officer history');
       SELECT public.expect_error($q$UPDATE public.location_zones SET boundary_verified_at=clock_timestamp()
         WHERE id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')$q$,'Use Places to capture');
+      SELECT public.expect_error($q$UPDATE public.location_zones SET is_active=false
+        WHERE id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')$q$,'Use Places to capture');
+      SELECT public.assert_ok(NOT EXISTS(SELECT 1 FROM public.service_agreement_locations sal JOIN public.location_zones z ON z.id=sal.zone_id WHERE z.is_verification_point),'verification markers never become delivery scope');
       SELECT public.assert_ok((SELECT cp.boundary IS NULL FROM public.locations l JOIN public.canonical_places cp ON cp.id=l.canonical_place_id WHERE l.id=(SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='field-new')),'new marker is not a property boundary');
       SELECT public.assert_ok((SELECT count(*)=1 FROM public.location_zones WHERE location_id=(SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='field-new') AND NOT is_verification_point),'field area has a separately editable parent zone');
       SELECT public.expect_error($q$INSERT INTO public.client_sites(client_organization_id,location_id,name,site_type,boundary_status,boundary_verification)
@@ -203,6 +214,25 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
         FROM public.test_receipts WHERE key='recaptured'),'recapture reuses the marker');
       SELECT public.assert_ok((SELECT count(*)=2 FROM public.geofence_boundary_history
         WHERE entity_id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')),'recapture appends rather than replacing the original evidence');
+      INSERT INTO public.test_receipts SELECT 'zone-edit-before',jsonb_build_object('version',l.updated_at,'zone_version',z.configuration_version)
+        FROM public.locations l JOIN public.location_zones z ON z.location_id=l.id
+        WHERE z.id=(SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone');
+      ${actor(adminOfficer)}
+      SELECT public.expect_error($q$SELECT public.save_service_location_profile('${provider}',
+        (SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='zone'),
+        (SELECT (data->>'version')::timestamptz FROM public.test_receipts WHERE key='zone-edit-before'),
+        'Renamed area','',null,null,null,null,
+        (SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone'),-1)$q$,'Area changed');
+      SELECT public.save_service_location_profile('${provider}',
+        (SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='zone'),
+        (SELECT (data->>'version')::timestamptz FROM public.test_receipts WHERE key='zone-edit-before'),
+        'Renamed area','',null,null,null,null,
+        (SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone'),
+        (SELECT (data->>'zone_version')::integer FROM public.test_receipts WHERE key='zone-edit-before'));
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT l.name='Renamed area' AND z.name=l.name
+        FROM public.locations l JOIN public.location_zones z ON z.location_id=l.id
+        WHERE z.id=(SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone')),'single-area rename stays consistent with its house');
     `;
     try { docker(['exec', '-i', name, 'psql', '-X', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], setup); }
     catch (failure) { throw new Error(`${failure.stdout?.slice(-3000) ?? ''}\n${failure.stderr ?? failure.message}`); }

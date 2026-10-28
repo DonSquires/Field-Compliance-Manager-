@@ -38,6 +38,7 @@ BEGIN
         OR NEW.boundary_verification IS DISTINCT FROM OLD.boundary_verification
         OR NEW.boundary_verified_by IS DISTINCT FROM OLD.boundary_verified_by
         OR NEW.boundary_verified_at IS DISTINCT FROM OLD.boundary_verified_at
+        OR NEW.is_active IS DISTINCT FROM OLD.is_active
         OR NEW.location_id IS DISTINCT FROM OLD.location_id OR NEW.parent_zone_id IS DISTINCT FROM OLD.parent_zone_id) THEN
       RAISE EXCEPTION 'Use Places to capture and confirm a new verification point; edit the surrounding perimeter separately';
     END IF;
@@ -52,7 +53,7 @@ CREATE TRIGGER aa_field_verification_point BEFORE UPDATE ON public.location_zone
 CREATE OR REPLACE FUNCTION public.field_place_provider_allowed(p_provider_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
 AS $function$
-  SELECT EXISTS (
+  SELECT p_provider_id IS NOT NULL AND EXISTS (
     SELECT 1 FROM public.user_profiles u
     WHERE u.id = auth.uid() AND u.deactivated_at IS NULL
       AND u.role IN ('officer', 'admin_officer', 'admin', 'master', 'grand_master')
@@ -70,7 +71,7 @@ REVOKE ALL ON FUNCTION public.field_place_provider_allowed(uuid) FROM PUBLIC, an
 CREATE OR REPLACE FUNCTION public.field_place_client_allowed(p_provider_id uuid, p_client_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
 AS $function$
-  SELECT public.field_place_provider_allowed(p_provider_id) AND
+  SELECT p_client_id IS NOT NULL AND public.field_place_provider_allowed(p_provider_id) AND
     (p_client_id = p_provider_id OR EXISTS (
       SELECT 1 FROM public.service_agreements a
       WHERE a.provider_organization_id = p_provider_id AND a.client_organization_id = p_client_id
@@ -128,6 +129,10 @@ BEGIN
       AND (a.ends_on IS NULL OR a.ends_on >= current_date)
       AND (a.invitation_status = 'accepted' OR a.external_refs->'engagement_confirmation'->>'confirmed_by' IS NOT NULL)
   );
+  IF p_client_id IS NULL AND p_location_id IS NOT NULL THEN
+    SELECT organization_id INTO p_client_id FROM public.locations WHERE id = p_location_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Location is not available'; END IF;
+  END IF;
   IF p_client_id IS NULL THEN
     RETURN jsonb_build_object('clients', v_clients, 'places', '[]'::jsonb, 'total', 0);
   END IF;
@@ -404,9 +409,6 @@ BEGIN
         SELECT v_agreement_id, p_parent_zone_id, 'active'
         WHERE NOT EXISTS (SELECT 1 FROM public.service_agreement_locations WHERE service_agreement_id = v_agreement_id AND zone_id = p_parent_zone_id);
     END IF;
-    INSERT INTO public.service_agreement_locations(service_agreement_id, zone_id, status)
-      SELECT v_agreement_id, v_zone.id, 'active'
-      WHERE NOT EXISTS (SELECT 1 FROM public.service_agreement_locations WHERE service_agreement_id = v_agreement_id AND zone_id = v_zone.id);
     IF v_site_id IS NOT NULL THEN
       INSERT INTO public.service_agreement_locations(service_agreement_id, site_id, status)
         SELECT v_agreement_id, v_site_id, 'active'
@@ -478,11 +480,11 @@ GRANT EXECUTE ON FUNCTION public.create_service_location(uuid, uuid, uuid, text,
 CREATE OR REPLACE FUNCTION public.save_service_location_profile(
   p_provider_id uuid, p_location_id uuid, p_expected_updated_at timestamptz, p_name text, p_notes text,
   p_site_id uuid DEFAULT NULL, p_site_version integer DEFAULT NULL, p_site_profile jsonb DEFAULT NULL,
-  p_resolved_address jsonb DEFAULT NULL
+  p_resolved_address jsonb DEFAULT NULL, p_zone_id uuid DEFAULT NULL, p_zone_version integer DEFAULT NULL
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $function$
-DECLARE v_house public.locations%rowtype;
+DECLARE v_house public.locations%rowtype; v_zone public.location_zones%rowtype;
 BEGIN
   IF auth.uid() IS NULL OR NOT public.field_place_provider_allowed(p_provider_id)
     OR NOT public.is_admin_for_org(p_provider_id) THEN RAISE EXCEPTION 'Provider administrator access is required'; END IF;
@@ -509,6 +511,7 @@ BEGIN
     END IF;
   END IF;
   IF p_site_id IS NOT NULL THEN
+    IF p_zone_id IS NOT NULL THEN RAISE EXCEPTION 'Edit one site or area profile at a time'; END IF;
     IF p_site_version IS NULL THEN RAISE EXCEPTION 'Site version is required. Reload the profile'; END IF;
     IF NOT EXISTS (SELECT 1 FROM public.client_sites WHERE id = p_site_id AND location_id = v_house.id) THEN
       RAISE EXCEPTION 'Site does not belong to this location';
@@ -517,6 +520,15 @@ BEGIN
     PERFORM public.manage_crm_site_profile(p_site_id, p_site_version, p_site_profile->>'risk_level',
       p_site_profile->>'site_brief', p_site_profile->>'access_instructions', p_site_profile->>'hs_notes',
       (p_site_profile->>'active')::boolean);
+  END IF;
+  IF p_zone_id IS NOT NULL THEN
+    SELECT * INTO v_zone FROM public.location_zones
+      WHERE id = p_zone_id AND location_id = v_house.id AND NOT is_verification_point FOR UPDATE;
+    IF NOT FOUND OR p_zone_version IS NULL OR v_zone.configuration_version IS DISTINCT FROM p_zone_version THEN
+      RAISE EXCEPTION 'Area changed or is not available. Reload the profile before saving';
+    END IF;
+    UPDATE public.location_zones SET name = trim(p_name), configuration_version = configuration_version + 1
+      WHERE id = p_zone_id;
   END IF;
   UPDATE public.locations SET name = trim(p_name), notes = nullif(trim(p_notes), ''), updated_at = clock_timestamp()
     , address = CASE WHEN p_resolved_address IS NULL THEN address ELSE trim(p_resolved_address->>'label') END
@@ -528,8 +540,151 @@ BEGIN
   RETURN jsonb_build_object('location_id', v_house.id, 'updated_at', v_house.updated_at);
 END;
 $function$;
-REVOKE ALL ON FUNCTION public.save_service_location_profile(uuid, uuid, timestamptz, text, text, uuid, integer, jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.save_service_location_profile(uuid, uuid, timestamptz, text, text, uuid, integer, jsonb, jsonb) TO authenticated;
+REVOKE ALL ON FUNCTION public.save_service_location_profile(uuid, uuid, timestamptz, text, text, uuid, integer, jsonb, jsonb, uuid, integer) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.save_service_location_profile(uuid, uuid, timestamptz, text, text, uuid, integer, jsonb, jsonb, uuid, integer) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.crm_actor_can_manage_location(p_location_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.locations l
+    JOIN public.user_profiles actor ON actor.id = auth.uid() AND actor.deactivated_at IS NULL
+    WHERE l.id = p_location_id AND public.is_admin_for_org(actor.organization_id)
+      AND (
+        l.organization_id = actor.organization_id
+        OR l.organization_id = ANY(public.get_descendant_organizations(coalesce(actor.employer_organization_id, actor.organization_id)))
+        OR EXISTS (
+          SELECT 1 FROM public.service_agreements agreement
+          JOIN public.service_agreement_locations coverage ON coverage.service_agreement_id = agreement.id AND coverage.status = 'active'
+          LEFT JOIN public.client_sites site ON site.id = coverage.site_id
+          LEFT JOIN public.location_zones zone ON zone.id = coverage.zone_id
+          WHERE ((agreement.provider_organization_id = actor.organization_id AND agreement.invitation_status = 'accepted')
+            OR (public.is_admin_for_org(agreement.provider_organization_id)
+              AND agreement.client_organization_id = l.organization_id
+              AND (agreement.invitation_status = 'accepted' OR agreement.external_refs->'engagement_confirmation'->>'confirmed_by' IS NOT NULL)
+              AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
+              AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)))
+            AND agreement.agreement_type = 'operational'
+            AND (site.location_id = l.id OR zone.location_id = l.id)
+        )
+      )
+  );
+$function$;
+REVOKE ALL ON FUNCTION public.crm_actor_can_manage_location(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.crm_actor_can_manage_location(uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.get_crm_operational_geography()
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_provider uuid;
+  v_reach uuid[];
+BEGIN
+  SELECT organization_id INTO v_provider FROM public.user_profiles WHERE id = v_actor AND deactivated_at IS NULL;
+  IF v_provider IS NULL OR NOT public.is_admin_for_org(v_provider) THEN
+    RAISE EXCEPTION 'Active CRM administrator required';
+  END IF;
+  v_reach := array(
+    SELECT DISTINCT descendant
+    FROM unnest(public.get_descendant_organizations(v_provider) || v_provider) descendant
+  );
+  RETURN jsonb_build_object(
+    'locations', (
+      SELECT coalesce(jsonb_agg(to_jsonb(item) ORDER BY item.name), '[]'::jsonb)
+      FROM (
+        SELECT DISTINCT location.id, location.organization_id, location.canonical_place_id,
+          location.name, location.address, location.suburb, location.postcode, location.notes
+        FROM public.locations location
+        WHERE location.organization_id = ANY(v_reach)
+          OR EXISTS (
+            SELECT 1 FROM public.service_agreements agreement
+            JOIN public.service_agreement_locations link ON link.service_agreement_id = agreement.id AND link.status = 'active'
+            LEFT JOIN public.client_sites site ON site.id = link.site_id
+            LEFT JOIN public.location_zones zone ON zone.id = link.zone_id
+            WHERE agreement.provider_organization_id = ANY(v_reach)
+              AND (agreement.invitation_status = 'accepted' OR (
+                agreement.external_refs->'engagement_confirmation'->>'confirmed_by' IS NOT NULL
+                AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
+                AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)))
+              AND agreement.agreement_type = 'operational'
+              AND (site.location_id = location.id OR zone.location_id = location.id)
+          )
+      ) item
+    ),
+    'sites', (
+      SELECT coalesce(jsonb_agg(to_jsonb(item) ORDER BY item.name), '[]'::jsonb)
+      FROM (
+        SELECT DISTINCT site.id, site.client_organization_id, site.location_id, site.name,
+          site.address, site.site_type, site.active, site.gps_lat, site.gps_lng,
+          st_asgeojson(site.boundary)::jsonb AS boundary, site.boundary_status,
+          site.boundary_verification, site.configuration_version
+        FROM public.client_sites site
+        WHERE site.client_organization_id = ANY(v_reach)
+          OR EXISTS (
+            SELECT 1 FROM public.service_agreements agreement
+            JOIN public.service_agreement_locations link ON link.service_agreement_id = agreement.id AND link.status = 'active'
+            WHERE agreement.provider_organization_id = ANY(v_reach)
+              AND (agreement.invitation_status = 'accepted' OR (
+                agreement.external_refs->'engagement_confirmation'->>'confirmed_by' IS NOT NULL
+                AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
+                AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)))
+              AND agreement.agreement_type = 'operational' AND link.site_id = site.id
+          )
+      ) item
+    ),
+    'zones', (
+      SELECT coalesce(jsonb_agg(to_jsonb(item) ORDER BY item.name), '[]'::jsonb)
+      FROM (
+        SELECT DISTINCT zone.id, zone.organization_id, zone.location_id, zone.name,
+          location.address, zone.zone_type, zone.module_key, zone.rule_type, zone.is_active,
+          zone.active_schedule, zone.onsite_profile, zone.enforcement_workflow_override,
+          st_asgeojson(zone.boundary)::jsonb AS boundary, st_asgeojson(zone.center_point)::jsonb AS center_point,
+          zone.boundary_status, zone.boundary_verification, zone.bylaw_clause, zone.bylaw_source_url,
+          zone.nightly_limit_consecutive, zone.nightly_limit_monthly, zone.scv_required,
+          zone.parking_time_limit_minutes, zone.parking_disabled_multiplier, zone.parking_signage_photo_url,
+          zone.parking_limit_source, zone.parking_limit_set_at, zone.configuration_version
+        FROM public.location_zones zone LEFT JOIN public.locations location ON location.id = zone.location_id
+        WHERE NOT zone.is_verification_point AND (zone.organization_id = ANY(v_reach)
+          OR EXISTS (
+            SELECT 1 FROM public.service_agreements agreement
+            JOIN public.service_agreement_locations link ON link.service_agreement_id = agreement.id AND link.status = 'active'
+            WHERE agreement.provider_organization_id = ANY(v_reach)
+              AND (agreement.invitation_status = 'accepted' OR (
+                agreement.external_refs->'engagement_confirmation'->>'confirmed_by' IS NOT NULL
+                AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
+                AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)))
+              AND agreement.agreement_type = 'operational' AND link.zone_id = zone.id
+          ))
+      ) item
+    )
+  );
+END;
+$function$;
+COMMENT ON FUNCTION public.get_crm_operational_geography() IS
+  'CRM-admin scoped geography for owned and accepted or provider-attested operational places; reference markers are not work areas.';
+REVOKE ALL ON FUNCTION public.get_crm_operational_geography() FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_crm_operational_geography() TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_crm_operational_place_editor(p_location_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+AS $function$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_location public.locations%rowtype;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_location(p_location_id) then raise exception 'Active CRM administrator required for this location';end if;
+  select * into v_location from public.locations l where l.id=p_location_id;if not found then raise exception 'Location not found';end if;
+  return jsonb_build_object(
+    'location',jsonb_build_object('id',v_location.id,'name',v_location.name,'organization_id',v_location.organization_id),
+    'sites',(select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'risk_level',s.risk_level,'site_brief',s.site_brief,'access_instructions',s.access_instructions,'hs_notes',s.hs_notes,'active',s.active,'boundary_status',s.boundary_status,'boundary_verification',s.boundary_verification,'configuration_version',s.configuration_version) order by s.name),'[]'::jsonb) from public.client_sites s where s.location_id=v_location.id),
+    'zones',(select coalesce(jsonb_agg(jsonb_build_object('id',z.id,'name',z.name,'zone_type',z.zone_type,'module_key',z.module_key,'rule_type',z.rule_type,'is_active',z.is_active,'nightly_limit_consecutive',z.nightly_limit_consecutive,'nightly_limit_monthly',z.nightly_limit_monthly,'scv_required',z.scv_required,'enforcement_workflow_override',z.enforcement_workflow_override,'boundary_status',z.boundary_status,'boundary_verification',z.boundary_verification,'configuration_version',z.configuration_version) order by z.name),'[]'::jsonb) from public.location_zones z where z.location_id=v_location.id AND NOT z.is_verification_point),
+    'modules',(select coalesce(jsonb_agg(jsonb_build_object('module_key',m.module_key,'display_name',initcap(replace(m.module_key,'_',' '))) order by m.module_key),'[]'::jsonb) from public.module_catalog m where m.active),
+    'closures',(select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'zone_id',c.zone_id,'closure_type',c.closure_type,'status',c.status,'effective_from',c.effective_from,'effective_to',c.effective_to,'reason',c.reason,'resolution_notes',c.resolution_notes) order by c.created_at desc),'[]'::jsonb) from public.zone_closures c join public.location_zones z on z.id=c.zone_id where z.location_id=v_location.id AND NOT z.is_verification_point)
+  );
+end;
+$function$;
+REVOKE ALL ON FUNCTION public.get_crm_operational_place_editor(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_crm_operational_place_editor(uuid) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION "public"."resolve_context"(p_lat double precision, p_lng double precision, p_org_id uuid, p_module_key text DEFAULT NULL::text, p_at timestamp with time zone DEFAULT now())
  RETURNS TABLE(in_operating_bounds boolean, out_of_bounds_district text, governing_jurisdiction_id uuid, governing_jurisdiction_name text, on_site boolean, site_id uuid, client_org_id uuid, matched_zone_id uuid, matched_module_key text, effective_rules jsonb, resolution_status text, governor_overlap_flag boolean)

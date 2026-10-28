@@ -7,7 +7,7 @@ import { ServiceClientWorkspace } from '../components/ServiceClientWorkspace';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { supabase } from '../lib/supabase';
-import { workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
+import { readWorkflowContext, workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
 import './ClientSetupPage.css';
 
 export const SERVICE_CHOICES: Array<{ key: string; label: string; help: string; kind: 'visits' | 'post' | 'response' }> = [
@@ -59,10 +59,12 @@ const ClientSetupPage: React.FC<ClientSetupProps> = props => {
 
 const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithContext }> = ({ onNavigate, accountId, providerOrganizationId, embedded = false, onDirtyChange, onOpenCoverage }) => {
   const { profile, operatingOrganizationId } = useAuth();
-  const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
-  const canEdit = Boolean(branchId && isAdminTierRole(profile?.role));
   const location = useLocation();
+  const context = readWorkflowContext(location.search);
+  const branchId = providerOrganizationId ?? context.providerId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
+  const canEdit = Boolean(branchId && isAdminTierRole(profile?.role));
   const requestedSite = new URLSearchParams(location.search).get('site');
+  const requestedLocation = context.locationId;
   const [client, setClient] = useState<Client | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [selected, setSelected] = useState('');
@@ -101,7 +103,7 @@ const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithC
   const leave = (page: Parameters<NavigateWithContext>[0]) => {
     if (dirtyCount && !window.confirm('Unsaved location drafts will be lost. Leave this workspace?')) return;
     if (embedded && page === 'crm' && onOpenCoverage) onOpenCoverage();
-    else onNavigate(page, { accountId: client?.id });
+    else onNavigate(page, { accountId: client?.id, providerId: branchId ?? undefined });
   };
   useEffect(() => {
     if (!branchId) {
@@ -153,7 +155,7 @@ const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithC
       const org = await supabase.from('organizations').select('id,name,contact_email,contact_phone').eq('id', id).single();
       if (org.error || !org.data) throw org.error ?? new Error('Client not found or not accessible.');
       const [sites, agreements] = await Promise.all([
-        supabase.from('client_sites').select('id,name,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
+        supabase.from('client_sites').select('id,name,location_id,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
         supabase.from('service_agreements').select('id,ends_on').eq('client_organization_id', id).eq('provider_organization_id', branchId).eq('agreement_type', 'operational').in('invitation_status', ['not_invited', 'invited', 'accepted']),
       ]);
       if (sites.error || agreements.error) throw sites.error ?? agreements.error;
@@ -193,15 +195,17 @@ const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithC
       }
       if (version !== loadVersion.current) return;
       if (requestedSite && !sites.data?.some(site => site.id === requestedSite)) throw new Error('The requested site is inactive or unavailable. Return to its location profile to review it.');
+      if (requestedLocation && !sites.data?.some(site => site.id === requestedSite && site.location_id === requestedLocation)) throw new Error('Choose a specific active site from this location profile before editing delivery.');
       setClient(org.data as Client);
       setAgreementId(agreement); setPlaces((sites.data ?? []) as Place[]); setDrafts(next); setSelected(requestedSite ?? sites.data?.[0]?.id ?? '');
+      setMobilePane(requestedSite ? 'detail' : 'locations');
     } catch (failure) { if (version === loadVersion.current) setError(failureMessage(failure)); } finally { if (version === loadVersion.current) setLoading(false); }
-  }, [branchId, requestedSite]);
+  }, [branchId, requestedSite, requestedLocation]);
   useEffect(() => {
     const account = accountId ?? new URLSearchParams(location.search).get('account');
-    const key = `${branchId}:${account}:${requestedSite ?? ''}`;
+    const key = `${branchId}:${account}:${requestedSite ?? ''}:${requestedLocation ?? ''}`;
     if (account && branchId && key !== loadKey.current) { loadKey.current = key; void loadClient(account); }
-  }, [location.search, branchId, loadClient, accountId, requestedSite]);
+  }, [location.search, branchId, loadClient, accountId, requestedSite, requestedLocation]);
   useEffect(() => {
     let cancelled = false;
     void supabase.from('module_catalog').select('module_key').eq('active', true).then(({ data, error: catalogError }) => {

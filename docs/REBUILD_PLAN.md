@@ -27,6 +27,9 @@ Owner-directed client/place simplification, 2026-10-28:
   Reference zones are excluded from regulatory resolution and cannot promote
   their small circles to canonical property boundaries. Basic site capture
   does not authorise inferred financial defaults.
+  Review follow-up also excludes reference markers from delivery links and
+  work-area editing, preserves selected-provider context, requires an explicit
+  site for multi-site scheduling, and version-checks single-area renames.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,
   actual constraints and place/agreement/financial triggers, stale fix/version
   rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
