@@ -469,9 +469,9 @@ const OfficerShell: React.FC = () => {
       case 'modules':
         return (
           <section className="officer-module-directory">
-            <header><span>Field tools</span><h1>Enabled modules</h1><p>Tools available for your organisation and role.</p></header>
+            <header><span>Field tools</span><h1>Tools</h1><p>Tools available for your organisation and role.</p></header>
             {grantedModules.length === 0 ? (
-              <div className="officer-module-empty">No enabled field modules are available.</div>
+              <div className="officer-module-empty">No field tools are available for your role.</div>
             ) : (
               <div className="officer-module-grid">
                 {grantedModules.map((mod) => {
@@ -566,7 +566,7 @@ const OfficerShell: React.FC = () => {
 
       <nav className="officer-action-bar" aria-label="Field actions">
         <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''} aria-current={activeModule === 'modules' ? 'page' : undefined}>
-          <Grid3X3 size={19} aria-hidden="true" /><span>Modules</span>
+          <Grid3X3 size={19} aria-hidden="true" /><span>Tools</span>
         </button>
         <button type="button" onClick={() => navigateToModule('report')} className={activeModule === 'report' ? 'is-active' : ''} aria-current={activeModule === 'report' ? 'page' : undefined}>
           <FilePlus2 size={19} aria-hidden="true" /><span>Report</span>

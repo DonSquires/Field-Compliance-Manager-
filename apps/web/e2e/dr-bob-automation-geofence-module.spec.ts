@@ -63,9 +63,9 @@ test.describe("Dr. Bob's automation, geofence, and module rules walkthrough", ()
     const errors = monitorBrowserErrors(page);
     console.log('\n[BOB FLOW] BEFORE: officer has patrol entitlement but no welfare module entitlement');
     await signInAsOfficer(page, '/officer/modules');
-    await expect(page.getByRole('heading', { name: 'Enabled modules' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Tools' })).toBeVisible();
     console.log('[BOB EXPECTED/PRESENT] welfare module expected absent present absent');
-    await expect(page.getByText('No enabled field modules are available.')).toBeVisible();
+    await expect(page.getByText('No field tools are available for your role.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Welfare' })).toHaveCount(0);
     console.log('[BOB FLOW] AFTER: no unauthorized module action is exposed');
     expect(errors, errors.join('\n')).toEqual([]);
