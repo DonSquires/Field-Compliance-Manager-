@@ -21,7 +21,10 @@ test('the public R&M identity gate wraps the private check without opening schem
   const wrapper = functionBlock(migration, 'public.can_view_rnm_identity_for_organization');
   assert.match(wrapper, /SECURITY DEFINER/);
   assert.match(wrapper, /SET search_path = ''/);
-  assert.match(wrapper, /private\.rnm_admin_for_organization\(p_organization_id\)/);
+  // The whole body is pinned: a wrapper that keeps the private call but returns
+  // true (or ORs in anything else) would silently widen identity access.
+  const body = /AS \$function\$([\s\S]*?)\$function\$;/.exec(wrapper)?.[1].trim();
+  assert.equal(body, 'SELECT COALESCE(private.rnm_admin_for_organization(p_organization_id), false);');
   assert.match(migration, /REVOKE ALL ON FUNCTION public\.can_view_rnm_identity_for_organization\(uuid\) FROM PUBLIC, anon, authenticated, service_role;/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.can_view_rnm_identity_for_organization\(uuid\) TO authenticated;/);
   assert.doesNotMatch(migration, /GRANT EXECUTE ON FUNCTION public\.can_view_rnm_identity_for_organization\(uuid\) TO anon/);
@@ -74,10 +77,16 @@ test('no SECURITY INVOKER public function calls schema private once migrations a
 
 test('web identity gates ask the same org-scoped question the RPCs enforce', () => {
   const page = read('apps/web/src/pages/ObservationSearchPage.tsx');
-  assert.match(page, /rpc\('can_view_rnm_identity_for_organization', \{ p_organization_id: profile\.organizationId \}\)/);
+  assert.match(page, /rpc\('can_view_rnm_identity_for_organization', \{ p_organization_id: organizationId \}\)/);
   assert.doesNotMatch(page, /rpc\('can_manage_r_and_m_identity'\)/);
+  // Only an explicit true grants access; null, errors and truthy non-booleans deny.
+  assert.match(page, /setCanManageIdentity\(identityAccess === true\)/);
+  assert.match(page, /const peopleResult = identityAccess === true/);
+  // A slower answer for an earlier organisation must not overwrite the current one.
+  assert.match(page, /if \(requestId !== optionsRequest\.current\) return;\n    setCanManageIdentity/);
 
   const panel = read('apps/web/src/components/RepeatSubjectsPanel.tsx');
   assert.match(panel, /rpc\('can_view_rnm_identity_for_organization', \{ p_organization_id: organizationId \}\)/);
+  assert.match(panel, /linkOrgIds\.filter\(\(_, index\) => scopes\[index\]\.data === true\)/);
   assert.match(panel, /identityLinkOrgIds\.has\(item\.organization_id\) && <PersonObservationLink/);
 });

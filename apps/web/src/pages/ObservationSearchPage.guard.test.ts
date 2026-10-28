@@ -35,7 +35,11 @@ describe('Observation Search canonical entity contract', () => {
     expect(searchMigration).toContain("cp.review_state='verified' AND cp.status='active'");
     // The plate registry table itself is Bob-only; pages read the projection.
     expect(source).not.toContain("from('canonical_vehicles')");
-    expect(source).toContain(".eq('organization_id', profile.organizationId)");
+    // Options are captured once per request so a late answer cannot mix organisations.
+    expect(source).toContain('const organizationId = profile?.organizationId;');
+    for (const table of ['client_sites', 'location_zones', 'locations', 'incidents']) {
+      expect(source).toMatch(new RegExp(`from\\('${table}'\\)[^\\n]*\\.eq\\('organization_id', organizationId\\)`));
+    }
   });
 
   it('keeps investigation context visible in the result model', () => {

@@ -27,4 +27,12 @@ describe('Akahu Apply organisation verification', () => {
     expect(workspace).toContain('providerResult.data?.configured === false');
     expect(workspace).toContain('Akahu Apply is not connected for this platform yet.');
   });
+
+  it('keeps every provider-backed Apply action off until the provider organisation is verified', () => {
+    expect(workspace).toContain('const providerReady = Boolean(applyOrganization) && !providerNotConfigured;');
+    for (const action of ['createApplication', 'createSharingRequest', 'createReport', 'checkReport', 'loadReviewSummary']) {
+      expect(workspace).toMatch(new RegExp(`const ${action} = async \\(\\) => \\{\\n    if \\(!providerReady`));
+      expect(workspace).toMatch(new RegExp(`disabled=\\{saving \\|\\| [^}]*!providerReady[^}]*\\} onClick=\\{\\(\\) => void ${action}\\(\\)\\}`));
+    }
+  });
 });

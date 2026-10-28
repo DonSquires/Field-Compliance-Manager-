@@ -34,6 +34,8 @@ export function FinanceApplyWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canManage = Boolean(profile?.organizationId && financeRoles.has(profile.role));
+  // Every Apply action needs the verified provider organisation; without it nothing may reach Akahu.
+  const providerReady = Boolean(applyOrganization) && !providerNotConfigured;
 
   useEffect(() => {
     if (!profile?.organizationId) {
@@ -49,6 +51,8 @@ export function FinanceApplyWorkspace() {
     setLoading(true);
     setError(null);
     setProviderNotConfigured(false);
+    setApplyOrganization(null);
+    setApplication(null); setSharingRequest(null); setReport(null); setReviewSummary(null); setSelectedTransactionIds([]); setReviewIds({});
     void (async () => {
       const [destinationResult, providerResult] = await Promise.all([
         supabase.from('finance_external_connection_requests').select('id,bank_account_id,status,provider_name').eq('organization_id', profile.organizationId).eq('provider_type', 'bank').not('bank_account_id', 'is', null).in('status', ['connected', 'needs_review']).order('updated_at', { ascending: false }),
@@ -70,6 +74,7 @@ export function FinanceApplyWorkspace() {
   }, [canManage, profile?.organizationId]);
 
   const createApplication = async () => {
+    if (!providerReady) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: invokeError } = await supabase.functions.invoke('finance-akahu-apply-application', { body: { reference: reference.trim() } });
     if (invokeError || data?.error) setError(invokeError?.message ?? data?.error ?? 'Apply application could not be prepared.');
@@ -78,7 +83,7 @@ export function FinanceApplyWorkspace() {
   };
 
   const createSharingRequest = async () => {
-    if (!application) return;
+    if (!providerReady || !application) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: invokeError } = await supabase.functions.invoke('finance-akahu-apply-sharing-request', { body: { application_id: application.id, requested_days: requestedDays, allow_manual_uploads: allowManualUploads } });
     if (invokeError || data?.error) setError(invokeError?.message ?? data?.error ?? 'Applicant sharing link could not be created.');
@@ -87,7 +92,7 @@ export function FinanceApplyWorkspace() {
   };
 
   const createReport = async () => {
-    if (!application) return;
+    if (!providerReady || !application) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: invokeError } = await supabase.functions.invoke('finance-akahu-apply-report', { body: { action: 'create', application_id: application.id } });
     if (invokeError || data?.error) setError(invokeError?.message ?? data?.error ?? 'Apply report could not be created.');
@@ -96,7 +101,7 @@ export function FinanceApplyWorkspace() {
   };
 
   const checkReport = async () => {
-    if (!application || !report) return;
+    if (!providerReady || !application || !report) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: invokeError } = await supabase.functions.invoke('finance-akahu-apply-report', { body: { action: 'status', application_id: application.id, report_id: report.akahu_report_id } });
     if (invokeError || data?.error) setError(invokeError?.message ?? data?.error ?? 'Apply report status could not be checked.');
@@ -105,7 +110,7 @@ export function FinanceApplyWorkspace() {
   };
 
   const loadReviewSummary = async () => {
-    if (!application || !report) return;
+    if (!providerReady || !application || !report) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: invokeError } = await supabase.functions.invoke('finance-akahu-apply-report', { body: { action: 'data', application_id: application.id, report_id: report.akahu_report_id } });
     if (invokeError || data?.error) setError(invokeError?.message ?? data?.error ?? 'Apply review summary could not be loaded.');
@@ -148,9 +153,9 @@ export function FinanceApplyWorkspace() {
     {error && <p className="finance-apply-message is-error" role="alert"><CircleAlert size={14} />{error}</p>}
     {notice && <p className="finance-apply-message is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
     <div className="finance-apply-grid">
-      <div className="finance-apply-panel"><h3>1. Prepare a finance case</h3><label><span>Case reference</span><input value={reference} maxLength={500} onChange={(event) => setReference(event.target.value)} /></label><button type="button" className="btn btn-primary" disabled={saving || !reference.trim() || !applyOrganization} onClick={() => void createApplication()}><Plus size={15} />{saving ? 'Preparing...' : 'Create or reuse case'}</button>{application && <p className="finance-apply-record"><strong>{application.reference}</strong><span>Provider case: {application.akahu_application_id}</span><span>Status: {application.status}</span></p>}</div>
-      <div className="finance-apply-panel"><h3>2. Request applicant data</h3><label><span>History requested (days)</span><input type="number" min={30} max={730} value={requestedDays} onChange={(event) => setRequestedDays(Number(event.target.value))} /></label><label className="finance-apply-check"><input type="checkbox" checked={allowManualUploads} onChange={(event) => setAllowManualUploads(event.target.checked)} /><span>Allow PDF statement uploads</span></label><button type="button" className="btn btn-secondary" disabled={saving || !application} onClick={() => void createSharingRequest()}><Link2 size={15} />{saving ? 'Creating...' : 'Create secure sharing link'}</button>{sharingRequest && <div className="finance-apply-link"><strong>Applicant link ready</strong><span>Expires {new Date(sharingRequest.expires_at).toLocaleDateString()}</span><a href={sharingRequest.link} target="_blank" rel="noreferrer">Open Akahu Apply <ExternalLink size={13} /></a></div>}</div>
-      <div className="finance-apply-panel"><h3>3. Stage for review</h3><p className="finance-apply-panel-copy">After the applicant submits data, ask Apply to prepare an aggregate report for review.</p><div className="finance-apply-report-actions"><button type="button" className="btn btn-secondary" disabled={saving || !application} onClick={() => void createReport()}><FileText size={15} />Create report</button><button type="button" className="btn btn-secondary" disabled={saving || !report} onClick={() => void checkReport()}>Check status</button><button type="button" className="btn btn-secondary" disabled={saving || report?.status !== 'completed'} onClick={() => void loadReviewSummary()}>Load review summary</button></div>{report && <div className="finance-apply-record"><strong>Report {report.status}</strong><span>{report.akahu_report_id}</span>{report.completed_at && <span>Completed {new Date(report.completed_at).toLocaleString()}</span>}</div>}{reviewSummary && <div className="finance-apply-review-summary"><strong>{reviewSummary.transaction_count} transactions · {reviewSummary.account_count} accounts</strong><span>{reviewSummary.data_source_count} statement source(s) · {reviewSummary.insight_count} insight(s)</span><span>Total movement: {reviewSummary.transaction_total.toLocaleString(undefined, { style: 'currency', currency: 'NZD' })}</span>{reviewSummary.truncated && <small>Preview limited to the first 50 transactions and insights.</small>}<div className="finance-apply-transaction-list">{reviewSummary.transactions.map((transaction) => { const id = transactionId(transaction); return id ? <label key={id}><input type="checkbox" checked={selectedTransactionIds.includes(id)} onChange={() => toggleTransaction(id)} /><span>{transaction.date?.slice(0, 10) ?? 'Undated'} · {transaction.description ?? 'Provider transaction'} · {Number(transaction.amount ?? 0).toLocaleString(undefined, { style: 'currency', currency: 'NZD' })}</span><strong>{reviewIds[id] ? 'Reviewed' : 'Pending'}</strong></label> : null; })}</div><div className="finance-apply-review-actions"><button type="button" className="btn btn-secondary" disabled={saving || selectedTransactionIds.length === 0} onClick={() => void reviewSelected('approve')}>Approve selected</button><button type="button" className="btn btn-secondary" disabled={saving || selectedTransactionIds.length === 0} onClick={() => void reviewSelected('reject')}>Reject selected</button><select value={connectionRequestId} onChange={(event) => setConnectionRequestId(event.target.value)} aria-label="Reconciliation bank destination"><option value="">Choose bank destination</option>{bankDestinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.provider_name ?? 'Bank'} · {destination.status}</option>)}</select><button type="button" className="btn btn-primary" disabled={saving || selectedTransactionIds.length === 0 || selectedTransactionIds.some((id) => !reviewIds[id]) || !connectionRequestId} onClick={() => void promoteSelected()}>Promote to reconciliation</button></div></div>}</div>
+      <div className="finance-apply-panel"><h3>1. Prepare a finance case</h3><label><span>Case reference</span><input value={reference} maxLength={500} onChange={(event) => setReference(event.target.value)} /></label><button type="button" className="btn btn-primary" disabled={saving || !reference.trim() || !providerReady} onClick={() => void createApplication()}><Plus size={15} />{saving ? 'Preparing...' : 'Create or reuse case'}</button>{application && <p className="finance-apply-record"><strong>{application.reference}</strong><span>Provider case: {application.akahu_application_id}</span><span>Status: {application.status}</span></p>}</div>
+      <div className="finance-apply-panel"><h3>2. Request applicant data</h3><label><span>History requested (days)</span><input type="number" min={30} max={730} value={requestedDays} onChange={(event) => setRequestedDays(Number(event.target.value))} /></label><label className="finance-apply-check"><input type="checkbox" checked={allowManualUploads} onChange={(event) => setAllowManualUploads(event.target.checked)} /><span>Allow PDF statement uploads</span></label><button type="button" className="btn btn-secondary" disabled={saving || !providerReady || !application} onClick={() => void createSharingRequest()}><Link2 size={15} />{saving ? 'Creating...' : 'Create secure sharing link'}</button>{sharingRequest && <div className="finance-apply-link"><strong>Applicant link ready</strong><span>Expires {new Date(sharingRequest.expires_at).toLocaleDateString()}</span><a href={sharingRequest.link} target="_blank" rel="noreferrer">Open Akahu Apply <ExternalLink size={13} /></a></div>}</div>
+      <div className="finance-apply-panel"><h3>3. Stage for review</h3><p className="finance-apply-panel-copy">After the applicant submits data, ask Apply to prepare an aggregate report for review.</p><div className="finance-apply-report-actions"><button type="button" className="btn btn-secondary" disabled={saving || !providerReady || !application} onClick={() => void createReport()}><FileText size={15} />Create report</button><button type="button" className="btn btn-secondary" disabled={saving || !providerReady || !report} onClick={() => void checkReport()}>Check status</button><button type="button" className="btn btn-secondary" disabled={saving || !providerReady || report?.status !== 'completed'} onClick={() => void loadReviewSummary()}>Load review summary</button></div>{report && <div className="finance-apply-record"><strong>Report {report.status}</strong><span>{report.akahu_report_id}</span>{report.completed_at && <span>Completed {new Date(report.completed_at).toLocaleString()}</span>}</div>}{reviewSummary && <div className="finance-apply-review-summary"><strong>{reviewSummary.transaction_count} transactions · {reviewSummary.account_count} accounts</strong><span>{reviewSummary.data_source_count} statement source(s) · {reviewSummary.insight_count} insight(s)</span><span>Total movement: {reviewSummary.transaction_total.toLocaleString(undefined, { style: 'currency', currency: 'NZD' })}</span>{reviewSummary.truncated && <small>Preview limited to the first 50 transactions and insights.</small>}<div className="finance-apply-transaction-list">{reviewSummary.transactions.map((transaction) => { const id = transactionId(transaction); return id ? <label key={id}><input type="checkbox" checked={selectedTransactionIds.includes(id)} onChange={() => toggleTransaction(id)} /><span>{transaction.date?.slice(0, 10) ?? 'Undated'} · {transaction.description ?? 'Provider transaction'} · {Number(transaction.amount ?? 0).toLocaleString(undefined, { style: 'currency', currency: 'NZD' })}</span><strong>{reviewIds[id] ? 'Reviewed' : 'Pending'}</strong></label> : null; })}</div><div className="finance-apply-review-actions"><button type="button" className="btn btn-secondary" disabled={saving || selectedTransactionIds.length === 0} onClick={() => void reviewSelected('approve')}>Approve selected</button><button type="button" className="btn btn-secondary" disabled={saving || selectedTransactionIds.length === 0} onClick={() => void reviewSelected('reject')}>Reject selected</button><select value={connectionRequestId} onChange={(event) => setConnectionRequestId(event.target.value)} aria-label="Reconciliation bank destination"><option value="">Choose bank destination</option>{bankDestinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.provider_name ?? 'Bank'} · {destination.status}</option>)}</select><button type="button" className="btn btn-primary" disabled={saving || selectedTransactionIds.length === 0 || selectedTransactionIds.some((id) => !reviewIds[id]) || !connectionRequestId} onClick={() => void promoteSelected()}>Promote to reconciliation</button></div></div>}</div>
     </div>
     <footer><strong>Review boundary</strong><span>Apply reports remain staged for human review. They do not post transactions, make payments, or submit IRD filings.</span></footer>
   </section>;
