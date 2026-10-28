@@ -1,10 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
+import { ADMIN_ID, installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
 
 const JOB_ID = '91919191-9191-4919-8919-919191919191';
 const PROJECT_ID = '92929292-9292-4929-8929-929292929292';
 const ORGANIZATION_ID = '33333333-3333-4333-8333-333333333333';
-const ADMIN_USER_ID = '11111111-1111-4111-8111-111111111111';
 
 test('incomplete acceptance stays a same-job correction gate after reload, never finished-code approval', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
@@ -63,7 +62,7 @@ test('owner re-verifies the exact saved patch on the same job only after a secon
   const job = () => ({
     id: JOB_ID, organization_id: ORGANIZATION_ID, project_id: PROJECT_ID, title: 'Saved patch verifier recovery',
     status: retried ? 'implementation_pending' : 'failed', target_sha: targetSha, frontend_required: true,
-    backend_required: true, code_review_mode: 'human', code_review_status: 'pending', autopilot_requested_by: ADMIN_USER_ID,
+    backend_required: true, code_review_mode: 'human', code_review_status: 'pending', autopilot_requested_by: ADMIN_ID,
     autopilot_state: retried ? 'driving' : 'blocked', created_at: '2026-11-02T00:00:00Z', updated_at: '2026-11-02T01:02:03.456789+00:00',
   });
   const step = (id: string, step_id: string, builder_mode: string, ordinal_position: number, status: string) =>
