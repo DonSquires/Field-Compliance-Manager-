@@ -60,7 +60,7 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
         $f$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $f$;
       ${tables.map(tableDDL).join('\n')}
-      ${['module_catalog', 'zone_closures'].map(tableDDL).join('\n')}
+      ${['module_catalog', 'zone_closures', 'organization_modules', 'module_rule_sets'].map(tableDDL).join('\n')}
       ${constraints}
       ${['get_descendant_organizations', 'is_admin_for_org', 'crm_actor_can_manage_account', 'crm_actor_can_manage_location', 'ensure_canonical_place',
         'canonical_place_for_house', 'address_match_key', 'tg_locations_place_identity', 'tg_client_sites_place_house',
@@ -194,6 +194,9 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       INSERT INTO public.test_receipts SELECT 'client-edit-before',jsonb_build_object('version',o.updated_at,'confirmation',a.external_refs->'engagement_confirmation')
         FROM public.organizations o JOIN public.service_agreements a ON a.client_organization_id=o.id
         WHERE o.id=(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client');
+      ALTER TABLE public.location_zones DISABLE TRIGGER aa_field_verification_point;
+      UPDATE public.location_zones SET is_active=false WHERE id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified');
+      ALTER TABLE public.location_zones ENABLE TRIGGER aa_field_verification_point;
       INSERT INTO public.test_receipts SELECT 'recapture-version',to_jsonb(l.updated_at)
         FROM public.locations l WHERE l.id=(SELECT (data->>'location_id')::uuid FROM public.test_receipts WHERE key='site');
       ${actor(adminOfficer)}
@@ -214,6 +217,15 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
         FROM public.test_receipts WHERE key='recaptured'),'recapture reuses the marker');
       SELECT public.assert_ok((SELECT count(*)=2 FROM public.geofence_boundary_history
         WHERE entity_id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')),'recapture appends rather than replacing the original evidence');
+      SELECT public.assert_ok((SELECT is_active FROM public.location_zones WHERE id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified')),'recapture restores an inactive marker');
+      SELECT public.expect_error($q$SELECT * FROM public.resolve_active_rules('${provider}','parking_enforcement',
+        p_zone_id=>(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified'))$q$,'not an operational work area');
+      INSERT INTO public.jurisdiction_rule_sets(id,organization_id,module_key,name,jurisdiction_name,rules)
+        VALUES('${id(75)}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'patrol','Marker-only fixture','Fixture jurisdiction','{"must_not_inherit":true}');
+      UPDATE public.location_zones SET jurisdiction_rule_set_id='${id(75)}'
+        WHERE id=(SELECT (data->>'zone_id')::uuid FROM public.test_receipts WHERE key='verified');
+      SELECT public.assert_ok((SELECT jurisdiction_rule_set_id IS NULL FROM public.resolve_active_rules('${provider}','patrol',
+        p_site_id=>(SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='site'))),'site resolution ignores reference-marker sibling rules');
       INSERT INTO public.test_receipts SELECT 'zone-edit-before',jsonb_build_object('version',l.updated_at,'zone_version',z.configuration_version)
         FROM public.locations l JOIN public.location_zones z ON z.location_id=l.id
         WHERE z.id=(SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone');
@@ -233,6 +245,68 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       SELECT public.assert_ok((SELECT l.name='Renamed area' AND z.name=l.name
         FROM public.locations l JOIN public.location_zones z ON z.location_id=l.id
         WHERE z.id=(SELECT (data->>'facet_id')::uuid FROM public.test_receipts WHERE key='zone')),'single-area rename stays consistent with its house');
+      INSERT INTO public.organizations(id,name,organization_type,active,status) VALUES
+        ('${id(60)}','Pending client','client',true,'active'),('${id(64)}','Other pending client','client',true,'active');
+      INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,name,agreement_type,starts_on,invitation_status)
+        VALUES ('${id(61)}','${provider}','${id(60)}','Pending engagement','operational',current_date,'not_invited'),
+          ('${id(65)}','${other}','${id(64)}','Other engagement','operational',current_date,'not_invited'),
+          ('${id(67)}','${provider}','${id(60)}','Ambiguous engagement','operational',current_date,'invited');
+      INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,name,agreement_type,starts_on,ends_on,invitation_status)
+        VALUES('${id(68)}','${provider}','${id(64)}','Expired engagement','operational',current_date-10,current_date-1,'not_invited');
+      INSERT INTO public.test_receipts SELECT 'pending-profile',to_jsonb(updated_at) FROM public.organizations WHERE id='${id(60)}';
+      ${actor(adminOfficer)}
+      SELECT public.expect_error($q$SELECT public.save_service_client('${id(62)}','${provider}','${id(60)}',
+        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Pending client','','','',false)$q$,'outside your managed');
+      SELECT public.expect_error($q$SELECT public.save_service_client('${id(66)}','${provider}','${id(64)}',
+        now(),'Other pending client','','','',true)$q$,'outside your managed');
+      SELECT public.expect_error($q$SELECT public.save_service_client('${id(63)}','${provider}','${id(60)}',
+        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Must not persist','','','',true)$q$,'Several current agreements');
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT name='Pending client' FROM public.organizations WHERE id='${id(60)}'),'ambiguous confirmation rolls back profile edits');
+      DELETE FROM public.service_agreements WHERE id='${id(67)}';
+      ${actor(adminOfficer)}
+      SELECT public.assert_ok(public.save_service_client('${id(63)}','${provider}','${id(60)}',
+        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Pending client','','','',true)->'engagement_confirmed'='true'::jsonb,'provider can explicitly confirm its own pending agreement');
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT invitation_status='not_invited' AND external_refs->'engagement_confirmation'->>'confirmed_by'='${adminOfficer}'
+        FROM public.service_agreements WHERE id='${id(61)}'),'pending confirmation does not accept a portal invitation');
+
+      INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,name,agreement_type,starts_on,invitation_status)
+        VALUES('${id(72)}','${other}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'Later other-provider agreement','operational',current_date,'accepted');
+      INSERT INTO public.locations(id,organization_id,name)
+        VALUES('${id(70)}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'Unbound legacy site'),
+          ('${id(80)}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'Legacy profile');
+      ALTER TABLE public.client_sites DISABLE TRIGGER autolink;
+      ALTER TABLE public.client_sites DISABLE TRIGGER financial_config;
+      INSERT INTO public.client_sites(id,client_organization_id,location_id,name,site_type,center_point,metadata)
+        VALUES('${id(71)}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'${id(70)}',
+          'Unbound legacy site','other',ST_SetSRID(ST_Point(173.28,-41.27),4326),'{"created_via":"legacy_import"}'),
+          ('${id(81)}',(SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'${id(80)}',
+          'Legacy profile','other',ST_SetSRID(ST_Point(173.28,-41.27),4326),'{"created_via":"legacy_import"}');
+      ALTER TABLE public.client_sites ENABLE TRIGGER autolink;
+      ALTER TABLE public.client_sites ENABLE TRIGGER financial_config;
+      INSERT INTO public.test_receipts SELECT 'legacy-version',to_jsonb(updated_at) FROM public.locations WHERE id='${id(70)}';
+      ${actor(officer)}
+      SELECT public.capture_field_place('${id(73)}','${provider}',
+        (SELECT (data->>'id')::uuid FROM public.test_receipts WHERE key='client'),'${id(70)}',
+        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='legacy-version'),
+        'site','Unbound legacy site',(SELECT data FROM public.test_receipts WHERE key='capture'),true);
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT service_agreement_id=(SELECT (data->>'agreement_id')::uuid FROM public.test_receipts WHERE key='client')
+        AND metadata->>'created_via'='legacy_import' FROM public.client_sites WHERE id='${id(71)}'),'legacy capture uses the intended provider and preserves origin');
+      SELECT public.assert_ok((SELECT count(*)=0 FROM public.site_financial_config),'legacy verification does not infer financial defaults');
+      INSERT INTO public.test_receipts SELECT 'legacy-profile-version',jsonb_build_object('house',l.updated_at,'site',s.configuration_version)
+        FROM public.locations l JOIN public.client_sites s ON s.location_id=l.id WHERE s.id='${id(81)}';
+      ${actor(adminOfficer)}
+      SELECT public.save_service_location_profile('${provider}','${id(80)}',
+        (SELECT (data->>'house')::timestamptz FROM public.test_receipts WHERE key='legacy-profile-version'),
+        'Legacy profile','Reviewed','${id(81)}',
+        (SELECT (data->>'site')::integer FROM public.test_receipts WHERE key='legacy-profile-version'),
+        '{"risk_level":"low","site_brief":"Reviewed briefing","access_instructions":"","hs_notes":"","active":true}');
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT service_agreement_id IS NULL AND metadata->>'created_via'='legacy_import'
+        AND site_brief='Reviewed briefing' FROM public.client_sites WHERE id='${id(81)}'),'legacy profile edit leaves agreement decisions explicit');
+      SELECT public.assert_ok((SELECT count(*)=0 FROM public.site_financial_config),'legacy profile edit does not infer financial defaults');
     `;
     try { docker(['exec', '-i', name, 'psql', '-X', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], setup); }
     catch (failure) { throw new Error(`${failure.stdout?.slice(-3000) ?? ''}\n${failure.stderr ?? failure.message}`); }

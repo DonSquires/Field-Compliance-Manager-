@@ -30,6 +30,11 @@ Owner-directed client/place simplification, 2026-10-28:
   Review follow-up also excludes reference markers from delivery links and
   work-area editing, preserves selected-provider context, requires an explicit
   site for multi-site scheduling, and version-checks single-area renames.
+  Explicit rule selection also rejects reference markers. Existing unbound
+  sites retain their source provenance and use the selected provider's agreement
+  on field capture; ordinary profile edits do not infer agreements or pricing.
+  Administrators can explicitly confirm their own current pending engagement
+  without accepting a client invitation, and recapture restores inactive markers.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,
   actual constraints and place/agreement/financial triggers, stale fix/version
   rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
