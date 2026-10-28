@@ -41,6 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
+import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
 const CORS = {
@@ -92,6 +93,9 @@ const LOOP_STEP_SUMMARY_BUDGET = parseBudgetEnv(Deno.env.get('BOB_LOOP_STEP_SUMM
 }
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// HMAC key for update_records previews held in the transcript. Server-only; the signed payload is domain-separated
+// in record-updates.mjs, and the key itself is never sent to a browser, model or log.
+const RECORD_UPDATE_SIGNING_KEY = SUPABASE_SERVICE_KEY;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const BOB_INFERENCE_URL = Deno.env.get('BOB_INFERENCE_URL') ?? '';
 const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
@@ -381,6 +385,7 @@ function safeAgentWorkspaceContext(value: any) {
         'dispatch_flow',
         'create_builder_job',
         'cancel_builder_job',
+        'update_records',
         'laptop_shell',
         'create_document_draft',
         'review_merge_request',
@@ -713,7 +718,7 @@ function budgetKnowledgeCards(cards: any) {
       `- **Capabilities:** ${registry.available_count} of ${registry.total_count} available`,
       `- **Read tools:** ${reads}`,
       `- **Write/propose tools:** ${writes}`,
-      `- **Governance:** all writes require proposal → approval`,
+      `- **Governance:** writes go through proposal → approval, or a preview you confirm in chat`,
       `- **Contract:** Runtime v2`
     ].join('\n');
   }
@@ -737,7 +742,7 @@ function budgetKnowledgeCards(cards: any) {
     }
     lines.push('');
   }
-  lines.push('All writes go through proposal → approval. Ask me anything!');
+  lines.push('Record changes go through proposal → approval, or through a preview you confirm in this chat before I apply it as you. Ask me anything!');
   return lines.join('\n');
 }
 // ── REASONING LOOP — "give Bob the loop, keep the cage" ──────────────────────
@@ -801,6 +806,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   // create_builder_job opens a GitHub Builder job (produces a DRAFT PR) — write-capable.
   'create_builder_job',
   'cancel_builder_job',
+  // update_records previews person/vehicle/report changes and applies them only on the caller's next-turn yes.
+  'update_records',
   // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
   'laptop_shell',
   'create_document_draft',
@@ -1034,6 +1041,8 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_tentative_roster_block', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_place_hazards', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research', 'triage_friction');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
+  // update_records: every non-guest caller; the audited RPCs it calls as the caller decide what is accepted.
+  if (canCompareData) allowedTools.push('update_records');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
   if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('query_atlas');
@@ -1731,7 +1740,8 @@ function attachGuidedProposalWorkflow(meta: JsonRecord) {
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
     t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
     t.tool === 'create_builder_job' && caps.tier === 'admiral' ||
-    t.tool === 'cancel_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
+    t.tool === 'cancel_builder_job' && caps.tier === 'admiral' || // update_records previews then applies the caller's confirmed changes as the caller.
+    t.tool === 'update_records' && caps.canCompareData || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
     t.tool === 'laptop_shell' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
@@ -2164,7 +2174,7 @@ async function loadHistory(supabase: DbClient, conversationId: string, limit = 8
     history: [],
     pending: null
   };
-  const { data } = await supabase.from('bob_messages').select('role, content, metadata, created_at').eq('conversation_id', conversationId).order('created_at', {
+  const { data } = await supabase.from('bob_messages').select('id, role, content, metadata, created_at').eq('conversation_id', conversationId).order('created_at', {
     ascending: false
   }).limit(limit);
   const rows = (data ?? []).slice().reverse(); // chronological
@@ -2251,6 +2261,18 @@ async function loadHistory(supabase: DbClient, conversationId: string, limit = 8
           typeof proposal.conversation_id === 'string') {
         return { history, pending: {
           kind: 'builder_cancellation_pending', builder_cancellation: proposal
+        } };
+      }
+    }
+    // An update_records preview is confirmable only as the very next turn: a later assistant row consumes it.
+    if (md.tool === 'update_records' && !rows.slice(i + 1).some((row: JsonRecord)=>row.role === 'assistant') && md.outcome === 'proposed') {
+      const proposal = md.pending_record_updates;
+      if (proposal && typeof proposal === 'object' && typeof proposal.plan_id === 'string' &&
+          typeof proposal.user_id === 'string' && typeof proposal.conversation_id === 'string' &&
+          Array.isArray(proposal.steps) && proposal.steps.length) {
+        return { history, pending: {
+          kind: 'record_updates_pending', record_updates: proposal,
+          message_id: typeof rows[i]?.id === 'string' ? rows[i].id : null
         } };
       }
     }
@@ -9850,6 +9872,35 @@ serve(async (req)=>{
               }
             };
           }
+        // update_records: in-app Bob's governed write path for people, vehicles and reports (owner request: Bob
+        // updates records from the information he is given). This case only PREVIEWS, with the caller's own read
+        // access. The pre-plan hook applies the stored preview on the caller's next-turn yes, as the caller.
+        case 'update_records':
+          {
+            const toolMeta = (outcome: string, extra: JsonRecord = {}) => ({ tool: 'update_records', outcome, ...extra });
+            if (!caps.canCompareData) return { reply: 'Guest accounts cannot change records.', meta: toolMeta('forbidden') };
+            if (!orgId) return { reply: 'Your account is not attached to an organisation, so I cannot change records for you.', meta: toolMeta('no_org') };
+            if (!conversationId) return { reply: 'Open a saved Bob conversation first so I can hold the preview for you to confirm.', meta: toolMeta('need_params') };
+            const validated = validateRecordUpdatePlan(toolArgs);
+            const plan = validated.ok ? validated.plan : null;
+            if (!plan) return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
+            const resolved = await resolveRecordUpdatePlan({
+              rpc: (name: string, args: JsonRecord) => callerClient.rpc(name, args), organizationId: orgId, plan
+            });
+            const preview = renderRecordUpdatePreview(resolved);
+            if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length }) };
+            let signed;
+            try {
+              signed = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, {
+                plan_id: crypto.randomUUID(), user_id: user.id, conversation_id: conversationId, organization_id: orgId,
+                created_at: new Date().toISOString(), source_summary: plan.source_summary,
+                steps: resolved.steps, held: resolved.held
+              });
+            } catch {
+              return { reply: 'I cannot hold a change preview for you to confirm right now, so nothing will be changed. Please try again shortly.', meta: toolMeta('unavailable') };
+            }
+            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed }) };
+          }
         case 'cancel_builder_job':
           {
             const toolMeta = (outcome: string) => ({ tool: 'cancel_builder_job', outcome });
@@ -10130,6 +10181,44 @@ serve(async (req)=>{
     // Bob now reasons his way through affirmations using his knowledge cards and
     // conversation history. The gate was a training-wheels workaround that treated
     // Bob as a keyword-driven bot rather than an agentic copilot.
+    // A record-update preview is applied only here, on the caller's own explicit yes, never by the planner.
+    const recordUpdatesChoice = pending?.kind === 'record_updates_pending' ? recordUpdateDecision(message) : null;
+    if (recordUpdatesChoice) {
+      const stored = pending?.record_updates;
+      const planId = typeof stored?.plan_id === 'string' ? stored.plan_id : null;
+      const toolMeta = (outcome: string, extra: JsonRecord = {}) => ({ tool: 'update_records', outcome, record_updates_plan_id: planId, ...extra });
+      let result;
+      // Same stop point as every other governed action: a cancelled turn must not start writing.
+      const cancelledBeforeApply = await cancelAtBoundary('applying record updates');
+      if (cancelledBeforeApply) return cancelledBeforeApply;
+      if (!isToolEffectPermitted('update_records', caps) || typeof pending?.message_id !== 'string' ||
+          !isTrustedPendingRecordUpdates(stored, { userId: user.id, conversationId, organizationId: orgId }) ||
+          !(await verifyPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, stored))) {
+        result = { reply: 'That preview can no longer be applied (it has expired, cannot be verified as one I made, or belongs to another person, organisation or conversation). Nothing was written. Tell me the changes again and I will show a fresh preview.', meta: toolMeta('unconfirmed') };
+      } else if (!(await claimRecordUpdatePreview({
+        db: admin, messageId: pending?.message_id, conversationId, planId, answer: recordUpdatesChoice
+      }))) {
+        result = { reply: 'That preview has already been answered (or is being applied from another reply), so nothing more was written from this message. Ask me what changed if you want to check.', meta: toolMeta('already_answered') };
+      } else if (recordUpdatesChoice === 'decline') {
+        result = { reply: 'Discarded. Nothing was written.', meta: toolMeta('declined') };
+      } else {
+        const applied = await applyRecordUpdatePlan({
+          rpc: (name: string, args: JsonRecord) => callerClient.rpc(name, args), organizationId: orgId, pending: stored
+        });
+        result = {
+          reply: renderRecordUpdateReceipts({ receipts: applied.receipts, held: Array.isArray(stored.held) ? stored.held : [] }),
+          meta: toolMeta(applied.outcome, { record_updates_applied_plan_id: planId, receipts: applied.receipts })
+        };
+      }
+      await persist(admin, orgId, conversationId, [
+        { role: 'user', content: message },
+        { role: 'assistant', content: result.reply, metadata: result.meta }
+      ]);
+      return respond(buildStructuredResponse({
+        reply: result.reply, route: 'tool', startTime,
+        meta: { intent: 'conductor', planned_tool: 'update_records', ...result.meta }
+      }));
+    }
     if (pending?.kind === 'builder_cancellation_pending' && builderCancellationDecision(message)) {
       // Consume the immediately preceding preview when the user explicitly confirms or declines.
       const result = await dispatchTool('cancel_builder_job', {}, { action: 'use_tool', tool: 'cancel_builder_job', args: {} });

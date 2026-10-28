@@ -358,6 +358,32 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   legal, HR, identity-critical, enforcement, commercial commitments and
   protected release paths require the appropriate human key. A read-only
   inventory is a staging phase for writer/creator proposals, not the end state.
+- **Confirmed in-chat record updates (implements the Reader / Writer / Creator
+  ruling; owner request, 2026-10-28, that in-app Bob update records from the
+  information he is given).** When a user gives Bob facts about people,
+  vehicles or reports (a pasted email, a call note, an officer's account),
+  `update_records` turns each fact into one operation and previews it, resolved
+  with the caller's own read access; that turn writes nothing. Only the
+  caller's own short, unhedged yes on the very next turn applies it, within 30
+  minutes and for the same user, conversation and organisation, using the
+  caller's JWT and only the existing audited RPCs (`manage_identity_vehicle`,
+  `update_vehicle_profile_details`, `record_vehicle_person`, `add_person_alias`,
+  `raise_entity_flag`, `add_record_update`). The identity-critical human key is
+  that confirmation of the exact preview, turned with the caller's own rank and
+  `can_access_vehicle_owner_identity`: Bob holds no write authority of his own
+  here, never uses the service role, never writes the sensitive floor directly,
+  and does not unlock `generic_write`. Ambiguous people, unconfirmed identities,
+  NZTA-register facts and anything without a governed path are held in the
+  preview, not guessed. The preview shows every value in full and names people
+  by their stored record name, so the yes covers exactly what will be written.
+  Only a preview the server signed (HMAC over the exact plan) and carried by a
+  single transcript row can be applied, so a row another member inserts into
+  the conversation can never borrow the caller's yes. A preview is answered
+  once: the stored preview row is
+  claimed before anything is applied or discarded, so overlapping replies
+  cannot apply it twice. Each step reports applied, already present (only an
+  exact duplicate), failed or not attempted; Bob never claims a change without
+  a receipt.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no
