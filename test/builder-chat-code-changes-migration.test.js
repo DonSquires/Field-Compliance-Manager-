@@ -25,6 +25,9 @@ test('code corrections preserve immutable task/target/attempts and have owner-on
   assert.match(requiredLaneMigration, /FROM PUBLIC, anon, authenticated, service_role/);
   assert.match(savedPatchRetryMigration, /saved_frontend_patch_retry/);
   assert.match(savedPatchRetryMigration, /owner_patch_retry::/);
+  assert.match(savedPatchRetryMigration, /owner_patch_retry_attempt_count/);
+  assert.match(savedPatchRetryMigration, /attempt::/);
+  assert.match(savedPatchRetryMigration, /v_run\.status NOT IN \('failed', 'timeout'\)/);
   assert.match(savedPatchRetryMigration, /attempt_count/);
   assert.match(savedPatchRetryMigration, /p_job_updated_at/);
   assert.match(savedPatchRetryMigration, /FROM PUBLIC, anon, service_role/);
@@ -493,7 +496,9 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         UPDATE builder_job_steps SET error=original_error WHERE id=step_id;
         UPDATE builder_worker_runs SET profile='backend-verify' WHERE id=run_id;
         PERFORM expect_error(command,'latest frontend verifier');
-        UPDATE builder_worker_runs SET profile='frontend-verify' WHERE id=run_id;
+        UPDATE builder_worker_runs SET profile='frontend-verify', status='failed', exit_code=NULL WHERE id=run_id;
+        PERFORM expect_error(command,'latest frontend verifier');
+        UPDATE builder_worker_runs SET status='timeout', exit_code=NULL WHERE id=run_id;
         UPDATE builder_jobs SET workspace_pull_request_url='https://example.invalid/pr' WHERE id=job_id;
         PERFORM expect_error(command,'changed, is published');
         UPDATE builder_jobs SET workspace_pull_request_url=NULL WHERE id=job_id;
@@ -518,6 +523,11 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         PERFORM expect_error(command,'active worker, model run, or approval');
         DELETE FROM builder_approvals WHERE builder_approvals.job_id=job_id;
 
+        UPDATE builder_jobs SET backend_required=false WHERE id=job_id;
+        UPDATE builder_job_steps SET status='skipped', started_at=now(), completed_at=now() WHERE id=backend_id;
+        PERFORM expect_error(command,'untouched downstream gates');
+        UPDATE builder_job_steps SET started_at=NULL WHERE id=backend_id;
+        UPDATE builder_job_steps SET completed_at=now() WHERE id=backend_id;
         receipt:=builder_retry_failed_frontend_patch(job_id,step_id,patch_id,repeat('a',40),request_time);
         repeated:=builder_retry_failed_frontend_patch(job_id,step_id,patch_id,repeat('a',40),request_time);
         IF receipt IS DISTINCT FROM repeated
@@ -542,11 +552,27 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         SELECT builder_claim_frontend_worker(job_id,step_id,patch_id,'test-runner',repeat('a',40),900) INTO worker_result;
         IF (worker_result->>'run_id')::uuid=run_id
           OR (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>2
-          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'failed'
+          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'timeout'
           OR (SELECT idempotency_key FROM builder_worker_runs WHERE id=(worker_result->>'run_id')::uuid)
-            IS DISTINCT FROM original_key||'::owner_patch_retry::'||receipt::text
+            IS DISTINCT FROM original_key||'::owner_patch_retry::'||receipt::text||'::attempt::4'
+          OR (SELECT input_context->>'owner_patch_retry_receipt' FROM builder_job_steps WHERE id=step_id) IS DISTINCT FROM receipt::text
+          OR (SELECT input_context->>'owner_patch_retry_attempt_count' FROM builder_job_steps WHERE id=step_id)<>'3'
           OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>4
           THEN RAISE EXCEPTION 'Owner retry overwrote verifier history or failed to start a new attempt'; END IF;
+        UPDATE builder_worker_runs SET status='failed', exit_code=1, completed_at=now(), lease_token_hash=NULL
+          WHERE id=(worker_result->>'run_id')::uuid;
+        UPDATE builder_job_steps SET status='failed', retryable=true, error='Frontend worker verification failed',
+          completed_at=now() WHERE id=step_id;
+        UPDATE builder_jobs SET status='implementation_pending' WHERE id=job_id;
+        SELECT builder_claim_frontend_worker(job_id,step_id,patch_id,'test-runner-2',repeat('a',40),900) INTO worker_result;
+        IF (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>3
+          OR (SELECT status FROM builder_worker_runs WHERE id=(SELECT id FROM builder_worker_runs WHERE job_id=job_id
+            AND idempotency_key=original_key||'::owner_patch_retry::'||receipt::text||'::attempt::4'))<>'failed'
+          OR (SELECT idempotency_key FROM builder_worker_runs WHERE id=(worker_result->>'run_id')::uuid)
+            IS DISTINCT FROM original_key||'::owner_patch_retry::'||receipt::text||'::attempt::5'
+          OR (SELECT input_context->>'owner_patch_retry_receipt' FROM builder_job_steps WHERE id=step_id) IS DISTINCT FROM receipt::text
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>5
+          THEN RAISE EXCEPTION 'A repeated verification overwrote receipt history or reused its idempotency key'; END IF;
       END $f$;
       DO $f$
       BEGIN

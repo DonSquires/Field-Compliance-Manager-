@@ -73,9 +73,10 @@ BEGIN
       WHERE job_id = p_job_id AND step_id = 'backend_implementation') <> 1)
     OR EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = p_job_id
       AND step_id = 'backend_implementation'
-      AND ((v_job.backend_required AND status <> 'pending')
-        OR (NOT v_job.backend_required AND status NOT IN ('pending', 'skipped'))
-        OR started_at IS NOT NULL OR completed_at IS NOT NULL)) THEN
+      AND ((v_job.backend_required AND (status <> 'pending' OR started_at IS NOT NULL OR completed_at IS NOT NULL))
+        OR (NOT v_job.backend_required AND NOT (
+          (status = 'pending' AND started_at IS NULL AND completed_at IS NULL)
+          OR (status = 'skipped' AND started_at IS NULL)))) THEN
     RAISE EXCEPTION 'Saved-patch retry requires one paused frontend verifier and untouched downstream gates';
   END IF;
 
@@ -95,10 +96,11 @@ BEGIN
   SELECT * INTO v_run FROM public.builder_worker_runs
     WHERE job_id = p_job_id AND step_id = p_step_id
     ORDER BY created_at DESC LIMIT 1;
-  IF v_run.id IS NULL OR v_run.status <> 'failed' OR v_run.profile <> 'frontend-verify'
+  IF v_run.id IS NULL OR v_run.status NOT IN ('failed', 'timeout') OR v_run.profile <> 'frontend-verify'
     OR v_run.patch_artifact_id IS DISTINCT FROM v_patch.id
     OR v_run.target_sha IS DISTINCT FROM p_target_sha
-    OR v_run.exit_code IS NULL OR v_run.exit_code = 0 THEN
+    OR (v_run.status = 'failed' AND (v_run.exit_code IS NULL OR v_run.exit_code = 0))
+    OR (v_run.status = 'timeout' AND v_run.exit_code = 0) THEN
     RAISE EXCEPTION 'The latest frontend verifier did not fail against this saved patch and target';
   END IF;
 
@@ -109,7 +111,7 @@ BEGIN
     input_context = coalesce(input_context, '{}'::jsonb) || jsonb_build_object(
       'patch_artifact_id', v_patch.id, 'target_sha', v_job.target_sha,
       'owner_patch_retry_receipt', v_receipt, 'owner_patch_retry_actor', v_user,
-      'owner_patch_retry_at', now()
+      'owner_patch_retry_at', now(), 'owner_patch_retry_attempt_count', v_step.attempt_count
     ),
     updated_at = now()
     WHERE id = v_step.id;
@@ -154,12 +156,24 @@ DECLARE
     || CASE WHEN _job.code_review_revision->>''approval_id'' IS NOT NULL
       THEN ''::correction::'' || (_job.code_review_revision->>''approval_id'') ELSE '''' END
     || CASE WHEN _step.input_context->>''owner_patch_retry_receipt'' IS NOT NULL
-      THEN ''::owner_patch_retry::'' || (_step.input_context->>''owner_patch_retry_receipt'') ELSE '''' END;';
+      THEN ''::owner_patch_retry::'' || (_step.input_context->>''owner_patch_retry_receipt'')
+        || ''::attempt::'' || (_step.attempt_count + 1)::text ELSE '''' END;';
+  v_context_anchor text := 'input_context = jsonb_build_object(''patch_artifact_id'', _patch.id, ''target_sha'', _job.target_sha), updated_at = now()';
+  v_context_replacement text := 'input_context = jsonb_build_object(''patch_artifact_id'', _patch.id, ''target_sha'', _job.target_sha)
+      || CASE WHEN _step.input_context->>''owner_patch_retry_receipt'' IS NOT NULL THEN jsonb_build_object(
+        ''owner_patch_retry_receipt'', _step.input_context->''owner_patch_retry_receipt'',
+        ''owner_patch_retry_actor'', _step.input_context->''owner_patch_retry_actor'',
+        ''owner_patch_retry_at'', _step.input_context->''owner_patch_retry_at'',
+        ''owner_patch_retry_attempt_count'', _step.input_context->''owner_patch_retry_attempt_count'')
+        ELSE ''{}''::jsonb END, updated_at = now()';
 BEGIN
   v_definition := pg_get_functiondef(v_signature);
   IF length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) THEN
     RAISE EXCEPTION 'Frontend worker claim changed; review saved-patch retry history key before applying';
   END IF;
-  EXECUTE replace(v_definition, v_anchor, v_replacement);
+  IF length(v_definition) - length(replace(v_definition, v_context_anchor, '')) <> length(v_context_anchor) THEN
+    RAISE EXCEPTION 'Frontend worker claim changed; review saved-patch retry context before applying';
+  END IF;
+  EXECUTE replace(replace(v_definition, v_anchor, v_replacement), v_context_anchor, v_context_replacement);
 END;
 $patch$;

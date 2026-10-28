@@ -6,6 +6,73 @@ const { execFileSync } = require('node:child_process');
 
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const TEST_TITLE = /(?<![\w$.])(?:test|it|describe)(?:\.(?:describe|only|skip|fixme|fail|slow|serial|parallel|concurrent|todo))*\s*\(\s*(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
+const PARAMETERIZED_TEST = /(?<![\w$.])(?:test|it|describe)(?:\.(?:describe|only|skip|fixme|fail|slow|serial|parallel|concurrent|todo))*\.each\s*/g;
+
+function skipTrivia(source, index) {
+  while (index < source.length) {
+    if (/\s/.test(source[index])) { index += 1; continue; }
+    if (source.startsWith('//', index)) {
+      const newline = source.indexOf('\n', index + 2);
+      index = newline < 0 ? source.length : newline + 1;
+      continue;
+    }
+    if (source.startsWith('/*', index)) {
+      const close = source.indexOf('*/', index + 2);
+      index = close < 0 ? source.length : close + 2;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+function matchingParen(source, open) {
+  const stack = [')'];
+  let quote = null;
+  for (let index = open + 1; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') { quote = char; continue; }
+    if (source.startsWith('//', index)) {
+      const newline = source.indexOf('\n', index + 2);
+      index = newline < 0 ? source.length : newline;
+      continue;
+    }
+    if (source.startsWith('/*', index)) {
+      const close = source.indexOf('*/', index + 2);
+      index = close < 0 ? source.length : close + 1;
+      continue;
+    }
+    if (char === '(') stack.push(')');
+    else if (char === '[') stack.push(']');
+    else if (char === '{') stack.push('}');
+    else if (char === stack.at(-1)) {
+      stack.pop();
+      if (!stack.length) return index;
+    }
+  }
+  return -1;
+}
+
+function stringArgument(source, index) {
+  const quote = source[index];
+  if (quote !== '"' && quote !== "'" && quote !== '`') return null;
+  let value = '';
+  for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+    const char = source[cursor];
+    if (char === '\\') {
+      if (cursor + 1 >= source.length) return null;
+      value += char + source[cursor + 1];
+      cursor += 1;
+    } else if (char === quote) return value;
+    else value += char;
+  }
+  return null;
+}
 
 function patchTouchedPaths(cwd, flags, patchPath) {
   const raw = execFileSync('git', ['apply', '--numstat', '-z', ...flags, patchPath], {
@@ -30,7 +97,19 @@ function patchTouchedPaths(cwd, flags, patchPath) {
 
 function testTitleCounts(content) {
   const counts = new Map();
-  for (const match of String(content ?? '').matchAll(TEST_TITLE)) counts.set(match[2], (counts.get(match[2]) || 0) + 1);
+  const source = String(content ?? '');
+  const add = title => counts.set(title, (counts.get(title) || 0) + 1);
+  for (const match of source.matchAll(TEST_TITLE)) add(match[2]);
+  for (const match of source.matchAll(PARAMETERIZED_TEST)) {
+    const tableOpen = skipTrivia(source, match.index + match[0].length);
+    if (source[tableOpen] !== '(') continue;
+    const tableClose = matchingParen(source, tableOpen);
+    if (tableClose < 0) continue;
+    const titleOpen = skipTrivia(source, tableClose + 1);
+    if (source[titleOpen] !== '(') continue;
+    const title = stringArgument(source, skipTrivia(source, titleOpen + 1));
+    if (title !== null) add(title);
+  }
   return counts;
 }
 

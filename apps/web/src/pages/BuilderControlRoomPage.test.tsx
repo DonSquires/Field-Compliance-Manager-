@@ -1,13 +1,51 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import BuilderControlRoomPage, { failedFrontendPatchRetryCandidate } from './BuilderControlRoomPage';
 
-const { invoke, rpc } = vi.hoisted(() => ({ invoke: vi.fn(), rpc: vi.fn() }));
-vi.mock('../lib/supabase', () => ({ supabase: { functions: { invoke }, rpc } }));
+const { invoke, rpc, getUser } = vi.hoisted(() => ({ invoke: vi.fn(), rpc: vi.fn(), getUser: vi.fn() }));
+vi.mock('../lib/supabase', () => ({ supabase: { functions: { invoke }, rpc, auth: { getUser } } }));
 vi.mock('../components/BuilderChatPanel', () => ({ BuilderChatPanel: () => null }));
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
+beforeEach(() => { getUser.mockResolvedValue({ data: { user: { id: 'owner' } }, error: null }); });
+
+function retryFixture(backendRequired = true) {
+  const updatedAt = '2026-10-27T11:19:32.127197+13:00';
+  const job = {
+    id: 'failed-job', project_id: 'project', title: 'Verifier recovery',
+    status: 'failed', target_sha: 'a'.repeat(40), updated_at: updatedAt,
+    autopilot_requested_by: 'owner', autopilot_state: 'blocked',
+    frontend_required: true, backend_required: backendRequired, code_review_mode: 'human',
+    workspace_published_at: null, workspace_published_head_sha: null,
+    workspace_pull_request_url: null, workspace_pull_request_head_sha: null,
+  };
+  const step = (id: string, step_id: string, status: string, builder_mode: string, extra = {}) => ({
+    id, job_id: job.id, step_id, status, builder_mode, ordinal_position: 1,
+    attempt_count: step_id === 'frontend_implementation' ? 1 : 0,
+    retryable: false, started_at: null, completed_at: null, result_summary: null, error: null, ...extra,
+  });
+  const steps = [
+    step('analysis', 'product_analysis', 'completed', 'product_analyst'),
+    step('design', 'ui_design', 'completed', 'ux_designer'),
+    step('frontend-step', 'frontend_implementation', 'failed', 'frontend_engineer', {
+      error: 'Verifier recovery paused after two infrastructure or attribution failures; patch preserved; inspect the runner and evidence before resuming',
+      input_context: { target_sha: job.target_sha, patch_artifact_id: 'saved-patch' },
+    }),
+    step('backend-step', 'backend_implementation', backendRequired ? 'pending' : 'skipped', 'backend_engineer'),
+    ...['test_suite', 'security_review', 'code_review', 'release_prep'].map(id => step(id, id, 'pending', 'qa_security_reviewer')),
+  ];
+  return {
+    job, steps, updatedAt,
+    snapshot: {
+      job, steps,
+      artifacts: [{ id: 'saved-patch', step_id: 'frontend-step', artifact_type: 'code_implementation', status: 'final', checksum: 'b'.repeat(64), content_size_bytes: 24231 }],
+      workerRuns: [{ id: 'failed-run', step_id: 'frontend-step', profile: 'frontend-verify', status: 'failed',
+        target_sha: job.target_sha, patch_artifact_id: 'saved-patch', exit_code: 1 }],
+      approvals: [],
+    },
+  };
+}
 
 it.each(['missing', 'blocked', 'covered'])('shows %s acceptance honestly at the same-job correction gate', async state => {
   const job = { id: 'review-job', project_id: 'project', title: 'Review repair', status: 'security_review',
@@ -126,41 +164,24 @@ it('treats a cancelled job with stale failures and pending approvals as history,
 });
 
 it('requires a separate owner confirmation before retrying the exact saved frontend patch', async () => {
-  const updatedAt = '2026-10-27T11:19:32.127197+13:00';
-  const job = {
-    id: 'failed-job', project_id: 'project', title: 'Verifier recovery',
-    status: 'failed', target_sha: 'a'.repeat(40), updated_at: updatedAt,
-    autopilot_requested_by: 'owner', autopilot_state: 'blocked',
-    frontend_required: true, backend_required: true, code_review_mode: 'human',
-    workspace_published_at: null, workspace_published_head_sha: null,
-    workspace_pull_request_url: null, workspace_pull_request_head_sha: null,
-  };
-  const step = (id: string, step_id: string, status: string, builder_mode: string, extra = {}) => ({
-    id, job_id: job.id, step_id, status, builder_mode, ordinal_position: 1,
-    attempt_count: step_id === 'frontend_implementation' ? 1 : 0,
-    retryable: false, started_at: null, completed_at: null, result_summary: null, error: null, ...extra,
-  });
-  const steps = [
-    step('analysis', 'product_analysis', 'completed', 'product_analyst'),
-    step('design', 'ui_design', 'completed', 'ux_designer'),
-    step('frontend-step', 'frontend_implementation', 'failed', 'frontend_engineer', {
-      error: 'Verifier recovery paused after two infrastructure or attribution failures; patch preserved; inspect the runner and evidence before resuming',
-      input_context: { target_sha: job.target_sha, patch_artifact_id: 'saved-patch' },
-    }),
-    step('backend-step', 'backend_implementation', 'pending', 'backend_engineer'),
-    ...['test_suite', 'security_review', 'code_review', 'release_prep'].map(id => step(id, id, 'pending', 'qa_security_reviewer')),
-  ];
-  const snapshot = {
-    job, steps,
-    artifacts: [{ id: 'saved-patch', step_id: 'frontend-step', artifact_type: 'code_implementation', status: 'final', checksum: 'b'.repeat(64), content_size_bytes: 24231 }],
-    workerRuns: [{ id: 'failed-run', step_id: 'frontend-step', profile: 'frontend-verify', status: 'failed',
-      target_sha: job.target_sha, patch_artifact_id: 'saved-patch', exit_code: 1 }],
-    approvals: [],
-  };
+  const { job, steps, snapshot, updatedAt } = retryFixture();
   expect(failedFrontendPatchRetryCandidate({
     ...snapshot,
     steps: steps.filter(item => item.step_id !== 'backend_implementation'),
-  } as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0])).toBeNull();
+  } as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner')).toBeNull();
+  expect(failedFrontendPatchRetryCandidate({
+    ...snapshot,
+    job: { ...job, backend_required: false },
+    steps: steps.map(item => item.step_id === 'backend_implementation'
+      ? { ...item, status: 'skipped', completed_at: '2026-10-27T12:00:00Z' } : item),
+  } as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner')).not.toBeNull();
+  expect(failedFrontendPatchRetryCandidate({
+    ...snapshot, workerRuns: [{ ...snapshot.workerRuns[0], status: 'timeout', exit_code: null }],
+  } as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner')).not.toBeNull();
+  expect(failedFrontendPatchRetryCandidate(snapshot as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'other-user')).toBeNull();
+  expect(failedFrontendPatchRetryCandidate({
+    ...snapshot, workerRuns: [{ ...snapshot.workerRuns[0], status: 'failed', exit_code: null }],
+  } as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner')).toBeNull();
   invoke.mockImplementation(async (_name, { body }) => {
     if (body.action === 'list') return { data: { jobs: [job], projects: [] }, error: null };
     if (body.action === 'context_snapshot') return { data: {}, error: null };
@@ -184,4 +205,27 @@ it('requires a separate owner confirmation before retrying the exact saved front
     p_job_updated_at: updatedAt,
   });
   expect(invoke.mock.calls.some(([, { body }]) => body.action === 'run' && body.job_id === job.id)).toBe(true);
+});
+
+it.each(['handoff', 'run'])('keeps the %s error visible after successful refresh', async failurePoint => {
+  const { job, snapshot } = retryFixture();
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [job], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    if (body.action === 'get') return { data: snapshot, error: null };
+    if (body.action === 'run' && failurePoint === 'run') return { data: null, error: { message: 'runner unavailable' } };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+  if (failurePoint === 'handoff') rpc.mockResolvedValue({ data: null, error: { message: 'saved-patch state changed' } });
+  else rpc.mockResolvedValue({ data: 'handoff-receipt', error: null });
+  render(<BuilderControlRoomPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Review same-job retry' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm handoff and retry verification' }));
+  await waitFor(() => {
+    expect(screen.getByRole('alert').textContent).toMatch(failurePoint === 'handoff' ? /saved-patch state changed/ : /runner unavailable/);
+  });
+  if (failurePoint === 'run') {
+    expect(screen.getByText(/Bob could not start \(.*runner unavailable/)).toBeTruthy();
+    expect(screen.queryByText(/Bob remains queued/)).toBeNull();
+  }
 });

@@ -156,6 +156,29 @@ test('runtime stops re-launching a retryable step once its persisted attempt cou
   assert.match(paused.detail, /failed 6 times/);
 });
 
+test('one current owner receipt permits exactly one same-patch verifier retry at the persisted attempt ceiling', () => {
+  const { MAX_STEP_ATTEMPTS } = require('../builder-runtime-coordinator');
+  const state = snapshot('implementation_pending', { job: { target_sha: 'a'.repeat(40) } });
+  const frontend = state.steps.find(step => step.step_id === 'frontend_implementation');
+  frontend.status = 'failed';
+  frontend.retryable = true;
+  frontend.attempt_count = MAX_STEP_ATTEMPTS;
+  frontend.error = 'Verifier recovery pending: owner-confirmed saved patch verification';
+  frontend.input_context = {
+    patch_artifact_id: 'saved-patch', target_sha: state.job.target_sha,
+    owner_patch_retry_receipt: 'owner-receipt', owner_patch_retry_attempt_count: MAX_STEP_ATTEMPTS,
+  };
+  state.artifacts.push({ id: 'saved-patch', step_id: frontend.id, artifact_type: 'code_implementation', status: 'final' });
+  assert.equal(planBuilderAction(state).type, 'run_frontend');
+
+  frontend.attempt_count += 1;
+  const consumed = planBuilderAction(state);
+  assert.equal(consumed.reason, 'attempt_ceiling', 'the receipt cannot grant an unbounded verifier retry loop');
+  frontend.attempt_count = MAX_STEP_ATTEMPTS;
+  frontend.input_context.owner_patch_retry_attempt_count -= 1;
+  assert.equal(planBuilderAction(state).reason, 'attempt_ceiling', 'stale receipts cannot bypass the ceiling');
+});
+
 test('runtime advances exactly one planned action', async () => {
   const calls = [];
   const state = snapshot('intake');

@@ -12,7 +12,8 @@ vi.mock('../components/BuilderChatPanel', () => ({ BuilderChatPanel: () => null 
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 
 const source = fs.readFileSync(path.resolve(process.cwd(), '../../supabase/functions/bob-builder-control-room/index.ts'), 'utf8');
-const projection = source.slice(source.indexOf('function acceptanceSummary('), source.indexOf('async function relay('));
+const projection = source.slice(source.indexOf('function safeJob('), source.indexOf('const LIVE_MODEL_RUN_LIMIT'))
+  + source.slice(source.indexOf('function acceptanceSummary('), source.indexOf('async function relay('));
 const compiled = ts.transpileModule(`${projection}\nthis.project = safeSnapshot;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   reportDiagnostics: true,
@@ -25,13 +26,13 @@ interface ProjectedReport {
   requirements: Array<{ requirement_id: string | null; status: string }>;
 }
 interface ProjectedSnapshot {
+  job: { updated_at?: string | null } | null;
   steps: Array<{
     step_id?: string;
     input_context?: { implementation_acceptance: { report: ProjectedReport } } & Partial<Record<'patch_artifact_id' | 'target_sha', string>>;
   }>;
 }
-const context = { safeJob: (value: unknown) => value,
-  strings: (value: unknown, max: number) => Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(0, max) : [],
+const context = { strings: (value: unknown, max: number) => Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(0, max) : [],
   project: (_input: unknown): ProjectedSnapshot => { throw new Error('Projection was not loaded'); } };
 vm.createContext(context);
 vm.runInContext(compiled.outputText, context);
@@ -129,12 +130,22 @@ test('actual projection supplies the saved-patch retry identifiers the Control R
     events: [],
   };
   const projected = project(raw) as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0];
-  const candidate = failedFrontendPatchRetryCandidate(projected);
+  const candidate = failedFrontendPatchRetryCandidate(projected, 'owner');
   assert.equal(candidate?.patch.id, patchId);
   assert.equal(candidate?.step.id, 'frontend-step');
+  assert.equal(projected?.job.updated_at, job.updated_at, 'the real safeJob allowlist carries the stale-state RPC timestamp');
+  assert.equal(failedFrontendPatchRetryCandidate(projected, 'another-user'), null, 'non-requesters do not see an unusable owner retry');
   assert.deepEqual(projected?.steps.find(item => item.step_id === 'frontend_implementation')?.input_context,
     { patch_artifact_id: patchId, target_sha: target });
   assert.doesNotMatch(JSON.stringify(projected), /private/);
+
+  const skippedWithCompletion = project({ ...raw, steps: raw.steps.map(item => item.id === 'backend-step'
+    ? { ...item, completed_at: '2026-10-27T12:00:00Z' } : item) });
+  assert.ok(failedFrontendPatchRetryCandidate(skippedWithCompletion as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner'),
+    'a documented optional skip may have a completion timestamp');
+  const startedSkip = project({ ...raw, steps: raw.steps.map(item => item.id === 'backend-step'
+    ? { ...item, started_at: '2026-10-27T11:00:00Z', completed_at: '2026-10-27T12:00:00Z' } : item) });
+  assert.equal(failedFrontendPatchRetryCandidate(startedSkip as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner'), null);
 
   for (const input_context of [
     { target_sha: target, patch_artifact_id: 'not-a-uuid' },
@@ -143,6 +154,6 @@ test('actual projection supplies the saved-patch retry identifiers the Control R
   ]) {
     const malformed = project({ ...raw, steps: raw.steps.map(item => item.id === 'frontend-step' ? { ...item, input_context } : item) });
     assert.equal(malformed.steps.find(item => item.step_id === 'frontend_implementation')?.input_context, undefined);
-    assert.equal(failedFrontendPatchRetryCandidate(malformed as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0]), null);
+    assert.equal(failedFrontendPatchRetryCandidate(malformed as unknown as Parameters<typeof failedFrontendPatchRetryCandidate>[0], 'owner'), null);
   }
 });

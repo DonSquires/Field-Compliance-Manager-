@@ -127,6 +127,29 @@ test('frontend verifier compares touched tests with the mounted pre-patch source
       `${spec} would remove existing regression tests ("saved patch keeps baseline evidence", "result remains gated")`
     ], 'a rename cannot carry pinned tests out of the protected path unnoticed');
 
+    const parameterizedSpec = 'apps/web/src/vehiclePlateSearch.test.ts';
+    const parameterizedBaseline = [
+      "test.each([[1, 2]])('sum case %#', () => {});",
+      "it.each(plates)('finds saved plate %s', () => {});",
+      ''
+    ].join('\n');
+    fs.mkdirSync(path.join(sourceDir, path.dirname(parameterizedSpec)), { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, parameterizedSpec), parameterizedBaseline);
+    const dropParameterized = [
+      `diff --git a/${parameterizedSpec} b/${parameterizedSpec}`,
+      `--- a/${parameterizedSpec}`,
+      `+++ b/${parameterizedSpec}`,
+      '@@ -1,2 +1 @@',
+      "-test.each([[1, 2]])('sum case %#', () => {});",
+      "-it.each(plates)('finds saved plate %s', () => {});",
+      "+describe('vehicle plate search', () => {});",
+      ''
+    ].join('\n');
+    prepare(dropParameterized);
+    assert.deepEqual(patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }), [
+      `${parameterizedSpec} would remove existing regression tests ("sum case %#", "finds saved plate %s")`
+    ], 'parameterized regression declarations are protected like ordinary tests');
+
     fs.writeFileSync(patchPath, 'diff --git a/broken b/broken\n@@ not a patch\n');
     assert.throws(() => patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }));
   } finally {

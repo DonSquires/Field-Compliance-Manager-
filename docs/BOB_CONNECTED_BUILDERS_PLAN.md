@@ -46,16 +46,22 @@ the frontend verifier failed twice with infrastructure or attribution errors.
 Its exact final frontend patch and target SHA remain recorded, while downstream
 gates are untouched. The job has not been changed or resumed in production.
 
-During: the Builder Control Room now shows a two-stage, owner-confirmed retry
-for this narrowly eligible failure. The owner sees the saved patch checksum
-and target SHA before confirmation. An owner-authorized RPC rechecks job
-freshness, patch identity, latest failed verifier run, active work, publication
-state, approvals and downstream gates; it writes an audit receipt and preserves
-the patch and attempt history. The retry uses that receipt in its worker
-idempotency key, so the prior failed run is retained. It does not approve or
-publish the work. Before verification proceeds, the worker also rejects a
-saved patch that removes pinned regression-test titles and records actionable
-failure evidence for Bob to repair.
+During: the Builder Control Room now shows a two-stage retry only to the
+original job requester after matching the authenticated identity. The owner
+sees the saved patch checksum and target SHA before confirmation. An
+owner-authorized RPC rechecks job freshness, patch identity, latest failed or
+timed-out verifier run, active work, publication state, approvals and downstream
+gates. An optional backend lane may be skipped with its normal completion
+timestamp, but any started work remains ineligible. The RPC writes an audit
+receipt and preserves the patch and attempt history. Each verifier claim
+retains that receipt and gets an attempt-specific idempotency key, so repeated
+failures do not overwrite earlier evidence. At the persisted attempt ceiling,
+the receipt authorizes exactly one verifier-only attempt on the saved patch;
+it does not reset attempts or permit another author run. The retry does not
+approve or publish the work. Before verification proceeds, the worker also
+rejects a saved patch that removes pinned ordinary or `.each`-parameterized
+regression-test titles and records actionable failure evidence for Bob to
+repair.
 
 Two seams found during acceptance and closed in the same change:
 
