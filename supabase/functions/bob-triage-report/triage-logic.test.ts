@@ -21,6 +21,27 @@ Deno.test('high-confidence render failures are routine repairs', () => {
   assertEquals(classifyRepairRisk(envelope, null, 'bug', 0.9, route), 'routine');
 });
 
+Deno.test('a persisted schema-v1 envelope can still be a routine repair', () => {
+  const { envelope } = validateAndRedactEnvelope({
+    schema_version: '1',
+    before: { page: '/admin/hub', module: 'web_runtime' },
+    during: { error: { kind: 'exception', message: 'Cannot read properties of undefined' } },
+    expected: { user_intent: 'Open the hub', expected_outcome: 'The hub renders' },
+  });
+  const verdict = classifyByRules(envelope);
+  const route = deriveRoute(null, verdict.triage, verdict.confidence);
+  assertEquals(route, 'dispatch_flow');
+  assertEquals(classifyRepairRisk(envelope, null, verdict.triage, verdict.confidence, route), 'routine');
+
+  const { envelope: schemaChange } = validateAndRedactEnvelope({
+    schema_version: '1',
+    before: { page: '/admin/hub', module: 'web_runtime' },
+    during: { error: { kind: 'exception', message: 'column missing from database schema' } },
+    expected: { user_intent: 'Open the hub', expected_outcome: 'The hub renders' },
+  });
+  assertEquals(classifyRepairRisk(schemaChange, null, 'bug', 0.9, 'dispatch_flow'), 'protected');
+});
+
 Deno.test('consequential, redesign, and uncertain faults never auto-start', () => {
   const protectedEnvelope = {
     before: { page: '/admin/access-control' },

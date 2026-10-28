@@ -48,7 +48,62 @@ Disable the monitor with `BOB_PRODUCTION_HUMAN_TEST=false`; adjust polling with
 `BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS` (minimum 60 seconds) and the first check
 after startup with `BOB_PRODUCTION_HUMAN_TEST_STARTUP_DELAY_MS` (1 second to 10
 minutes, default 2 minutes). A failure is evidence for Builder investigation. It
-is not an automatic repair, approval or release decision.
+is not an approval or release decision. A genuine live failure is routed into
+governed triage (below); only packets the triage classifier marks `routine` may
+become a bounded repair job.
+
+### Findings to triage
+
+Owner ruling 2026-10-27: a failed production verdict must not stop at a log
+line. When a live phase fails (fixture failures, passes, infrastructure retries
+and superseded runs never file), the control plane:
+
+1. Reads each `human-test-report.json` written under the run's
+   `live/test-results/` directory. Symlinks, files over 2 MB, more than 100
+   test directories and more than 500 events per report are refused or
+   truncated.
+2. Collapses the structured `httpErrorEvents` into distinct findings by a
+   fingerprint of status, method, endpoint and page. Server errors come first,
+   and at most 10 findings are filed per verdict.
+3. Redacts each finding before it leaves the control plane. The endpoint keeps
+   only the Supabase path kind and name (`rpc/<name>`, `functions/<name>`,
+   `rest/<table>`) or a host with identifiers masked. The page keeps only its
+   path, with UUIDs, numbers, emails and tokens masked, plus the `area`, `tab`,
+   `view`, `section` and `mode` query parameters. No query values, response
+   bodies, record data or credentials are sent.
+4. Signs in as the dedicated `GRANDMASTER_TEST_EMAIL` identity with the anon
+   key. It posts each finding to `bob-triage-report` through the same
+   user-JWT path as any signed-in reporter, with module `dr_bob_production`
+   and a client packet key of `dr-bob:<fingerprint>:<first 12 SHA characters>`. It always signs
+   out (`scope=local`) afterwards. No service-role branch is added to triage.
+   The service key is used only for a read that skips a defect which already
+   has an `open` or `reviewing` packet from this observer, so later SHAs do
+   not duplicate it.
+5. Records `triage_intake` on the verdict: status
+   (`filed`/`partial`/`failed`/`none`/`unconfigured`/`error`), attempts,
+   finding count, filed packets with their repair risk, skipped open packets
+   and redacted errors. `/health.productionHumanTest.latest.triage_intake`
+   shows it. Intake failures retry at most three times on later ticks while
+   that SHA is still production. They never change the verdict and never re-run
+   the walk. A restart mid-intake resumes from the persisted `pending` state.
+
+Filing happens after the read-only walk has finished, against Bob's own
+operational triage table. The browser walk itself still never commits a record.
+
+The triage classifier keeps its existing governance. A 5xx or 404 with no
+stop-line or protected signal is a `routine` repair, which the routine self-heal
+lane claims as a bounded Builder job. 401/403 responses are `data_problem`, and
+other 4xx responses go to the self-heal apparatus with `unknown` risk, so they
+stay `not_eligible` for unattended repair. Finance, auth, schema, enforcement,
+legal, evidential and similar signals are `protected` or stop-lines and wait
+for the Grandmaster. On 2026-10-27 the classifier stopped matching protected
+terms against envelope keys. Before that, the persisted key `schema_version`
+made every monitored packet `protected`, so the routine lane had never fired.
+
+Disable filing with `BOB_DR_BOB_TRIAGE=false`; the verdict is still recorded.
+Known gap: the Builder change-request queue lists only user reports, so
+monitored packets that are `awaiting_grandmaster` or `not_eligible` are visible
+through `/health` and the triage table, not yet in a review UI.
 
 Known limits:
 
@@ -153,7 +208,7 @@ Each test produces:
 
 - A screenshot after login, every discovered admin navigation item, safe tab, and final state.
 - Console output describing the visible heading, fields, buttons, links, and page text.
-- A `human-test-report.json` attachment containing steps, URLs, findings, console errors, and failed requests.
+- A `human-test-report.json` attachment containing steps, URLs, findings, console errors, and failed requests. The same report is written to the test's output directory, with structured `httpErrorEvents` (status, method, query-free endpoint, page and step), so the control plane can route production findings to triage.
 - Playwright traces and failure screenshots when the configured Playwright policy retains them.
 
 Reports and images are available through the Playwright HTML report:

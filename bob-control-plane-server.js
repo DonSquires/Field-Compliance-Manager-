@@ -35,6 +35,7 @@ const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace,
 const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, worstPreflight } = require('./builder-production-human-test');
+const { collectLiveHttpFindings, fileDrBobFindings, openDrBobPacketFinder } = require('./builder-dr-bob-triage');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
@@ -1026,6 +1027,27 @@ function latestProductionHumanTest() {
     .sort((left, right) => String(right.first_seen_at).localeCompare(String(left.first_seen_at)))[0] ?? null;
 }
 
+// A genuine live failure files its distinct HTTP findings into governed triage as the dedicated test
+// identity (docs/HUMAN_TESTING.md). Routine packets enter Builder intake; the rest wait for the Grandmaster.
+const drBobTriageEnabled = process.env.BOB_DR_BOB_TRIAGE !== 'false';
+
+async function fileProductionHumanTestFindings({ sha, run_id: runId }) {
+  if (!drBobTriageEnabled) return { status: 'disabled', filed: [], skipped: [], errors: [] };
+  if (!builderSupabase) return { status: 'unconfigured', filed: [], skipped: [], errors: [{ error: 'Supabase service access is not configured' }] };
+  if (!/^[0-9a-f-]{36}$/i.test(String(runId || ''))) return { status: 'failed', filed: [], skipped: [], errors: [{ error: 'Dr Bob run id is missing' }] };
+  const collected = collectLiveHttpFindings({ resultsDir: path.join(stateDir, 'human-test-runs', runId, 'live', 'test-results') });
+  const outcome = await fileDrBobFindings({
+    findings: collected.findings,
+    sha,
+    supabaseUrl: process.env.SUPABASE_URL,
+    anonKey: process.env.BOB_VIBE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY,
+    email: process.env.GRANDMASTER_TEST_EMAIL,
+    password: process.env.GRANDMASTER_TEST_PASSWORD,
+    findOpenPacket: openDrBobPacketFinder(builderSupabase),
+  });
+  return { ...outcome, unique: collected.unique, truncated: collected.truncated };
+}
+
 const productionHumanTestMonitor = createProductionHumanTestMonitor({
   resolveProduction: resolveProductionDeployment,
   readReleasedSha: async () => {
@@ -1043,6 +1065,7 @@ const productionHumanTestMonitor = createProductionHumanTestMonitor({
     return { idle: true };
   },
   log: (entry) => record('bob:production-verify', 'human_test.production_verify', entry.sha || 'production', entry),
+  onFailedVerdict: fileProductionHumanTestFindings,
 });
 
 function productionHumanTestStatus() {
@@ -1059,6 +1082,22 @@ function productionHumanTestStatus() {
       release_lane_behind: latest.release_lane_behind ?? null,
       completed_at: latest.completed_at ?? null,
       error: latest.error ?? latest.waiting_reason ?? null,
+      triage_intake: latest.triage_intake ? {
+        status: latest.triage_intake.status,
+        attempts: latest.triage_intake.attempts ?? 0,
+        findings: latest.triage_intake.findings ?? null,
+        truncated: latest.triage_intake.truncated === true,
+        packets: (latest.triage_intake.filed || []).map((packet) => ({
+          packet_id: packet.packet_id,
+          status: packet.status,
+          endpoint: packet.endpoint,
+          page: packet.page,
+          repair_risk: packet.repair_risk,
+          automation_status: packet.automation_status,
+        })),
+        already_open: (latest.triage_intake.skipped || []).map((entry) => entry.packet_id).filter(Boolean),
+        errors: (latest.triage_intake.errors || []).length + (latest.triage_intake.error ? 1 : 0),
+      } : null,
     } : null,
     observation: productionHumanTestMonitor.lastObservation(),
   };

@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 import { isWriteOrDestructiveAction } from '../src/lib/humanTestActionPolicy';
 
@@ -17,6 +18,18 @@ interface HumanStep {
   url: string;
   status: 'passed' | 'failed';
   details?: string;
+}
+
+/**
+ * One HTTP error response with the page and step it happened on. The request is recorded as
+ * origin + path only: query strings can carry filter values and never leave the browser walk.
+ */
+export interface HumanHttpErrorEvent {
+  status: number;
+  method: string;
+  endpoint: string;
+  page: string;
+  step: string;
 }
 
 interface HumanSkippedAction {
@@ -68,6 +81,7 @@ export class HumanTestSession {
   private readonly abortedRequests: string[] = [];
   private readonly failedRequests: string[] = [];
   private readonly httpErrors: string[] = [];
+  private readonly httpErrorEvents: HumanHttpErrorEvent[] = [];
   readonly readOnly: boolean;
 
   constructor(private readonly page: Page, private readonly testInfo: TestInfo, options: HumanTestSessionOptions = {}) {
@@ -84,7 +98,16 @@ export class HumanTestSession {
       else this.failedRequests.push(detail);
     });
     page.on('response', (response) => {
-      if (response.status() >= 400) this.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      if (response.status() < 400) return;
+      this.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      let endpoint = '';
+      try {
+        const requested = new URL(response.url());
+        endpoint = `${requested.origin}${requested.pathname}`;
+      } catch {
+        endpoint = '';
+      }
+      this.httpErrorEvents.push({ status: response.status(), method: response.request().method(), endpoint, page: page.url(), step: this.currentStep });
     });
   }
 
@@ -562,8 +585,12 @@ export class HumanTestSession {
       abortedRequests: this.abortedRequests,
       failedRequests: this.failedRequests,
       httpErrors: this.httpErrors,
+      httpErrorEvents: this.httpErrorEvents,
     };
-    await this.testInfo.attach('human-test-report.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
+    const reportJson = JSON.stringify(report, null, 2);
+    // On disk as well as attached: the control plane reads it to route live findings into triage.
+    await writeFile(this.testInfo.outputPath('human-test-report.json'), reportJson);
+    await this.testInfo.attach('human-test-report.json', { body: reportJson, contentType: 'application/json' });
     const errors = this.findings.filter((finding) => finding.severity === 'error');
     console.log(`\n[HUMAN SUMMARY] ${this.steps.length} steps, ${this.findings.length} findings, ${errors.length} errors`);
     expect(errors, 'Human test found browser errors or failed interactions').toEqual([]);
