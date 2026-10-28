@@ -23,6 +23,24 @@ same-job correction path and distinguish coverage, semantic review and deployed
 human acceptance. See the connected plan and Bob doctrine; consent, tenant
 isolation, audit and protected releases remain in force.
 
+In-app Bob record updates, 2026-10-28:
+
+- Before: given a pasted email about a vehicle and its people, in-app Bob twice
+  said he had no way to update records. The governed RPCs existed; no chat tool
+  reached them.
+- Now: `update_records` (`supabase/functions/_shared/record-updates.mjs`,
+  conductor-inline in `onspace-ai-chat`) previews vehicle details and
+  registration, vehicle-person links, other names, safety warnings and
+  report notes with the caller's own reads. The caller's next-turn yes applies
+  them as the caller through the existing audited RPCs, with per-step receipts.
+  Ambiguous or ungoverned facts are held. Planner guidance:
+  `services/fcm-api/src/bob/planPrompt.js`. Tests:
+  `test/bob-inapp-record-updates.test.js`. Doctrine: `BOB_DOCTRINE.md` §4.
+- Evidence gate: merged, released (edge function and VPS planner), then a
+  dedicated test identity proves preview, yes, receipts and the persisted
+  records in the glass with synthetic data. Concurrent duplicate yeses can
+  still race on a report note; other steps re-check or are idempotent.
+
 Builder research release follow-up, 2026-10-25:
 
 - PR #213 and generated-catalog PR #214 are merged; governed release

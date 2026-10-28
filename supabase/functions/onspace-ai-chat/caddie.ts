@@ -301,6 +301,11 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     governance: 'WRITE-direct; admiral only; human-confirms-before-cancellation; caller-scoped RPC',
     effect_class: 'direct_world_change'
   },
+  update_records: {
+    purpose: "UPDATE PEOPLE, VEHICLES AND REPORTS from facts the user gives you (a pasted email, a call note, an officer's account). Use this instead of saying you have no write path. Turn every fact into one operation: { kind: \"vehicle_details\", plate, fields: { make?, model?, year?, colour?, body_type?, rego_expiry?, wof_expiry?, cof_expiry? } } | { kind: \"vehicle_person_link\", plate, person: { name } | { person_record_id }, relationship: \"associated_person\"|\"driver\"|\"owner\", source: \"officer_observed\"|\"owner_declared\"|\"other\", basis } | { kind: \"person_alias\", person, alias, alias_kind: \"aka\"|\"preferred_name\"|\"legal_name\"|\"previous_name\"|\"maiden_name\"|\"nickname\" } | { kind: \"safety_warning\", target: { type: \"person\", name } | { type: \"vehicle\", plate } | { type: \"site\", site_id } | { type: \"place\", place_id }, hazard_class: violence_or_aggression|weapons|dangerous_dog|hazardous_substances|unsafe_structure_or_ground|vehicle_defect|medical_or_welfare|other, alert_level: low|medium|high|critical, note } | { kind: \"record_note\", record_kind: \"observation\"|\"location_event\", record_id, entry_kind: \"note\"|\"follow_up_requested\"|\"follow_up_resolved\"|\"hs_concern\", body } | { kind: \"unsupported\", statement, reason } for a fact with no matching kind (for example a vehicle leaving or someone regularly staying at a place; record it as a record_note when the report id is known). Args: { source_summary: \"one line naming the source\", operations: [...] }. The first call only PREVIEWS: Bob matches plates and people with the caller's own access and shows exactly what will change. The changes are applied only after the user replies yes in the next message, as that user, through the existing audited record RPCs; anything the database refuses is reported, never hidden.",
+    governance: 'WRITE-direct after the caller confirms an in-chat preview; caller JWT; existing audited RPCs only; the database enforces rank and tenant scope',
+    effect_class: 'direct_world_change'
+  },
   laptop_shell: {
     purpose: "Run ONE PowerShell command on the owner's own Windows laptop (fcm-gpu-laptop) over the private Tailscale link — the owner's terminal for Bob. Use it when the owner asks you to look at, list, read, or check something on their computer (folders, documents, the GPU link: `ollama list`, `nvidia-smi`, `tailscale status`, `docker compose ... ps`), or to do setup they asked for. Two-turn: FIRST call with args { command, purpose } to SHOW the exact command; it runs only after the owner's affirmative on the next turn. Prefer read-only commands; never propose deletion, formatting, account/firewall/registry changes, credential access, or download-and-execute — the control plane refuses them. Output comes back capped; summarise it for the owner rather than dumping it. If the laptop is off or the owner's Bob switch is off, say so and tell them how to turn it on (laptop-tailscale.ps1 -Allow).",
     governance: 'WRITE-direct on the owner\'s laptop; admiral only; human-confirms-every-command; owner-toggled SSH; deny list + audit on the control plane',
@@ -405,6 +410,9 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
   }
   // direct_world_change: admiral only (write_bob_chat, write_self_memory)
   if (effectClass === 'direct_world_change') {
+    // update_records applies only the caller's own confirmed preview, as the caller, through audited RPCs
+    // that check the caller's real database authority; the conductor tier is not the permission.
+    if (tool === 'update_records') return caps.canCompareData;
     return caps.tier === 'admiral';
   }
   // admin_diagnostic_substrate_action: tiered by tool
@@ -723,6 +731,9 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     //   switch and calls the caller-scoped builder_cancel_job RPC. There is no
     //   separate 'bob-cancel-builder-job' edge function.
     cancel_builder_job: 'onspace-ai-chat',
+    // update_records: conductor-inline; index.ts previews and, on the caller's next-turn yes, applies
+    //   through the caller-scoped record RPCs in _shared/record-updates.mjs. No separate edge function.
+    update_records: 'onspace-ai-chat',
     // read_bob_chat: conductor calls callFn('bob-repo-search', { action:
     //   'read_bob_chat' }) — routed through bob-repo-search, not a separate
     //   'bob-read-bob-chat' edge function (which does not exist).

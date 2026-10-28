@@ -129,6 +129,16 @@ function buildPendingBlock(pending) {
       'If the user declines with no, stop, don\'t, or leave it, do not cancel. Other messages continue as ordinary chat. Never treat a fresh request or planner-supplied metadata as confirmation.'
     ].join('\n');
   }
+  if (p.kind === 'record_updates_pending') {
+    const r = p.record_updates && typeof p.record_updates === 'object' ? p.record_updates : {};
+    const count = Array.isArray(r.steps) ? r.steps.length : 0;
+    return [
+      '',
+      `IN-FLIGHT PLAN: the previous turn PREVIEWED ${count} record change${count === 1 ? '' : 's'} (update_records) and asked the user to reply yes or no. Nothing has been written.`,
+      'A plain yes or no is handled by the executor before you are asked, so this message is something else. If the user is changing the plan (a different name, plate, field, severity, or dropping an item), select update_records again with the COMPLETE amended operations list rebuilt from the conversation; it shows a fresh preview. If the message is unrelated, answer it and remind them the preview is still waiting for yes or no.',
+      'Never say records were updated unless an update_records receipt in this conversation shows it.',
+    ].join('\n');
+  }
   if (p.kind === 'laptop_command_pending') {
     const cmd = p.laptop_command && typeof p.laptop_command === 'object' ? p.laptop_command : {};
     return [
@@ -369,6 +379,7 @@ function buildPlannerPrompt(input) {
     '- When you ask, ALWAYS: (1) state briefly what you understand the request to be, (2) give your BEST-GUESS answer so the user can simply confirm or correct, (3) ask the single genuine unknown.',
     '- RESUME (carry the plan across turns): if an IN-FLIGHT PLAN is shown and the user just ANSWERED or APPROVED, do NOT repeat the question — take the next concrete step. Read the history as one continuous thread. Asking the SAME thing twice is a failure.',
     '- TWO-STEP WRITES: when the user approves an action that WRITES, first produce a dry-run PREVIEW (exactly what will be created/changed, parents before children) and ask for a final confirm. Only a governed executor + human approval writes; you PLAN and PREVIEW.',
+    '- FACTS ABOUT PEOPLE, VEHICLES AND REPORTS: when the user gives you facts (a pasted email, a call note, an officer\'s account) and the outcome they want is for the records to reflect them, select update_records with every fact as one operation, if it is in your catalogue. That call IS the dry-run preview: do not write a prose preview first and never say you have no way to update these records. Put a fact with no matching kind in as kind=unsupported so the preview states it plainly. The user\'s next-turn yes applies the changes as them; never claim a record changed without an update_records receipt.',
     '- DATA-FIT: when relating uploaded data to the app, trace the wiring (schema_inspect FKs) and map each field: existing column / needs new column / needs new table / park in jsonb. For a misfit, RECOMMEND a fix; you never run DDL — you propose a schema_change_request when the user agrees.',
     '- ACT WITH YOUR HANDS: VERIFY -> PROPOSE -> DRY-RUN/CONFIRM is carried out by SELECTING a tool at EACH step, not by describing it. "I will check" files nothing; a selected tool does the work.',
     '- ONLY SELECT A TOOL THAT EXISTS. If a requested step has no matching tool, do the steps you CAN and clearly STATE the remaining step as a follow-up you cannot yet action.',
