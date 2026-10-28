@@ -18382,6 +18382,7 @@ export type Database = {
           internal_client_ref: string | null
           is_active: boolean
           is_adhoc: boolean
+          is_verification_point: boolean
           jurisdiction_rule_set_id: string | null
           location_id: string
           metadata: Json
@@ -18426,6 +18427,7 @@ export type Database = {
           internal_client_ref?: string | null
           is_active?: boolean
           is_adhoc?: boolean
+          is_verification_point?: boolean
           jurisdiction_rule_set_id?: string | null
           location_id: string
           metadata?: Json
@@ -18470,6 +18472,7 @@ export type Database = {
           internal_client_ref?: string | null
           is_active?: boolean
           is_adhoc?: boolean
+          is_verification_point?: boolean
           jurisdiction_rule_set_id?: string | null
           location_id?: string
           metadata?: Json
@@ -39197,6 +39200,22 @@ export type Database = {
         }
         Returns: string
       }
+      capture_field_place: {
+        Args: {
+          p_capture: Json
+          p_client_id: string
+          p_expected_updated_at: string
+          p_location_id: string
+          p_map_confirmed: boolean
+          p_name: string
+          p_parent_zone_id?: string
+          p_place_kind: string
+          p_provider_id: string
+          p_request_id: string
+          p_target_site_id?: string
+        }
+        Returns: Json
+      }
       cctv_bbox_is_stationary: {
         Args: { p_left: Json; p_right: Json }
         Returns: boolean
@@ -40785,6 +40804,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_service_location: {
+        Args: {
+          p_client_id: string
+          p_kind: string
+          p_name: string
+          p_provider_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
       create_shift_coverage_request: {
         Args: {
           p_end_time: string
@@ -41541,6 +41570,18 @@ export type Database = {
       face_embedding_cosine: {
         Args: { p_left: Json; p_right: Json }
         Returns: number
+      }
+      field_place_agreement_id: {
+        Args: { p_client_id: string; p_provider_id: string }
+        Returns: string
+      }
+      field_place_client_allowed: {
+        Args: { p_client_id: string; p_provider_id: string }
+        Returns: boolean
+      }
+      field_place_provider_allowed: {
+        Args: { p_provider_id: string }
+        Returns: boolean
       }
       file_restricted_access_allowed: {
         Args: { p_organization_id: string }
@@ -42486,6 +42527,16 @@ export type Database = {
       }
       get_dispatch_job_protected_party: {
         Args: { p_dispatch_job_id: string; p_party_role?: string }
+        Returns: Json
+      }
+      get_field_place_workspace: {
+        Args: {
+          p_client_id?: string
+          p_location_id?: string
+          p_offset?: number
+          p_provider_id: string
+          p_search?: string
+        }
         Returns: Json
       }
       get_file_explorer_tree: {
@@ -44707,6 +44758,7 @@ export type Database = {
           internal_client_ref: string | null
           is_active: boolean
           is_adhoc: boolean
+          is_verification_point: boolean
           jurisdiction_rule_set_id: string | null
           location_id: string
           metadata: Json
@@ -45272,6 +45324,7 @@ export type Database = {
           internal_client_ref: string | null
           is_active: boolean
           is_adhoc: boolean
+          is_verification_point: boolean
           jurisdiction_rule_set_id: string | null
           location_id: string
           metadata: Json
@@ -46086,6 +46139,7 @@ export type Database = {
           internal_client_ref: string | null
           is_active: boolean
           is_adhoc: boolean
+          is_verification_point: boolean
           jurisdiction_rule_set_id: string | null
           location_id: string
           metadata: Json
@@ -49937,6 +49991,36 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      save_service_client: {
+        Args: {
+          p_client_id: string
+          p_confirm_engagement: boolean
+          p_email: string
+          p_expected_updated_at: string
+          p_name: string
+          p_notes: string
+          p_phone: string
+          p_provider_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      save_service_location_profile: {
+        Args: {
+          p_expected_updated_at: string
+          p_location_id: string
+          p_name: string
+          p_notes: string
+          p_provider_id: string
+          p_resolved_address?: Json
+          p_site_id?: string
+          p_site_profile?: Json
+          p_site_version?: number
+          p_zone_id?: string
+          p_zone_version?: number
+        }
+        Returns: Json
       }
       schedule_court_appearance: {
         Args: {
