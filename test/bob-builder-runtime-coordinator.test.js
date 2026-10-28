@@ -550,6 +550,38 @@ test('expired verifier leases are recovered before every advance, and the recove
   assert.equal(received.resumePatchArtifact, undefined);
 });
 
+test('owner-confirmed saved-patch retry bypasses author generation and re-verifies the exact artifact', async () => {
+  const { advanceBuilderJob, planBuilderAction } = require('../builder-runtime-coordinator');
+  const step = {
+    id: 'frontend-step', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer',
+    status: 'failed', retryable: true, attempt_count: 1,
+    error: 'Verifier recovery pending: owner-confirmed saved patch verification',
+    input_context: { patch_artifact_id: 'saved-patch', target_sha: 'a'.repeat(40) },
+  };
+  const snapshot = {
+    job: { id: 'retry-job', status: 'implementation_pending', target_sha: 'a'.repeat(40), frontend_required: true, backend_required: true },
+    steps: [
+      { id: 'analysis', step_id: 'product_analysis', builder_mode: 'product_analyst', status: 'completed' },
+      { id: 'design', step_id: 'ui_design', builder_mode: 'ux_designer', status: 'completed' },
+      step,
+      { id: 'backend', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'pending' },
+      ...['test_suite', 'security_review', 'code_review', 'release_prep'].map(step_id => ({ id: step_id, step_id, status: 'pending' })),
+    ],
+    artifacts: [{ id: 'saved-patch', step_id: step.id, artifact_type: 'code_implementation', status: 'final' }],
+    workerRuns: [], approvals: [],
+  };
+  assert.equal(planBuilderAction(snapshot).type, 'run_frontend');
+  let received;
+  const outcome = await advanceBuilderJob({
+    supabase: { rpc: async () => ({ data: 0, error: null }) },
+    gateway: {}, jobId: snapshot.job.id, context: {}, loadSnapshot: async () => snapshot,
+    handlers: { frontend: async input => { received = input; return { success: true }; } },
+  });
+  assert.equal(outcome.advanced, true);
+  assert.equal(received.resumePatchArtifact.id, 'saved-patch');
+  assert.equal(received.step.attempt_count, 1, 'the persisted worker claim, not the handoff, increments attempts');
+});
+
 test('ordinary failed implementation resumes from its exact patch and worker evidence across scheduler ticks', () => {
   const { failedImplementationEvidence } = require('../builder-runtime-coordinator');
   const step = { id: 'step', status: 'failed', retryable: true, error: 'Frontend worker verification failed', input_context: { patch_artifact_id: 'patch' } };

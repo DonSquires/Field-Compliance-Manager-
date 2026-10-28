@@ -86,6 +86,7 @@ interface BuilderWorkerRun {
   profile: string;
   status: string;
   target_sha: string | null;
+  patch_artifact_id?: string | null;
   exit_code: number | null;
   started_at?: string | null;
   completed_at?: string | null;
@@ -170,6 +171,42 @@ function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   return 'Run to the next governed gate and review the resulting files, tests, and findings.';
 }
 
+export function failedFrontendPatchRetryCandidate(snapshot: BuilderSnapshot | null) {
+  const job = snapshot?.job;
+  if (!job || job.status !== 'failed' || !job.autopilot_requested_by || job.code_review_mode !== 'human'
+    || !job.frontend_required || !/^[a-f0-9]{40}$/.test(job.target_sha || '')
+    || !job.updated_at || job.workspace_published_at || job.workspace_published_head_sha
+    || job.workspace_pull_request_url || job.workspace_pull_request_head_sha
+    || snapshot.approvals.some(approval => approval.status === 'pending')
+    || snapshot.workerRuns.some(run => ['pending', 'running'].includes(run.status))
+    || snapshot.modelRuns?.some(run => run.status === 'pending' || run.status === 'running')) return null;
+
+  const failed = snapshot.steps.filter(step => step.status === 'failed');
+  if (failed.length !== 1) return null;
+  const step = failed[0];
+  if (step.step_id !== 'frontend_implementation' || step.builder_mode !== 'frontend_engineer'
+    || step.retryable || !step.error?.startsWith('Verifier recovery paused after two infrastructure or attribution failures; patch preserved;')) return null;
+  const input = asRecord(step.input_context);
+  const patchId = input?.patch_artifact_id;
+  if (typeof patchId !== 'string' || input?.target_sha !== job.target_sha) return null;
+  const patch = snapshot.artifacts.find(artifact => artifact.id === patchId && artifact.step_id === step.id
+    && artifact.artifact_type === 'code_implementation' && artifact.status === 'final'
+    && /^[a-f0-9]{64}$/.test(artifact.checksum || ''));
+  if (!patch) return null;
+  const latestRun = snapshot.workerRuns.filter(run => run.step_id === step.id).at(-1);
+  if (!latestRun || latestRun.status !== 'failed' || latestRun.profile !== 'frontend-verify'
+    || latestRun.target_sha !== job.target_sha || latestRun.patch_artifact_id !== patch.id
+    || latestRun.exit_code === null || latestRun.exit_code === 0) return null;
+  if (!snapshot.steps.some(item => item.step_id === 'product_analysis' && item.status === 'completed')
+    || !snapshot.steps.some(item => item.step_id === 'ui_design' && item.status === 'completed')
+    || ['test_suite', 'security_review', 'code_review', 'release_prep'].some(stepId =>
+      !snapshot.steps.some(item => item.step_id === stepId && item.status === 'pending' && !item.started_at && !item.completed_at))) return null;
+  const backend = snapshot.steps.find(item => item.step_id === 'backend_implementation');
+  if ((job.backend_required && !backend)
+    || (backend && (job.backend_required ? backend.status !== 'pending' : !['pending', 'skipped'].includes(backend.status)))) return null;
+  return { job, step, patch };
+}
+
 const PROMPT_TEMPLATES = [
   {
     label: '🚀 New Feature',
@@ -225,6 +262,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [followupTask, setFollowupTask] = useState('');
   const [cancellationReason, setCancellationReason] = useState('');
+  const [confirmSavedPatchRetry, setConfirmSavedPatchRetry] = useState(false);
   const [activeTab, setActiveTab] = useState<JobFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
@@ -301,7 +339,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   }, [invoke]);
 
   useEffect(() => { void loadList(); }, [loadList]);
-  useEffect(() => { setCancellationReason(''); }, [selectedId]);
+  useEffect(() => { setCancellationReason(''); setConfirmSavedPatchRetry(false); }, [selectedId]);
   useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
 
   const liveSnapshot = snapshot?.job?.id === selectedId ? snapshot : null;
@@ -514,6 +552,44 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     }
   };
 
+  const retrySavedFrontendPatch = async () => {
+    const candidate = failedFrontendPatchRetryCandidate(liveSnapshot);
+    if (!candidate || !selectedId) return;
+    setBusy('saved-patch-retry');
+    setError(null);
+    setNotice(null);
+    try {
+      const { data: receipt, error: retryError } = await supabase.rpc('builder_retry_failed_frontend_patch', {
+        p_job_id: candidate.job.id,
+        p_step_id: candidate.step.id,
+        p_patch_artifact_id: candidate.patch.id,
+        p_target_sha: candidate.job.target_sha,
+        p_job_updated_at: candidate.job.updated_at,
+      });
+      if (retryError) throw retryError;
+      if (typeof receipt !== 'string' || !receipt) throw new Error('The saved-patch handoff was not recorded; refresh before retrying.');
+      setConfirmSavedPatchRetry(false);
+      let runNotice = 'The handoff is recorded. Bob remains queued; use Run to gate if the scheduler does not resume it.';
+      try {
+        const started = await invoke({ action: 'run', job_id: selectedId, max_actions: 8 });
+        if (started?.accepted) {
+          runNotice = started.already_running
+            ? 'Bob was already running this same job; no duplicate run was started.'
+            : 'Bob accepted the same-job verification run and will stop at the next governed gate.';
+        }
+      } catch (startError) {
+        setError(`Handoff receipt ${receipt} was recorded, but Bob could not start: ${startError instanceof Error ? startError.message : 'Builder run failed'}. Use Run to gate to continue.`);
+      }
+      setNotice(`Saved-patch handoff recorded (${receipt}). ${runNotice} Verification, security review, and fresh human approval remain required; nothing is approved or published.`);
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : 'Saved-patch handoff could not be recorded.');
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const createWorkspace = async () => {
     if (!selectedId) return;
     setBusy('workspace');
@@ -658,6 +734,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const cancelled = selectedJob?.status === 'cancelled';
   const deliveryTruth = selectedJob ? builderDeliveryTruth(selectedJob) : null;
   const nextSafeAction = selectedJob && snapshot ? builderNextAction(selectedJob, snapshot) : 'Select a job or describe new work to Bob Builder.';
+  const savedPatchRetry = failedFrontendPatchRetryCandidate(liveSnapshot);
   const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
   const failedStepCount = snapshot?.steps.filter(step => step.status === 'failed' || step.status === 'blocked').length ?? 0;
 
@@ -899,6 +976,17 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>}
+            {!successorId && !cancelled && savedPatchRetry && <section className="builder-followup builder-recovery" aria-label="Owner-confirmed saved-patch handoff">
+              <div><strong>Saved patch · owner handoff</strong><p>Bob can re-run the frontend verifier on this exact patch and pinned target. If verification finds a patch-caused failure, the evidence returns to Bob for repair. Existing attempts and downstream gates stay intact.</p></div>
+              <p>Patch SHA-256: <code>{savedPatchRetry.patch.checksum?.slice(0, 16)}</code> · target: <code>{savedPatchRetry.job.target_sha.slice(0, 12)}</code></p>
+              {!confirmSavedPatchRetry
+                ? <button type="button" onClick={() => setConfirmSavedPatchRetry(true)} disabled={Boolean(busy)}><RefreshCw size={15} /> Review same-job retry</button>
+                : <div className="builder-recovery__confirm" role="group" aria-label="Confirm saved-patch retry">
+                    <p>This does not rewrite or approve the patch. The verifier also checks that pinned regression-test titles remain; inspect test changes and reject any later approval if that evidence is incomplete. No pull request, merge, or deployment is created.</p>
+                    <div><button type="button" onClick={() => setConfirmSavedPatchRetry(false)} disabled={Boolean(busy)}>Cancel</button>
+                      <button type="button" className="is-primary" onClick={() => void retrySavedFrontendPatch()} disabled={Boolean(busy)}>{busy === 'saved-patch-retry' ? 'Recording handoff…' : 'Confirm handoff and retry verification'}</button></div>
+                  </div>}
+            </section>}
             {!successorId && !cancelled && selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
             {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}

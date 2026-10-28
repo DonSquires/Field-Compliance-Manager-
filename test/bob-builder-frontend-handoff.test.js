@@ -3,10 +3,12 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const { runFrontendHandoff, downloadVerifiedArtifact } = require('../builder-frontend-handoff');
+const { executeFrontendPatch } = require('../frontend-worker');
+const { patchTestPreservationFailures } = require('../builder-test-preservation');
 
 const patch = [
   'diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts',
@@ -74,6 +76,107 @@ test('frontend artifact download rejects checksum mismatch', async () => {
   const supabase = { from:()=>query, storage:{from:()=>({download:async()=>({data:{arrayBuffer:async()=>content},error:null})})} };
   await assert.rejects(downloadVerifiedArtifact(supabase, 'a', 'j', 'code_implementation'), /integrity check failed/);
 });
+
+test('frontend verifier compares touched tests with the mounted pre-patch source and needs no Git metadata', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-test-preservation-'));
+  // Production mounts a worktree whose .git pointer is unusable inside the container; this fixture has none at all.
+  const sourceDir = path.join(root, 'source');
+  const workDir = path.join(root, 'work');
+  const spec = 'apps/web/e2e/example.spec.ts';
+  const baseline = "test('saved patch keeps baseline evidence', () => {});\ntest('result remains gated', () => {});\n";
+  const dropPatch = [
+    `diff --git a/${spec} b/${spec}`,
+    `--- a/${spec}`,
+    `+++ b/${spec}`,
+    '@@ -1,2 +1,1 @@',
+    "-test('saved patch keeps baseline evidence', () => {});",
+    "-test('result remains gated', () => {});",
+    "+test('new example', () => {});",
+    ''
+  ].join('\n');
+  const renamed = 'apps/web/e2e/renamed.spec.ts';
+  const renamePatch = [
+    `diff --git a/${spec} b/${renamed}`,
+    'similarity index 100%',
+    `rename from ${spec}`,
+    `rename to ${renamed}`,
+    ''
+  ].join('\n');
+  try {
+    fs.mkdirSync(path.join(sourceDir, path.dirname(spec)), { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, spec), baseline);
+    const patchPath = path.join(root, 'input.patch');
+    const prepare = text => {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.cpSync(sourceDir, workDir, { recursive: true });
+      fs.writeFileSync(patchPath, text);
+      execFileSync('git', ['apply', patchPath], { cwd: workDir });
+    };
+
+    prepare(dropPatch);
+    assert.deepEqual(patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }), [
+      `${spec} would remove existing regression tests ("saved patch keeps baseline evidence", "result remains gated")`
+    ]);
+    const preserved = "test('saved patch keeps baseline evidence', () => {});\ntest('result remains gated', () => {});\ntest('new example', () => {});\n";
+    fs.writeFileSync(path.join(workDir, spec), preserved);
+    assert.deepEqual(patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }), []);
+
+    prepare(renamePatch);
+    assert.equal(fs.existsSync(path.join(workDir, spec)), false);
+    assert.deepEqual(patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }), [
+      `${spec} would remove existing regression tests ("saved patch keeps baseline evidence", "result remains gated")`
+    ], 'a rename cannot carry pinned tests out of the protected path unnoticed');
+
+    fs.writeFileSync(patchPath, 'diff --git a/broken b/broken\n@@ not a patch\n');
+    assert.throws(() => patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath }));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('frontend worker records a regression-preservation failure and does not run later checks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-worker-preservation-'));
+  const sourceDir = path.join(root, 'source');
+  const artifactDir = path.join(root, 'artifacts');
+  const workDir = path.join(root, 'work');
+  const spec = 'apps/web/e2e/example.spec.ts';
+  const baseline = "test('existing workflow remains covered', () => {});\n";
+  const patch = [
+    `diff --git a/${spec} b/${spec}`,
+    `--- a/${spec}`,
+    `+++ b/${spec}`,
+    '@@ -1 +1 @@',
+    "-test('existing workflow remains covered', () => {});",
+    "+test('new workflow', () => {});",
+    ''
+  ].join('\n');
+  const calls = [];
+  try {
+    fs.mkdirSync(path.join(sourceDir, path.dirname(spec)), { recursive: true });
+    fs.mkdirSync(artifactDir);
+    fs.writeFileSync(path.join(sourceDir, spec), baseline);
+    const patchPath = path.join(artifactDir, 'input.patch');
+    fs.writeFileSync(patchPath, patch);
+
+    const result = executeFrontendPatch({
+      sourceDir, patchPath, artifactDir, workDir,
+      runCommand: (command, args, options) => {
+        calls.push(command);
+        if (command === 'git') return spawnSync(command, args, { ...options, encoding: 'utf8' });
+        return { status: 0, stdout: '', stderr: '' };
+      }
+    });
+
+    assert.equal(result.succeeded, false);
+    assert.deepEqual(calls, ['git', 'git']);
+    const evidence = JSON.parse(fs.readFileSync(path.join(artifactDir, 'verification.json'), 'utf8'));
+    assert.equal(evidence.commands.at(-1).command, 'pinned regression test preservation');
+    assert.match(evidence.commands.at(-1).stderr, /existing workflow remains covered/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a worker killed at its lease is an infrastructure failure naming the step that was running, with the partial evidence kept', async () => {
   const repo = fixture();
   const summaries = [];

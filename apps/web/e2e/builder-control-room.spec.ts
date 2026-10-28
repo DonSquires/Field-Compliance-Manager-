@@ -50,7 +50,88 @@ test('incomplete acceptance stays a same-job correction gate after reload, never
   expect(errors).toEqual([]);
 });
 
-test('a superseded attempt opens its failed successor without implying that either is running', async ({ page }) => {
+test('owner re-verifies the exact saved patch on the same job only after a second confirmation', async ({ page, isMobile }) => {
+  const errors = monitorBrowserErrors(page);
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  const targetSha = 'c'.repeat(40);
+  const stepId = '93939393-9393-4939-8939-939393939393';
+  const patchId = '94949494-9494-4949-8949-949494949494';
+  const receipt = '95959595-9595-4959-8959-959595959595';
+  let retried = false;
+  const job = () => ({
+    id: JOB_ID, organization_id: ORGANIZATION_ID, project_id: PROJECT_ID, title: 'Saved patch verifier recovery',
+    status: retried ? 'implementation_pending' : 'failed', target_sha: targetSha, frontend_required: true,
+    backend_required: true, code_review_mode: 'human', code_review_status: 'pending', autopilot_requested_by: 'owner',
+    autopilot_state: retried ? 'driving' : 'blocked', created_at: '2026-11-02T00:00:00Z', updated_at: '2026-11-02T01:02:03.456789+00:00',
+  });
+  const step = (id: string, step_id: string, builder_mode: string, ordinal_position: number, status: string) =>
+    ({ id, step_id, builder_mode, ordinal_position, status, attempt_count: status === 'pending' ? 0 : 1 });
+  const rpcBodies: unknown[] = [];
+  const actions: string[] = [];
+  await page.route('**/rest/v1/rpc/builder_retry_failed_frontend_patch', async route => {
+    rpcBodies.push(route.request().postDataJSON());
+    retried = true;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(receipt) });
+  });
+  await page.route('**/functions/v1/bob-builder-control-room', async route => {
+    const body = route.request().postDataJSON() as { action: string; job_id?: string; max_actions?: number };
+    if (!['list', 'get', 'context_snapshot'].includes(body.action)) actions.push(`${body.action}:${body.job_id}:${body.max_actions}`);
+    const frontend = {
+      ...step(stepId, 'frontend_implementation', 'frontend_engineer', 3, retried ? 'pending' : 'failed'),
+      retryable: retried, input_context: { patch_artifact_id: patchId, target_sha: targetSha },
+      error: retried ? 'Verifier recovery pending: owner-confirmed saved patch verification'
+        : 'Verifier recovery paused after two infrastructure or attribution failures; patch preserved; browser attribution unavailable',
+    };
+    const response = body.action === 'list'
+      ? { projects: [{ id: PROJECT_ID, organization_id: ORGANIZATION_ID, name: 'FCM' }], jobs: [job()] }
+      : body.action === 'get' ? {
+        job: job(),
+        steps: [
+          step('s1', 'product_analysis', 'product_analyst', 1, 'completed'), step('s2', 'ui_design', 'ux_designer', 2, 'completed'),
+          frontend, step('s4', 'backend_implementation', 'backend_engineer', 4, 'pending'),
+          step('s5', 'test_suite', 'qa_security_reviewer', 5, 'pending'), step('s6', 'security_review', 'qa_security_reviewer', 6, 'pending'),
+          step('s7', 'code_review', 'code_reviewer', 7, 'pending'), step('s8', 'release_prep', 'release_manager', 8, 'pending'),
+        ],
+        artifacts: [{ id: patchId, step_id: stepId, artifact_type: 'code_implementation', status: 'final', checksum: 'd'.repeat(64) }],
+        workerRuns: [{ id: 'run-1', step_id: stepId, profile: 'frontend-verify', status: 'failed', exit_code: 1, target_sha: targetSha, patch_artifact_id: patchId }],
+        modelRuns: [], events: [], approvals: [],
+      } : body.action === 'run' ? { accepted: true, already_running: false } : { context: null };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) });
+  });
+
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  if (isMobile) await page.getByRole('button', { name: 'Jobs', exact: true }).click();
+  await page.locator('.builder-list button').filter({ hasText: 'Saved patch verifier recovery' }).click();
+  const handoff = page.getByRole('region', { name: 'Owner-confirmed saved-patch handoff' });
+  await expect(handoff).toContainText('d'.repeat(16));
+  await expect(handoff).toContainText('c'.repeat(12));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+
+  await handoff.getByRole('button', { name: 'Review same-job retry', exact: true }).click();
+  const confirm = handoff.getByRole('group', { name: 'Confirm saved-patch retry' });
+  await expect(confirm).toContainText('No pull request, merge, or deployment is created.');
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  expect(rpcBodies).toEqual([]);
+
+  await handoff.getByRole('button', { name: 'Review same-job retry', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await confirm.getByRole('button', { name: 'Confirm handoff and retry verification', exact: true }).click();
+  await expect(page.getByText(`Saved-patch handoff recorded (${receipt})`)).toBeVisible();
+  await expect(page.getByText(/nothing is approved or published/)).toBeVisible();
+  await expect(handoff).toHaveCount(0);
+
+  expect(rpcBodies).toEqual([{
+    p_job_id: JOB_ID, p_step_id: stepId, p_patch_artifact_id: patchId,
+    p_target_sha: targetSha, p_job_updated_at: '2026-11-02T01:02:03.456789+00:00',
+  }]);
+  expect(actions).toEqual([`run:${JOB_ID}:8`]);
+  expect(errors).toEqual([]);
+});
+
+test('a superseded attempt opens its failed successor without implying that either is running', async ({ page, isMobile }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
   const successorId = '0c388688-c566-42b0-b700-d8267f602ddb';
@@ -82,6 +163,8 @@ test('a superseded attempt opens its failed successor without implying that eith
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) });
   });
   await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  if (isMobile) await page.getByRole('button', { name: 'Jobs', exact: true }).click();
   await page.locator('.builder-list button').filter({ hasText: 'Historical map attempt' }).click();
   const activity = page.getByLabel('Bob live activity', { exact: true });
   await expect(activity).toContainText('Continued in a newer job');
@@ -96,7 +179,7 @@ test('a superseded attempt opens its failed successor without implying that eith
   expect(browserErrors).toEqual([]);
 });
 
-test('Builder renders a partial historical job without crashing on missing labels', async ({ page }) => {
+test('Builder renders a partial historical job without crashing on missing labels', async ({ page, isMobile }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
   await page.route('**/functions/v1/bob-builder-control-room', async (route) => {
@@ -117,6 +200,8 @@ test('Builder renders a partial historical job without crashing on missing label
   });
 
   await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  if (isMobile) await page.getByRole('button', { name: 'Jobs', exact: true }).click();
   await page.locator('.builder-list button').filter({ hasText: 'Historical Builder job' }).click();
   await expect(page.getByRole('heading', { name: 'Builder control room' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Historical Builder job' })).toBeVisible();
@@ -201,6 +286,8 @@ test('Builder control room supports issue tabs, search filtering, and prompt tem
   });
 
   await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  if (isMobile) await page.getByLabel('Builder workspace panels').getByRole('button', { name: 'Jobs', exact: true }).click();
 
   // Verify tabs
   await expect(page.getByRole('button', { name: /All 3/ })).toBeVisible();
