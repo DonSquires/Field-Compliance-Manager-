@@ -26,6 +26,7 @@ export function FinanceApplyWorkspace() {
   const [reviewIds, setReviewIds] = useState<Record<string, string>>({});
   const [bankDestinations, setBankDestinations] = useState<BankDestination[]>([]);
   const [applyOrganization, setApplyOrganization] = useState<ApplyOrganization | null>(null);
+  const [providerNotConfigured, setProviderNotConfigured] = useState(false);
   const [connectionRequestId, setConnectionRequestId] = useState('');
   const [requestedDays, setRequestedDays] = useState(365);
   const [allowManualUploads, setAllowManualUploads] = useState(true);
@@ -47,6 +48,7 @@ export function FinanceApplyWorkspace() {
     }
     setLoading(true);
     setError(null);
+    setProviderNotConfigured(false);
     void (async () => {
       const [destinationResult, providerResult] = await Promise.all([
         supabase.from('finance_external_connection_requests').select('id,bank_account_id,status,provider_name').eq('organization_id', profile.organizationId).eq('provider_type', 'bank').not('bank_account_id', 'is', null).in('status', ['connected', 'needs_review']).order('updated_at', { ascending: false }),
@@ -54,7 +56,10 @@ export function FinanceApplyWorkspace() {
       ]);
       if (destinationResult.error) setError(destinationResult.error.message);
       else setBankDestinations((destinationResult.data as BankDestination[]) ?? []);
-      if (providerResult.error || providerResult.data?.error || !providerResult.data?.configured) {
+      if (!providerResult.error && !providerResult.data?.error && providerResult.data?.configured === false) {
+        setApplyOrganization(null);
+        setProviderNotConfigured(true);
+      } else if (providerResult.error || providerResult.data?.error || !providerResult.data?.configured) {
         setApplyOrganization(null);
         setError((current) => current ?? providerResult.error?.message ?? providerResult.data?.error ?? 'Akahu Apply provider configuration could not be verified.');
       } else {
@@ -139,6 +144,7 @@ export function FinanceApplyWorkspace() {
   return <section className="finance-apply-workspace" aria-labelledby="finance-apply-heading">
     <header><FileText size={18} /><div><p className="finance-apply-eyebrow">Statement collection</p><h2 id="finance-apply-heading">Akahu Apply case</h2><p>Collect bank statements or open-banking data in a separate provider window for review. FCM never asks for bank credentials.</p></div></header>
     {applyOrganization && <p className="finance-apply-message is-success" role="status"><CheckCircle2 size={14} />Provider ready: {applyOrganization.name}</p>}
+    {providerNotConfigured && <p className="finance-apply-message is-info" role="status"><CircleAlert size={14} />Akahu Apply is not connected for this platform yet. Statement collection stays off until a platform administrator provisions the provider key.</p>}
     {error && <p className="finance-apply-message is-error" role="alert"><CircleAlert size={14} />{error}</p>}
     {notice && <p className="finance-apply-message is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
     <div className="finance-apply-grid">

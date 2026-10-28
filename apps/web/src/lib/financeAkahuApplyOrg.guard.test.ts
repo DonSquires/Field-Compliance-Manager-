@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const edge = readFileSync(resolve(process.cwd(), '../../supabase/functions/finance-akahu-apply-org/index.ts'), 'utf8');
+const workspace = readFileSync(resolve(process.cwd(), 'src/components/FinanceApplyWorkspace.tsx'), 'utf8');
 
 describe('Akahu Apply organisation verification', () => {
   it('uses the server-only Apply API key and current-org endpoint', () => {
@@ -17,5 +18,13 @@ describe('Akahu Apply organisation verification', () => {
     expect(edge).toContain('Finance administrator required');
     expect(edge).toContain('api_key_exposed: false');
     expect(edge).not.toContain('return json({ applyApiKey');
+  });
+
+  it('reports a missing provider key as a configuration state only after authorising the caller', () => {
+    const notConfigured = edge.indexOf("if (!applyApiKey) return json({ configured: false, reason: 'akahu_apply_not_configured'");
+    expect(notConfigured).toBeGreaterThan(edge.indexOf('Finance administrator required'));
+    expect(edge).not.toContain("'Akahu Apply is not configured yet' }, 503");
+    expect(workspace).toContain('providerResult.data?.configured === false');
+    expect(workspace).toContain('Akahu Apply is not connected for this platform yet.');
   });
 });

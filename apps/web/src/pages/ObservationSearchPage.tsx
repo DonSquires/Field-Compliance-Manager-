@@ -67,7 +67,7 @@ export default function ObservationSearchPage() {
 
   const loadOptions = useCallback(async () => {
     if (!profile?.organizationId) return;
-    const { data: identityAccess } = await supabase.rpc('can_manage_r_and_m_identity');
+    const { data: identityAccess } = await supabase.rpc('can_view_rnm_identity_for_organization', { p_organization_id: profile.organizationId });
     setCanManageIdentity(identityAccess === true);
     const [siteResult, zoneResult, vehicleResult, locationResult, incidentResult] = await Promise.all([
       supabase.from('client_sites').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
