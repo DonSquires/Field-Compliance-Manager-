@@ -11,7 +11,10 @@ const sendInvoice = read('supabase/functions/send-invoice/index.ts');
 test('Akahu Apply workspace verifies provider readiness before case work', () => {
   assert.match(workspace, /supabase\.functions\.invoke\('finance-akahu-apply-org'/);
   assert.match(workspace, /Provider ready: \{applyOrganization\.name\}/);
-  assert.match(workspace, /disabled=\{saving \|\| !reference\.trim\(\) \|\| !applyOrganization\}/);
+  assert.match(workspace, /const providerReady = Boolean\(applyOrganization\) && !providerNotConfigured;/);
+  assert.match(workspace, /disabled=\{saving \|\| !reference\.trim\(\) \|\| !providerReady\}/);
+  assert.match(workspace, /Akahu Apply is not connected for this platform yet/);
+  assert.doesNotMatch(workspace, /disabled=\{[^}]*!applyOrganization\}/);
 });
 
 test('CRM invoice send performs real delivery instead of status-only transition', () => {

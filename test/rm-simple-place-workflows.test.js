@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
-const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101170000_rm_simple_place_workflows.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
 const catalogFunction = name => {
   const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${name}"(`);
   assert.ok(start >= 0, name);

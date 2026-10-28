@@ -61,6 +61,45 @@ same-job correction path and distinguish coverage, semantic review and deployed
 human acceptance. See the connected plan and Bob doctrine; consent, tenant
 isolation, audit and protected releases remain in force.
 
+In-app Bob record updates, 2026-10-28:
+
+- Before: given a pasted email about a vehicle and its people, in-app Bob twice
+  said he had no way to update records. The governed RPCs existed; no chat tool
+  reached them.
+- Now: `update_records` (`supabase/functions/_shared/record-updates.mjs`,
+  conductor-inline in `onspace-ai-chat`) previews vehicle details and
+  registration, vehicle-person links, other names, safety warnings and
+  report notes with the caller's own reads. The caller's next-turn yes applies
+  them as the caller through the existing audited RPCs, with per-step receipts.
+  Ambiguous or ungoverned facts are held. Planner guidance:
+  `services/fcm-api/src/bob/planPrompt.js`. Tests:
+  `test/bob-inapp-record-updates.test.js`. Doctrine: `BOB_DOCTRINE.md` §4.
+- Evidence gate: merged, released (edge function and VPS planner), then a
+  dedicated test identity proves preview, yes, receipts and the persisted
+  records in the glass with synthetic data. Each preview is claimed once
+  (conditional update of its transcript row) before it is applied or
+  discarded, so concurrent yeses cannot double-write. Steps resolve
+  person-creating links first, stop at a 90 s apply budget with
+  "not attempted" receipts, and call a warning or note "already present"
+  only when it is an exact duplicate (a follow-up only when it matches the
+  latest follow-up, which sets the open/closed state).
+- Second review round (PR #277): any organisation member can insert
+  `bob_messages` rows, so a pending plan is applied only if it carries the
+  server's HMAC over its exact contents and its plan id is carried by exactly
+  one transcript row (no forged or replayed previews). The confirm path stops
+  at the cancellation boundary before claiming. A planner-supplied person
+  record id must come back from the caller's own person search and is shown
+  with its stored name. Names fold only case and spacing, so "Māia" and "Maia"
+  stay separate unless the register binds them. Previews show every value in
+  full.
+- Data-loss fix found on the way: `manage_identity_vehicle` erased an
+  organisation's vehicle note whenever `p_fields` omitted `notes`, so NZTA owner
+  review (`'{}'`) and a vehicle registered by another administrator mid-confirm
+  silently lost the note. Migration
+  `20261101180000_manage_identity_vehicle_preserve_notes.sql` keeps an omitted
+  note (present-but-empty still clears), proven against disposable PostgreSQL
+  in `test/manage-identity-vehicle-notes-migration.test.js`.
+
 Builder research release follow-up, 2026-10-25:
 
 - PR #213 and generated-catalog PR #214 are merged; governed release
