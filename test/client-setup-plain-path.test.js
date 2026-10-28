@@ -8,6 +8,7 @@ const plainPath = read('supabase/migrations/20260920200000_client_setup_plain_pa
 const ruling = read('supabase/migrations/20260920210000_readiness_and_activation_follow_the_ruling.sql');
 const canon = read('docs/canon/ORG_SERVICE_MODEL.md');
 const wizard = read('apps/web/src/pages/ClientSetupPage.tsx');
+const clientEditor = read('apps/web/src/components/ServiceClientWorkspace.tsx');
 const shell = read('apps/web/src/shells/AdminShell.tsx');
 const crmPage = read('apps/web/src/pages/CRMPage.tsx');
 const ledger = read('apps/web/src/pages/AccountOnboardingPage.tsx');
@@ -26,8 +27,10 @@ test('the workspace retains governed writers over the existing spine', () => {
   assert.match(plainPath, /CREATE OR REPLACE FUNCTION public\.manage_crm_agreement_delivery_schedule\(/);
   // the two paths (quote acceptance and direct schedule) meet on the same link, and every reader joins on either
   assert.match(plainPath, /c\.delivery_schedule_id = s\.id OR \(c\.proposal_scope_schedule_id IS NOT NULL AND s\.proposal_scope_schedule_id = c\.proposal_scope_schedule_id\)/);
-  assert.match(wizard, /supabase\.rpc\('manage_crm_organization'/);
-  assert.match(wizard, /supabase\.rpc\('manage_crm_contact'/);
+  assert.doesNotMatch(wizard, /supabase\.rpc\('manage_crm_organization'/);
+  assert.doesNotMatch(wizard, /supabase\.rpc\('manage_crm_contact'/);
+  assert.match(wizard, /: <ServiceClientWorkspace/);
+  assert.match(clientEditor, /supabase\.rpc\('save_service_client'/);
   assert.match(wizard, /supabase\.rpc\('create_crm_site'/);
   assert.match(wizard, /const row = \(Array\.isArray\(data\) \? data\[0\] : data\)/);
   assert.match(wizard, /supabase\.rpc\('ensure_crm_client_agreement', \{ p_account_organization_id: client\.id, p_provider_organization_id: branchId \}\)/);
@@ -51,9 +54,8 @@ test('readiness and activation no longer wait for the client\'s portal acceptanc
 });
 
 test('the setup workspace is reachable and uses the shared planning-context strip', () => {
-  assert.match(shell, /\{ id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck \}/);
-  assert.match(shell, /\{ id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck \}/);
-  assert.match(shell, /case 'client-setup':\s+return <ClientSetupPage onNavigate=/);
+  assert.match(shell, /\{ id: 'crm', label: 'Clients', icon: Building2 \}/);
+  assert.match(shell, /case 'client-setup':[\s\S]*get\('view'\) === 'delivery'[\s\S]*<ClientSetupPage onNavigate=[\s\S]*<ServiceClientPage onNavigate=/);
   assert.match(shell, /<PlaceContextBanner compact/);
   assert.match(crmPage, /Discard unsaved client drafts and set up another client[\s\S]*onNavigate\('client-setup'\)/);
   assert.match(ledger, /<h1>Clients being set up<\/h1>/);
@@ -83,7 +85,7 @@ test('unsupported quick-fill and per-site SLA are explicit, not invented persist
   assert.match(wizard, /Nothing is sent to a model or saved from this panel/);
   assert.match(wizard, /leave\('document-studio'\)/);
   assert.doesNotMatch(wizard, /p_response_sla_minutes:|p_sla_minutes:/);
-  assert.match(wizard, /workspace grouping, not legal ownership/);
+  assert.match(wizard, /<small>Client organisation<\/small>/);
   assert.match(wizard, /beforeunload/);
   assert.match(wizard, /Cloned draft — review before saving/);
 });

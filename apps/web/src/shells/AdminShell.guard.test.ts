@@ -137,7 +137,7 @@ describe('AdminShell access and routing boundaries', () => {
   it('keeps specialist routes visible until their container pages exist locally', () => {
     expect(source).toContain("'Clients & Delivery': [");
     expect(source).toContain('Finance: [');
-    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
+    expect(source).toContain("{ id: 'crm', label: 'Clients'");
     expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
     expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
     expect(source).toContain("{ id: 'finance-money', label: 'Business money check'");
@@ -147,13 +147,13 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("'Reports & Analytics': [");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).toContain("{ id: 'client-setup', label: 'Set up a new client'");
-    expect(source).toContain("{ id: 'onboarding', label: 'Clients being set up'");
-    expect(source).toContain("{ id: 'handoffs', label: 'Start delivery'");
+    expect(source).toContain("'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites'");
+    expect(source).toContain("{ id: 'locations', label: 'Locations'");
+    expect(source).not.toContain("label: 'Location Houses'");
   });
 
   it('consolidates duplicate admin menu entries and landing shortcuts', () => {
-    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios', icon: DollarSign }");
+    expect(source).toContain("{ id: 'crm', label: 'Clients', icon: Building2 }");
     expect(source).not.toContain("{ id: 'relationships', label: 'Client Portfolios', icon: Network }");
     expect(source).toContain("label: 'People & Access'");
     expect(source).not.toContain("label: 'Client Portfolios', icon: Network");
@@ -187,7 +187,7 @@ describe('AdminShell access and routing boundaries', () => {
   });
 
   it('lets the CRM matrix replace rather than duplicate shell workflow controls', () => {
-    expect(source).toContain("const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage)");
+    expect(source).toContain("const showWorkflowNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage)");
     expect(source).toContain("['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)");
     expect(source.match(/activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
     expect(source.match(/showWorkflowNavigation && <WorkflowRail/g)).toHaveLength(2);

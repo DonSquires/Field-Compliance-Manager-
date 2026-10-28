@@ -17,7 +17,7 @@ import { describeDrawdown, drawdownAdjustment, monthBounds, overrunJustification
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, CrmPrimaryContactEditor, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
-import ClientSetupPage from './ClientSetupPage';
+import { ServiceClientWorkspace } from '../components/ServiceClientWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import { PriceListPicker } from '../components/PriceListPicker';
@@ -1585,7 +1585,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         <section className="crm-selected-client" aria-label="Selected client">
           {selectedEntry ? <><header><div><h2>{selectedEntry.name}</h2><small>{selectedEntry.type.replaceAll('_', ' ')} · identity is not owned by the provider</small></div><button type="button" onClick={() => setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status })}>Full account workspace</button></header>
             <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={isAdminTierRole(profile?.role)} onDirtyChange={contactDirty} />
-            {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ClientSetupPage key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenCoverage={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
+            {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ServiceClientWorkspace key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenDetails={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
           </> : <p>Select or create a client organization to configure its contacts and sites.</p>}
         </section>
       </div>

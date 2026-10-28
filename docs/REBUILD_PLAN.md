@@ -8,6 +8,36 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-directed client/place simplification, 2026-10-28:
+
+- **Before:** admin navigation exposed five client-workflow destinations and
+  four place-management destinations. Basic entry was coupled to contacts,
+  service schedules/rates and a resolved address. Officer Map showed colleague
+  positions but offered no place-capture action. These are source observations;
+  production opened at sign-in, not an authenticated whole-app walkthrough.
+- **During:** the primary client page becomes a name/engagement form plus
+  searchable location rows. A row opens the editable location profile, with
+  contextual scheduling, activity/reporting and specialist map controls.
+  Core officer Places records raw GPS plus an explicitly confirmed/corrected
+  10 m zone, with loading/error/permission/retry handling. Admin navigation
+  consolidates everyday destinations; old specialist deep links remain valid.
+- **After:** own-rooted client, operational engagement attestation, house/site
+  or area, service-place links and verification/audit receipts persist.
+  Location profiles retain officer history when administrators refine details.
+  Reference zones are excluded from regulatory resolution and cannot promote
+  their small circles to canonical property boundaries. Basic site capture
+  does not authorise inferred financial defaults.
+- **Evidence gate:** real disposable PostGIS tests include role isolation,
+  actual constraints and place/agreement/financial triggers, stale fix/version
+  rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
+  synthetic browser tests cover the new journey and retained delivery/rate
+  paths. Release/catalog/Atlas receipts and human use of a real authorised
+  account remain distinct from these local checks.
+- **Remaining review:** source-level shell/task review is not a complete
+  field audit of HR, finance, every specialist module, every role and every
+  viewport. Further consolidation should follow observed tasks, not hide
+  necessary safety, NZTA, client disclosure or commercial decisions.
+
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
 diagnostics/capability discovery, then shared knowledge/evidence, investigation

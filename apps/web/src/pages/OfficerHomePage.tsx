@@ -53,7 +53,7 @@ interface AssignedDispatchJobRow extends Omit<AssignedDispatchJob, 'site'> {
   zone: { name: string } | Array<{ name: string }> | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'person_search' | 'credentials' | 'leave' | 'timesheet';
+type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'places' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'person_search' | 'credentials' | 'leave' | 'timesheet';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -390,6 +390,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
             <QuickAction icon={<Clock3 />} label="Submit timesheet" detail="Record time for approval" onClick={() => onNavigate('timesheet')} />
           </>}
           <QuickAction icon={<Car />} label="Vehicle lookup" detail="Registry and compliance history" onClick={() => onNavigate('vehicle_lookup')} />
+          <QuickAction icon={<Map />} label="Places" detail="Add or verify with GPS" onClick={() => onNavigate('places')} />
           <QuickAction icon={<Users />} label="Person search" detail="Authorized notice and permit checks" onClick={() => onNavigate('person_search')} />
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
         </div>

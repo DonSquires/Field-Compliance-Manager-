@@ -55,6 +55,17 @@ status. A `false`/`NULL` is never an answer.
 
 ## P2 — Visual verification gate
 
+Owner ruling 2026-10-28: the officer portal may capture a named 10 m
+verification zone for a new or existing place, without a street address.
+An existing perimeter is preserved; the point zone is separate, on the same
+house. Its confirmation does not certify the entire perimeter or change the
+place's regulatory rules. P2 is satisfied by the officer previewing and
+explicitly confirming the point on the map. If the device reports accuracy
+worse than 10 m, show that warning and permit manual map correction and
+confirmation. Store both the raw fix/accuracy/time and the confirmed point;
+the radius is not a claim about GPS accuracy. Admins may refine the place
+afterwards without erasing the officer's verification history.
+
 > Owner ruling (MR !1051, confirmed across Q3 and Q6): all geofence settings must
 > be verified by the user visually on the actual map.
 

@@ -43,6 +43,26 @@ any specific relationship.
 
 ## How organisations link: service_agreements
 
+### Owner ruling 2026-10-28: provider-confirmed practical onboarding
+
+The primary client setup form needs a name and an attributable provider-admin
+confirmation that the provider is engaged. It creates an own-rooted organisation
+and a current operational agreement, recording the confirmation in
+`external_refs.engagement_confirmation`. It does not forge client invitation
+acceptance, approve a price, enable a module, or issue an invoice.
+
+Admin and admin-officer CRM writers recognise that dated provider confirmation
+for managing the client's profile and places. Officers receive the narrow
+place-capture path, not CRM administration. Expired/future or unconfirmed
+agreements do not qualify for this new path. Existing accepted-agreement
+authority is preserved.
+
+New site drafts explicitly use the confirmed provider agreement rather than
+the legacy trigger's inferred latest agreement. They do not seed default
+hourly billing, minimum hours or tax assumptions. Those decisions remain in
+the commercial workspace. Multiple current agreements require an explicit
+administrative review; the simple path never silently picks one.
+
 The `service_agreements` table is the canonical inter-org link:
 
 | Column | Meaning |

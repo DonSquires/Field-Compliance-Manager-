@@ -11,6 +11,22 @@
 
 ## The model
 
+### Owner ruling 2026-10-28: field capture without a street address
+
+A field officer or admin officer may create a named place using GPS and a
+selected client within the provider's authorised operational relationships.
+A street/LINZ address is not a prerequisite for a remote site or zone. Record
+the GPS source rather than invent an address; administrators can enrich the
+address later using the canonical address pipeline. Existing nearby places
+must be offered for selection, not silently duplicated or merged by proximity.
+
+When a place already has a boundary, keep it. The officer adds a separate
+10 m point-radius zone on the same house, like a checkpoint inside that
+boundary. This is not permission to replace a property perimeter, create
+jurisdiction, change regulatory rules or certify a whole boundary from one
+GPS fix. The admin profile must distinguish officer verification of a point
+from perimeter verification and retain the original capture and correction.
+
 ```
 Place registry (canonical_places)       -- ONE permanent row per real-world place; anyone can search it
   kind = site  : a literal address / LINZ lot, keyed by its address

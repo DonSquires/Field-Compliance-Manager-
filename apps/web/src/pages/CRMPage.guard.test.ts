@@ -193,7 +193,7 @@ describe('governed CRM accounts', () => {
       expect(page).toContain("['government', 'Government']");
       expect(page).toContain("['private_enterprise', 'Private enterprise']");
       expect(page).toContain("['contractor', 'Contractor']");
-      expect(page.indexOf('<CrmPrimaryContactEditor')).toBeLessThan(page.indexOf('<ClientSetupPage'));
+      expect(page.indexOf('<CrmPrimaryContactEditor')).toBeLessThan(page.indexOf('<ServiceClientWorkspace'));
       expect(page).toContain('embedded onDirtyChange={matrixDirty}');
       expect(page).toContain('directoryDirty.contact || directoryDirty.matrix');
       expect(page).not.toContain('<h2>Branches (');

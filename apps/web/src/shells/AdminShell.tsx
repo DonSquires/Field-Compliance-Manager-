@@ -82,6 +82,7 @@ import { DESKTOP_V2_DOWNLOAD_URL, DESKTOP_V2_FILENAME, DESKTOP_V2_VERSION } from
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
 const ClientSetupPage = React.lazy(() => import('../pages/ClientSetupPage'));
+const ServiceClientPage = React.lazy(() => import('../components/ServiceClientWorkspace').then(module => ({ default: module.ServiceClientWorkspace })));
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
@@ -293,10 +294,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'field-ops', label: 'Field reports', icon: ClipboardCheck, area: 'field-reports' },
     { id: 'field-ops', label: 'Operational continuity', icon: Handshake, area: 'operational-continuity' },
     { id: 'field-ops', label: 'Video evidence', icon: FolderOpen, area: 'cctv-console' },
-    { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
-    { id: 'locations', label: 'Location Houses', icon: MapPin },
-    { id: 'zones', label: 'Zone Facets', icon: MapPin },
-    { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
+    { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
   Workforce: [
@@ -306,11 +304,8 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'users', label: 'People & Access', icon: Users },
   ],
   'Clients & Delivery': [
-    { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
+    { id: 'crm', label: 'Clients', icon: Building2 },
     { id: 'relationships', label: 'Agreements & services', icon: Handshake },
-    { id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck },
-    { id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck },
-    { id: 'handoffs', label: 'Start delivery', icon: ClipboardCheck },
   ],
   Finance: [
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
@@ -345,7 +340,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
 
 const NAVIGABLE_ADMIN_PAGES = new Set<AdminPage>([
   ...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id)),
-  'bob', 'document-studio',
+  'bob', 'document-studio', 'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites',
 ]);
 
 const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
@@ -769,7 +764,9 @@ const AdminShell: React.FC = () => {
       case 'crm':
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'client-setup':
-        return <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+        return new URLSearchParams(location.search).get('view') === 'delivery'
+          ? <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
+          : <ServiceClientPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
       case 'cost-of-service':
@@ -889,7 +886,7 @@ const AdminShell: React.FC = () => {
   const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
     || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
     || (activePage === 'field-ops' && fieldOpsSubArea === 'landing');
-  const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage);
+  const showWorkflowNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage);
   const countScope = telemetryZoneIds.length ? 'Agreement zones' : 'Organisation-wide';
   const telemetryPills = <div className="admin-console-telemetry" role="group" aria-label={`Operational counts · ${countScope}`}>
     {([
