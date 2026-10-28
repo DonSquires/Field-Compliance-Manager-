@@ -41,7 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
-import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
+import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
 const CORS = {
@@ -2171,7 +2171,7 @@ async function loadHistory(supabase: DbClient, conversationId: string, limit = 8
     history: [],
     pending: null
   };
-  const { data } = await supabase.from('bob_messages').select('role, content, metadata, created_at').eq('conversation_id', conversationId).order('created_at', {
+  const { data } = await supabase.from('bob_messages').select('id, role, content, metadata, created_at').eq('conversation_id', conversationId).order('created_at', {
     ascending: false
   }).limit(limit);
   const rows = (data ?? []).slice().reverse(); // chronological
@@ -2268,7 +2268,8 @@ async function loadHistory(supabase: DbClient, conversationId: string, limit = 8
           typeof proposal.user_id === 'string' && typeof proposal.conversation_id === 'string' &&
           Array.isArray(proposal.steps) && proposal.steps.length) {
         return { history, pending: {
-          kind: 'record_updates_pending', record_updates: proposal
+          kind: 'record_updates_pending', record_updates: proposal,
+          message_id: typeof rows[i]?.id === 'string' ? rows[i].id : null
         } };
       }
     }
@@ -10183,9 +10184,13 @@ serve(async (req)=>{
       const planId = typeof stored?.plan_id === 'string' ? stored.plan_id : null;
       const toolMeta = (outcome: string, extra: JsonRecord = {}) => ({ tool: 'update_records', outcome, record_updates_plan_id: planId, ...extra });
       let result;
-      if (!isToolEffectPermitted('update_records', caps) ||
+      if (!isToolEffectPermitted('update_records', caps) || typeof pending?.message_id !== 'string' ||
           !isTrustedPendingRecordUpdates(stored, { userId: user.id, conversationId, organizationId: orgId })) {
         result = { reply: 'That preview can no longer be applied (it has expired, or it belongs to another person, organisation or conversation). Nothing was written. Tell me the changes again and I will show a fresh preview.', meta: toolMeta('unconfirmed') };
+      } else if (!(await claimRecordUpdatePreview({
+        db: admin, messageId: pending?.message_id, conversationId, planId, answer: recordUpdatesChoice
+      }))) {
+        result = { reply: 'That preview has already been answered (or is being applied from another reply), so nothing more was written from this message. Ask me what changed if you want to check.', meta: toolMeta('already_answered') };
       } else if (recordUpdatesChoice === 'decline') {
         result = { reply: 'Discarded. Nothing was written.', meta: toolMeta('declined') };
       } else {

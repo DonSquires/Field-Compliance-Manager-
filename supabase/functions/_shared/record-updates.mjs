@@ -8,6 +8,8 @@
 
 export const RECORD_UPDATE_TTL_MS = 30 * 60 * 1000;
 export const RECORD_UPDATE_MAX_OPERATIONS = 25;
+// Leaves room inside the 150 s edge budget to persist receipts for whatever did run.
+export const RECORD_UPDATE_APPLY_BUDGET_MS = 90_000;
 
 export const SAFETY_HAZARD_CLASSES = Object.freeze([
   'violence_or_aggression', 'weapons', 'dangerous_dog', 'hazardous_substances',
@@ -37,6 +39,8 @@ const VEHICLE_TEXT_FIELDS = ['make', 'model', 'colour', 'body_type'];
 const VEHICLE_DATE_FIELDS = ['rego_expiry', 'wof_expiry', 'cof_expiry'];
 const TARGET_TYPES = ['person', 'vehicle', 'site', 'place'];
 const STEP_KINDS = ['register_vehicle', 'update_vehicle_details', 'vehicle_person_link', 'person_alias', 'safety_warning', 'record_note'];
+// Person-creating links resolve before facts about that person, whatever order they were given in.
+const RESOLVE_ORDER = { vehicle_details: 0, vehicle_person_link: 1, person_alias: 2, safety_warning: 3, record_note: 4 };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EXACT_MATCH_BASES = new Set(['name_exact', 'alias_exact']);
 
@@ -294,7 +298,8 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
     return null;
   };
 
-  for (const op of plan.operations) {
+  const ordered = [...plan.operations].sort((a, b) => (RESOLVE_ORDER[a.kind] - RESOLVE_ORDER[b.kind]) || (a.index - b.index));
+  for (const op of ordered) {
     const holdOp = (reason) => held.push({ index: op.index, statement: op.kind.replace(/_/g, ' '), reason });
     if (op.kind === 'vehicle_details') {
       const vehicle = ensureVehicle(op, op.plate, op.fields);
@@ -425,6 +430,20 @@ export function isTrustedPendingRecordUpdates(stored, { userId, conversationId, 
   return stored.steps.every((s) => isObject(s) && STEP_KINDS.includes(s.kind) && typeof s.label === 'string');
 }
 
+// Answers a stored preview exactly once. The conditional update re-checks the outcome under the row lock,
+// so overlapping replies cannot both apply (or apply after a decline). Uses the transcript client only.
+export async function claimRecordUpdatePreview({ db, messageId, conversationId, planId, answer, now = new Date() }) {
+  if (!isUuid(messageId) || !conversationId || !isUuid(planId) || !['confirm', 'decline'].includes(answer)) return false;
+  const { data: row, error } = await db.from('bob_messages').select('metadata').eq('id', messageId).eq('conversation_id', conversationId).maybeSingle();
+  const metadata = row?.metadata;
+  if (error || !isObject(metadata) || metadata.outcome !== 'proposed' || metadata.pending_record_updates?.plan_id !== planId) return false;
+  const { data: claimed, error: claimError } = await db.from('bob_messages')
+    .update({ metadata: { ...metadata, outcome: answer === 'confirm' ? 'confirmed' : 'declined', record_updates_answered_at: now.toISOString() } })
+    .eq('id', messageId).eq('conversation_id', conversationId).eq('metadata->>outcome', 'proposed')
+    .select('id');
+  return !claimError && Array.isArray(claimed) && claimed.length === 1;
+}
+
 const hexToUuid = (hex) => `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 
 // Stable request id so a retried apply of the same plan step cannot raise a second warning.
@@ -441,7 +460,7 @@ function auditReason(sourceSummary) {
 }
 
 // Applies a confirmed plan in order with the caller's JWT-bound rpc. Each step reports what actually happened.
-export async function applyRecordUpdatePlan({ rpc, organizationId, pending }) {
+export async function applyRecordUpdatePlan({ rpc, organizationId, pending, deadlineAt = Date.now() + RECORD_UPDATE_APPLY_BUDGET_MS, now = () => Date.now() }) {
   const reason = auditReason(pending.source_summary);
   const vehicles = new Map();
   const people = new Map();
@@ -450,6 +469,10 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending }) {
   const vehicleFor = (step) => step.vehicle_id ?? vehicles.get(step.plate) ?? null;
 
   for (const [i, step] of pending.steps.entries()) {
+    if (now() > deadlineAt) {
+      receipt(step, 'not_attempted', 'Stopped before this step to stay within the request time limit. Ask me again and I will preview only what is still missing.');
+      continue;
+    }
     if (step.kind === 'register_vehicle') {
       const current = await lookupPlate(rpc, step.plate);
       // Never register blind: manage_identity_vehicle clears this organisation's note on an existing vehicle.
@@ -507,8 +530,10 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending }) {
         continue;
       }
       const existing = await call(rpc, 'get_safety_warnings', { p_entity_type: step.entity_type, p_entity_ids: [entityId] });
-      if (!existing.error && (Array.isArray(existing.data) ? existing.data : []).some((w) => w?.is_own_organization === true && w?.hazard_class === step.hazard_class)) {
-        receipt(step, 'already_present', 'Your organisation already has an active warning of this kind on this record.');
+      const ownSameHazard = (!existing.error && Array.isArray(existing.data) ? existing.data : [])
+        .filter((w) => w?.is_own_organization === true && w?.hazard_class === step.hazard_class);
+      if (ownSameHazard.some((w) => w?.alert_level === step.alert_level && String(w?.reason ?? '').trim() === String(step.note ?? '').trim())) {
+        receipt(step, 'already_present', 'Your organisation already has this exact warning active on this record.');
         continue;
       }
       const { error } = await call(rpc, 'raise_entity_flag', {
@@ -517,11 +542,16 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending }) {
         p_alert_level: step.alert_level, p_reason: step.note, p_hazard_class: step.hazard_class,
       });
       if (error) receipt(step, 'failed', errorMessage(error));
-      else receipt(step, 'applied');
+      else {
+        const levels = [...new Set(ownSameHazard.map((w) => w?.alert_level).filter(Boolean))].join('/');
+        receipt(step, 'applied', ownSameHazard.length
+          ? `Your organisation already had ${levels ? `a ${levels}` : 'a'} warning of this kind here; this one was added alongside it, and the earlier one stays active until someone resolves it.`
+          : undefined);
+      }
     } else if (step.kind === 'record_note') {
       const existing = await call(rpc, 'list_record_updates', { p_record_kind: step.record_kind, p_record_id: step.record_id });
-      if (!existing.error && (Array.isArray(existing.data) ? existing.data : []).some((row) => String(row?.body ?? '').trim() === step.body.trim())) {
-        receipt(step, 'already_present', 'That exact note is already on the record.');
+      if (!existing.error && (Array.isArray(existing.data) ? existing.data : []).some((row) => row?.entry_kind === step.entry_kind && String(row?.body ?? '').trim() === step.body.trim())) {
+        receipt(step, 'already_present', `That exact ${ENTRY_LABELS[step.entry_kind] ?? 'entry'} is already on the record.`);
         continue;
       }
       const { error } = await call(rpc, 'add_record_update', { p_record_kind: step.record_kind, p_record_id: step.record_id, p_entry_kind: step.entry_kind, p_body: step.body });
@@ -533,13 +563,13 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending }) {
   }
   const count = (status) => receipts.filter((r) => r.status === status).length;
   const applied = count('applied');
-  const problems = count('failed') + count('skipped_dependency');
+  const problems = count('failed') + count('skipped_dependency') + count('not_attempted');
   const outcome = applied ? (problems ? 'partially_applied' : 'applied') : (problems ? 'failed' : 'already_present');
   return { outcome, receipts };
 }
 
 const STATUS_WORDS = {
-  applied: 'Done', already_present: 'Already on record', failed: 'Not done', skipped_dependency: 'Not attempted', held: 'Held',
+  applied: 'Done', already_present: 'Already on record', failed: 'Not done', skipped_dependency: 'Not attempted', not_attempted: 'Stopped (time limit)', held: 'Held',
 };
 
 export function renderRecordUpdateReceipts({ receipts, held = [] }) {

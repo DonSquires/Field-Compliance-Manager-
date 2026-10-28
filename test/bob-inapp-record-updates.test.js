@@ -16,6 +16,7 @@ const PERSON = '0c000000-0000-4000-8000-000000000003';
 const CANON = '0d000000-0000-4000-8000-000000000004';
 const OBS = '0e000000-0000-4000-8000-000000000005';
 const PLAN = '0f000000-0000-4000-8000-000000000006';
+const MSG = '10000000-0000-4000-8000-000000000007';
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const SUMMARY = 'Council email about vehicle TST123';
 
@@ -265,8 +266,8 @@ test('existing facts are reported as already present, and database refusals are 
     update_vehicle_profile_details: ok({ vehicle_id: VEH, changed: false }),
     record_vehicle_person: fail('POSSIBLE_DUPLICATE: Alex Example (born 1990) already exists'),
     add_person_alias: fail('This person already has that name recorded'),
-    get_safety_warnings: ok([{ hazard_class: 'dangerous_dog', is_own_organization: true }]),
-    list_record_updates: ({ p_record_kind }) => ({ data: p_record_kind === 'observation' ? [{ body: '  Council confirmed the owner. ' }] : [], error: null }),
+    get_safety_warnings: ok([{ hazard_class: 'dangerous_dog', is_own_organization: true, alert_level: 'low', reason: ' Dog in the vehicle ' }]),
+    list_record_updates: ({ p_record_kind }) => ({ data: p_record_kind === 'observation' ? [{ entry_kind: 'note', body: '  Council confirmed the owner. ' }] : [], error: null }),
     add_record_update: ok(OBS),
   });
   const { outcome, receipts } = await mod.applyRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, pending });
@@ -288,6 +289,67 @@ test('existing facts are reported as already present, and database refusals are 
   });
   assert.equal(throwing.outcome, 'failed');
   assert.equal(throwing.receipts[0].detail, 'network down');
+});
+
+test('a changed warning level or reason, or a different entry kind, is added rather than reported as present', async () => {
+  const mod = await load();
+  const warning = (alertLevel, note) => ({ kind: 'safety_warning', label: 'Raise warning', entity_type: 'vehicle', entity_id: VEH, hazard_class: 'dangerous_dog', alert_level: alertLevel, note });
+  const followUp = { kind: 'record_note', label: 'Ask for follow-up', record_kind: 'observation', record_id: OBS, entry_kind: 'follow_up_requested', body: 'Council confirmed the owner.' };
+  const db = fakeRpc({
+    get_safety_warnings: ok([
+      { hazard_class: 'dangerous_dog', is_own_organization: true, alert_level: 'low', reason: 'Dog in the vehicle' },
+      { hazard_class: 'dangerous_dog', is_own_organization: false, alert_level: 'high', reason: null },
+    ]),
+    raise_entity_flag: ok({ id: OBS }),
+    list_record_updates: ok([{ entry_kind: 'note', body: 'Council confirmed the owner.' }]),
+    add_record_update: ok(OBS),
+  });
+  const { outcome, receipts } = await mod.applyRecordUpdatePlan({
+    rpc: db.rpc, organizationId: ORG,
+    pending: { plan_id: PLAN, steps: [warning('high', 'Dog in the vehicle'), warning('low', 'Two dogs, one loose'), followUp] },
+  });
+  assert.equal(outcome, 'applied');
+  assert.deepEqual(receipts.map((r) => r.status), ['applied', 'applied', 'applied']);
+  assert.match(receipts[0].detail, /already had a low warning of this kind here; this one was added alongside it, and the earlier one stays active/);
+  assert.match(receipts[1].detail, /already had a low warning/);
+  assert.equal(receipts[2].detail, undefined);
+  assert.deepEqual(db.names(), ['get_safety_warnings', 'raise_entity_flag', 'get_safety_warnings', 'raise_entity_flag', 'list_record_updates', 'add_record_update']);
+});
+
+test('person-creating links resolve before facts about that person, whatever order they were given in', async () => {
+  const { validateRecordUpdatePlan, resolveRecordUpdatePlan } = await load();
+  const { plan } = validateRecordUpdatePlan({
+    source_summary: SUMMARY,
+    operations: [
+      { kind: 'safety_warning', target: { type: 'person', name: 'Alex Example' }, note: 'Raised voice at last visit' },
+      { kind: 'person_alias', person: 'Alex Example', alias: 'AJ' },
+      { kind: 'vehicle_person_link', plate: 'TST123', person: 'Alex Example' },
+      { kind: 'vehicle_details', plate: 'TST123', fields: { colour: 'Blue' } },
+    ],
+  });
+  const db = fakeRpc({ search_vehicle_registrations: ok([]), find_person_matches: ok([]) });
+  const { steps, held } = await resolveRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, plan });
+  assert.deepEqual(held, []);
+  assert.deepEqual(steps.map((s) => s.kind), ['register_vehicle', 'vehicle_person_link', 'person_alias', 'safety_warning']);
+  assert.deepEqual(steps.map((s) => s.op_index), [3, 2, 1, 0]);
+  assert.match(steps[2].label, /created above/);
+});
+
+test('a confirmed plan stops at its time budget and reports the rest as not attempted', async () => {
+  const mod = await load();
+  const steps = ['First', 'Second', 'Third'].map((label) => ({ kind: 'record_note', label, record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: label }));
+  const db = fakeRpc({ list_record_updates: ok([]), add_record_update: ok(OBS) });
+  const { outcome, receipts } = await mod.applyRecordUpdatePlan({
+    rpc: db.rpc, organizationId: ORG, pending: { plan_id: PLAN, steps },
+    deadlineAt: 1_000, now: () => (db.names().includes('add_record_update') ? 2_000 : 0),
+  });
+  assert.equal(outcome, 'partially_applied');
+  assert.deepEqual(receipts.map((r) => r.status), ['applied', 'not_attempted', 'not_attempted']);
+  assert.deepEqual(db.names(), ['list_record_updates', 'add_record_update']);
+  const rendered = mod.renderRecordUpdateReceipts({ receipts, held: [] });
+  assert.match(rendered, /^I made 1 change as you/);
+  assert.match(rendered, /2\. Stopped \(time limit\) — Second \(Stopped before this step .* preview only what is still missing\.\)/);
+  assert.ok(mod.RECORD_UPDATE_APPLY_BUDGET_MS < 150_000);
 });
 
 test('only a short, unhedged reply confirms; questions and amendments go back to the planner', async () => {
@@ -355,6 +417,31 @@ const stripTypeAnnotations = (source) => source
   .replace(/:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|JsonRecord|DbClient|Caps|ToolResult|Array<[^>]+>|Record<[^>]+>)(?:\s*\|\s*null)?/g, '');
 const historySource = chat.slice(chat.indexOf('async function loadHistory('), chat.indexOf('// Bob\'s per-user memory', chat.indexOf('async function loadHistory(')));
 const loadHistory = vm.runInNewContext(`${stripTypeAnnotations(historySource)}\nloadHistory`);
+// Minimal bob_messages fake: the history read, and the read-then-conditional-update claim of a preview row.
+function fakeTranscript(rows = []) {
+  const from = (table) => {
+    assert.equal(table, 'bob_messages');
+    const filters = [];
+    let patch = null;
+    const matches = () => rows.filter((row) => filters.every(([col, val]) => (col === 'metadata->>outcome' ? row.metadata?.outcome : row[col]) === val));
+    const query = {
+      select() {
+        if (!patch) return query;
+        const hit = matches();
+        for (const row of hit) row.metadata = patch.metadata;
+        return Promise.resolve({ data: hit.map((row) => ({ id: row.id })), error: null });
+      },
+      update(next) { patch = next; return query; },
+      eq(col, val) { filters.push([col, val]); return query; },
+      order() { return query; },
+      async limit() { return { data: matches().slice().reverse() }; },
+      async maybeSingle() { const [row] = matches(); return { data: row ? { metadata: row.metadata } : null, error: null }; },
+    };
+    return query;
+  };
+  return { rows, from };
+}
+
 async function recover(chronological) {
   const supabase = { from: (table) => {
     assert.equal(table, 'bob_messages');
@@ -371,13 +458,16 @@ assert.ok(caseStart > 0 && hookStart > 0);
 assert.doesNotMatch(dispatchCase, /applyRecordUpdatePlan/);
 assert.match(hook, /callerClient\.rpc\(name, args\)/);
 assert.match(hook, /isTrustedPendingRecordUpdates\(stored, \{ userId: user\.id, conversationId, organizationId: orgId \}\)/);
+assert.match(hook, /claimRecordUpdatePreview\(\{\s*db: admin, messageId: pending\?\.message_id/);
+assert.ok(hook.indexOf('claimRecordUpdatePreview(') < hook.indexOf("recordUpdatesChoice === 'decline'"));
+assert.ok(hook.indexOf('claimRecordUpdatePreview(') < hook.indexOf('applyRecordUpdatePlan('));
 
 async function makeFlow(env) {
   const mod = await load();
   return vm.runInNewContext(`(env) => {
     const { caps, user, conversationId, orgId, callerClient, persist, admin, startTime, respond, buildStructuredResponse, isToolEffectPermitted,
       validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates,
-      applyRecordUpdatePlan, renderRecordUpdateReceipts } = env;
+      claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } = env;
     const dispatchTool = async (tool, toolArgs) => {
       switch (tool) {
         ${dispatchCase}
@@ -392,13 +482,14 @@ async function makeFlow(env) {
   }`, { crypto: globalThis.crypto })({ ...mod, ...env });
 }
 
-function chatEnv(handlers) {
+function chatEnv(handlers, rows = []) {
   const db = fakeRpc(handlers);
   const saved = [];
+  const transcript = fakeTranscript(rows);
   return {
-    db, saved,
+    db, saved, transcript,
     env: {
-      caps: { canCompareData: true }, user: { id: 'user-a' }, conversationId: 'thread-a', orgId: ORG, admin: {}, startTime: 0,
+      caps: { canCompareData: true }, user: { id: 'user-a' }, conversationId: 'thread-a', orgId: ORG, admin: transcript, startTime: 0,
       callerClient: { rpc: db.rpc },
       persist: async (_admin, _org, _conversation, turns) => { saved.push(turns); },
       respond: (result) => result,
@@ -409,7 +500,7 @@ function chatEnv(handlers) {
 }
 
 test('preview, recovery and the next-turn yes apply as the caller; the preview turn itself writes nothing', async () => {
-  const { db, saved, env } = chatEnv({
+  const { db, saved, env, transcript } = chatEnv({
     search_vehicle_registrations: ok([]),
     find_person_matches: ok([]),
     manage_identity_vehicle: ok({ vehicle_id: VEH }),
@@ -429,11 +520,13 @@ test('preview, recovery and the next-turn yes apply as the caller; the preview t
   assert.equal(stored.organization_id, ORG);
   assert.deepEqual(stored.steps.map((s) => s.kind), ['register_vehicle', 'vehicle_person_link']);
 
-  const { pending } = await recover([
-    { role: 'user', content: 'Update the records from this email' },
-    { role: 'assistant', content: preview.reply, metadata: preview.meta },
-  ]);
+  transcript.rows.push(
+    { id: PERSON, conversation_id: 'thread-a', role: 'user', content: 'Update the records from this email', metadata: null },
+    { id: MSG, conversation_id: 'thread-a', role: 'assistant', content: preview.reply, metadata: preview.meta },
+  );
+  const { pending } = await loadHistory(transcript, 'thread-a');
   assert.equal(pending.kind, 'record_updates_pending');
+  assert.equal(pending.message_id, MSG);
   assert.equal((await flow.confirm(pending, 'change the colour to red instead')), null);
   const result = await flow.confirm(pending, 'yes please');
   assert.equal(result.meta.outcome, 'applied');
@@ -444,6 +537,14 @@ test('preview, recovery and the next-turn yes apply as the caller; the preview t
   assert.equal(saved.length, 1);
   assert.equal(saved[0][0].content, 'yes please');
   assert.equal(saved[0][1].metadata.outcome, 'applied');
+  assert.equal(transcript.rows[1].metadata.outcome, 'confirmed');
+  assert.match(transcript.rows[1].metadata.record_updates_answered_at, /^\d{4}-/);
+  assert.equal(transcript.rows[1].metadata.pending_record_updates.plan_id, stored.plan_id);
+
+  const again = await flow.confirm(pending, 'yes');
+  assert.equal(again.meta.outcome, 'already_answered');
+  assert.match(again.reply, /already been answered .* nothing more was written/);
+  assert.equal(db.names().length, 5);
 });
 
 test('a decline, a foreign or expired preview, or a caller without the capability writes nothing', async () => {
@@ -451,7 +552,8 @@ test('a decline, a foreign or expired preview, or a caller without the capabilit
     plan_id: PLAN, user_id: 'user-a', conversation_id: 'thread-a', organization_id: ORG, created_at: new Date().toISOString(),
     source_summary: SUMMARY, held: [], steps: [{ kind: 'record_note', label: 'Add a note', record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: 'x' }],
   };
-  const pending = { kind: 'record_updates_pending', record_updates: stored };
+  const pending = { kind: 'record_updates_pending', record_updates: stored, message_id: MSG };
+  const previewRows = () => [{ id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: stored } }];
   const noWrites = () => { throw new Error('No RPC may run'); };
   const cases = [
     ['no thanks', {}, 'declined', /^Discarded\. Nothing was written\./],
@@ -461,17 +563,47 @@ test('a decline, a foreign or expired preview, or a caller without the capabilit
     ['yes', { caps: { canCompareData: false } }, 'unconfirmed', /Nothing was written/],
   ];
   for (const [message, override, outcome, reply] of cases) {
-    const { saved, env } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites });
+    const { saved, env, transcript } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites }, previewRows());
     const flow = await makeFlow({ ...env, ...override });
     const result = await flow.confirm(pending, message);
     assert.equal(result.meta.outcome, outcome, `${message} ${JSON.stringify(override)}`);
     assert.match(result.reply, reply);
     assert.equal(saved[0][1].metadata.outcome, outcome);
+    // Only the caller's own decline answers the preview; a refused reply leaves it for its owner.
+    assert.equal(transcript.rows[0].metadata.outcome, outcome === 'declined' ? 'declined' : 'proposed');
+  }
+  for (const [label, rowsFor, pendingFor] of [
+    ['no row id', previewRows, { ...pending, message_id: null }],
+    ['already declined', () => [{ ...previewRows()[0], metadata: { outcome: 'declined', pending_record_updates: stored } }], pending],
+    ['another plan in that row', () => [{ ...previewRows()[0], metadata: { outcome: 'proposed', pending_record_updates: { ...stored, plan_id: VEH } } }], pending],
+    ['another conversation\'s row', () => [{ ...previewRows()[0], conversation_id: 'thread-b' }], pending],
+  ]) {
+    const { env } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites }, rowsFor());
+    const result = await (await makeFlow(env)).confirm(pendingFor, 'yes');
+    assert.equal(result.meta.outcome, label === 'no row id' ? 'unconfirmed' : 'already_answered', label);
+    assert.match(result.reply, /nothing more was written|Nothing was written/, label);
   }
   const expired = { ...pending, record_updates: { ...stored, created_at: new Date(Date.now() - 31 * 60 * 1000).toISOString() } };
   const { env } = chatEnv({});
   assert.equal((await (await makeFlow(env)).confirm(expired, 'yes')).meta.outcome, 'unconfirmed');
   assert.equal(await (await makeFlow(env)).confirm({ kind: 'builder_cancellation_pending' }, 'yes'), null);
+});
+
+test('two overlapping yes replies apply the preview once; the other is told nothing more was written', async () => {
+  const stored = {
+    plan_id: PLAN, user_id: 'user-a', conversation_id: 'thread-a', organization_id: ORG, created_at: new Date().toISOString(),
+    source_summary: SUMMARY, held: [], steps: [{ kind: 'record_note', label: 'Add a note', record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: 'x' }],
+  };
+  const pending = { kind: 'record_updates_pending', record_updates: stored, message_id: MSG };
+  const { db, env, transcript } = chatEnv(
+    { list_record_updates: ok([]), add_record_update: ok(OBS) },
+    [{ id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: stored } }],
+  );
+  const flow = await makeFlow(env);
+  const results = await Promise.all([flow.confirm(pending, 'yes'), flow.confirm(pending, 'yes please'), flow.confirm(pending, 'no')]);
+  assert.deepEqual(results.map((r) => r.meta.outcome).sort(), ['already_answered', 'already_answered', 'applied']);
+  assert.deepEqual(db.names(), ['list_record_updates', 'add_record_update']);
+  assert.equal(transcript.rows[0].metadata.outcome, 'confirmed');
 });
 
 test('a preview is confirmable only as the very next assistant turn and only when well formed', async () => {

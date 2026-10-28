@@ -374,8 +374,11 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   here, never uses the service role, never writes the sensitive floor directly,
   and does not unlock `generic_write`. Ambiguous people, unconfirmed identities,
   NZTA-register facts and anything without a governed path are held in the
-  preview, not guessed. Each step reports applied, already present, failed or
-  not attempted; Bob never claims a change without a receipt.
+  preview, not guessed. A preview is answered once: the stored preview row is
+  claimed before anything is applied or discarded, so overlapping replies
+  cannot apply it twice. Each step reports applied, already present (only an
+  exact duplicate), failed or not attempted; Bob never claims a change without
+  a receipt.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no

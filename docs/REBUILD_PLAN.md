@@ -38,8 +38,12 @@ In-app Bob record updates, 2026-10-28:
   `test/bob-inapp-record-updates.test.js`. Doctrine: `BOB_DOCTRINE.md` §4.
 - Evidence gate: merged, released (edge function and VPS planner), then a
   dedicated test identity proves preview, yes, receipts and the persisted
-  records in the glass with synthetic data. Concurrent duplicate yeses can
-  still race on a report note; other steps re-check or are idempotent.
+  records in the glass with synthetic data. Each preview is claimed once
+  (conditional update of its transcript row) before it is applied or
+  discarded, so concurrent yeses cannot double-write. Steps resolve
+  person-creating links first, stop at a 90 s apply budget with
+  "not attempted" receipts, and call a warning or note "already present"
+  only when it is an exact duplicate.
 
 Builder research release follow-up, 2026-10-25:
 
