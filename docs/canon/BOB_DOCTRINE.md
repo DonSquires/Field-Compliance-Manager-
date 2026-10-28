@@ -374,7 +374,12 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   here, never uses the service role, never writes the sensitive floor directly,
   and does not unlock `generic_write`. Ambiguous people, unconfirmed identities,
   NZTA-register facts and anything without a governed path are held in the
-  preview, not guessed. A preview is answered once: the stored preview row is
+  preview, not guessed. The preview shows every value in full and names people
+  by their stored record name, so the yes covers exactly what will be written.
+  Only a preview the server signed (HMAC over the exact plan) and carried by a
+  single transcript row can be applied, so a row another member inserts into
+  the conversation can never borrow the caller's yes. A preview is answered
+  once: the stored preview row is
   claimed before anything is applied or discarded, so overlapping replies
   cannot apply it twice. Each step reports applied, already present (only an
   exact duplicate), failed or not attempted; Bob never claims a change without

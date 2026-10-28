@@ -19,6 +19,8 @@ const PLAN = '0f000000-0000-4000-8000-000000000006';
 const MSG = '10000000-0000-4000-8000-000000000007';
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const SUMMARY = 'Council email about vehicle TST123';
+const KEY = 'test-only-record-update-signing-key-0123456789abcdef';
+const migration = fs.readFileSync('supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql', 'utf8');
 
 function fakeRpc(handlers) {
   const calls = [];
@@ -423,7 +425,12 @@ function fakeTranscript(rows = []) {
     assert.equal(table, 'bob_messages');
     const filters = [];
     let patch = null;
-    const matches = () => rows.filter((row) => filters.every(([col, val]) => (col === 'metadata->>outcome' ? row.metadata?.outcome : row[col]) === val));
+    const column = (row, col) => {
+      if (col === 'metadata->>outcome') return row.metadata?.outcome;
+      if (col === 'metadata->pending_record_updates->>plan_id') return row.metadata?.pending_record_updates?.plan_id;
+      return row[col];
+    };
+    const matches = () => rows.filter((row) => filters.every(([col, val]) => column(row, col) === val));
     const query = {
       select() {
         if (!patch) return query;
@@ -434,7 +441,7 @@ function fakeTranscript(rows = []) {
       update(next) { patch = next; return query; },
       eq(col, val) { filters.push([col, val]); return query; },
       order() { return query; },
-      async limit() { return { data: matches().slice().reverse() }; },
+      async limit() { return { data: matches().slice().reverse(), error: null }; },
       async maybeSingle() { const [row] = matches(); return { data: row ? { metadata: row.metadata } : null, error: null }; },
     };
     return query;
@@ -459,14 +466,29 @@ assert.doesNotMatch(dispatchCase, /applyRecordUpdatePlan/);
 assert.match(hook, /callerClient\.rpc\(name, args\)/);
 assert.match(hook, /isTrustedPendingRecordUpdates\(stored, \{ userId: user\.id, conversationId, organizationId: orgId \}\)/);
 assert.match(hook, /claimRecordUpdatePreview\(\{\s*db: admin, messageId: pending\?\.message_id/);
+assert.match(hook, /verifyPendingRecordUpdates\(RECORD_UPDATE_SIGNING_KEY, stored\)/);
+assert.ok(hook.indexOf("cancelAtBoundary('applying record updates')") < hook.indexOf('claimRecordUpdatePreview('));
+assert.ok(hook.indexOf('verifyPendingRecordUpdates(') < hook.indexOf('claimRecordUpdatePreview('));
+assert.match(dispatchCase, /signPendingRecordUpdates\(RECORD_UPDATE_SIGNING_KEY, \{/);
+assert.match(chat, /const RECORD_UPDATE_SIGNING_KEY = SUPABASE_SERVICE_KEY;/);
 assert.ok(hook.indexOf('claimRecordUpdatePreview(') < hook.indexOf("recordUpdatesChoice === 'decline'"));
 assert.ok(hook.indexOf('claimRecordUpdatePreview(') < hook.indexOf('applyRecordUpdatePlan('));
+
+async function signedNotePlan(extra = {}) {
+  const { signPendingRecordUpdates } = await load();
+  return signPendingRecordUpdates(KEY, {
+    plan_id: PLAN, user_id: 'user-a', conversation_id: 'thread-a', organization_id: ORG, created_at: new Date().toISOString(),
+    source_summary: SUMMARY, held: [], steps: [{ kind: 'record_note', label: 'Add a note', record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: 'x' }],
+    ...extra,
+  });
+}
 
 async function makeFlow(env) {
   const mod = await load();
   return vm.runInNewContext(`(env) => {
     const { caps, user, conversationId, orgId, callerClient, persist, admin, startTime, respond, buildStructuredResponse, isToolEffectPermitted,
       validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates,
+      signPendingRecordUpdates, verifyPendingRecordUpdates, RECORD_UPDATE_SIGNING_KEY, cancelAtBoundary,
       claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } = env;
     const dispatchTool = async (tool, toolArgs) => {
       switch (tool) {
@@ -490,6 +512,7 @@ function chatEnv(handlers, rows = []) {
     db, saved, transcript,
     env: {
       caps: { canCompareData: true }, user: { id: 'user-a' }, conversationId: 'thread-a', orgId: ORG, admin: transcript, startTime: 0,
+      RECORD_UPDATE_SIGNING_KEY: KEY, cancelAtBoundary: async () => null,
       callerClient: { rpc: db.rpc },
       persist: async (_admin, _org, _conversation, turns) => { saved.push(turns); },
       respond: (result) => result,
@@ -548,10 +571,7 @@ test('preview, recovery and the next-turn yes apply as the caller; the preview t
 });
 
 test('a decline, a foreign or expired preview, or a caller without the capability writes nothing', async () => {
-  const stored = {
-    plan_id: PLAN, user_id: 'user-a', conversation_id: 'thread-a', organization_id: ORG, created_at: new Date().toISOString(),
-    source_summary: SUMMARY, held: [], steps: [{ kind: 'record_note', label: 'Add a note', record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: 'x' }],
-  };
+  const stored = await signedNotePlan();
   const pending = { kind: 'record_updates_pending', record_updates: stored, message_id: MSG };
   const previewRows = () => [{ id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: stored } }];
   const noWrites = () => { throw new Error('No RPC may run'); };
@@ -583,17 +603,14 @@ test('a decline, a foreign or expired preview, or a caller without the capabilit
     assert.equal(result.meta.outcome, label === 'no row id' ? 'unconfirmed' : 'already_answered', label);
     assert.match(result.reply, /nothing more was written|Nothing was written/, label);
   }
-  const expired = { ...pending, record_updates: { ...stored, created_at: new Date(Date.now() - 31 * 60 * 1000).toISOString() } };
+  const expired = { ...pending, record_updates: await signedNotePlan({ created_at: new Date(Date.now() - 31 * 60 * 1000).toISOString() }) };
   const { env } = chatEnv({});
   assert.equal((await (await makeFlow(env)).confirm(expired, 'yes')).meta.outcome, 'unconfirmed');
   assert.equal(await (await makeFlow(env)).confirm({ kind: 'builder_cancellation_pending' }, 'yes'), null);
 });
 
 test('two overlapping yes replies apply the preview once; the other is told nothing more was written', async () => {
-  const stored = {
-    plan_id: PLAN, user_id: 'user-a', conversation_id: 'thread-a', organization_id: ORG, created_at: new Date().toISOString(),
-    source_summary: SUMMARY, held: [], steps: [{ kind: 'record_note', label: 'Add a note', record_kind: 'observation', record_id: OBS, entry_kind: 'note', body: 'x' }],
-  };
+  const stored = await signedNotePlan();
   const pending = { kind: 'record_updates_pending', record_updates: stored, message_id: MSG };
   const { db, env, transcript } = chatEnv(
     { list_record_updates: ok([]), add_record_update: ok(OBS) },
@@ -601,9 +618,18 @@ test('two overlapping yes replies apply the preview once; the other is told noth
   );
   const flow = await makeFlow(env);
   const results = await Promise.all([flow.confirm(pending, 'yes'), flow.confirm(pending, 'yes please'), flow.confirm(pending, 'no')]);
-  assert.deepEqual(results.map((r) => r.meta.outcome).sort(), ['already_answered', 'already_answered', 'applied']);
-  assert.deepEqual(db.names(), ['list_record_updates', 'add_record_update']);
-  assert.equal(transcript.rows[0].metadata.outcome, 'confirmed');
+  // Signature checks use real Web Crypto, so any reply may claim first; exactly one answer wins either way.
+  const outcomes = results.map((r) => r.meta.outcome);
+  const winners = outcomes.filter((o) => o !== 'already_answered');
+  assert.equal(winners.length, 1, outcomes.join(','));
+  if (winners[0] === 'applied') {
+    assert.deepEqual(db.names(), ['list_record_updates', 'add_record_update']);
+    assert.equal(transcript.rows[0].metadata.outcome, 'confirmed');
+  } else {
+    assert.equal(winners[0], 'declined');
+    assert.equal(db.calls.length, 0);
+    assert.equal(transcript.rows[0].metadata.outcome, 'declined');
+  }
 });
 
 test('a preview is confirmable only as the very next assistant turn and only when well formed', async () => {
@@ -624,8 +650,163 @@ test('the planner is told the preview is waiting, how to amend it, and to stop c
   });
   assert.match(prompt, /IN-FLIGHT PLAN: the previous turn PREVIEWED 2 record changes \(update_records\)/);
   assert.match(prompt, /COMPLETE amended operations list/);
+  assert.match(prompt, /your reply closes this preview: nothing from it was written/);
+  assert.doesNotMatch(prompt, /still waiting for yes or no/);
   assert.match(prompt, /FACTS ABOUT PEOPLE, VEHICLES AND REPORTS: .*select update_records/);
   assert.match(prompt, /never say you have no way to update these records/);
   assert.match(prompt, /never claim a record changed without an update_records receipt/);
   assert.doesNotMatch(prompt, UUID_RE);
+});
+
+test('only a plan this server signed, carried by exactly one transcript row, can be applied', async () => {
+  const mod = await load();
+  const stored = await signedNotePlan();
+  // jsonb reorders keys and drops undefined members; the signature must survive that round trip.
+  const roundTripped = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries({ ...stored, dropped: undefined }).reverse())));
+  assert.equal(await mod.verifyPendingRecordUpdates(KEY, roundTripped), true);
+  assert.equal(await mod.verifyPendingRecordUpdates('a-different-server-key-0123456789abcdef', stored), false);
+  assert.equal(await mod.verifyPendingRecordUpdates('', stored), false);
+  await assert.rejects(mod.signPendingRecordUpdates('short', { plan_id: PLAN }), /not configured/);
+
+  const { signature: _drop, ...unsigned } = stored;
+  const forgedForOther = { ...(await signedNotePlan({ user_id: 'user-b' })), user_id: 'user-a' };
+  const noWrites = () => { throw new Error('No RPC may run'); };
+  for (const [label, forged] of [
+    ['unsigned', unsigned],
+    ['tampered step', { ...stored, steps: [{ ...stored.steps[0], body: 'a different note' }] }],
+    ['re-addressed to another user', forgedForOther],
+  ]) {
+    const { saved, env, transcript } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites },
+      [{ id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: forged } }]);
+    const result = await (await makeFlow(env)).confirm({ kind: 'record_updates_pending', record_updates: forged, message_id: MSG }, 'yes');
+    assert.equal(result.meta.outcome, 'unconfirmed', label);
+    assert.match(result.reply, /cannot be verified as one I made/);
+    assert.equal(saved[0][1].metadata.outcome, 'unconfirmed');
+    assert.equal(transcript.rows[0].metadata.outcome, 'proposed', label);
+  }
+
+  // A member re-inserting an earlier signed preview (even one already answered) cannot get it applied.
+  const COPY = '11000000-0000-4000-8000-000000000008';
+  for (const originalOutcome of ['declined', 'proposed']) {
+    const { db, env, transcript } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites }, [
+      { id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: originalOutcome, pending_record_updates: stored } },
+      { id: COPY, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: stored } },
+    ]);
+    const result = await (await makeFlow(env)).confirm({ kind: 'record_updates_pending', record_updates: stored, message_id: COPY }, 'yes');
+    assert.equal(result.meta.outcome, 'already_answered', originalOutcome);
+    assert.equal(db.calls.length, 0);
+    assert.equal(transcript.rows[1].metadata.outcome, 'proposed');
+  }
+});
+
+test('a cancelled turn stops before the preview is answered or anything is written', async () => {
+  const stored = await signedNotePlan();
+  const noWrites = () => { throw new Error('No RPC may run'); };
+  const { db, saved, env, transcript } = chatEnv({ list_record_updates: noWrites, add_record_update: noWrites },
+    [{ id: MSG, conversation_id: 'thread-a', role: 'assistant', metadata: { outcome: 'proposed', pending_record_updates: stored } }]);
+  const boundaries = [];
+  const cancelled = { cancelled: true };
+  const flow = await makeFlow({ ...env, cancelAtBoundary: async (boundary) => { boundaries.push(boundary); return cancelled; } });
+  assert.equal(await flow.confirm({ kind: 'record_updates_pending', record_updates: stored, message_id: MSG }, 'yes'), cancelled);
+  assert.deepEqual(boundaries, ['applying record updates']);
+  assert.equal(db.calls.length, 0);
+  assert.equal(saved.length, 0);
+  assert.equal(transcript.rows[0].metadata.outcome, 'proposed');
+});
+
+test('a planner-supplied person record id is confirmed by the caller\'s own search and shown with its stored name', async () => {
+  const { validateRecordUpdatePlan, resolveRecordUpdatePlan } = await load();
+  const plan = validateRecordUpdatePlan({ source_summary: SUMMARY, operations: [
+    { kind: 'person_alias', person: { person_record_id: PERSON, name: 'Alex Example' }, alias: 'AJ' },
+  ] }).plan;
+  const stored = fakeRpc({ find_person_matches: ok([{ person_record_id: PERSON, display_name: 'Alexandra Example', match_basis: 'alias_exact', score: 0.9 }]) });
+  const bound = await resolveRecordUpdatePlan({ rpc: stored.rpc, organizationId: ORG, plan });
+  assert.deepEqual(stored.calls[0].args, { p_organization_id: ORG, p_name: 'Alex Example', p_limit: 8 });
+  assert.equal(bound.steps[0].person_record_id, PERSON);
+  assert.match(bound.steps[0].label, /for Alexandra Example \(existing person record\)$/);
+
+  const other = fakeRpc({ find_person_matches: ok([exactMatch(CANON, 'Alex Example')]) });
+  const mismatch = await resolveRecordUpdatePlan({ rpc: other.rpc, organizationId: ORG, plan });
+  assert.equal(mismatch.steps.length, 0);
+  assert.match(mismatch.held[0].reason, /does not match "Alex Example" in your organisation/);
+
+  const idOnly = validateRecordUpdatePlan({ operations: [{ kind: 'person_alias', person: { person_record_id: PERSON }, alias: 'AJ' }] }).plan;
+  const none = fakeRpc({});
+  const unnamed = await resolveRecordUpdatePlan({ rpc: none.rpc, organizationId: ORG, plan: idOnly });
+  assert.equal(none.calls.length, 0);
+  assert.match(unnamed.held[0].reason, /Tell me the person's name as recorded/);
+});
+
+test('names that differ beyond case and spacing are looked up separately', async () => {
+  const { validateRecordUpdatePlan, resolveRecordUpdatePlan } = await load();
+  const plan = validateRecordUpdatePlan({ operations: [
+    { kind: 'person_alias', person: 'Māia Smith', alias: 'M' },
+    { kind: 'person_alias', person: 'Maia Smith', alias: 'Mai' },
+    { kind: 'person_alias', person: 'MAIA  smith', alias: 'Ms' },
+  ] }).plan;
+  const db = fakeRpc({ find_person_matches: ({ p_name }) => ({ data: [exactMatch(p_name === 'Māia Smith' ? PERSON : CANON, p_name)], error: null }) });
+  const resolved = await resolveRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, plan });
+  assert.deepEqual(db.calls.map((c) => c.args.p_name), ['Māia Smith', 'Maia Smith']);
+  assert.deepEqual(resolved.steps.map((s) => s.person_record_id), [PERSON, CANON, CANON]);
+});
+
+test('the preview shows every value in full, exactly as long as it will be written', async () => {
+  const { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview } = await load();
+  const body = `Follow-up from the council: ${'checked the site again and nothing was found '.repeat(60)}end of note`.trim();
+  const note = `Dog at the gate ${'is unrestrained and has charged staff before '.repeat(20)}`.trim();
+  const alias = `A ${'very '.repeat(21)}long alias`;
+  assert.ok(body.length > 2000 && body.length <= 4000 && note.length > 800 && note.length <= 1000 && alias.length > 100 && alias.length <= 120);
+  const plan = validateRecordUpdatePlan({ operations: [
+    { kind: 'record_note', record_kind: 'observation', record_id: OBS, body },
+    { kind: 'safety_warning', target: { type: 'vehicle', plate: 'TST123' }, hazard_class: 'dangerous_dog', note },
+    { kind: 'person_alias', person: 'Alex Example', alias },
+  ] }).plan;
+  const db = fakeRpc({ search_vehicle_registrations: ok([{ id: VEH, plate_number: 'TST123' }]), find_person_matches: ok([exactMatch(PERSON, 'Alex Example')]) });
+  const preview = renderRecordUpdatePreview(await resolveRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, plan }));
+  assert.ok(preview.includes(`"${body}"`));
+  assert.ok(preview.includes(`"${note}"`));
+  assert.ok(preview.includes(`"${alias}"`));
+  assert.doesNotMatch(preview, /…/);
+});
+
+test('a follow-up repeats only when it matches the latest follow-up; notes repeat only on an exact entry', async () => {
+  const { isRepeatRecordUpdate, applyRecordUpdatePlan } = await load();
+  const rows = [
+    { entry_kind: 'note', body: 'Checked again', created_at: '2026-10-01T00:00:00Z' },
+    { entry_kind: 'follow_up_resolved', body: 'Owner moved it', created_at: '2026-10-03T00:00:00Z' },
+    { entry_kind: 'follow_up_requested', body: 'Check again', created_at: '2026-10-02T00:00:00Z' },
+  ];
+  const step = (entry_kind, body) => ({ entry_kind, body });
+  assert.equal(isRepeatRecordUpdate(rows, step('follow_up_requested', 'Check again')), false);
+  assert.equal(isRepeatRecordUpdate(rows, step('follow_up_resolved', 'Owner moved it')), true);
+  assert.equal(isRepeatRecordUpdate(rows, step('follow_up_resolved', 'Different outcome')), false);
+  assert.equal(isRepeatRecordUpdate(rows, step('note', 'Checked again')), true);
+  assert.equal(isRepeatRecordUpdate(rows, step('hs_concern', 'Checked again')), false);
+  assert.equal(isRepeatRecordUpdate([], step('follow_up_requested', 'Check again')), false);
+
+  const db = fakeRpc({ list_record_updates: ok(rows), add_record_update: ok(OBS) });
+  const applied = await applyRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, pending: {
+    plan_id: PLAN, source_summary: SUMMARY,
+    steps: [{ kind: 'record_note', label: 'Re-open follow-up', record_kind: 'observation', record_id: OBS, entry_kind: 'follow_up_requested', body: 'Check again' }],
+  } });
+  assert.equal(applied.outcome, 'applied');
+  assert.deepEqual(db.names(), ['list_record_updates', 'add_record_update']);
+});
+
+test('registering a vehicle cannot erase a note: chat never sends notes and the register now keeps omitted notes', async () => {
+  const { validateRecordUpdatePlan } = await load();
+  const plan = validateRecordUpdatePlan({ operations: [{ kind: 'vehicle_details', plate: 'TST123', fields: { make: 'Toyota', notes: 'overwrite me' } }] }).plan;
+  assert.deepEqual(plan.operations[0].fields, { make: 'Toyota' });
+
+  const schema = fs.readFileSync('supabase/schema.sql', 'utf8');
+  const start = schema.indexOf('CREATE OR REPLACE FUNCTION "public"."manage_identity_vehicle"');
+  const live = schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
+  const migrated = migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION'), migration.indexOf('$function$;') + '$function$;'.length);
+  const before = "    org_notes = CASE WHEN v_note IS NULL THEN org_notes - p_organization_id::text\n";
+  const after = "    org_notes = CASE WHEN NOT coalesce(p_fields ? 'notes', false) THEN org_notes\n      WHEN v_note IS NULL THEN org_notes - p_organization_id::text\n";
+  assert.ok(live.includes(before) || live.includes(after));
+  // Identical to the live catalog definition apart from the omitted-notes rule.
+  assert.equal(migrated, live.replace(before, after));
+  assert.match(migration, /COMMENT ON FUNCTION public\.manage_identity_vehicle\(uuid, uuid, text, jsonb, text\) IS/);
+  assert.doesNotMatch(migration, /\b(GRANT|REVOKE)\b/);
 });

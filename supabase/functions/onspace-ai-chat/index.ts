@@ -41,7 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
-import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
+import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
 const CORS = {
@@ -93,6 +93,9 @@ const LOOP_STEP_SUMMARY_BUDGET = parseBudgetEnv(Deno.env.get('BOB_LOOP_STEP_SUMM
 }
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// HMAC key for update_records previews held in the transcript. Server-only; the signed payload is domain-separated
+// in record-updates.mjs, and the key itself is never sent to a browser, model or log.
+const RECORD_UPDATE_SIGNING_KEY = SUPABASE_SERVICE_KEY;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const BOB_INFERENCE_URL = Deno.env.get('BOB_INFERENCE_URL') ?? '';
 const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
@@ -9886,16 +9889,17 @@ serve(async (req)=>{
             });
             const preview = renderRecordUpdatePreview(resolved);
             if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length }) };
-            return {
-              reply: preview,
-              meta: toolMeta('proposed', {
-                pending_record_updates: {
-                  plan_id: crypto.randomUUID(), user_id: user.id, conversation_id: conversationId, organization_id: orgId,
-                  created_at: new Date().toISOString(), source_summary: plan.source_summary,
-                  steps: resolved.steps, held: resolved.held
-                }
-              })
-            };
+            let signed;
+            try {
+              signed = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, {
+                plan_id: crypto.randomUUID(), user_id: user.id, conversation_id: conversationId, organization_id: orgId,
+                created_at: new Date().toISOString(), source_summary: plan.source_summary,
+                steps: resolved.steps, held: resolved.held
+              });
+            } catch {
+              return { reply: 'I cannot hold a change preview for you to confirm right now, so nothing will be changed. Please try again shortly.', meta: toolMeta('unavailable') };
+            }
+            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed }) };
           }
         case 'cancel_builder_job':
           {
@@ -10184,9 +10188,13 @@ serve(async (req)=>{
       const planId = typeof stored?.plan_id === 'string' ? stored.plan_id : null;
       const toolMeta = (outcome: string, extra: JsonRecord = {}) => ({ tool: 'update_records', outcome, record_updates_plan_id: planId, ...extra });
       let result;
+      // Same stop point as every other governed action: a cancelled turn must not start writing.
+      const cancelledBeforeApply = await cancelAtBoundary('applying record updates');
+      if (cancelledBeforeApply) return cancelledBeforeApply;
       if (!isToolEffectPermitted('update_records', caps) || typeof pending?.message_id !== 'string' ||
-          !isTrustedPendingRecordUpdates(stored, { userId: user.id, conversationId, organizationId: orgId })) {
-        result = { reply: 'That preview can no longer be applied (it has expired, or it belongs to another person, organisation or conversation). Nothing was written. Tell me the changes again and I will show a fresh preview.', meta: toolMeta('unconfirmed') };
+          !isTrustedPendingRecordUpdates(stored, { userId: user.id, conversationId, organizationId: orgId }) ||
+          !(await verifyPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, stored))) {
+        result = { reply: 'That preview can no longer be applied (it has expired, cannot be verified as one I made, or belongs to another person, organisation or conversation). Nothing was written. Tell me the changes again and I will show a fresh preview.', meta: toolMeta('unconfirmed') };
       } else if (!(await claimRecordUpdatePreview({
         db: admin, messageId: pending?.message_id, conversationId, planId, answer: recordUpdatesChoice
       }))) {

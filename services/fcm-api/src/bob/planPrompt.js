@@ -135,7 +135,7 @@ function buildPendingBlock(pending) {
     return [
       '',
       `IN-FLIGHT PLAN: the previous turn PREVIEWED ${count} record change${count === 1 ? '' : 's'} (update_records) and asked the user to reply yes or no. Nothing has been written.`,
-      'A plain yes or no is handled by the executor before you are asked, so this message is something else. If the user is changing the plan (a different name, plate, field, severity, or dropping an item), select update_records again with the COMPLETE amended operations list rebuilt from the conversation; it shows a fresh preview. If the message is unrelated, answer it and remind them the preview is still waiting for yes or no.',
+      'A plain yes or no is handled by the executor before you are asked, so this message is something else. If the user is changing the plan (a different name, plate, field, severity, or dropping an item), select update_records again with the COMPLETE amended operations list rebuilt from the conversation; it shows a fresh preview. If the message is unrelated, answer it and say that your reply closes this preview: nothing from it was written, and if they still want those changes they should ask again (or say "show the preview again") and you will select update_records for a fresh preview to confirm.',
       'Never say records were updated unless an update_records receipt in this conversation shows it.',
     ].join('\n');
   }

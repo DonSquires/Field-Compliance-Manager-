@@ -63,9 +63,10 @@ export function normalisePlate(value) {
   return plate.length >= 1 && plate.length <= 10 ? plate : null;
 }
 
+// Only case and spacing are folded: "Māia" and "Maia" may be different people, so they resolve separately and
+// are treated as one person only if the register binds both to the same record.
 function personKey(name) {
-  return String(name ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9' -]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(name ?? '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function normalisePerson(raw) {
@@ -243,6 +244,22 @@ async function lookupPerson(rpc, organizationId, name) {
   return { state: 'new', similar: rows.length };
 }
 
+// A planner-supplied record id is never trusted on its own: it must come back from the caller's own person
+// search for the given name, and the preview then shows the stored name rather than the planner's wording.
+async function lookupPersonById(rpc, organizationId, person) {
+  if (!person.name) {
+    return { state: 'error', reason: 'Tell me the person\'s name as recorded so I can confirm that person record before changing it.' };
+  }
+  const { data, error } = await call(rpc, 'find_person_matches', { p_organization_id: organizationId, p_name: person.name, p_limit: 8 });
+  if (error) return { state: 'error', reason: personLookupProblem(errorMessage(error)) };
+  const row = (Array.isArray(data) ? data : [])
+    .find((r) => typeof r?.person_record_id === 'string' && r.person_record_id.toLowerCase() === person.person_record_id);
+  if (!row) {
+    return { state: 'error', reason: `That person record does not match ${quote(person.name, 80)} in your organisation, so I have not used it; tell me which person you mean.` };
+  }
+  return { state: 'bound', person_record_id: person.person_record_id, display_name: text(row.display_name, 120) || person.name };
+}
+
 async function lookupCanonicalPerson(rpc, organizationId, personRecordId, name) {
   const { data, error } = await call(rpc, 'get_identity_registry', { p_organization_id: organizationId, p_search: name, p_limit: 25 });
   if (error || !isObject(data) || !Array.isArray(data.people)) return null;
@@ -270,7 +287,7 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
     const person = op.person ?? (op.target?.type === 'person' ? op.target.person : null);
     if (person && !people.has(person.ref)) {
       people.set(person.ref, person.person_record_id
-        ? { state: 'bound', person_record_id: person.person_record_id, display_name: person.name ?? 'the named person record' }
+        ? await lookupPersonById(rpc, organizationId, person)
         : await lookupPerson(rpc, organizationId, person.name));
     }
   }
@@ -334,7 +351,7 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
         kind: 'person_alias', op_index: op.index, person_ref: op.person.ref,
         person_record_id: state.state === 'bound' ? state.person_record_id : null,
         alias: op.alias, alias_kind: op.alias_kind, notes: op.notes,
-        label: `Record ${quote(op.alias, 80)} as ${ALIAS_LABELS[op.alias_kind]} for ${state.state === 'bound' ? personLabel(state, op.person) : `${op.person.name} (created above)`}`,
+        label: `Record ${quote(op.alias, 120)} as ${ALIAS_LABELS[op.alias_kind]} for ${state.state === 'bound' ? personLabel(state, op.person) : `${op.person.name} (created above)`}`,
       });
     } else if (op.kind === 'safety_warning') {
       const base = { kind: 'safety_warning', op_index: op.index, hazard_class: op.hazard_class, alert_level: op.alert_level, note: op.note };
@@ -357,18 +374,18 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
             : `I could not confirm the platform identity for ${quote(state.display_name, 80)}; raise this warning from their person page.`);
           continue;
         }
-        steps.push({ ...base, entity_type: 'person', entity_id: canonical, person_ref: person.ref, label: `Raise a ${warning} on ${state.state === 'bound' ? state.display_name : person.name}: ${quote(op.note)} (${visibility})` });
+        steps.push({ ...base, entity_type: 'person', entity_id: canonical, person_ref: person.ref, label: `Raise a ${warning} on ${state.state === 'bound' ? state.display_name : person.name}: ${quote(op.note, 1000)} (${visibility})` });
       } else if (op.target.type === 'vehicle') {
         const vehicle = ensureVehicle(op, op.target.plate);
         if (vehicle.problem) { holdOp(vehicle.problem); continue; }
-        steps.push({ ...base, entity_type: 'vehicle', entity_id: vehicle.vehicle_id ?? null, plate: op.target.plate, label: `Raise a ${warning} on vehicle ${op.target.plate}: ${quote(op.note)} (${visibility})` });
+        steps.push({ ...base, entity_type: 'vehicle', entity_id: vehicle.vehicle_id ?? null, plate: op.target.plate, label: `Raise a ${warning} on vehicle ${op.target.plate}: ${quote(op.note, 1000)} (${visibility})` });
       } else {
-        steps.push({ ...base, entity_type: op.target.type, entity_id: op.target.id, label: `Raise a ${warning} on the ${op.target.type}${op.target.name ? ` ${op.target.name}` : ' you named'}: ${quote(op.note)} (${visibility})` });
+        steps.push({ ...base, entity_type: op.target.type, entity_id: op.target.id, label: `Raise a ${warning} on the ${op.target.type}${op.target.name ? ` ${op.target.name}` : ' you named'}: ${quote(op.note, 1000)} (${visibility})` });
       }
     } else if (op.kind === 'record_note') {
       steps.push({
         kind: 'record_note', op_index: op.index, record_kind: op.record_kind, record_id: op.record_id, entry_kind: op.entry_kind, body: op.body,
-        label: `Add a ${ENTRY_LABELS[op.entry_kind]} to the ${RECORD_KIND_LABELS[op.record_kind]} you named: ${quote(op.body, 200)}`,
+        label: `Add a ${ENTRY_LABELS[op.entry_kind]} to the ${RECORD_KIND_LABELS[op.record_kind]} you named: ${quote(op.body, 4000)}`,
       });
     }
   }
@@ -430,6 +447,43 @@ export function isTrustedPendingRecordUpdates(stored, { userId, conversationId, 
   return stored.steps.every((s) => isObject(s) && STEP_KINDS.includes(s.kind) && typeof s.label === 'string');
 }
 
+// Any organisation member may insert bob_messages rows (RLS checks organisation access only), so a pending plan
+// read back from the transcript is trusted only if it carries this server's signature over its exact contents.
+const SIGNATURE_CONTEXT = 'fcm-bob-record-updates-v1';
+
+// Key order and omitted (undefined) members are normalised so the plan verifies after its jsonb round trip.
+export function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => (item === undefined ? 'null' : canonicalJson(item))).join(',')}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+async function planSignature(secret, pending) {
+  const { signature: _ignored, ...unsigned } = pending;
+  const encoder = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', key, encoder.encode(`${SIGNATURE_CONTEXT}\n${canonicalJson(unsigned)}`)));
+  return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function signPendingRecordUpdates(secret, pending) {
+  if (typeof secret !== 'string' || secret.length < 32) throw new Error('The record-update signing key is not configured.');
+  return { ...pending, signature: await planSignature(secret, pending) };
+}
+
+export async function verifyPendingRecordUpdates(secret, pending) {
+  if (typeof secret !== 'string' || secret.length < 32 || !isObject(pending)) return false;
+  const given = pending.signature;
+  if (typeof given !== 'string' || !/^[0-9a-f]{64}$/.test(given)) return false;
+  const expected = await planSignature(secret, pending);
+  let difference = 0;
+  for (let i = 0; i < expected.length; i += 1) difference |= expected.charCodeAt(i) ^ given.charCodeAt(i);
+  return difference === 0;
+}
+
 // Answers a stored preview exactly once. The conditional update re-checks the outcome under the row lock,
 // so overlapping replies cannot both apply (or apply after a decline). Uses the transcript client only.
 export async function claimRecordUpdatePreview({ db, messageId, conversationId, planId, answer, now = new Date() }) {
@@ -437,6 +491,10 @@ export async function claimRecordUpdatePreview({ db, messageId, conversationId, 
   const { data: row, error } = await db.from('bob_messages').select('metadata').eq('id', messageId).eq('conversation_id', conversationId).maybeSingle();
   const metadata = row?.metadata;
   if (error || !isObject(metadata) || metadata.outcome !== 'proposed' || metadata.pending_record_updates?.plan_id !== planId) return false;
+  // A signed plan copied into a second row (a replay of an earlier preview) makes the plan id ambiguous: refuse it.
+  const { data: carriers, error: carrierError } = await db.from('bob_messages').select('id')
+    .eq('conversation_id', conversationId).eq('metadata->pending_record_updates->>plan_id', planId).limit(2);
+  if (carrierError || !Array.isArray(carriers) || carriers.length !== 1 || carriers[0]?.id !== messageId) return false;
   const { data: claimed, error: claimError } = await db.from('bob_messages')
     .update({ metadata: { ...metadata, outcome: answer === 'confirm' ? 'confirmed' : 'declined', record_updates_answered_at: now.toISOString() } })
     .eq('id', messageId).eq('conversation_id', conversationId).eq('metadata->>outcome', 'proposed')
@@ -550,7 +608,7 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending, dead
       }
     } else if (step.kind === 'record_note') {
       const existing = await call(rpc, 'list_record_updates', { p_record_kind: step.record_kind, p_record_id: step.record_id });
-      if (!existing.error && (Array.isArray(existing.data) ? existing.data : []).some((row) => row?.entry_kind === step.entry_kind && String(row?.body ?? '').trim() === step.body.trim())) {
+      if (!existing.error && isRepeatRecordUpdate(Array.isArray(existing.data) ? existing.data : [], step)) {
         receipt(step, 'already_present', `That exact ${ENTRY_LABELS[step.entry_kind] ?? 'entry'} is already on the record.`);
         continue;
       }
@@ -566,6 +624,19 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending, dead
   const problems = count('failed') + count('skipped_dependency') + count('not_attempted');
   const outcome = applied ? (problems ? 'partially_applied' : 'applied') : (problems ? 'failed' : 'already_present');
   return { outcome, receipts };
+}
+
+const FOLLOW_UP_KINDS = new Set(['follow_up_requested', 'follow_up_resolved']);
+const sameEntry = (row, step) => row?.entry_kind === step.entry_kind && String(row?.body ?? '').trim() === step.body.trim();
+
+// Notes and safety concerns repeat only if the exact entry exists. A follow-up repeats only if it matches the
+// latest follow-up entry (the one that sets the open/closed state), so re-opening a resolved follow-up still writes.
+export function isRepeatRecordUpdate(rows, step) {
+  if (!FOLLOW_UP_KINDS.has(step.entry_kind)) return rows.some((row) => sameEntry(row, step));
+  const latest = rows
+    .filter((row) => FOLLOW_UP_KINDS.has(row?.entry_kind))
+    .sort((a, b) => (Date.parse(String(b?.created_at ?? '')) || 0) - (Date.parse(String(a?.created_at ?? '')) || 0))[0];
+  return Boolean(latest) && sameEntry(latest, step);
 }
 
 const STATUS_WORDS = {

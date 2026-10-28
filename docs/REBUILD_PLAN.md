@@ -43,7 +43,24 @@ In-app Bob record updates, 2026-10-28:
   discarded, so concurrent yeses cannot double-write. Steps resolve
   person-creating links first, stop at a 90 s apply budget with
   "not attempted" receipts, and call a warning or note "already present"
-  only when it is an exact duplicate.
+  only when it is an exact duplicate (a follow-up only when it matches the
+  latest follow-up, which sets the open/closed state).
+- Second review round (PR #277): any organisation member can insert
+  `bob_messages` rows, so a pending plan is applied only if it carries the
+  server's HMAC over its exact contents and its plan id is carried by exactly
+  one transcript row (no forged or replayed previews). The confirm path stops
+  at the cancellation boundary before claiming. A planner-supplied person
+  record id must come back from the caller's own person search and is shown
+  with its stored name. Names fold only case and spacing, so "Māia" and "Maia"
+  stay separate unless the register binds them. Previews show every value in
+  full.
+- Data-loss fix found on the way: `manage_identity_vehicle` erased an
+  organisation's vehicle note whenever `p_fields` omitted `notes`, so NZTA owner
+  review (`'{}'`) and a vehicle registered by another administrator mid-confirm
+  silently lost the note. Migration
+  `20261101180000_manage_identity_vehicle_preserve_notes.sql` keeps an omitted
+  note (present-but-empty still clears), proven against disposable PostgreSQL
+  in `test/manage-identity-vehicle-notes-migration.test.js`.
 
 Builder research release follow-up, 2026-10-25:
 
