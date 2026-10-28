@@ -97,6 +97,19 @@ still requires the device position inside a verified site boundary. That is an
 attendance evidence and billing rule, not module access, and is left in place
 pending an owner ruling.
 
+## Owner ruling 2026-10-28: core officer place capture
+
+> Place workflow clarification, 2026-10-28: **Places** is a core officer tool,
+> independent of specialty ticks, shift state and geofence position. Its reader
+> and capture RPC require an active provider officer/admin-tier identity and a
+> current accepted or provider-admin-confirmed operational engagement with the
+> selected client (or the provider's own place). Branch authorisation must be
+> current. Only administrators can create client organisations or edit the full
+> site briefing, access, safety and commercial configuration. Field capture can
+> name a place and record a map-confirmed 10 m reference zone; it cannot replace
+> an existing perimeter or supply regulatory rules. Person-search and NZTA
+> permissions are unaffected. See the organisation and place model rulings.
+
 ## Owner ruling 2026-11-01: NZTA section 241 readiness (R&M Security and Investigations)
 
 R&M holds a section 241 authorisation (Gazette 2025-au4644) to use Motor

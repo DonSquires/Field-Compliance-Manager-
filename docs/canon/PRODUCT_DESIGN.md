@@ -14,6 +14,34 @@
 
 ## 1. Design Philosophy
 
+### Owner ruling 2026-10-28: service-provider task-first workspaces
+
+R&M's daily operation is the reference workflow, not a separate product or a
+hard-coded tenant mode. Replace the mandatory client setup stages with one
+client page: organisation text fields, explicit confirmation of the provider's
+engagement, and an Add location action above selectable location rows.
+Contacts, prices, scheduling and portal invitations may be completed later.
+Saving an engagement is an administrator's attestation, not a client signature
+or acceptance of a portal invitation.
+
+Each location opens one editable profile. Scheduling, reporting, maps and
+specialist controls are contextual destinations from that profile, not extra
+steps required to save its basic identity. Keep the selected client and place
+when moving between those destinations. Use ordinary operational labels;
+"house", "facet" and database identifiers belong in technical detail.
+
+Officers and admin officers can select, create and verify a place from the
+officer portal. A map preview and explicit confirmation records a named 10 m
+point zone, its client, actor, timestamp, original GPS accuracy and any manual
+correction. A point confirmation is not verification of an entire property
+perimeter. Existing boundaries remain intact and administrators can refine the
+record later. The location and geofence canon define the geometry semantics.
+
+Simplification does not remove tenant isolation, NZTA purpose controls, safety
+actions, historical evidence, contract/pricing authority or audit receipts.
+Review the three portals and their navigation against these tasks; a source
+review or a mocked browser test is not a completed live application audit.
+
 This is a **tactical operations platform**, not a consumer app. Three distinct operating contexts drive every design decision:
 
 | Context | Who | Environment | Priority |

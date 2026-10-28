@@ -75,6 +75,44 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 | **Master Shell** | Master, Grand Master | Policy & Governance | Multi-tenant setup, platform terms, module subscriptions |
 | **Bob Studio** | Owner, Grand Master | IDE / Multi-Ability Studio | Continuous in-app build, testing, and system extensions |
 
+### Client and location setup
+
+- Open **Clients**, then **Set up a new client**. Enter the client name and
+  confirm that your provider is engaged. Email, phone and notes are optional.
+  Choose an existing matching organisation instead of creating a duplicate.
+- Save the client, then use **Add location**. A location name is enough to
+  record an unverified site or area. No address, price, schedule or invitation
+  is required at this stage.
+- Select a location row to open its profile. Edit its name, notes and site
+  briefing/access/safety details; an address can be selected from address
+  search. **Scheduling and services** retains the client/site context.
+  **Reporting and activity** shows records for that location's sites/zones.
+  **Map, areas and restrictions** opens the existing specialist editor.
+  Delivery editing requires an existing client. A delivery link without one
+  opens the same simple setup form, not the former organisation/contact wizard.
+  Provider context follows the client into its profile and delivery editor.
+  Where several sites share a location, choose the intended active site before
+  opening scheduling. Area-only locations open agreement/service configuration
+  rather than defaulting to another site's schedule.
+- On the officer home page, use **Places**. Select the client and existing
+  location, or add a new one. If several site/area boundaries share the
+  location, choose the intended boundary. Capture GPS, inspect the map and
+  correct the point if needed, then confirm and save.
+- Accuracy worse than 10 m is a warning, not a claim of precise GPS. The
+  original fix/time/accuracy and corrected point are retained. Captures older
+  than ten minutes must be reacquired. Failed tiles cannot be confirmed.
+- The admin row/profile displays **Officer verified** after persistence. This
+  means a separate 10 m reference point was confirmed, not that the perimeter
+  or legal rules were verified. Existing boundaries and officer history remain.
+  To move or re-verify that reference point, capture it again through **Places**;
+  the specialist boundary editor cannot overwrite its verification provenance.
+  Reference points are not delivery locations, work areas or restriction targets.
+  Offline captures are not queued by this workflow; wait for the save receipt.
+- A stale-record error requires reloading before retrying. Multiple current
+  agreements require an administrator to review the intended engagement
+  rather than allowing the form to guess. Contacts, invitations, prices and
+  advanced readiness/handoff tools remain available separately.
+
 ### Vehicle search and cross-area subject trends
 
 - In **Vehicle Search & Flags**, enter any part of a registration. Plain text

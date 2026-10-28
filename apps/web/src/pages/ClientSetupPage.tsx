@@ -3,10 +3,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap } from '../components/LocationHouseMap';
+import { ServiceClientWorkspace } from '../components/ServiceClientWorkspace';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { supabase } from '../lib/supabase';
-import type { NavigateWithContext } from '../lib/workflowNavigation';
+import { readWorkflowContext, workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
 import './ClientSetupPage.css';
 
 export const SERVICE_CHOICES: Array<{ key: string; label: string; help: string; kind: 'visits' | 'post' | 'response' }> = [
@@ -21,9 +22,9 @@ export const SERVICE_CHOICES: Array<{ key: string; label: string; help: string; 
   { key: 'access_control', label: 'Access control', help: 'Open, close and control entry.', kind: 'visits' },
 ];
 export const PLACE_TYPES = [
-  { key: 'commercial_premises', label: 'Shop, office or premises' }, { key: 'car_park', label: 'Car park' },
-  { key: 'reserve', label: 'Park or reserve' }, { key: 'street', label: 'Street or public area' },
-  { key: 'residential', label: 'Home or residential block' }, { key: 'industrial', label: 'Yard or industrial site' },
+  { key: 'commercial_premises', label: 'Shop, office or premises' }, { key: 'parking_area', label: 'Car park' },
+  { key: 'public_space', label: 'Park, reserve or public area' },
+  { key: 'residential_complex', label: 'Home or residential block' }, { key: 'industrial_site', label: 'Yard or industrial site' },
 ];
 interface ScheduleForm { days: number[]; anyTime: boolean; start: string; end: string; visits: string; gap: string; stay: string; slaMinutes: string; notes: string; attendanceMode: 'scheduled' | 'as_attended'; patrolRouteId: string }
 const defaultSchedule = (): ScheduleForm => ({ days: [1, 2, 3, 4, 5, 6, 7], anyTime: true, start: '', end: '', visits: '1', gap: '60', stay: '10', slaMinutes: '', notes: '', attendanceMode: 'scheduled', patrolRouteId: '' });
@@ -45,16 +46,26 @@ const moduleKey = (key: string) => key === 'general_patrol' ? 'patrol' : key ===
 const newRow = (module: string): Row => ({ key: crypto.randomUUID(), module, enabled: false, scheduleId: null, workModel: null, form: defaultSchedule(), amount: '', unit: 'per_visit', rate: null, rateBlocked: false, dirty: false, scheduleDone: false, rateDone: false, requestId: crypto.randomUUID(), rateRequestId: crypto.randomUUID(), receipt: '' });
 const failureMessage = (failure: unknown) => failure instanceof Error ? failure.message : (failure as { message?: string })?.message ?? 'The request failed. Check permissions and retry.';
 
-const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: string; providerOrganizationId?: string; embedded?: boolean; onDirtyChange?: (dirty: boolean) => void; onOpenCoverage?: () => void }> = ({ onNavigate = () => undefined, accountId, providerOrganizationId, embedded = false, onDirtyChange, onOpenCoverage }) => {
-  const { profile, operatingOrganizationId } = useAuth();
-  const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
-  const canEdit = Boolean(branchId && isAdminTierRole(profile?.role));
+interface ClientSetupProps { onNavigate?: NavigateWithContext; accountId?: string; providerOrganizationId?: string; embedded?: boolean; onDirtyChange?: (dirty: boolean) => void; onOpenCoverage?: () => void }
+const ClientSetupPage: React.FC<ClientSetupProps> = props => {
   const location = useLocation();
   const navigate = useNavigate();
+  const account = props.accountId ?? new URLSearchParams(location.search).get('account') ?? '';
+  const onNavigate: NavigateWithContext = props.onNavigate ?? ((page, context) => navigate(`/admin/${page}${workflowContextQuery(context ?? {})}`));
+  return account
+    ? <DeliveryWorkspace key={account} {...props} accountId={account} onNavigate={onNavigate} />
+    : <ServiceClientWorkspace {...props} onNavigate={onNavigate} />;
+};
+
+const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithContext }> = ({ onNavigate, accountId, providerOrganizationId, embedded = false, onDirtyChange, onOpenCoverage }) => {
+  const { profile, operatingOrganizationId } = useAuth();
+  const location = useLocation();
+  const context = readWorkflowContext(location.search);
+  const branchId = providerOrganizationId ?? context.providerId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
+  const canEdit = Boolean(branchId && isAdminTierRole(profile?.role));
+  const requestedSite = new URLSearchParams(location.search).get('site');
+  const requestedLocation = context.locationId;
   const [client, setClient] = useState<Client | null>(null);
-  const [clientForm, setClientForm] = useState({ name: '', firstName: '', lastName: '', email: '', phone: '' });
-  const [contactSaved, setContactSaved] = useState(false);
-  const [matches, setMatches] = useState<Client[]>([]);
   const [places, setPlaces] = useState<Place[]>([]);
   const [selected, setSelected] = useState('');
   const [agreementId, setAgreementId] = useState<string | null>(null);
@@ -67,7 +78,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState<'organization' | 'location' | 'spatial' | 'invite' | 'bob' | null>(null);
+  const [drawer, setDrawer] = useState<'location' | 'spatial' | 'invite' | 'bob' | null>(null);
   const [mobilePane, setMobilePane] = useState<'locations' | 'detail'>('locations');
   const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
   const [candidates, setCandidates] = useState<AddressCandidate[]>([]);
@@ -76,8 +87,6 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
   const [workUnitId, setWorkUnitId] = useState<string | null>(null);
   const [inlineExpanded, setInlineExpanded] = useState(false);
   const [inlineServices, setInlineServices] = useState<Record<string, string>>({});
-  const clientRequest = useRef(crypto.randomUUID());
-  const contactRequest = useRef(crypto.randomUUID());
   const placeRequest = useRef(crypto.randomUUID());
   const routeRequest = useRef(crypto.randomUUID());
   const loadKey = useRef('');
@@ -94,7 +103,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
   const leave = (page: Parameters<NavigateWithContext>[0]) => {
     if (dirtyCount && !window.confirm('Unsaved location drafts will be lost. Leave this workspace?')) return;
     if (embedded && page === 'crm' && onOpenCoverage) onOpenCoverage();
-    else onNavigate(page, { accountId: client?.id });
+    else onNavigate(page, { accountId: client?.id, providerId: branchId ?? undefined });
   };
   useEffect(() => {
     if (!branchId) {
@@ -145,12 +154,11 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
     try {
       const org = await supabase.from('organizations').select('id,name,contact_email,contact_phone').eq('id', id).single();
       if (org.error || !org.data) throw org.error ?? new Error('Client not found or not accessible.');
-      const [sites, agreements, contacts] = await Promise.all([
-        supabase.from('client_sites').select('id,name,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
+      const [sites, agreements] = await Promise.all([
+        supabase.from('client_sites').select('id,name,location_id,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
         supabase.from('service_agreements').select('id,ends_on').eq('client_organization_id', id).eq('provider_organization_id', branchId).eq('agreement_type', 'operational').in('invitation_status', ['not_invited', 'invited', 'accepted']),
-        supabase.from('crm_contacts').select('id').eq('organization_id', id).eq('is_primary', true).is('deactivated_at', null).limit(1),
       ]);
-      if (sites.error || agreements.error || contacts.error) throw sites.error ?? agreements.error ?? contacts.error;
+      if (sites.error || agreements.error) throw sites.error ?? agreements.error;
       const active = (agreements.data ?? []).filter((agreement) => !agreement.ends_on || agreement.ends_on >= new Date().toISOString().slice(0, 10));
       if (active.length > 1) throw new Error('More than one live agreement exists for this provider. Choose the agreement in the client workspace before editing delivery.');
       const agreement = active[0]?.id ?? null;
@@ -186,16 +194,18 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
         }
       }
       if (version !== loadVersion.current) return;
-      setClient(org.data as Client); setContactSaved(Boolean(contacts.data?.length));
-      setClientForm({ name: org.data.name, firstName: '', lastName: '', email: org.data.contact_email ?? '', phone: org.data.contact_phone ?? '' });
-      setAgreementId(agreement); setPlaces((sites.data ?? []) as Place[]); setDrafts(next); setSelected(sites.data?.[0]?.id ?? '');
+      if (requestedSite && !sites.data?.some(site => site.id === requestedSite)) throw new Error('The requested site is inactive or unavailable. Return to its location profile to review it.');
+      if (requestedLocation && !sites.data?.some(site => site.id === requestedSite && site.location_id === requestedLocation)) throw new Error('Choose a specific active site from this location profile before editing delivery.');
+      setClient(org.data as Client);
+      setAgreementId(agreement); setPlaces((sites.data ?? []) as Place[]); setDrafts(next); setSelected(requestedSite ?? sites.data?.[0]?.id ?? '');
+      setMobilePane(requestedSite ? 'detail' : 'locations');
     } catch (failure) { if (version === loadVersion.current) setError(failureMessage(failure)); } finally { if (version === loadVersion.current) setLoading(false); }
-  }, [branchId]);
+  }, [branchId, requestedSite, requestedLocation]);
   useEffect(() => {
     const account = accountId ?? new URLSearchParams(location.search).get('account');
-    const key = `${branchId}:${account}`;
+    const key = `${branchId}:${account}:${requestedSite ?? ''}:${requestedLocation ?? ''}`;
     if (account && branchId && key !== loadKey.current) { loadKey.current = key; void loadClient(account); }
-  }, [location.search, branchId, loadClient, accountId]);
+  }, [location.search, branchId, loadClient, accountId, requestedSite, requestedLocation]);
   useEffect(() => {
     let cancelled = false;
     void supabase.from('module_catalog').select('module_key').eq('active', true).then(({ data, error: catalogError }) => {
@@ -203,53 +213,12 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
     });
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => {
-    if (client || clientForm.name.trim().length < 3) { setMatches([]); return; }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      const result = await supabase.from('organizations').select('id,name,contact_email,contact_phone').ilike('name', `%${clientForm.name.trim()}%`).limit(5);
-      if (!cancelled) {
-        if (result.error || !Array.isArray(result.data)) { setMatches([]); setError('Existing client matching is unavailable. Check the CRM before creating another organization.'); }
-        else setMatches(result.data.filter((item) => item.id !== branchId));
-      }
-    }, 350);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [client, clientForm.name, branchId]);
   const ensureAgreement = async () => {
     if (agreementId) return agreementId;
     if (!client) throw new Error('Save the organization first.');
     const result = await supabase.rpc('ensure_crm_client_agreement', { p_account_organization_id: client.id, p_provider_organization_id: branchId });
     if (result.error || !result.data?.agreement_id) throw result.error ?? new Error('Agreement could not be opened.');
     setAgreementId(result.data.agreement_id); return result.data.agreement_id as string;
-  };
-  const saveClient = (event: React.FormEvent) => {
-    event.preventDefault();
-    void run(async () => {
-      if (!clientForm.name.trim() || (!clientForm.email.trim() && !clientForm.phone.trim())) throw new Error('Add the client name and an email or phone.');
-      if (!contactSaved && (!clientForm.firstName.trim() || !clientForm.lastName.trim())) throw new Error('Add both first and last names for the primary contact.');
-      let record = client;
-      if (!record) {
-        const { data, error: saveError } = await supabase.rpc('manage_crm_organization', {
-          p_client_request_id: clientRequest.current, p_organization_id: null, p_expected_updated_at: null, p_action: 'create',
-          p_name: clientForm.name.trim(), p_organization_type: 'client', p_nzbn: null, p_company_registration_number: null,
-          p_contact_email: clientForm.email.trim() || null, p_contact_phone: clientForm.phone.trim() || null,
-          p_billing_email: null, p_billing_address: null, p_account_notes: null, p_status: null,
-        });
-        if (saveError || !data) throw saveError ?? new Error('The organization was not saved.');
-        record = data as Client; setClient(record); loadKey.current = `${branchId}:${record.id}`;
-        navigate(`${location.pathname}?account=${record.id}`, { replace: true });
-      }
-      if (!contactSaved) {
-        const contact = await supabase.rpc('manage_crm_contact', {
-          p_client_request_id: contactRequest.current, p_contact_id: null, p_account_organization_id: record.id, p_expected_updated_at: null, p_action: 'create',
-          p_first_name: clientForm.firstName.trim(), p_last_name: clientForm.lastName.trim(), p_role_title: null,
-          p_email: clientForm.email.trim() || null, p_phone: clientForm.phone.trim() || null, p_mobile: null, p_is_primary: true, p_is_emergency: false, p_notes: null,
-        });
-        if (contact.error) throw new Error(`Organization saved; contact failed: ${contact.error.message}. Retry to save only the contact.`);
-        setContactSaved(true);
-      }
-      setDrawer(null); setNotice('Organization and primary contact saved. Add locations when ready.');
-    });
   };
   const savePlace = (event: React.FormEvent) => {
     event.preventDefault();
@@ -361,13 +330,13 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
   });
 
   return <div className={`client-setup${embedded ? ` is-embedded${inlineExpanded ? ' is-expanded' : ''}` : ''}`} aria-busy={busy || loading}>
-    {!embedded && <header className="client-setup-head"><div><span>Client delivery workspace</span><h1>Set up a new client</h1></div><button type="button" onClick={() => leave('onboarding')}>All clients</button></header>}
+    {!embedded && <header className="client-setup-head"><div><span>Client delivery workspace</span><h1>Scheduling and services</h1></div><button type="button" onClick={() => leave('crm')}>All clients</button></header>}
     {!canEdit && <p role="alert">Provider administrator permission is required. No configuration can be saved.</p>}
     {error && <div className="client-setup-message is-error" role="alert">{error}{!client && !loading && new URLSearchParams(location.search).get('account') && <button type="button" onClick={() => void loadClient(new URLSearchParams(location.search).get('account')!)}>Retry loading client</button>}</div>}
     {notice && <div className="client-setup-message" role="status">{notice}</div>}
     {!embedded && <section className="client-setup-parent" aria-label="Parent organization and service agreement">
-      <div><small>Parent organization · workspace grouping, not legal ownership</small><strong>{client?.name ?? 'Choose or create a client organization'}</strong><span>{agreementId ? `Operational agreement · ${agreementId}` : 'Agreement opens through the governed writer on first delivery save'}</span></div>
-      <div className="client-setup-actions"><button type="button" onClick={() => setDrawer('organization')} disabled={busy || loading}>{client ? contactSaved ? 'Organization summary' : 'Complete contact' : 'Add organization'}</button><button type="button" disabled={!client || busy} onClick={() => setDrawer('invite')}>Client invitation</button><button type="button" onClick={() => setDrawer('bob')}>Bob Quick Setup</button></div>
+      <div><small>Client organisation</small><strong>{client?.name ?? (loading ? 'Loading client...' : 'Client unavailable')}</strong><span>{agreementId ? `Operational agreement · ${agreementId}` : 'Agreement opens through the governed writer on first delivery save'}</span></div>
+      <div className="client-setup-actions"><button type="button" onClick={() => leave('crm')} disabled={!client || busy || loading}>Client details and contacts</button><button type="button" disabled={!client || busy} onClick={() => setDrawer('invite')}>Client invitation</button><button type="button" onClick={() => setDrawer('bob')}>Bob Quick Setup</button></div>
     </section>}
     {embedded && <section className="crm-child-sites" aria-label="Child sites and inline services">
       <header><h3>Child sites</h3><div><button type="button" disabled={!client || busy || !canEdit} onClick={() => setDrawer('location')}>Add Location</button><button type="button" onClick={() => setDrawer('bob')}>Bob Quick Setup</button><button type="button" onClick={onOpenCoverage}>Agreement coverage</button></div></header>
@@ -431,7 +400,6 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: 
     </div>
     <footer className="client-setup-savebar"><div><strong>{dirtyCount ? `${dirtyCount} unsaved service rows` : 'No unsaved service changes'}</strong><small>Sequential governed saves · completed rows stay saved if another fails</small></div><button type="button" className="btn btn-primary" disabled={!canEdit || busy || loading || !dirtyCount} onClick={saveMatrix}>{busy ? 'Working…' : 'Save changes'}</button></footer>
     {drawer && <div className="client-setup-drawer-backdrop"><section ref={drawerRef} className="client-setup-drawer" role="dialog" aria-modal="true" aria-label={drawer === 'bob' ? 'Bob Quick Setup' : `${drawer} details`} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDrawer(null); }}><header><h2>{drawer === 'bob' ? 'Bob Quick Setup' : drawer === 'spatial' ? 'Spatial context' : drawer === 'invite' ? 'Client invitation' : drawer === 'location' ? 'Add Location' : 'Client organization'}</h2><button type="button" autoFocus aria-label="Close details" disabled={busy} onClick={() => setDrawer(null)}>Close</button></header>
-      {drawer === 'organization' && <form onSubmit={saveClient}><p>The client is own-rooted. The operational agreement links this organization to the provider; “parent” describes this workspace only.</p><label><span>Client name</span><input required disabled={Boolean(client) || busy || !canEdit} value={clientForm.name} onChange={(event) => setClientForm({ ...clientForm, name: event.target.value })} /></label>{matches.length > 0 && <div className="client-setup-matches"><span>Already on the books?</span>{matches.map((match) => <button key={match.id} type="button" onClick={() => { setDrawer(null); navigate(`${location.pathname}?account=${match.id}`, { replace: true }); }}>{match.name}</button>)}</div>}{(!client || !contactSaved) && <><div className="client-setup-two">{(['firstName', 'lastName'] as const).map((key) => <label key={key}><span>Contact {key === 'firstName' ? 'first' : 'last'} name</span><input disabled={busy || !canEdit} value={clientForm[key]} onChange={(event) => setClientForm({ ...clientForm, [key]: event.target.value })} /></label>)}</div>{(['email', 'phone'] as const).map((key) => <label key={key}><span>{key === 'email' ? 'Email' : 'Phone'}</span><input type={key === 'email' ? 'email' : 'tel'} disabled={busy || !canEdit || Boolean(client)} value={clientForm[key]} onChange={(event) => setClientForm({ ...clientForm, [key]: event.target.value })} /></label>)}<button type="submit" disabled={busy || !canEdit}>Save organization and contact</button></>}{client && contactSaved && <><p>{client.contact_email || client.contact_phone || 'No contact details recorded'}</p><button type="button" onClick={() => leave('crm')}>Manage organization and contacts</button></>}</form>}
       {drawer === 'location' && <form onSubmit={savePlace}><p>Creating this location saves immediately. Service changes remain drafts until the workspace save bar is used.</p><label><span>Place name</span><input required disabled={busy || !canEdit} value={placeForm.name} onChange={(event) => setPlaceForm({ ...placeForm, name: event.target.value })} /></label><label><span>What kind of place</span><select disabled={busy || !canEdit} value={placeForm.type} onChange={(event) => setPlaceForm({ ...placeForm, type: event.target.value })}>{PLACE_TYPES.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}</select></label><label><span>Address</span><input disabled={busy || !canEdit} value={placeForm.address} onChange={(event) => { setPlaceForm({ ...placeForm, address: event.target.value }); setChosenAddress(null); setCandidates([]); }} /></label><button type="button" disabled={busy || placeForm.address.length < 4} onClick={() => void run(async () => { const found = await resolveAddressCandidates(placeForm.address, 5); setCandidates(found); if (!found.length) throw new Error('No address matched. Try the street number, name and suburb.'); if (found.length === 1) setChosenAddress(found[0]); })}>Find address</button><div role="radiogroup" aria-label="Address matches">{candidates.map((candidate, index) => <label className="client-setup-check" key={`${candidate.label}-${index}`}><input type="radio" name="address" checked={chosenAddress === candidate} onChange={() => setChosenAddress(candidate)} />{candidate.label}</label>)}</div><button type="submit" disabled={busy || !canEdit || !chosenAddress}>Create location</button></form>}
       {drawer === 'spatial' && selectedPlace && <><p>Boundary edits use the existing proposal and human-verification path and save separately from service drafts.</p>{selectedPlace.gps_lat != null && selectedPlace.gps_lng != null ? <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: selectedPlace.name, address: selectedPlace.address }} sites={[{ ...selectedPlace, boundary_status: 'provisional' }]} zones={[]} editableEntity={canEdit ? { type: 'client_site', id: selectedPlace.id, organizationId: client?.id ?? '', centerLat: selectedPlace.gps_lat, centerLng: selectedPlace.gps_lng, onSaved: (verified) => setPlaces((current) => current.map((place) => place.id === selected ? { ...place, boundary_verification: verified ? 'verified' : 'unverified' } : place)) } : undefined} /> : <p>No resolved map pin is recorded. Use the governed location workspace to resolve the address.</p>}</>}
       {drawer === 'invite' && <><p>Optional client portal access. Provider configuration does not wait for portal acceptance.</p><p>{inviteEmail ? `Invitation sent to ${inviteEmail}` : client?.contact_email ?? 'No primary email recorded'}</p><button type="button" disabled={!client || !canEdit || busy || Boolean(inviteEmail)} onClick={sendInvite}>Send invitation</button></>}

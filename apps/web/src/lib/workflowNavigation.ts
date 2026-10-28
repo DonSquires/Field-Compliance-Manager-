@@ -7,13 +7,14 @@ export interface WorkflowContext {
   zoneId?: string;
   workUnitId?: string;
   handoffId?: string;
+  providerId?: string;
 }
 
 export type NavigateWithContext = (destination: string, context?: WorkflowContext) => void;
 
 const PARAMS: Array<[keyof WorkflowContext, string]> = [
   ['accountId', 'account'], ['agreementId', 'agreement'], ['ledgerId', 'ledger'], ['locationId', 'location'],
-  ['siteId', 'site'], ['zoneId', 'zone'], ['workUnitId', 'work_unit'], ['handoffId', 'handoff'],
+  ['siteId', 'site'], ['zoneId', 'zone'], ['workUnitId', 'work_unit'], ['handoffId', 'handoff'], ['providerId', 'provider'],
 ];
 
 export function readWorkflowContext(search: string): WorkflowContext {

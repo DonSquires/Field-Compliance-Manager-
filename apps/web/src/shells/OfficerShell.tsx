@@ -88,6 +88,7 @@ const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreed
 const OfficerOvernightVerificationPage = React.lazy(() => import('../pages/OfficerOvernightVerificationPage'));
 const ComingSoonPage = React.lazy(() => import('../pages/ComingSoonPage'));
 const OfficerMapPage = React.lazy(() => import('../pages/OfficerMapPage'));
+const OfficerPlacesPage = React.lazy(() => import('../pages/OfficerPlacesPage'));
 const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then((module) => ({ default: module.OfficerHomePage })));
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
@@ -98,7 +99,7 @@ const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'access_control' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
-  | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
+  | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'places' | 'dispatch' | 'debrief'
   | 'vehicle_lookup' | 'person_search' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
@@ -122,6 +123,7 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   overnight_verification: { label: 'Overnight', description: 'Verify overnight activity', icon: Moon },
   checkpoint_scan: { label: 'Checkpoints', description: 'Scan assigned checkpoints', icon: MapPin },
   map: { label: 'Map', description: 'View operational places', icon: Map },
+  places: { label: 'Places', description: 'Add or verify a location with GPS', icon: MapPin },
   dispatch: { label: 'Dispatch', description: 'Live jobs and response', icon: Radio },
   debrief: { label: 'Debrief', description: 'Close the shift and follow up', icon: MessageSquare },
   vehicle_lookup: { label: 'Vehicle', description: 'Search vehicle history', icon: Car },
@@ -130,7 +132,7 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   workshop: { label: 'Workshop', description: 'Your builds and maintenance visits', icon: Wrench },
 };
 
-const CORE_OFFICER_MODULES: ReadonlySet<string> = new Set(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'bob']);
+const CORE_OFFICER_MODULES: ReadonlySet<string> = new Set(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'places', 'bob']);
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
@@ -462,6 +464,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'map':
         return <OfficerMapPage />;
+      case 'places':
+        return <OfficerPlacesPage />;
       case 'modules':
         return (
           <section className="officer-module-directory">

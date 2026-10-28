@@ -18,6 +18,7 @@ import {
 } from "../components/LocationHouseMap";
 import { OperationalPlaceManager } from "../components/OperationalPlaceManager";
 import { PlaceHazardRegister } from "../components/PlaceHazardRegister";
+import LocationProfilePage from "./LocationProfilePage";
 import { readWorkflowContext, workflowContextQuery } from "../lib/workflowNavigation";
 import "./PageStyles.css";
 import "./GeographyPages.css";
@@ -394,4 +395,8 @@ const LocationsPage: React.FC = () => {
   );
 };
 
-export default LocationsPage;
+export default function LocationsRoute() {
+  const location = useLocation();
+  const id = readWorkflowContext(location.search).locationId;
+  return id ? <LocationProfilePage key={id} locationId={id} /> : <LocationsPage />;
+}
