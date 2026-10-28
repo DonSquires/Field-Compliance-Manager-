@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Car, CheckCircle2, Eye, FileSearch, Filter, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
@@ -65,20 +65,28 @@ export default function ObservationSearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Only the latest organisation's answers may land; an earlier org's identity access or options are discarded.
+  const optionsRequest = useRef(0);
   const loadOptions = useCallback(async () => {
-    if (!profile?.organizationId) return;
-    const { data: identityAccess } = await supabase.rpc('can_manage_r_and_m_identity');
+    const requestId = ++optionsRequest.current;
+    const organizationId = profile?.organizationId;
+    setCanManageIdentity(false);
+    setPeople([]);
+    if (!organizationId) return;
+    const { data: identityAccess } = await supabase.rpc('can_view_rnm_identity_for_organization', { p_organization_id: organizationId });
+    if (requestId !== optionsRequest.current) return;
     setCanManageIdentity(identityAccess === true);
     const [siteResult, zoneResult, vehicleResult, locationResult, incidentResult] = await Promise.all([
-      supabase.from('client_sites').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
-      supabase.from('location_zones').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
+      supabase.from('client_sites').select('id, name').eq('organization_id', organizationId).order('name').limit(200),
+      supabase.from('location_zones').select('id, name').eq('organization_id', organizationId).order('name').limit(200),
       supabase.from('canonical_vehicle_public').select('id, plate_number, make, model').order('plate_number').limit(200),
-      supabase.from('locations').select('id, name, address').eq('organization_id', profile.organizationId).order('name').limit(200),
-      supabase.from('incidents').select('id, incident_type, description').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }).limit(200),
+      supabase.from('locations').select('id, name, address').eq('organization_id', organizationId).order('name').limit(200),
+      supabase.from('incidents').select('id, incident_type, description').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(200),
     ]);
     const peopleResult = identityAccess === true
-      ? await supabase.rpc('list_verified_person_projections_for_organization', { p_organization_id: profile.organizationId })
+      ? await supabase.rpc('list_verified_person_projections_for_organization', { p_organization_id: organizationId })
       : { data: [] as Option[] };
+    if (requestId !== optionsRequest.current) return;
     setSites((siteResult.data ?? []) as Option[]);
     setZones((zoneResult.data ?? []) as Option[]);
     setVehicles((vehicleResult.data ?? []) as Option[]);

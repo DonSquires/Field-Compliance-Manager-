@@ -12,7 +12,6 @@ const json = (body: Record<string, unknown>, status = 200) => new Response(JSON.
 serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
-  if (!applyApiKey) return json({ error: 'Akahu Apply is not configured yet' }, 503);
 
   const authorization = request.headers.get('Authorization');
   if (!authorization) return json({ error: 'Authentication required' }, 401);
@@ -24,6 +23,9 @@ serve(async (request) => {
   const { data: profile } = await admin.from('user_profiles').select('organization_id,role,deactivated_at').eq('id', user.id).maybeSingle();
   if (!profile?.organization_id || profile.deactivated_at) return json({ error: 'Active organisation profile required' }, 403);
   if (!['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role)) return json({ error: 'Finance administrator required' }, 403);
+  // A missing provider key is a provisioning state, not a server fault: report it
+  // so the workspace can show "not connected" instead of failing every page load.
+  if (!applyApiKey) return json({ configured: false, reason: 'akahu_apply_not_configured', apply_org: null, api_key_exposed: false });
 
   const response = await fetch(`${applyBase}/orgs/current`, { headers: { Authorization: `Bearer ${applyApiKey}`, Accept: 'application/json' } });
   if (!response.ok) return json({ error: 'Akahu Apply rejected the server configuration', upstream_status: response.status }, response.status === 401 ? 502 : 502);
