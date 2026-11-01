@@ -42613,6 +42613,7 @@ export type Database = {
           scheduled_hours: number
           staff_id: string
           status: string
+          submitted_at: string
           work_derived_hours: number
           work_summary: Json
         }[]
