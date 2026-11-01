@@ -38,10 +38,14 @@
     "packageJson": {
       "dependencies": [
         "npm:@supabase/supabase-js@^2.57.4",
+        "npm:exceljs@4.4.0",
         "npm:supabase@^2.115.0",
         "npm:undici@^7.30.0",
         "npm:ws@^8.21.0"
-      ]
+      ],
+      "overrides": {
+        "uuid": "11.1.1"
+      }
     }
   }
 }

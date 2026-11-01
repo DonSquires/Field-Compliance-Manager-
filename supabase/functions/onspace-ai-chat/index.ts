@@ -968,6 +968,8 @@ function isValidGeoJsonBoundary(b: any) {
 }
 async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: string, userId: string | null = null) {
   const r = (role || '').toLowerCase();
+  // Owner ruling (2026-11-01): the officer role is deliberately the ensign tier in Bob (as in _shared/auth.ts);
+  // there is no 'officer' tier, so field officers do not get ingest, import, schema inspection or entitled-org scope.
   const tier = r === 'grand_master' ? 'admiral' : r === 'master' ? 'captain' : r === 'admin' || r === 'admin_officer' ? 'commander' : r === 'officer' ? 'ensign' : 'guest';
   const crossOrgUnrestricted = tier === 'admiral';
   let scopeOrgIds = orgId ? [
@@ -990,7 +992,7 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   // Operational-data scope (sites/zones) = full entitled set incl. bidirectional
   // agreements, per the ratified scoping ruling (!1350). Transcripts are
   // owning-org-only (a different, tighter scope) and are NOT scoped here.
-  if (userId && (tier === 'captain' || tier === 'commander' || tier === 'officer')) {
+  if (userId && (tier === 'captain' || tier === 'commander')) {
     try {
       const { data: entitled } = await supabase.rpc('my_entitled_org_ids_for_user', {
         p_user_id: userId
@@ -1024,9 +1026,9 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
     }
   }
   const canWrite = tier === 'admiral' || tier === 'captain' || tier === 'commander';
-  const canIngest = canWrite || tier === 'officer';
+  const canIngest = canWrite;
   const canPromote = canWrite;
-  const canInspectSchema = canWrite || tier === 'officer';
+  const canInspectSchema = canWrite;
   const canCompareData = tier !== 'guest';
   const allowedTools = [
     'understand_document',
@@ -1049,7 +1051,7 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('inspect_platform_services');
   if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'read_issues', 'propose_client_root_org');
   else if (tier === 'captain' || tier === 'commander') allowedTools.push('sql_read', 'check_proposals');
-  else if (tier === 'officer' || tier === 'ensign') allowedTools.push('check_proposals');
+  else if (tier === 'ensign') allowedTools.push('check_proposals');
   // C2 (issue #3): resolve the caller's area x level matrix for this org. Admiral
   // (grand_master) is unrestricted, so the matrix is not applied to them. For
   // everyone else it is a best-effort NARROWING signal read by the UI/help layer;
