@@ -47,16 +47,38 @@ const RECORD_NOUN_RE = /\b(?:records?|register|details|alias(?:es)?|aka|safety w
 const RECORD_DOMAIN_RE = /\b(?:(?:person|people|persons)\s+(?:records?|register|details|profiles?)|veh[a-z]{2,6}|plates?|regos?|registration|alias(?:es)?|aka|safety warnings?|canonical records?|identity (?:register|records?))\b/i;
 const RECORD_UPDATE_REQUEST_RE = new RegExp(`${RECORD_UPDATE_VERB_RE.source}[^.?!\\n]{0,80}?${RECORD_NOUN_RE.source}`, 'i');
 const STATUS_QUESTION_RE = /^\s*(?:did|have|has|was|were|is|are|how|what|where|why|when|which|who)\b/i;
+// "Do you have a way to update vehicle records?" asks what Bob can do; it is not a request to change records.
+// A polite request carries the facts or points at them ("Can you add these details: …"), so only a short single
+// question that supplies and points at nothing counts as a capability question.
+const CAPABILITY_QUESTION_RE = /^\s*(?:(?:do|does|can|could|would|will)\s+(?:you|bob)\b|(?:is|are)\s+(?:you|there)\s+(?:able|any|a)\b|is it possible\b)/i;
+const SUPPLIED_DETAIL_RE = /[:\n\d@]|\b(?:these|this|that|those|them|her|his|their|below|following|above|attached|here)\b/i;
 const RECORD_UPDATE_REFUSAL_RE = /\b(?:can(?:no|')?t|cannot|unable to|not able to)\b[^.\n]{0,60}\b(?:write|update|apply|create|record|add|link|register|change)\b|\b(?:no|isn't an?|is not an?|there is no|without an?)\b[^.\n]{0,40}\b(?:update|write|record)\s+(?:path|tool|route)\b/i;
+// The instruction often follows a long pasted email or call note, so the end of the message is read as well.
+const RECORD_REQUEST_WINDOW = 300;
+const RECORD_DOMAIN_WINDOW = 4000;
+
+function isCapabilityQuestion(message) {
+  const t = message.trim();
+  return t.length <= 160 && /\?$/.test(t) && CAPABILITY_QUESTION_RE.test(t) && !SUPPLIED_DETAIL_RE.test(t);
+}
+
+function lastClause(text) {
+  return text.split(/(?<=[.!?])\s+|\n+/).map((part) => part.trim()).filter(Boolean).pop() || '';
+}
 
 function skippedRecordUpdate(decision, input, message, reply) {
   if (decision.action !== 'answer' || decision.tool) return false;
   if (!(Array.isArray(input.tools) && input.tools.some((t) => t && t.tool === 'update_records'))) return false;
-  const opening = message.replace(/[\u2018\u2019]/g, "'").slice(0, 300);
+  const text = message.replace(/[\u2018\u2019]/g, "'");
   const answer = reply.replace(/[\u2018\u2019]/g, "'");
-  if (STATUS_QUESTION_RE.test(opening)) return false;
-  if (!RECORD_DOMAIN_RE.test(opening) && !RECORD_DOMAIN_RE.test(answer)) return false;
-  return RECORD_UPDATE_REQUEST_RE.test(opening) || RECORD_UPDATE_REFUSAL_RE.test(answer);
+  if (isCapabilityQuestion(text)) return false;
+  const opening = text.slice(0, RECORD_REQUEST_WINDOW);
+  const tail = text.length > RECORD_REQUEST_WINDOW ? text.slice(-RECORD_REQUEST_WINDOW) : '';
+  const openingIsQuestion = STATUS_QUESTION_RE.test(opening);
+  const requested = (!openingIsQuestion && RECORD_UPDATE_REQUEST_RE.test(opening))
+    || (Boolean(tail) && !STATUS_QUESTION_RE.test(lastClause(tail)) && RECORD_UPDATE_REQUEST_RE.test(tail));
+  if (!RECORD_DOMAIN_RE.test(text.slice(0, RECORD_DOMAIN_WINDOW)) && !RECORD_DOMAIN_RE.test(answer)) return false;
+  return requested || (!openingIsQuestion && RECORD_UPDATE_REFUSAL_RE.test(answer));
 }
 
 function countQuestionLines(text) {

@@ -9887,24 +9887,51 @@ serve(async (req)=>{
             // merge into it) unless the planner explicitly starts over. Only a preview this server signed for this
             // caller, conversation and organisation can be amended.
             const prior = pending?.kind === 'record_updates_pending' ? pending.record_updates : null;
-            const amendable = Boolean(prior) && toolArgs.replace_all !== true && Array.isArray(prior?.source_operations) &&
+            const trustedPrior = Boolean(prior) && toolArgs.replace_all !== true && typeof pending?.message_id === 'string' &&
               isTrustedPendingRecordUpdates(prior, { userId: user.id, conversationId, organizationId: orgId }) &&
               await verifyPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, prior);
+            const amendable = trustedPrior && Array.isArray(prior?.source_operations);
+            // Every successor (amended, or the same preview re-issued) first retires the preview it replaces, in its
+            // one transcript row and only while it is still unanswered. A copy of a signed preview in a second row,
+            // or a preview confirmed meanwhile, cannot be carried forward under a fresh plan id.
+            const retirePrior = () => claimRecordUpdatePreview({
+              db: admin, messageId: pending?.message_id, conversationId, planId: prior?.plan_id, answer: 'amend'
+            });
+            const alreadyAnswered = () => ({
+              reply: 'That preview has already been answered or replaced, so I have not changed it and nothing more was written. Ask me what changed if you want to check.',
+              meta: toolMeta('already_answered', { record_updates_plan_id: prior?.plan_id })
+            });
+            // The preview still waiting is kept exactly as it was (steps, held items and sources) under a fresh plan
+            // id; created_at keeps its expiry.
+            const reissuePrior = async (lead: string, extra: JsonRecord) => {
+              let kept;
+              try {
+                kept = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, { ...prior, plan_id: crypto.randomUUID() });
+              } catch {
+                return null;
+              }
+              if (!(await retirePrior())) return alreadyAnswered();
+              return {
+                reply: `${lead}\n\nThe earlier preview still stands unchanged. Reply **yes** to apply it as shown, or **no** to discard it.`,
+                meta: toolMeta('proposed', { pending_record_updates: kept, ...extra })
+              };
+            };
+            if (trustedPrior && !amendable) {
+              // A preview made before previews could be amended carries no sources to rebuild it from.
+              const kept = await reissuePrior(
+                'That preview was made before I could change a preview in place, so I cannot amend it. Reply **no** to discard it and then tell me the full set of changes, and I will show a fresh preview.',
+                { legacy_preview_reissued_for_plan_id: prior?.plan_id }
+              );
+              if (kept) return kept;
+              return { reply: 'I cannot change or hold that preview right now, so nothing will be changed. Tell me the full set of changes again shortly and I will show a fresh preview.', meta: toolMeta('unavailable') };
+            }
             const validated = amendable ? amendRecordUpdatePlan(prior, toolArgs) : validateRecordUpdatePlan(toolArgs);
             const plan = validated.ok ? validated.plan : null;
             if (!plan) {
               if (amendable) {
-                // The rejected amendment must not consume the preview that is still waiting: re-issue it unchanged
-                // under a fresh plan id (a copied plan id is refused at claim time); created_at keeps its expiry.
-                try {
-                  const kept = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, { ...prior, plan_id: crypto.randomUUID() });
-                  return {
-                    reply: `${String(validated.error ?? 'I could not apply that change to the preview.')}\n\nThe earlier preview still stands unchanged. Reply **yes** to apply it as shown, or **no** to discard it.`,
-                    meta: toolMeta('proposed', { pending_record_updates: kept, amendment_rejected_for_plan_id: prior?.plan_id })
-                  };
-                } catch {
-                  // Fall through: without a signing key the earlier preview cannot be carried forward.
-                }
+                // The rejected amendment must not consume the preview that is still waiting.
+                const kept = await reissuePrior(String(validated.error ?? 'I could not apply that change to the preview.'), { amendment_rejected_for_plan_id: prior?.plan_id });
+                if (kept) return kept;
               }
               return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
             }
@@ -9913,7 +9940,10 @@ serve(async (req)=>{
               rpc: (name: string, args: JsonRecord) => callerClient.rpc(name, args), organizationId: orgId, plan
             });
             const preview = renderRecordUpdatePreview({ ...resolved, amended: amendable });
-            if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length, ...amendedFrom }) };
+            if (!resolved.steps.length) {
+              if (amendable && !(await retirePrior())) return alreadyAnswered();
+              return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length, ...amendedFrom }) };
+            }
             let signed;
             try {
               signed = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, {
@@ -9925,6 +9955,7 @@ serve(async (req)=>{
             } catch {
               return { reply: 'I cannot hold a change preview for you to confirm right now, so nothing will be changed. Please try again shortly.', meta: toolMeta('unavailable') };
             }
+            if (amendable && !(await retirePrior())) return alreadyAnswered();
             return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed, ...amendedFrom }) };
           }
         case 'cancel_builder_job':

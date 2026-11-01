@@ -369,8 +369,8 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   caller's JWT and only the existing audited RPCs (`manage_identity_vehicle`,
   `update_vehicle_profile_details`, `record_vehicle_person`, `add_person_alias`,
   `raise_entity_flag`, `add_record_update`, and, for creating a person record
-  or adding details such as role or affiliation, contact details and notes,
-  `manage_identity_person_record`, which the database limits to
+  or adding details such as role or affiliation, contact details, date of birth
+  and notes, `record_identity_person_details`, which the database limits to
   identity-register administrators). The identity-critical human key is
   that confirmation of the exact preview, turned with the caller's own rank and
   `can_access_vehicle_owner_identity`: Bob holds no write authority of his own
@@ -386,17 +386,40 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   claimed before anything is applied or discarded, so overlapping replies
   cannot apply it twice. Each step reports applied, already present (only an
   exact duplicate), failed or not attempted; Bob never claims a change without
-  a receipt. A person record is created only when no exact match exists; a
-  strong near match (a spelling or surname variant) is held until the user says
-  the person is different, and the register is checked again immediately
-  before creating. Editing a person never renames them: the update carries the
-  name the register holds at that moment. A follow-up message while a preview
-  waits amends that preview rather than replacing it: new or corrected items
-  merge into it (the same vehicle, person, link, name or warning replaces the
-  earlier item), numbered items can be dropped, and one updated preview of
-  everything needs a fresh yes. A rejected amendment leaves the earlier
-  preview standing, and the planner's verifier blocks a prose refusal when the
-  user asked for record changes and `update_records` was available.
+  a receipt. People are matched with the register's own scoring
+  (`find_person_matches`): an exact name or active alias binds, a supplied date
+  of birth tells namesakes apart (someone recorded with a different date of
+  birth is a different person; someone recorded without one may be the same
+  person), and any other candidate the register returns (a spelling or surname
+  variant, or a similar name) holds the create, and every link, name or warning
+  for that person, until the user says who it is or confirms the person is
+  different (`confirm_new_person`), exactly as the register screen asks. The
+  create itself is one database operation serialised per organisation and
+  name: if someone with that exact name and no conflicting date of birth was
+  recorded after the preview, it returns that person (reported as already on
+  record) instead of making a second record, and the records the user said are
+  different people never count. Editing a person changes details only, under
+  the row lock: the name is never sent, so a rename made since the preview
+  stands, and a person merged or resolved into another record since the preview
+  is refused with nothing written. Each step is audited against the source of
+  the items it came from. A follow-up message while a preview waits amends that
+  preview rather than replacing it: new or corrected items merge into it (the
+  same vehicle, person, link, name, warning, site, place or report replaces the
+  earlier item), `corrections` move every carried item from a mistyped name or
+  plate to the corrected one, and items can be dropped by number (a combined
+  person item drops everything it combined) or by wording that matches exactly
+  one preview line, including a copied "Not included" line; wording that fits
+  several lines changes nothing. One updated preview of everything needs a
+  fresh yes. Before any successor is issued, the waiting preview is retired in
+  its one transcript row while it is still unanswered, so a copied preview or
+  one confirmed meanwhile is never carried forward and the earlier preview and
+  its successor can never both be confirmed. A rejected amendment re-issues the
+  earlier preview unchanged (steps, held items and sources), a preview made
+  before amendments existed is re-issued unchanged with a note that it cannot
+  be amended, and the planner's verifier blocks a prose refusal when the user
+  asked for record changes and `update_records` was available, without
+  treating a capability question ("can you update vehicle records?") as a
+  request and reading the end of a long pasted message as well as its start.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no
