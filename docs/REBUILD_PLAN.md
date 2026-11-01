@@ -256,12 +256,16 @@ Owner-directed client/place simplification, 2026-10-28:
   account. The existing `manage_crm_location` writer and place-identity trigger
   create the account-scoped house and reuse the canonical address identity;
   they do not grant access to the other account's house or records. Editing
-  either search field clears stale results before the operator acts. After,
-  the two houses remain separate while their `canonical_place_id` is shared.
-  This is covered by the CRM workspace guard and the place-model convergence
-  database fixture. The local Atlas manifest confirms the existing component
-  calls to `find_crm_location_candidates` and `manage_crm_location` and its
-  read of `locations`; no live Atlas write was made because the session has no
+  either search field invalidates the pending lookup generation, clears stale
+  results and errors, and causes any late success or failure response to be
+  ignored. Closing or reopening the lookup also invalidates pending requests.
+  After, the two houses remain separate while their `canonical_place_id` is
+  shared. The CRM workspace guard and browser regressions cover cross-account
+  creation plus stale success/error responses; the place-model convergence
+  database fixture verifies the shared canonical identity. The local Atlas
+  manifest confirms the existing component calls to
+  `find_crm_location_candidates` and `manage_crm_location` and its read of
+  `locations`; no live Atlas write was made because the session has no
   authorized Atlas credentials. The protected main-branch refresh remains the
   release path.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,

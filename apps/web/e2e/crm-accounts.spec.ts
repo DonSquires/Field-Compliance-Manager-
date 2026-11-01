@@ -247,7 +247,7 @@ test('relationships workspace opens the operational account record', async ({ pa
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
-test('location house lookup exposes only shared physical setup and blocks duplicate creation', async ({ page }) => {
+test('location house lookup exposes shared setup and allows a separate account house', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await page.route('**/rest/v1/rpc/find_crm_location_candidates', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
     location_id: '91919191-9191-4919-8919-919191919191', name: 'Nelson Civic Centre', address: '1 Civic Square, Nelson', suburb: 'Nelson', postcode: '7010',
@@ -255,6 +255,7 @@ test('location house lookup exposes only shared physical setup and blocks duplic
   }]) }));
   await signInAsAdmin(page, '/admin/crm');
   await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: 'Places 1' }).click();
   await workspace.getByRole('button', { name: 'Find or add location' }).click();
@@ -264,11 +265,97 @@ test('location house lookup exposes only shared physical setup and blocks duplic
   const lookup = workspace.getByText('Possible physical place matches').locator('..');
   await expect(lookup).toContainText('Nelson Civic Centre');
   await expect(lookup).toContainText('2 site facets · 1 zone facet · verified geometry available');
-  await expect(lookup).toContainText('Existing place is managed by another account');
-  await expect(lookup.getByRole('button', { name: 'Create new location' })).toHaveCount(0);
+  await expect(lookup).toContainText('Another account already has its own house at this address.');
+  await expect(lookup.getByRole('button', { name: 'Create location for this account' })).toBeVisible();
   await expect(lookup).not.toContainText('finance');
   await expect(lookup).not.toContainText('Safety');
   expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('location house lookup ignores results returned for an edited address', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let releaseFirstLookup!: () => void;
+  let startFirstLookup!: () => void;
+  const firstLookupGate = new Promise<void>((resolve) => { releaseFirstLookup = resolve; });
+  const firstLookupStarted = new Promise<void>((resolve) => { startFirstLookup = resolve; });
+  let lookupCount = 0;
+  let firstLookupCompleted = false;
+  await page.route('**/rest/v1/rpc/find_crm_location_candidates', async (route) => {
+    lookupCount += 1;
+    if (lookupCount === 1) {
+      startFirstLookup();
+      await firstLookupGate;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+        location_id: '91919191-9191-4919-8919-919191919191', name: 'Old address match', address: '1 Old Street, Nelson', suburb: 'Nelson', postcode: '7010',
+        site_count: 1, zone_count: 0, boundary_state: 'no geometry recorded', match_reason: 'Exact address match', belongs_to_account: true,
+      }]) });
+      firstLookupCompleted = true;
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: '[]' });
+  });
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
+  await workspace.getByRole('button', { name: 'Find or add location' }).click();
+  await workspace.getByLabel('Location name').fill('Old address');
+  await workspace.getByLabel('Street address').fill('1 Old Street, Nelson');
+  await workspace.getByRole('button', { name: 'Search places' }).click();
+  await firstLookupStarted;
+  await workspace.getByLabel('Street address').fill('2 New Street, Nelson');
+  releaseFirstLookup();
+  await expect.poll(() => firstLookupCompleted).toBe(true);
+  await expect(workspace.getByText('Possible physical place matches')).toHaveCount(0);
+  await workspace.getByRole('button', { name: 'Search places' }).click();
+  await expect(workspace.getByText('No matching physical places found')).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'Create location for this account' })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('location house lookup ignores errors returned for an edited address', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let releaseFirstLookup!: () => void;
+  let startFirstLookup!: () => void;
+  const firstLookupGate = new Promise<void>((resolve) => { releaseFirstLookup = resolve; });
+  const firstLookupStarted = new Promise<void>((resolve) => { startFirstLookup = resolve; });
+  let lookupCount = 0;
+  let firstLookupCompleted = false;
+  await page.route('**/rest/v1/rpc/find_crm_location_candidates', async (route) => {
+    lookupCount += 1;
+    if (lookupCount === 1) {
+      startFirstLookup();
+      await firstLookupGate;
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'P0001', message: 'Old address lookup failed', details: null, hint: null }),
+      });
+      firstLookupCompleted = true;
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: '[]' });
+  });
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
+  await workspace.getByRole('button', { name: 'Find or add location' }).click();
+  await workspace.getByLabel('Location name').fill('Old address');
+  await workspace.getByLabel('Street address').fill('1 Old Street, Nelson');
+  await workspace.getByRole('button', { name: 'Search places' }).click();
+  await firstLookupStarted;
+  await workspace.getByLabel('Street address').fill('2 New Street, Nelson');
+  releaseFirstLookup();
+  await expect.poll(() => firstLookupCompleted).toBe(true);
+  await expect(workspace.getByRole('alert')).toHaveCount(0);
+  await workspace.getByRole('button', { name: 'Search places' }).click();
+  await expect(workspace.getByText('No matching physical places found')).toBeVisible();
+  await expect(workspace.getByRole('alert')).toHaveCount(0);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain('status of 400 (Bad Request)');
 });
 
 test('administrator creates and edits organizations through the human account spine', async ({ page }) => {
