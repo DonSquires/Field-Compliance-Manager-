@@ -53,41 +53,75 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 
 // Frozen month-end activity in the shape written by public.build_agreement_activity_report.
 const e2eActivityReport = {
-  version: 1,
-  basis: 'Entries recorded at the places covered by this agreement during the period.',
-  totals: { entries: 5, events: 3, observations: 1, workOrders: 1, patrolVisits: 1, cameraActivations: 0, unattributedEntries: 0, places: 1, travelKm: 18.4, hours: 4.25, photos: 2 },
+  version: 2,
+  itemisedDigest: 'e2e',
+  basis: 'Everything recorded at the locations covered by this agreement during the period.',
+  totals: { entries: 7, events: 4, observations: 1, workOrders: 1, incidents: 1, patrolVisits: 1, cameraActivations: 0, withNotes: 6, places: 1, photos: 4 },
   categories: [
-    { code: 'pest_control', entries: 2, hours: 2.5, km: 12.4, photos: 1 },
-    { code: 'maintenance', entries: 1, hours: 1.75, km: 6, photos: 0 },
-    { code: 'manufacture', entries: 1, hours: 0, km: 0, photos: 0 },
-    { code: 'vehicle_observation', entries: 1, hours: 0, km: 0, photos: 1 },
+    { code: 'incident', entries: 1, photos: 2 },
+    { code: 'pest_control', entries: 2, photos: 1 },
+    { code: 'maintenance', entries: 1, photos: 0 },
+    { code: 'manufacture', entries: 1, photos: 0 },
+    { code: 'vehicle_observation', entries: 1, photos: 1 },
+    { code: 'patrol_visit', entries: 1, photos: 0 },
   ],
-  serviceLines: [],
-  byPlace: [{ place: 'Civic Events Centre', entries: 5, hours: 4.25, km: 18.4, photos: 2, categories: { pest_control: 2, maintenance: 1, manufacture: 1, vehicle_observation: 1 } }],
+  byPlace: [{ place: 'Civic Events Centre', entries: 7, photos: 4, categories: { incident: 1, pest_control: 2, maintenance: 1, manufacture: 1, vehicle_observation: 1, patrol_visit: 1 } }],
   pestControl: {
-    entries: 2, hours: 2.5, km: 12.4,
-    bySpecies: [{ code: 'goat', culls: 3, sightings: 1, other: 0, total: 4 }],
-    byActivity: [{ code: 'shooting', entries: 1, hours: 1.5 }, { code: 'trap_check', entries: 1, hours: 1 }],
+    entries: 2,
+    bySpecies: [{ code: 'goat', culls: 1, sightings: 0, other: 0, total: 1 }],
+    byActivity: [{ code: 'shooting', entries: 1 }, { code: 'trap_check', entries: 1 }],
     byEquipment: [{ code: 'doc200', entries: 1 }],
     ammunition: [{ calibre: '.223', entries: 1, rounds: 12 }],
   },
-  maintenance: { entries: 1, hours: 1.75, km: 6, bySubject: [{ code: 'gate', entries: 1, hours: 1.75 }], workOrders: { completed: 0, open: 0 } },
-  manufacture: { entries: 1, hours: 0, km: 0, bySubject: [{ code: 'trap_box', entries: 1, hours: 0 }], workOrders: { completed: 1, open: 0 } },
-  observations: { total: 1, withPhoto: 1, photos: 1, eventPhotos: 1, byModule: [{ module: 'patrol', entries: 1, withPhoto: 1, photos: 1 }] },
-  labels: { category: { pest_control: 'Pest control', maintenance: 'Maintenance and repairs', manufacture: 'Manufacture and fabrication', vehicle_observation: 'Vehicle observation' }, species: { goat: 'Feral goat' }, equipment: { doc200: 'DOC 200 trap' }, material: { ammunition: 'Ammunition' } },
-  accountedFor: { eventsInScope: 4, mirrorEventsExcluded: 1, activityEvents: 3, observationsInScope: 1, workOrdersInScope: 1, entries: 5, itemised: 5, notItemised: 0, unclassified: 0, reconciled: true },
+  maintenance: { entries: 1, bySubject: [{ code: 'gate', entries: 1 }], workOrders: { completed: 0, open: 0 } },
+  manufacture: { entries: 1, bySubject: [{ code: 'trap_box', entries: 1 }], workOrders: { completed: 1, open: 0 } },
+  observations: { total: 1, withPhoto: 1, photos: 1, byModule: [{ module: 'patrol', entries: 1, withPhoto: 1, photos: 1 }] },
+  incidents: { total: 1, investigations: 1, withMedia: 1, bySeverity: [{ code: 'medium', entries: 1 }], byStatus: [{ code: 'open', entries: 1 }] },
+  labels: {
+    category: {
+      incident: 'Incidents and investigations', pest_control: 'Pest control', maintenance: 'Maintenance and repairs', manufacture: 'Manufacture and fabrication',
+      vehicle_observation: 'Observations', patrol_visit: 'Patrols',
+    },
+    activity: { shooting: 'Shooting', trap_check: 'Trap check' },
+    species: { goat: 'Feral goat' },
+    equipment: { doc200: 'DOC 200 trap' },
+    subject: { gate: 'Gate', trap_box: 'Trap box' },
+    material: { ammunition: 'Ammunition' },
+  },
+  accountedFor: {
+    eventsInScope: 7, mirrorEventsExcluded: 1, activityEvents: 6, observationsInScope: 1, workOrdersInScope: 1, incidentsInScope: 1,
+    entries: 9, reported: 7, operationalWithheld: 2, withheldTravelAdmin: 1, withheldShiftMarkers: 1, itemised: 7, notItemised: 0, unclassified: 0, reconciled: true,
+  },
 };
 const e2eActivityLines = {
-  version: 1,
+  version: 2,
   notItemised: 0,
   lines: [
-    { d: '2026-08-03', p: 'Civic Events Centre', k: 'event', c: 'pest_control', a: 'shooting', sp: 'goat', m: [{ t: 'ammunition', cal: '.223', q: 12 }], h: 1.5, km: 8.2, ph: 1 },
-    { d: '2026-08-05', p: 'Civic Events Centre', k: 'event', c: 'pest_control', a: 'trap_check', eq: 'doc200', h: 1, km: 4.2 },
-    { d: '2026-08-12', p: 'Civic Events Centre', k: 'event', c: 'maintenance', s: 'gate', h: 1.75, km: 6 },
-    { d: '2026-08-18', p: 'Civic Events Centre', k: 'observation', c: 'vehicle_observation', ph: 1 },
-    { d: '2026-08-21', p: 'Civic Events Centre', k: 'work_order', c: 'manufacture', a: 'manufacture', s: 'trap_box', j: 'WO-0042', ws: 'completed' },
+    {
+      d: '2026-08-02', t: '22:15', p: 'Civic Events Centre', k: 'incident', c: 'incident', it: 'vandalism', sev: 'medium', st: 'open',
+      n: 'Graffiti found on the east amenities block. Area photographed and reported to the facilities manager.', inv: 'INV-2026-031', ivs: 'open', ph: 2,
+      pr: [{ b: 'scans', p: 'e2e/incidents/graffiti-1.jpg' }, { b: 'scans', p: 'e2e/incidents/graffiti-2.jpg' }],
+    },
+    {
+      d: '2026-08-03', t: '06:40', p: 'Civic Events Centre', k: 'event', c: 'pest_control', a: 'shooting', sp: 'goat',
+      n: 'Feral goat culled on the northern boundary.', ac: 'Carcass removed from the walking track.', m: [{ t: 'ammunition', cal: '.223', q: 12 }], ph: 1,
+      pr: [{ b: 'scans', p: 'e2e/pest/northern-boundary.jpg' }],
+    },
+    { d: '2026-08-05', p: 'Civic Events Centre', k: 'event', c: 'pest_control', a: 'trap_check', eq: 'doc200', n: 'Trap line checked; one rat caught and the trap reset.' },
+    { d: '2026-08-12', t: '10:30', p: 'Civic Events Centre', k: 'event', c: 'maintenance', s: 'gate', n: 'Service gate hinge had worked loose.', ac: 'Hinge replaced and the gate tested.' },
+    {
+      d: '2026-08-18', t: '14:05', p: 'Civic Events Centre', k: 'observation', c: 'vehicle_observation', mo: 'patrol', n: 'Vehicle parked on the grass verge overnight.', ph: 1,
+      pr: [{ b: 'scans', p: 'e2e/observations/verge.jpg' }],
+    },
+    { d: '2026-08-20', p: 'Civic Events Centre', k: 'event', c: 'patrol_visit' },
+    { d: '2026-08-21', p: 'Civic Events Centre', k: 'work_order', c: 'manufacture', a: 'manufacture', s: 'trap_box', j: 'WO-0042', ws: 'completed', ti: 'Build two replacement trap boxes' },
   ],
 };
+// Deterministic stand-in photographs for signed storage URLs, so screenshots show real thumbnails offline.
+function e2ePhoto(path: string): string {
+  const hue = [...path].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="320" height="240" fill="hsl(${hue} 35% 42%)"/><rect y="150" width="320" height="90" fill="hsl(${(hue + 40) % 360} 30% 28%)"/><circle cx="250" cy="60" r="26" fill="hsl(${hue} 60% 78%)"/></svg>`;
+}
 
 export const DESKTOP_PROMPT_KEY = `fcm:desktop-download-prompt-v2-dismissed:${ADMIN_ID}`;
 
@@ -584,7 +618,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'get_custom_report_scope_options') { await route.fulfill(fulfillJson({ agreement: { id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services' }, sites: [{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson' }], zones: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone', zone_type: 'general' }], people: [{ id: '81818181-8181-4181-8181-818181818181', name: 'Casey Morgan' }], vehicles: [{ id: '82828282-8282-4282-8282-828282828282', plate: 'FCM123', make: 'Toyota', model: 'Hiace' }], supported_sections: ['summary', 'observations', 'breaches', 'incidents', 'checkpoint_visits'] })); return; }
     if (table === 'generate_custom_report_pack') { const payload = JSON.parse(request.postData() ?? '{}'); const packId = '89898989-8989-4989-8989-898989898989'; monthlyReportPacks.splice(0, monthlyReportPacks.length, { id: packId, template_code: 'custom_fixture', report_kind: 'custom', report_scope: { match_semantics: 'or_within_dimensions_and_across_dimensions', site_ids: payload.p_site_ids, zone_ids: payload.p_zone_ids, person_ids: payload.p_person_ids, vehicle_ids: payload.p_vehicle_ids, sections: payload.p_sections, labels: { sites: [{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre' }], zones: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone' }], people: [{ id: '81818181-8181-4181-8181-818181818181', name: 'Casey Morgan' }], vehicles: [{ id: '82828282-8282-4282-8282-828282828282', plate: 'FCM123' }] } }, period_start: payload.p_period_start, period_end: payload.p_period_end, status: 'draft', data: { summary: { observation_count: 2, compliant_count: 1, non_compliant_count: 1, breach_count: 1 }, observations: [{ id: '83838383-8383-4383-8383-838383838383', observed_at: '2026-08-29T21:10:00.000Z', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, canonical_person_id: '81818181-8181-4181-8181-818181818181', canonical_vehicle_id: '82828282-8282-4282-8282-828282828282', plate_number: 'FCM123', module_key: 'patrol', is_compliant: false, compliance_reason: 'Follow-up required' }], breaches: [{ id: '84848484-8484-4484-8484-848484848484', observation_id: '83838383-8383-4383-8383-838383838383', created_at: '2026-08-29T21:15:00.000Z', zone_id: null, plate_number: 'FCM123', breach_type: 'other', status: 'open' }] }, editorial: { title: payload.p_title }, generated_at: '2026-08-30T09:30:00.000Z', updated_at: '2026-08-30T09:30:00.000Z', reviewed_at: null, published_at: null, delivery_channel: null, sent_at: null, pdf_path: null, pdf_sha256: null, agreement: [{ name: 'Civic Events Compliance Services' }] }); await route.fulfill(fulfillJson({ id: packId, status: 'draft', observation_count: 2, breach_count: 1 })); return; }
     if (table === 'generate_due_report_packs') { const payload = JSON.parse(request.postData() ?? '{}'); monthlyReportPacks.splice(0, monthlyReportPacks.length, { id: '79797979-7979-4979-8979-797979797979', template_code: 'monthly-compliance', report_kind: 'monthly', report_scope: {}, period_start: payload.p_period_start, period_end: payload.p_period_end, status: 'draft', data: { slaMet: 4, slaBreached: 0, incidentsTotal: 1, checkpointVisits: 18, breachAlerts: 2, activityReport: e2eActivityReport }, activity_lines: e2eActivityLines, editorial: {}, generated_at: '2026-08-30T09:30:00.000Z', updated_at: '2026-08-30T09:30:00.000Z', reviewed_at: null, published_at: null, delivery_channel: null, sent_at: null, pdf_path: null, pdf_sha256: null, agreement: [{ name: 'Civic Events Compliance Services' }] }); await route.fulfill(fulfillJson(1)); return; }
-    if (table === 'get_report_pack_activity_accounting') { const payload = JSON.parse(request.postData() ?? '{}'); const pack = monthlyReportPacks.find((item) => item.id === payload.p_pack_id); await route.fulfill(fulfillJson({ version: 1, packId: payload.p_pack_id, packUpdatedAt: pack?.updated_at, checkedAt: '2026-08-30T09:40:00.000Z', freshness: { hasFrozenReport: true, frozenEntries: 5, liveEntries: 5, matchesLive: true, changedCategories: [] }, live: { totals: e2eActivityReport.totals, accountedFor: e2eActivityReport.accountedFor }, provenance: { events: { inScope: 4, withLedger: 3, withoutLedger: 1 }, observations: { inScope: 1, withLedger: 1, withoutLedger: 0 }, sources: [{ sourceFile: 'Civic patrol log August.xlsx', sourceSheet: 'Log', batchId: '7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a', batchStatus: 'completed', batchRows: 4, batchDuplicates: 0, batchUnresolved: 0, events: 3, observations: 1 }] }, clientMonth: { entries: 6, thisAgreement: 5, otherAgreements: 0, noAgreementPlace: 1, unlinkedPlaces: [{ place: 'Harbour Overflow Carpark', entries: 1 }] }, exceptions: { futureDated: 0, sparseYears: [], supersededDuplicates: 0 } })); return; }
+    if (table === 'get_report_pack_activity_accounting') { const payload = JSON.parse(request.postData() ?? '{}'); const pack = monthlyReportPacks.find((item) => item.id === payload.p_pack_id); await route.fulfill(fulfillJson({ version: 1, packId: payload.p_pack_id, packUpdatedAt: pack?.updated_at, checkedAt: '2026-08-30T09:40:00.000Z', freshness: { hasFrozenReport: true, frozenEntries: 7, liveEntries: 7, matchesLive: true, changedCategories: [] }, live: { totals: e2eActivityReport.totals, accountedFor: e2eActivityReport.accountedFor }, provenance: { events: { inScope: 4, withLedger: 3, withoutLedger: 1 }, observations: { inScope: 1, withLedger: 1, withoutLedger: 0 }, sources: [{ sourceFile: 'Civic patrol log August.xlsx', sourceSheet: 'Log', batchId: '7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a', batchStatus: 'completed', batchRows: 4, batchDuplicates: 0, batchUnresolved: 0, events: 3, observations: 1 }] }, clientMonth: { entries: 6, thisAgreement: 5, otherAgreements: 0, noAgreementPlace: 1, unlinkedPlaces: [{ place: 'Harbour Overflow Carpark', entries: 1 }] }, exceptions: { futureDated: 0, sparseYears: [], supersededDuplicates: 0 } })); return; }
     if (table === 'review_monthly_report_pack') { const payload = JSON.parse(request.postData() ?? '{}'); const pack = monthlyReportPacks.find((item) => item.id === payload.p_pack_id); if (pack) Object.assign(pack, { status: payload.p_action === 'publish' ? 'generated' : 'draft', editorial: { title: payload.p_title, executive_summary: payload.p_executive_summary, client_notes: payload.p_client_notes, follow_up: payload.p_follow_up }, reviewed_at: '2026-08-30T09:35:00.000Z', published_at: payload.p_action === 'publish' ? '2026-08-30T09:35:00.000Z' : null, delivery_channel: payload.p_action === 'publish' ? 'portal' : null, updated_at: '2026-08-30T09:35:00.000Z' }); await route.fulfill(fulfillJson({ id: payload.p_pack_id, status: pack?.status, editorial: pack?.editorial, updated_at: pack?.updated_at, reviewed_at: pack?.reviewed_at, published_at: pack?.published_at, delivery_channel: pack?.delivery_channel, client_has_login: true })); return; }
     if (table === 'manage_crm_contact') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '50505050-5050-4050-8050-505050505050', organization_id: payload.p_account_organization_id, first_name: payload.p_first_name, last_name: payload.p_last_name, role_title: payload.p_role_title, email: payload.p_email, phone: payload.p_phone, mobile: payload.p_mobile, is_primary: payload.p_is_primary, is_emergency: payload.p_is_emergency, notes: payload.p_notes, updated_at: '2026-08-30T09:35:00.000Z', deactivated_at: null }; if (payload.p_is_primary) crmContacts.forEach((contact) => { contact.is_primary = false; }); crmContacts.push(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'create_crm_account_activity') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '51515151-5151-4151-8151-515151515151', account_organization_id: payload.p_account_organization_id, activity_type: payload.p_activity_type, subject: payload.p_subject, details: payload.p_details, outcome: payload.p_outcome, occurred_at: payload.p_occurred_at, follow_up_at: payload.p_follow_up_at, created_at: '2026-08-30T09:35:00.000Z' }; crmActivities.unshift(row); await route.fulfill(fulfillJson(row)); return; }
@@ -665,6 +699,18 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     await route.fulfill(fulfillJson({ success: true }));
   });
   await page.route('**/storage/v1/object/sign/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const signed = url.pathname.split('/object/sign/')[1] ?? '';
+    const body = request.method() === 'POST' ? JSON.parse(request.postData() ?? '{}') as { paths?: unknown } : {};
+    if (Array.isArray(body.paths)) {
+      await route.fulfill(fulfillJson(body.paths.map((path) => ({ path, signedURL: `/object/sign/${signed}/${String(path)}?token=e2e-photo`, error: null }))));
+      return;
+    }
+    if (request.method() === 'GET' && url.searchParams.get('token') === 'e2e-photo') {
+      await route.fulfill({ status: 200, contentType: 'image/svg+xml', body: e2ePhoto(signed) });
+      return;
+    }
     await route.fulfill(fulfillJson({ signedURL: 'https://storage.example.test/signed/sample-document.pdf' }));
   });
   await page.route('**/storage/v1/object/scans/**', async (route) => {

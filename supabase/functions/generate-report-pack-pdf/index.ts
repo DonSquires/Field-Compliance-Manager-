@@ -4,15 +4,16 @@
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { PDFDocument, rgb, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1';
+import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfTextFontRuns } from '../_shared/pdf-text-fonts.ts';
-import { activityAccountingStatement, itemisedActivityBlocks, monthlyActivityBlocks, type ReportBlock } from '../_shared/report-activity-sections.ts';
+import { monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
+import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v11';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v12';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -20,9 +21,15 @@ const canRender = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 
 type SupabaseClient = ReturnType<typeof createClient<any>>;
 
+interface PdfAgreement {
+  name: string;
+  client?: { name: string } | Array<{ name: string }> | null;
+}
+
 interface PdfReportPack {
   id: string;
-  agreement: { name: string } | Array<{ name: string }> | null;
+  agreement: PdfAgreement | PdfAgreement[] | null;
+  provider: { name: string } | Array<{ name: string }> | null;
   organization_id: string;
   period_start: string;
   period_end: string;
@@ -136,6 +143,8 @@ function wrapText(text: string, fonts: PdfFontPair, size: number, maxWidth: numb
 interface ReportRenderInput {
   templateTitle: string;
   agreementName: string;
+  providerName: string | null;
+  clientName: string | null;
   period: string;
   packId: string;
   snapshotGeneratedAt: string | null;
@@ -146,6 +155,7 @@ interface ReportRenderInput {
   reportScope: unknown;
   status: string;
   deliveryChannel: string | null;
+  loadPhotos?: (refs: ReportPhotoRef[]) => Promise<Map<string, Uint8Array>>;
 }
 
 function availabilityLine(status: string, deliveryChannel: string | null) {
@@ -155,11 +165,80 @@ function availabilityLine(status: string, deliveryChannel: string | null) {
   return 'Availability: governed provider report record.';
 }
 
-function reportAgreementName(pack: PdfReportPack) {
-  return (Array.isArray(pack.agreement) ? pack.agreement[0]?.name : pack.agreement?.name) ?? 'Service agreement';
+function relationName(value: { name: string } | Array<{ name: string }> | null | undefined) {
+  const name = Array.isArray(value) ? value[0]?.name : value?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
 }
 
-export async function renderPdf({ templateTitle, agreementName, period, packId, snapshotGeneratedAt, editorial, data, activityLines, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
+function reportAgreementName(pack: PdfReportPack) {
+  return relationName(pack.agreement) ?? 'Service agreement';
+}
+
+function reportClientName(pack: PdfReportPack) {
+  const agreement = Array.isArray(pack.agreement) ? pack.agreement[0] : pack.agreement;
+  return relationName(agreement?.client);
+}
+
+function isoDay(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) : null;
+}
+
+/** "October 2026" for a whole calendar month, otherwise "1 October 2026 to 15 October 2026". */
+export function reportPeriodLabel(start: string, end: string) {
+  const from = isoDay(start);
+  const to = isoDay(end);
+  if (!from || !to) return `${start} to ${end}`;
+  const format = (date: Date, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-NZ', { timeZone: 'UTC', ...options }).format(date);
+  const lastDay = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 0)).getUTCDate();
+  if (from.getUTCDate() === 1 && to.getUTCDate() === lastDay && from.getUTCFullYear() === to.getUTCFullYear() && from.getUTCMonth() === to.getUTCMonth()) {
+    return format(from, { month: 'long', year: 'numeric' });
+  }
+  const long: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
+  return `${format(from, long)} to ${format(to, long)}`;
+}
+
+function preparedDate(value: string | null) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+}
+
+const PAGE_SIZE: [number, number] = [595, 842];
+const LEFT = 54;
+const RIGHT = 541;
+const WIDTH = RIGHT - LEFT;
+const TOP = 786;
+const BOTTOM = 66;
+const PHOTOS_PER_ENTRY = 3;
+const MAX_REPORT_PHOTOS = 60;
+const INK = rgb(0.08, 0.12, 0.13);
+const MUTED = rgb(0.38, 0.44, 0.46);
+const BRAND = rgb(0.09, 0.33, 0.31);
+const BRAND_SOFT = rgb(0.78, 0.9, 0.88);
+const BRAND_TINT = rgb(0.92, 0.96, 0.95);
+const RULE = rgb(0.78, 0.85, 0.84);
+const ALERT = rgb(0.7, 0.2, 0.15);
+const ALERT_TINT = rgb(0.99, 0.95, 0.94);
+const STRIPE = rgb(0.97, 0.98, 0.98);
+const WHITE = rgb(1, 1, 1);
+
+function entryPhotoRefs(blocks: ReportBlock[]) {
+  const seen = new Set<string>();
+  const refs: ReportPhotoRef[] = [];
+  for (const block of blocks) {
+    if (block.kind !== 'entry') continue;
+    for (const ref of block.photos.slice(0, PHOTOS_PER_ENTRY)) {
+      const key = reportPhotoKey(ref);
+      if (seen.has(key) || refs.length >= MAX_REPORT_PHOTOS) continue;
+      seen.add(key);
+      refs.push(ref);
+    }
+  }
+  return refs;
+}
+
+export async function renderPdf({ templateTitle, agreementName, providerName, clientName, period, packId, snapshotGeneratedAt, editorial, data, activityLines, reportKind, reportScope, status, deliveryChannel, loadPhotos }: ReportRenderInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.setLanguage('en-NZ');
   const { normal, bold } = await embedPdfNotoFonts(pdf);
@@ -168,70 +247,191 @@ export async function renderPdf({ templateTitle, agreementName, period, packId, 
     : `${templateTitle} - ${period}`;
   pdf.setTitle(reportTitle);
   pdf.setSubject(`${agreementName} | ${period}`);
+  if (providerName) pdf.setAuthor(providerName);
   pdf.setCreator('Field Compliance Manager');
-  let page = pdf.addPage([595, 842]);
-  let y = 780;
-  const drawRuns = (line: string, x: number, baseline: number, fonts: PdfFontPair, size: number) => {
+  // Audit provenance travels in the document properties (and the
+  // record_report_pack_pdf row), not on the client's pages.
+  pdf.setProducer(rendererVersion);
+  pdf.setKeywords([`report-pack:${packId}`, `snapshot-generated:${snapshotGeneratedAt ?? 'not-recorded'}`, `renderer:${rendererVersion}`, `scope:${reportKind}`]);
+
+  const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  const activityBlocks = reportKind === 'custom' ? null : monthlyActivityBlocks(snapshot, activityLines);
+  const logBlocks = activityBlocks ? siteLogBlocks(snapshot, activityLines) : [];
+  const photoRefs = entryPhotoRefs([...(activityBlocks ?? []), ...logBlocks]);
+  const photoBytes = photoRefs.length && loadPhotos ? await loadPhotos(photoRefs) : new Map<string, Uint8Array>();
+  const photos = new Map<string, PDFImage>();
+  for (const [key, bytes] of photoBytes) {
+    try {
+      photos.set(key, await pdf.embedJpg(bytes));
+    } catch {
+      // An unreadable photo is reported as held on file.
+    }
+  }
+
+  let page = pdf.addPage(PAGE_SIZE);
+  let y = TOP;
+  const newPage = () => { page = pdf.addPage(PAGE_SIZE); y = TOP; };
+  const ensure = (height: number) => { if (y - height < BOTTOM) newPage(); };
+  const drawRuns = (line: string, x: number, baseline: number, fonts: PdfFontPair, size: number, color = INK) => {
     let cursor = x;
     for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
-      page.drawText(run.text, { x: cursor, y: baseline, size, font: run.font, color: rgb(0.08, 0.12, 0.13) });
+      page.drawText(run.text, { x: cursor, y: baseline, size, font: run.font, color });
       cursor += run.font.widthOfTextAtSize(run.text, size);
     }
   };
-  const draw = (text: string, fonts = normal, size = 10) => {
-    for (const line of wrapText(text, fonts, size, 487)) {
-      if (y < 64) { page = pdf.addPage([595, 842]); y = 780; }
-      drawRuns(line, 54, y, fonts, size);
+  const fit = (value: string, fonts: PdfFontPair, size: number, maxWidth: number) => {
+    if (textWidth(value, fonts, size) <= maxWidth) return value;
+    let characters = Array.from(value);
+    while (characters.length && textWidth(`${characters.join('').trimEnd()}…`, fonts, size) > maxWidth) characters = characters.slice(0, -1);
+    return `${characters.join('').trimEnd()}…`;
+  };
+  const draw = (text: string, fonts = normal, size = 10, color = INK) => {
+    for (const line of wrapText(text, fonts, size, WIDTH)) {
+      ensure(size + 6);
+      drawRuns(line, LEFT, y, fonts, size, color);
       y -= size + 6;
     }
   };
   const drawTable = (block: Extract<ReportBlock, { kind: 'table' }>) => {
     const size = block.size ?? 8.5;
     const leading = size + 3;
-    const padding = 3;
+    const padding = 4;
+    ensure(48);
     let top = y + 10;
     const drawRow = (cells: string[], fonts: PdfFontPair, fill: ReturnType<typeof rgb> | null, isHeader: boolean) => {
       const wrapped = block.columns.map((column, index) => wrapText(cells[index] ?? '', fonts, size, column.width - padding * 2));
       const height = Math.max(1, ...wrapped.map((lines) => lines.length)) * leading + padding * 2;
-      if (top - height < 56) {
-        page = pdf.addPage([595, 842]);
-        top = 790;
-        if (!isHeader) drawRow(block.columns.map((column) => column.label), bold, rgb(0.9, 0.95, 0.94), true);
+      if (top - height < BOTTOM - 10) {
+        newPage();
+        top = TOP + 10;
+        if (!isHeader) drawRow(block.columns.map((column) => column.label), bold, BRAND_TINT, true);
       }
-      if (fill) page.drawRectangle({ x: 54, y: top - height, width: 487, height, color: fill });
-      let x = 54;
+      if (fill) page.drawRectangle({ x: LEFT, y: top - height, width: WIDTH, height, color: fill });
+      let x = LEFT;
       block.columns.forEach((column, index) => {
         wrapped[index].forEach((line, lineIndex) => {
           const baseline = top - padding - size - lineIndex * leading + 1;
           const offset = column.align === 'right' ? column.width - padding - textWidth(line, fonts, size) : padding;
-          drawRuns(line, x + offset, baseline, fonts, size);
+          drawRuns(line, x + offset, baseline, fonts, size, isHeader ? BRAND : INK);
         });
         x += column.width;
       });
-      page.drawLine({ start: { x: 54, y: top - height }, end: { x: 541, y: top - height }, thickness: isHeader ? 0.8 : 0.3, color: rgb(0.72, 0.82, 0.80) });
+      page.drawLine({ start: { x: LEFT, y: top - height }, end: { x: RIGHT, y: top - height }, thickness: isHeader ? 0.8 : 0.3, color: RULE });
       top -= height;
     };
-    drawRow(block.columns.map((column) => column.label), bold, rgb(0.9, 0.95, 0.94), true);
-    block.rows.forEach((row, index) => drawRow(row, normal, index % 2 ? rgb(0.97, 0.98, 0.98) : null, false));
+    drawRow(block.columns.map((column) => column.label), bold, BRAND_TINT, true);
+    block.rows.forEach((row, index) => drawRow(row, normal, index % 2 ? STRIPE : null, false));
     y = top - 16;
   };
   const drawSection = (title: string) => {
-    y -= 8;
-    if (y < 110) { page = pdf.addPage([595, 842]); y = 780; }
-    draw(title, bold, 12);
     y -= 10;
-    page.drawLine({ start: { x: 54, y }, end: { x: 541, y }, thickness: 0.7, color: rgb(0.72, 0.82, 0.80) });
-    y -= 14;
+    if (y < 160) newPage();
+    drawRuns(title, LEFT, y, bold, 13, BRAND);
+    y -= 8;
+    page.drawLine({ start: { x: LEFT, y }, end: { x: RIGHT, y }, thickness: 0.8, color: RULE });
+    y -= 18;
+  };
+  const drawSubsection = (title: string, detail = '') => {
+    const detailWidth = detail ? textWidth(detail, normal, 8.5) : 0;
+    const lines = wrapText(title, bold, 10.5, WIDTH - 24 - detailWidth);
+    const height = lines.length * 14 + 10;
+    y -= 4;
+    if (y - height < 150) newPage();
+    page.drawRectangle({ x: LEFT, y: y - height + 10, width: WIDTH, height, color: BRAND_TINT });
+    lines.forEach((line, index) => drawRuns(line, LEFT + 8, y - 4 - index * 14, bold, 10.5, BRAND));
+    if (detail) drawRuns(detail, RIGHT - 8 - detailWidth, y - 4, normal, 8.5, MUTED);
+    y -= height + 8;
+  };
+  const drawMetrics = (items: Array<{ label: string; value: string }>) => {
+    const columns = 4;
+    const gap = 8;
+    const tileWidth = (WIDTH - gap * (columns - 1)) / columns;
+    const tileHeight = 50;
+    const rowCount = Math.ceil(items.length / columns);
+    ensure(rowCount * (tileHeight + gap));
+    items.forEach((item, index) => {
+      const x = LEFT + (index % columns) * (tileWidth + gap);
+      const top = y + 8 - Math.floor(index / columns) * (tileHeight + gap);
+      page.drawRectangle({ x, y: top - tileHeight, width: tileWidth, height: tileHeight, color: BRAND_TINT });
+      page.drawRectangle({ x, y: top - tileHeight, width: 3, height: tileHeight, color: BRAND });
+      drawRuns(fit(item.value, bold, 17, tileWidth - 16), x + 11, top - 24, bold, 17, BRAND);
+      drawRuns(fit(item.label, normal, 8, tileWidth - 16), x + 11, top - 40, normal, 8, MUTED);
+    });
+    y -= rowCount * (tileHeight + gap) + 6;
+  };
+  const drawEntry = (block: Extract<ReportBlock, { kind: 'entry' }>) => {
+    const incident = block.tone === 'incident';
+    const innerX = LEFT + 12;
+    const innerWidth = WIDTH - 20;
+    const tagsText = block.tags.join('  ·  ');
+    const whenWidth = textWidth(block.when, bold, 8.5);
+    const tagsInline = Boolean(tagsText) && whenWidth + 16 + textWidth(tagsText, normal, 8.5) <= innerWidth;
+    const tagLines = tagsText && !tagsInline ? wrapText(tagsText, normal, 8.5, innerWidth) : [];
+    const titleLines = block.title ? wrapText(block.title, bold, 10, innerWidth) : [];
+    const bodies = block.lines.map((line) => ({
+      label: line.label ? `${line.label}:` : '',
+      lines: wrapText(line.label ? `${line.label}: ${line.text}` : line.text, line.label ? bold : normal, 9.5, innerWidth),
+    }));
+    const gap = 8;
+    const cellWidth = (innerWidth - gap * (PHOTOS_PER_ENTRY - 1)) / PHOTOS_PER_ENTRY;
+    const sized = block.photos.slice(0, PHOTOS_PER_ENTRY).flatMap((ref) => {
+      const image = photos.get(reportPhotoKey(ref));
+      if (!image) return [];
+      const scale = Math.min(cellWidth / image.width, 130 / image.height);
+      return [{ image, width: image.width * scale, height: image.height * scale }];
+    });
+    const photoRowHeight = sized.length ? Math.max(...sized.map((photo) => photo.height)) + 12 : 0;
+    const held = Math.max(0, block.photoCount - sized.length);
+    const heldText = held > 0 ? `${held} ${sized.length ? 'further ' : ''}${held === 1 ? 'photo' : 'photos'} held on file` : '';
+    const height = 8 + 11 + tagLines.length * 11 + titleLines.length * 13
+      + bodies.reduce((sum, body) => sum + body.lines.length * 13, 0)
+      + photoRowHeight + (heldText ? 11 : 0) + 6;
+    ensure(Math.min(height, TOP - BOTTOM));
+    const top = y + 8;
+    if (incident) page.drawRectangle({ x: LEFT, y: top - height, width: WIDTH, height, color: ALERT_TINT });
+    page.drawRectangle({ x: LEFT, y: top - height, width: 3, height, color: incident ? ALERT : BRAND });
+    let cursor = top - 8 - 8.5;
+    drawRuns(block.when, innerX, cursor, bold, 8.5, INK);
+    if (tagsInline) drawRuns(tagsText, RIGHT - 8 - textWidth(tagsText, normal, 8.5), cursor, normal, 8.5, MUTED);
+    cursor -= 11;
+    for (const line of tagLines) { drawRuns(line, innerX, cursor, normal, 8.5, MUTED); cursor -= 11; }
+    cursor -= 2;
+    for (const line of titleLines) { drawRuns(line, innerX, cursor, bold, 10, incident ? ALERT : INK); cursor -= 13; }
+    for (const body of bodies) {
+      body.lines.forEach((line, index) => {
+        if (index === 0 && body.label && line.startsWith(body.label)) {
+          drawRuns(body.label, innerX, cursor, bold, 9.5, INK);
+          drawRuns(line.slice(body.label.length), innerX + textWidth(body.label, bold, 9.5), cursor, normal, 9.5, INK);
+        } else {
+          drawRuns(line, innerX, cursor, normal, 9.5, INK);
+        }
+        cursor -= 13;
+      });
+    }
+    if (sized.length) {
+      const rowTop = cursor + 2;
+      sized.forEach((photo, index) => {
+        const x = innerX + index * (cellWidth + gap);
+        page.drawImage(photo.image, { x, y: rowTop - photo.height, width: photo.width, height: photo.height });
+        page.drawRectangle({ x, y: rowTop - photo.height, width: photo.width, height: photo.height, borderColor: RULE, borderWidth: 0.5 });
+      });
+      cursor -= photoRowHeight;
+    }
+    if (heldText) drawRuns(heldText, innerX, cursor, normal, 8, MUTED);
+    if (!incident) page.drawLine({ start: { x: LEFT, y: top - height }, end: { x: RIGHT, y: top - height }, thickness: 0.3, color: RULE });
+    y = top - height - 16;
   };
   const drawBlocks = (blocks: ReportBlock[]) => {
     for (const block of blocks) {
       if (block.kind === 'section') drawSection(block.title);
+      else if (block.kind === 'subsection') drawSubsection(block.title, block.detail);
       else if (block.kind === 'table') drawTable(block);
-      else draw(block.text, block.bold ? bold : normal, block.size ?? 10);
+      else if (block.kind === 'metrics') drawMetrics(block.items);
+      else if (block.kind === 'entry') drawEntry(block);
+      else { draw(block.text, block.bold ? bold : normal, block.size ?? 10, block.muted ? MUTED : INK); y -= 2; }
     }
   };
   const drawMonthlySections = () => {
-    const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
     const number = (key: string) => typeof snapshot[key] === 'number' ? snapshot[key] as number : null;
     const format = (value: number | null, maximumFractionDigits = 0) => value === null
       ? 'Not recorded'
@@ -242,11 +442,10 @@ export async function renderPdf({ templateTitle, agreementName, period, packId, 
       draw(editorial.executive_summary);
     }
     if (typeof editorial.client_notes === 'string' && editorial.client_notes) {
-      drawSection('Operational Highlights');
+      drawSection('Highlights');
       draw(editorial.client_notes);
     }
 
-    const activityBlocks = monthlyActivityBlocks(snapshot);
     if (activityBlocks) {
       drawBlocks(activityBlocks);
     } else {
@@ -254,7 +453,6 @@ export async function renderPdf({ templateTitle, agreementName, period, packId, 
       draw(`Patrol visits: ${format(number('patrolVisits'))}`);
       draw(`Camera activations: ${format(number('cameraActivations'))}`);
       draw(`Vehicle observations: ${format(number('vehicleObservations'))}`);
-      draw(`Patrol travel: ${format(number('patrolTravelKm'), 1)} km`);
     }
 
     const facilities = Array.isArray(snapshot.facilities)
@@ -268,58 +466,96 @@ export async function renderPdf({ templateTitle, agreementName, period, packId, 
       : [];
     if (facilities.length) {
       drawSection('Site Coverage');
-      draw('Site | Planned activities | Completed activities', bold, 9);
-      for (const facility of facilities) {
-        const expected = typeof facility.expected === 'number' ? facility.expected : null;
-        const completed = typeof facility.completed === 'number' ? facility.completed : null;
-        draw(`${typeof facility.siteName === 'string' ? facility.siteName : 'Unnamed site'} | ${format(expected)} | ${format(completed)}`);
-      }
+      drawTable({
+        kind: 'table',
+        columns: [{ label: 'Location', width: 287 }, { label: 'Planned', width: 100, align: 'right' }, { label: 'Completed', width: 100, align: 'right' }],
+        rows: facilities.map((facility) => [
+          typeof facility.siteName === 'string' ? facility.siteName : 'Unnamed location',
+          format(typeof facility.expected === 'number' ? facility.expected : null),
+          format(typeof facility.completed === 'number' ? facility.completed : null),
+        ]),
+      });
     }
 
-    drawSection('Service Level Performance');
-    draw(`SLA met: ${format(number('slaMet'))}`);
-    draw(`SLA breached: ${format(number('slaBreached'))}`);
-    draw(`SLA in progress: ${format(number('slaRunning'))}`);
+    const sla: Array<[string, number | null]> = [['Met', number('slaMet')], ['Breached', number('slaBreached')], ['In progress', number('slaRunning')]];
+    if (sla.some(([, value]) => (value ?? 0) > 0)) {
+      drawSection('Service Level Performance');
+      drawTable({
+        kind: 'table',
+        columns: [{ label: 'Service level', width: 387 }, { label: 'Count', width: 100, align: 'right' }],
+        rows: sla.map(([label, value]) => [label, format(value)]),
+      });
+    }
 
     if (typeof editorial.follow_up === 'string' && editorial.follow_up) {
       drawSection('Follow-up');
       draw(editorial.follow_up);
     }
 
-    const accounting = activityAccountingStatement(snapshot);
-    if (accounting.length) {
-      drawSection('Activity Accounting');
-      for (const line of accounting) draw(line, normal, 9);
-      drawBlocks(itemisedActivityBlocks(snapshot, activityLines));
-    }
+    drawBlocks(logBlocks);
   };
-  draw('Field Compliance Manager', bold, 15);
-  draw(reportTitle, bold, 18);
-  draw(agreementName, bold, 13);
-  draw(`Reporting period: ${period}`, normal, 10);
-  draw(`Report pack ID: ${packId}`, normal, 9);
-  draw(`Source snapshot generated: ${snapshotGeneratedAt ?? 'Not recorded'}`, normal, 9);
-  draw(`PDF rendered: ${new Date().toISOString()}`, normal, 9);
-  draw(`Renderer: ${rendererVersion}`, normal, 8);
-  draw(reportKind === 'custom' ? 'Scope: governed custom snapshot.' : 'Scope: governed monthly aggregate snapshot.', normal, 8);
-  page.drawLine({ start: { x: 54, y: y + 2 }, end: { x: 541, y: y + 2 }, thickness: 1.5, color: rgb(0.18, 0.49, 0.45) });
-  y -= 14;
+  const drawCover = () => {
+    const titleLines = wrapText(reportTitle, bold, 20, WIDTH).slice(0, 3);
+    const bandHeight = 40 + (providerName ? 22 : 0) + titleLines.length * 25;
+    page.drawRectangle({ x: 0, y: PAGE_SIZE[1] - bandHeight, width: PAGE_SIZE[0], height: bandHeight, color: BRAND });
+    let baseline = PAGE_SIZE[1] - 30;
+    if (providerName) {
+      drawRuns(fit(providerName.toUpperCase(), bold, 9, WIDTH), LEFT, baseline, bold, 9, BRAND_SOFT);
+      baseline -= 26;
+    }
+    for (const line of titleLines) {
+      drawRuns(line, LEFT, baseline, bold, 20, WHITE);
+      baseline -= 25;
+    }
+    y = PAGE_SIZE[1] - bandHeight - 26;
+    const facts: Array<[string, string]> = [];
+    if (clientName) facts.push(['Prepared for', clientName]);
+    facts.push(['Agreement', agreementName], ['Reporting period', period]);
+    const prepared = preparedDate(snapshotGeneratedAt);
+    if (prepared) facts.push(['Prepared', prepared]);
+    for (const [label, value] of facts) {
+      const lines = wrapText(value, normal, 10, WIDTH - 110);
+      drawRuns(label, LEFT, y, bold, 8.5, MUTED);
+      lines.forEach((line, index) => drawRuns(line, LEFT + 110, y - index * 14, normal, 10, INK));
+      y -= lines.length * 14 + 4;
+    }
+    if (status === 'draft') {
+      y -= 6;
+      page.drawRectangle({ x: LEFT, y: y - 8, width: WIDTH, height: 24, color: ALERT_TINT });
+      drawRuns('Draft for provider review. This report has not been issued.', LEFT + 10, y, bold, 9, ALERT);
+      y -= 24;
+    }
+    y -= 6;
+    page.drawLine({ start: { x: LEFT, y }, end: { x: RIGHT, y }, thickness: 1.2, color: BRAND });
+    y -= 12;
+  };
+
+  drawCover();
   if (reportKind === 'custom') {
-    draw('Frozen report scope', bold, 12);
+    drawSection('Frozen report scope');
     for (const line of customScopeLines(reportScope)) draw(line);
-    y -= 4;
-  }
-  if (reportKind === 'custom') {
     if (typeof editorial.executive_summary === 'string' && editorial.executive_summary) { drawSection('Executive summary'); draw(editorial.executive_summary); }
     if (typeof editorial.client_notes === 'string' && editorial.client_notes) { drawSection('Client notes'); draw(editorial.client_notes); }
     if (typeof editorial.follow_up === 'string' && editorial.follow_up) { drawSection('Follow-up'); draw(editorial.follow_up); }
     drawSection('Source-derived metrics');
     for (const line of flatten(data)) draw(line);
+    y -= 6;
+    draw(availabilityLine(status, deliveryChannel), normal, 8, MUTED);
   } else {
     drawMonthlySections();
   }
-  draw('This report is generated from the governed FCM report-pack snapshot.', normal, 8);
-  draw(availabilityLine(status, deliveryChannel), normal, 8);
+
+  const pages = pdf.getPages();
+  const reference = `Ref ${packId.slice(0, 8).toUpperCase()}`;
+  pages.forEach((current, index) => {
+    page = current;
+    page.drawLine({ start: { x: LEFT, y: 46 }, end: { x: RIGHT, y: 46 }, thickness: 0.5, color: RULE });
+    const right = `${reference}  ·  Page ${index + 1} of ${pages.length}`;
+    const rightWidth = textWidth(right, normal, 7.5);
+    drawRuns(fit(`${agreementName}  ·  ${period}`, normal, 7.5, WIDTH - rightWidth - 24), LEFT, 34, normal, 7.5, MUTED);
+    drawRuns(right, RIGHT - rightWidth, 34, normal, 7.5, MUTED);
+    if (status === 'draft') page.drawText('DRAFT', { x: 150, y: 300, size: 120, font: bold.latin, color: ALERT, opacity: 0.06, rotate: degrees(35) });
+  });
   return pdf.save();
 }
 
@@ -332,7 +568,7 @@ async function loadRenderContext(req: Request, packId: string): Promise<{ admin:
   const admin = createClient(url, serviceKey);
   const { data: profile } = await admin.from('user_profiles').select('role,organization_id,deactivated_at').eq('id', user.id).single();
   if (!profile || profile.deactivated_at || !canRender.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
-  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name)').eq('id', packId).single();
+  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name,client:client_organization_id(name)),provider:organization_id(name)').eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayRender } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayRender !== true) throw new RequestError('Forbidden', 403);
@@ -380,7 +616,9 @@ async function handlePdfGeneration(req: Request) {
   const bytes = await renderPdf({
     templateTitle,
     agreementName: reportAgreementName(pack),
-    period: `${pack.period_start} to ${pack.period_end}`,
+    providerName: relationName(pack.provider),
+    clientName: reportClientName(pack),
+    period: reportPeriodLabel(pack.period_start, pack.period_end),
     packId: pack.id,
     snapshotGeneratedAt: pack.generated_at,
     editorial: pack.editorial ?? {},
@@ -390,6 +628,7 @@ async function handlePdfGeneration(req: Request) {
     reportScope: pack.report_scope ?? {},
     status: pack.status,
     deliveryChannel: pack.delivery_channel,
+    loadPhotos: (refs) => loadReportPhotos(admin, refs),
   });
   return json({ ok: true, pack: await storeRenderedPdf(admin, userId, pack, bytes) });
 }

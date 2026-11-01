@@ -1,18 +1,28 @@
-// Month-end activity report sections for the report-pack PDF.
+// Client month-end activity report sections for the report-pack PDF and email.
 // The data comes from public.build_agreement_activity_report (frozen into
 // monthly_report_packs.data.activityReport and .activity_lines when the pack is
 // generated). These helpers only lay the frozen snapshot out; they never query,
-// recount or invent values, so the PDF says exactly what the governed snapshot says.
+// recount or invent values. The snapshot already withholds travel,
+// administration and shift markers, so everything here is what happened at the
+// client's locations, written for the client: no hours, distances, staff,
+// costs, system or import detail.
 
 /**
+ * @typedef {{ b: string, p: string }} ReportPhotoRef
  * @typedef {{ label: string, width: number, align?: 'left' | 'right' }} ReportTableColumn
  * @typedef {{ kind: 'section', title: string }} ReportSectionBlock
- * @typedef {{ kind: 'text', text: string, size?: number, bold?: boolean }} ReportTextBlock
+ * @typedef {{ kind: 'subsection', title: string, detail?: string }} ReportSubsectionBlock
+ * @typedef {{ kind: 'text', text: string, size?: number, bold?: boolean, muted?: boolean }} ReportTextBlock
  * @typedef {{ kind: 'table', columns: ReportTableColumn[], rows: string[][], size?: number }} ReportTableBlock
- * @typedef {ReportSectionBlock | ReportTextBlock | ReportTableBlock} ReportBlock
+ * @typedef {{ label: string, value: string }} ReportMetric
+ * @typedef {{ kind: 'metrics', items: ReportMetric[] }} ReportMetricsBlock
+ * @typedef {{ label?: string, text: string }} ReportEntryLine
+ * @typedef {{ kind: 'entry', when: string, tags: string[], title: string, lines: ReportEntryLine[], photos: ReportPhotoRef[], photoCount: number, tone: 'incident' | 'default' }} ReportEntryBlock
+ * @typedef {ReportSectionBlock | ReportSubsectionBlock | ReportTextBlock | ReportTableBlock | ReportMetricsBlock | ReportEntryBlock} ReportBlock
  */
 
-export const ACTIVITY_REPORT_VERSION = 1;
+export const ACTIVITY_REPORT_VERSION = 2;
+export const NO_PLACE_LABEL = 'Not location-specific';
 
 const numberFormats = new Map();
 
@@ -42,21 +52,59 @@ function text(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
+/** @param {string} value */
+const normText = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/** @param {string} left @param {string} right */
+function sameText(left, right) {
+  return Boolean(left && right && normText(left) === normText(right));
+}
+
+/**
+ * A short imported label such as "Pest" or "Patrol" says nothing a category
+ * of "Pest control" or "Patrols and site checks" does not already say.
+ * @param {string} label @param {string} other
+ */
+function repeats(label, other) {
+  return Boolean(label && other && normText(other).startsWith(normText(label)));
+}
+
 /** @param {string} code */
 export function humaniseCode(code) {
   const value = code.replaceAll('_', ' ').trim();
   return value ? value[0].toUpperCase() + value.slice(1) : '';
 }
 
+const FIXED_LABELS = {
+  incidentType: { cctv_bookmark: 'CCTV review' },
+  severity: { low: 'Low', standard: 'Standard', high: 'High', critical: 'Critical' },
+  incidentStatus: { open: 'Open', in_review: 'Under review', resolved: 'Resolved', escalated: 'Escalated' },
+  investigationStatus: { open: 'Open', active: 'Active', awaiting_evidence: 'Awaiting evidence', awaiting_review: 'Awaiting review', referred: 'Referred', court: 'Before the court', resolved: 'Resolved', closed: 'Closed' },
+  workOrderStatus: { approved: 'Scheduled', in_progress: 'In progress', completed: 'Completed' },
+  module: { unknown: 'General' },
+};
+
 /**
  * Returns the frozen activity report from a monthly pack's data, or null for
- * packs generated before the activity report existed.
+ * packs generated before the client activity report existed.
  * @param {unknown} data
  */
 export function readActivityReport(data) {
   const report = obj(obj(data)?.activityReport);
   if (!report || report.version !== ACTIVITY_REPORT_VERSION || !obj(report.totals)) return null;
   return report;
+}
+
+/**
+ * Itemised lines that belong to the same snapshot version, or [] when absent.
+ * @param {unknown} activityLines
+ */
+export function readActivityLines(activityLines) {
+  const document = obj(activityLines);
+  return {
+    lines: document?.version === ACTIVITY_REPORT_VERSION ? rows(document.lines) : [],
+    notItemised: document?.version === ACTIVITY_REPORT_VERSION ? num(document.notItemised) : 0,
+  };
 }
 
 /** @param {Record<string, unknown>} report */
@@ -66,18 +114,15 @@ function labeller(report) {
   return (dim, code) => {
     const key = text(code);
     if (!key) return '';
-    const label = text(obj(labels[dim])?.[key]);
-    if (label) return label;
-    if (dim === 'serviceLine' && key === 'none') return 'No source category';
-    if (dim === 'module' && key === 'unknown') return 'Not specified';
-    return humaniseCode(key);
+    const label = text(obj(labels[dim])?.[key]) || text(obj(FIXED_LABELS[dim])?.[key]);
+    return label || humaniseCode(key);
   };
 }
 
 /** @param {string} title @returns {ReportSectionBlock} */
 const section = (title) => ({ kind: 'section', title });
-/** @param {string} value @param {number} [size] @returns {ReportTextBlock} */
-const note = (value, size) => ({ kind: 'text', text: value, size });
+/** @param {string} value @param {number} [size] @param {boolean} [muted] @returns {ReportTextBlock} */
+const note = (value, size, muted) => ({ kind: 'text', text: value, size, muted });
 
 /**
  * @param {Array<[string, number] | [string, number, 'right']>} columns
@@ -95,56 +140,186 @@ function table(columns, body, size) {
  */
 const counted = (value, one, many) => `${fmt(num(value))} ${num(value) === 1 ? one : many}`;
 /** @param {unknown} value */
-const hours = (value) => fmt(num(value), 2);
-/** @param {unknown} value */
-const km = (value) => fmt(num(value), 1);
+const isAre = (value) => (num(value) === 1 ? 'is' : 'are');
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** "2026-10-14" -> "Wed 14 Oct 2026" (the snapshot dates are already New Zealand dates). @param {string} value */
+export function reportDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  const day = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return `${DAYS[day.getUTCDay()]} ${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
+}
+
+/** @param {string[]} dates ISO dates in order */
+function dayList(dates) {
+  /** @type {Map<string, number[]>} */
+  const byMonth = new Map();
+  for (const value of dates) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) continue;
+    const key = `${match[1]}-${match[2]}`;
+    const days = byMonth.get(key) ?? [];
+    if (!days.includes(Number(match[3]))) days.push(Number(match[3]));
+    byMonth.set(key, days);
+  }
+  return [...byMonth.entries()].map(([key, days]) => `${days.join(', ')} ${MONTHS[Number(key.slice(5)) - 1]}`).join('; ');
+}
+
+/** @param {Record<string, unknown>} line @param {ReturnType<typeof labeller>} label */
+function materialsText(line, label) {
+  return rows(line.m).map((item) => {
+    const quantity = typeof item.q === 'number' ? ` × ${fmt(item.q, 2)}` : '';
+    const calibre = text(item.cal) && text(item.cal) !== 'unspecified' ? ` ${text(item.cal)}` : '';
+    return `${label('material', item.t)}${calibre}${quantity}`;
+  }).join(', ');
+}
+
+/** @param {Record<string, unknown>} line */
+function photoRefs(line) {
+  return rows(line.pr)
+    .map((ref) => ({ b: text(ref.b), p: text(ref.p) }))
+    .filter((ref) => ref.b && ref.p && !/^https?:/i.test(ref.p));
+}
 
 /**
- * Summary sections for a monthly pack. Returns null when the pack has no
- * activity report so the caller can keep its legacy layout.
+ * A patrol or site check with nothing written, no photo and nothing used.
+ * The site log counts these per location instead of listing each one.
+ * @param {Record<string, unknown>} line
+ */
+export function isRoutineLine(line) {
+  return text(line.k) === 'event' && text(line.c) === 'patrol_visit'
+    && !text(line.n) && !text(line.ac) && num(line.ph) === 0 && rows(line.m).length === 0;
+}
+
+/**
+ * One client-facing entry: when, what kind, what was seen or done, what was
+ * done about it, and the photos taken.
+ * @param {Record<string, unknown>} line
+ * @param {ReturnType<typeof labeller>} label
+ * @returns {ReportEntryBlock}
+ */
+function entryFromLine(line, label) {
+  const kind = text(line.k);
+  const noteText = text(line.n);
+  const action = text(line.ac);
+  const issue = text(line.ti);
+  /** @type {string[]} */
+  const tags = [];
+  /** @type {ReportEntryLine[]} */
+  const lines = [];
+  let title = '';
+  if (kind === 'incident') {
+    title = label('incidentType', line.it) || 'Incident';
+    tags.push(`${label('severity', line.sev || 'standard')} severity`, label('incidentStatus', line.st || 'open'));
+    if (noteText) lines.push({ text: noteText });
+    if (text(line.inv)) lines.push({ label: 'Investigation', text: [text(line.inv), label('investigationStatus', line.ivs)].filter(Boolean).join(' · ') });
+    if (num(line.vid) > 0) lines.push({ label: 'Video', text: `${counted(line.vid, 'video clip', 'video clips')} held on file` });
+  } else {
+    const category = label('category', line.c);
+    tags.push(category);
+    if (kind === 'observation') tags.push(`${label('module', line.mo || 'unknown')} observation`);
+    if (kind === 'work_order') {
+      title = issue;
+      if (text(line.ws)) tags.push(label('workOrderStatus', line.ws));
+    } else {
+      title = [label('activity', line.a), label('subject', line.s), label('species', line.sp), label('equipment', line.eq)]
+        .filter((value, index, all) => value && all.indexOf(value) === index && !sameText(value, category))
+        .join(' · ');
+      if (issue && !sameText(issue, noteText) && !repeats(issue, category) && !repeats(issue, title)) tags.push(issue);
+    }
+    if (noteText && !sameText(noteText, title)) lines.push({ text: noteText });
+    const materials = materialsText(line, label);
+    if (materials) lines.push({ label: 'Used', text: materials });
+    if (action && !sameText(action, noteText)) lines.push({ label: kind === 'work_order' ? 'Completion' : 'Action taken', text: action });
+  }
+  if (text(line.j)) tags.push(`Ref ${text(line.j)}`);
+  return {
+    kind: 'entry',
+    when: [reportDate(text(line.d)), text(line.t)].filter(Boolean).join(' · '),
+    tags: tags.filter(Boolean),
+    title,
+    lines,
+    photos: photoRefs(line),
+    photoCount: num(line.ph),
+    tone: kind === 'incident' ? 'incident' : 'default',
+  };
+}
+
+/** @param {Record<string, unknown>} report */
+function speciesCulls(report) {
+  return rows(obj(report.pestControl)?.bySpecies).reduce((sum, row) => sum + num(row.culls), 0);
+}
+
+/**
+ * Client summary sections for a monthly pack: at a glance, incidents and
+ * investigations (with each incident itemised), activity by location, pest
+ * control, maintenance, manufacture and observations. Returns null when the
+ * pack has no client activity report so the caller keeps its legacy layout.
  * @param {unknown} data
+ * @param {unknown} [activityLines]
  * @returns {ReportBlock[] | null}
  */
-export function monthlyActivityBlocks(data) {
+export function monthlyActivityBlocks(data, activityLines) {
   const report = readActivityReport(data);
   if (!report) return null;
   const label = labeller(report);
   const totals = obj(report.totals) ?? {};
+  const pest = obj(report.pestControl) ?? {};
   /** @type {ReportBlock[]} */
   const blocks = [];
 
-  blocks.push(section('Activity Summary'));
-  const summary = [
-    ['Recorded activity entries', fmt(num(totals.entries))],
-    ['Places with recorded activity', fmt(num(totals.places))],
-    ['Recorded work hours', hours(totals.hours)],
-    ['Recorded travel (km)', km(totals.travelKm)],
-    ['Photos attached', fmt(num(totals.photos))],
-    ['Patrol visits', fmt(num(totals.patrolVisits))],
-    ['Camera activations', fmt(num(totals.cameraActivations))],
-    ['Observations', fmt(num(totals.observations))],
-    ['Workshop work orders', fmt(num(totals.workOrders))],
+  blocks.push(section('At a Glance'));
+  const metrics = [
+    { label: 'Locations with activity', value: fmt(num(totals.places)) },
+    { label: 'Entries recorded', value: fmt(num(totals.entries)) },
+    { label: 'Incidents', value: fmt(num(totals.incidents)) },
+    { label: 'Observations', value: fmt(num(totals.observations)) },
+    { label: 'Patrols', value: fmt(num(totals.patrolVisits)) },
+    { label: 'CCTV activity', value: fmt(num(totals.cameraActivations)) },
+    { label: 'Photos', value: fmt(num(totals.photos)) },
+    { label: 'Pest culls recorded', value: fmt(speciesCulls(report)) },
   ];
-  if (num(totals.unattributedEntries) > 0) summary.push(['Log entries without an attributed visit', fmt(num(totals.unattributedEntries))]);
-  blocks.push(table([['Measure', 327], ['Recorded', 160, 'right']], summary));
-  if (text(report.basis)) blocks.push(note(text(report.basis), 8));
+  blocks.push({ kind: 'metrics', items: metrics });
+  if (text(report.basis)) blocks.push(note(text(report.basis), 8.5, true));
 
   const categories = rows(report.categories);
-  blocks.push(section('Activity by Category'));
+  blocks.push(section('Activity Overview'));
   if (categories.length) {
     blocks.push(table(
-      [['Category', 227], ['Entries', 65, 'right'], ['Hours', 65, 'right'], ['km', 65, 'right'], ['Photos', 65, 'right']],
-      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), hours(row.hours), km(row.km), fmt(num(row.photos))]),
+      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
+      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
     ));
   } else {
-    blocks.push(note('No activity was recorded at the places covered by this agreement during the period.'));
+    blocks.push(note('Nothing was recorded at your locations during the period.'));
+  }
+
+  const incidents = obj(report.incidents) ?? {};
+  blocks.push(section('Incidents and Investigations'));
+  if (num(incidents.total) > 0) {
+    const parts = [counted(incidents.total, 'incident was', 'incidents were') + ' recorded at your locations'];
+    if (num(incidents.investigations) > 0) parts.push(`${counted(incidents.investigations, 'investigation is', 'investigations are')} linked`);
+    if (num(incidents.withMedia) > 0) parts.push(`${fmt(num(incidents.withMedia))} with photo or video evidence`);
+    blocks.push(note(`${parts.join('; ')}.`));
+    const breakdown = (key, dim) => rows(incidents[key]).map((row) => `${label(dim, row.code)} ${fmt(num(row.entries))}`).join(' · ');
+    const severity = breakdown('bySeverity', 'severity');
+    const status = breakdown('byStatus', 'incidentStatus');
+    if (severity || status) blocks.push(note([severity && `Severity: ${severity}`, status && `Status: ${status}`].filter(Boolean).join('   |   '), 9, true));
+    const incidentLines = readActivityLines(activityLines).lines.filter((line) => text(line.k) === 'incident');
+    for (const line of incidentLines) blocks.push(entryFromLine(line, label));
+    const unlisted = num(incidents.total) - incidentLines.length;
+    if (unlisted > 0) blocks.push(note(`${counted(unlisted, 'further incident is', 'further incidents are')} held on file.`, 9, true));
+  } else {
+    blocks.push(note('No incidents were recorded at your locations during the period.'));
   }
 
   const places = rows(report.byPlace);
   if (places.length) {
-    blocks.push(section('Activity by Place'));
+    blocks.push(section('Activity by Location'));
     blocks.push(table(
-      [['Place', 140], ['Entries', 50, 'right'], ['Hours', 50, 'right'], ['km', 50, 'right'], ['Photos', 47, 'right'], ['Main activity', 150]],
+      [['Location', 170], ['Entries', 60, 'right'], ['Photos', 60, 'right'], ['Main activity', 197]],
       places.map((row) => {
         const mix = Object.entries(obj(row.categories) ?? {})
           .filter(([, count]) => num(count) > 0)
@@ -152,15 +327,14 @@ export function monthlyActivityBlocks(data) {
           .slice(0, 3)
           .map(([code, count]) => `${label('category', code)} ${fmt(num(count))}`)
           .join(', ');
-        return [text(row.place) || 'Not place-specific', fmt(num(row.entries)), hours(row.hours), km(row.km), fmt(num(row.photos)), mix];
+        return [text(row.place) || NO_PLACE_LABEL, fmt(num(row.entries)), fmt(num(row.photos)), mix];
       }),
     ));
   }
 
-  const pest = obj(report.pestControl) ?? {};
   blocks.push(section('Pest Control'));
   if (num(pest.entries) > 0) {
-    blocks.push(note(`${counted(pest.entries, 'pest-control entry', 'pest-control entries')} · ${hours(pest.hours)} hours · ${km(pest.km)} km. Species counts are recorded entries, not a population estimate.`));
+    blocks.push(note(`${counted(pest.entries, 'pest-control entry was', 'pest-control entries were')} recorded. Species figures count recorded entries, not population estimates.`));
     const species = rows(pest.bySpecies);
     if (species.length) {
       blocks.push(table(
@@ -171,8 +345,8 @@ export function monthlyActivityBlocks(data) {
     const activities = rows(pest.byActivity);
     if (activities.length) {
       blocks.push(table(
-        [['Pest-control activity', 287], ['Entries', 100, 'right'], ['Hours', 100, 'right']],
-        activities.map((row) => [label('activity', row.code), fmt(num(row.entries)), hours(row.hours)]),
+        [['Pest-control work', 387], ['Entries', 100, 'right']],
+        activities.map((row) => [label('activity', row.code), fmt(num(row.entries))]),
       ));
     }
     const equipment = rows(pest.byEquipment);
@@ -187,14 +361,14 @@ export function monthlyActivityBlocks(data) {
       blocks.push(table(
         [['Ammunition calibre', 287], ['Entries', 100, 'right'], ['Rounds recorded', 100, 'right']],
         ammunition.map((row) => [
-          text(row.calibre) === 'unspecified' ? 'Calibre not recorded' : text(row.calibre) || 'Calibre not recorded',
+          text(row.calibre) && text(row.calibre) !== 'unspecified' ? text(row.calibre) : 'Calibre not recorded',
           fmt(num(row.entries)),
           typeof row.rounds === 'number' ? fmt(row.rounds) : 'Not recorded',
         ]),
       ));
     }
   } else {
-    blocks.push(note('No pest-control activity was recorded at the places covered by this agreement during the period.'));
+    blocks.push(note('No pest-control work was recorded at your locations during the period.'));
   }
 
   for (const [key, title, empty] of /** @type {const} */ ([
@@ -205,12 +379,15 @@ export function monthlyActivityBlocks(data) {
     const orders = obj(work.workOrders) ?? {};
     blocks.push(section(title));
     if (num(work.entries) > 0) {
-      blocks.push(note(`${counted(work.entries, 'entry', 'entries')} · ${hours(work.hours)} hours · ${km(work.km)} km · workshop work orders: ${fmt(num(orders.completed))} completed, ${fmt(num(orders.open))} in progress or approved.`));
+      const jobs = num(orders.completed) + num(orders.open) > 0
+        ? ` Workshop jobs: ${fmt(num(orders.completed))} completed, ${fmt(num(orders.open))} scheduled or in progress.`
+        : '';
+      blocks.push(note(`${counted(work.entries, 'entry was', 'entries were')} recorded.${jobs}`));
       const subjects = rows(work.bySubject);
       if (subjects.length) {
         blocks.push(table(
-          [['Item worked on', 287], ['Entries', 100, 'right'], ['Hours', 100, 'right']],
-          subjects.map((row) => [label('subject', row.code) || 'Not specified', fmt(num(row.entries)), hours(row.hours)]),
+          [['Item worked on', 387], ['Entries', 100, 'right']],
+          subjects.map((row) => [label('subject', row.code) || 'Not specified', fmt(num(row.entries))]),
         ));
       }
     } else {
@@ -219,22 +396,68 @@ export function monthlyActivityBlocks(data) {
   }
 
   const observations = obj(report.observations) ?? {};
-  blocks.push(section('Observations and Photos'));
+  blocks.push(section('Observations'));
   const modules = rows(observations.byModule);
   if (modules.length) {
+    blocks.push(note(`${counted(observations.total, 'observation was', 'observations were')} recorded; ${fmt(num(observations.withPhoto))} with photos.`));
     blocks.push(table(
       [['Observation type', 187], ['Observations', 100, 'right'], ['With photo', 100, 'right'], ['Photos', 100, 'right']],
       modules.map((row) => [label('module', row.module), fmt(num(row.entries)), fmt(num(row.withPhoto)), fmt(num(row.photos))]),
     ));
   } else {
-    blocks.push(note('No observations were recorded at the places covered by this agreement during the period.'));
+    blocks.push(note('No observations were recorded at your locations during the period.'));
   }
-  blocks.push(note(`Photos attached to patrol-log entries: ${fmt(num(observations.eventPhotos))}. Photos attached to observations: ${fmt(num(observations.photos))}.`, 9));
   return blocks;
 }
 
 /**
- * Short email summary: one headline sentence plus the category rows.
+ * The site log: every reported entry grouped by location in date order, with
+ * its comments, action taken and photos. Routine patrols with nothing to
+ * report are counted per location rather than listed. Incidents are described
+ * in their own section, so they are not repeated here.
+ * @param {unknown} data
+ * @param {unknown} activityLines
+ * @returns {ReportBlock[]}
+ */
+export function siteLogBlocks(data, activityLines) {
+  const report = readActivityReport(data);
+  if (!report) return [];
+  const label = labeller(report);
+  const { lines, notItemised } = readActivityLines(activityLines);
+  /** @type {ReportBlock[]} */
+  const blocks = [section('Site Log')];
+  if (!lines.length) {
+    blocks.push(note(num(obj(report.totals)?.entries) > 0
+      ? 'The itemised site log is not available for this report.'
+      : 'Nothing was recorded at your locations during the period.'));
+    return blocks;
+  }
+  blocks.push(note('What happened at each location, in date order (New Zealand time).', 9, true));
+  /** @type {Map<string, Record<string, unknown>[]>} */
+  const byPlace = new Map();
+  for (const line of lines) {
+    if (text(line.k) === 'incident') continue;
+    const place = text(line.p) || NO_PLACE_LABEL;
+    byPlace.set(place, [...(byPlace.get(place) ?? []), line]);
+  }
+  const placeNames = [...byPlace.keys()].sort((left, right) => (left === NO_PLACE_LABEL ? 1 : 0) - (right === NO_PLACE_LABEL ? 1 : 0) || left.localeCompare(right));
+  for (const place of placeNames) {
+    const placeLines = byPlace.get(place) ?? [];
+    const routine = placeLines.filter(isRoutineLine);
+    blocks.push({ kind: 'subsection', title: place, detail: counted(placeLines.length, 'entry', 'entries') });
+    for (const line of placeLines) if (!isRoutineLine(line)) blocks.push(entryFromLine(line, label));
+    if (routine.length) {
+      blocks.push(note(`${counted(routine.length, 'routine patrol', 'routine patrols')} with nothing further to report (${dayList(routine.map((line) => text(line.d)))}).`, 9, true));
+    }
+  }
+  if (notItemised > 0) {
+    blocks.push(note(`A further ${counted(notItemised, 'entry', 'entries')} from this period ${isAre(notItemised)} included in the totals above and held on file.`, 9, true));
+  }
+  return blocks;
+}
+
+/**
+ * Short email summary: one headline sentence plus entries by type of activity.
  * @param {unknown} data
  * @returns {{ headline: string, categories: string[][] } | null}
  */
@@ -244,92 +467,7 @@ export function activityEmailSummary(data) {
   const label = labeller(report);
   const totals = obj(report.totals) ?? {};
   return {
-    headline: `${counted(totals.entries, 'recorded activity entry', 'recorded activity entries')} across ${counted(totals.places, 'place', 'places')} · ${hours(totals.hours)} hours · ${km(totals.travelKm)} km · ${counted(totals.photos, 'photo', 'photos')}.`,
-    categories: rows(report.categories).map((row) => [label('category', row.code), fmt(num(row.entries)), hours(row.hours)]),
+    headline: `${counted(totals.entries, 'entry', 'entries')} recorded across ${counted(totals.places, 'location', 'locations')}, including ${counted(totals.incidents, 'incident', 'incidents')}, ${counted(totals.observations, 'observation', 'observations')} and ${counted(totals.photos, 'photo', 'photos')}.`,
+    categories: rows(report.categories).map((row) => [label('category', row.code), fmt(num(row.entries))]),
   };
-}
-
-/**
- * Plain-language statement that every in-scope record is accounted for.
- * @param {unknown} data
- * @returns {string[]}
- */
-export function activityAccountingStatement(data) {
-  const report = readActivityReport(data);
-  const accounted = obj(report?.accountedFor);
-  if (!accounted) return [];
-  const statement = [
-    `${counted(accounted.entries, 'recorded entry is', 'recorded entries are')} reported: ${counted(accounted.activityEvents, 'patrol-log entry', 'patrol-log entries')}, ${counted(accounted.observationsInScope, 'observation', 'observations')} and ${counted(accounted.workOrdersInScope, 'workshop work order', 'workshop work orders')}.`,
-  ];
-  if (num(accounted.mirrorEventsExcluded) > 0) statement.push(`${counted(accounted.mirrorEventsExcluded, 'automatic patrol-log copy of an observation was', 'automatic patrol-log copies of observations were')} excluded so no observation is counted twice.`);
-  if (num(accounted.unclassified) > 0) statement.push(`${counted(accounted.unclassified, 'entry has', 'entries have')} no work type recorded and ${num(accounted.unclassified) === 1 ? 'is' : 'are'} shown as "Not yet classified".`);
-  statement.push(num(accounted.notItemised) > 0
-    ? `${counted(accounted.itemised, 'entry is', 'entries are')} itemised in the appendix; ${counted(accounted.notItemised, 'further entry is', 'further entries are')} included in every total but not itemised because of the appendix line limit.`
-    : num(accounted.itemised) === 1 ? 'The 1 entry is itemised in the appendix.' : `All ${fmt(num(accounted.itemised))} entries are itemised in the appendix.`);
-  statement.push(accounted.reconciled === true
-    ? 'Reconciliation: entry, category and place totals agree with the records in scope.'
-    : 'Reconciliation: totals did not agree with the records in scope when this snapshot was generated. Ask your provider to regenerate the report.');
-  return statement;
-}
-
-/** @param {string} value */
-function nzDate(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
-}
-
-/**
- * Itemised activity appendix built from monthly_report_packs.activity_lines.
- * @param {unknown} data
- * @param {unknown} activityLines
- * @returns {ReportBlock[]}
- */
-export function itemisedActivityBlocks(data, activityLines) {
-  const report = readActivityReport(data);
-  if (!report) return [];
-  const label = labeller(report);
-  const document = obj(activityLines);
-  const lines = document?.version === ACTIVITY_REPORT_VERSION ? rows(document.lines) : [];
-  /** @type {ReportBlock[]} */
-  const blocks = [section('Appendix: Itemised Activity')];
-  if (!lines.length) {
-    blocks.push(note(num(obj(report.totals)?.entries) > 0
-      ? 'Itemised lines are not available for this report pack.'
-      : 'No activity was recorded during the period, so there is nothing to itemise.'));
-    return blocks;
-  }
-  blocks.push(note('One line per recorded entry, in date order (New Zealand time). Free-text notes, staff and vehicle details are not included.', 8));
-  blocks.push(table(
-    [['Date', 50], ['Place', 88], ['Category', 80], ['Detail', 161], ['Ref', 44], ['Hours', 34, 'right'], ['km', 30, 'right']],
-    lines.map((line) => {
-      const materials = rows(line.m).map((item) => {
-        const quantity = typeof item.q === 'number' ? ` × ${fmt(item.q, 2)}` : '';
-        const calibre = text(item.cal) && text(item.cal) !== 'unspecified' ? ` ${text(item.cal)}` : '';
-        return `${label('material', item.t)}${calibre}${quantity}`;
-      });
-      const detail = [
-        line.k === 'observation' ? 'Observation' : '',
-        line.k === 'work_order' ? `Work order ${text(line.ws).replaceAll('_', ' ')}`.trim() : '',
-        label('activity', line.a),
-        label('subject', line.s),
-        label('species', line.sp),
-        label('equipment', line.eq),
-        ...materials,
-        num(line.ph) > 0 ? counted(line.ph, 'photo', 'photos') : '',
-      ].filter(Boolean).join(' · ');
-      return [
-        nzDate(text(line.d)),
-        text(line.p) || 'Not place-specific',
-        label('category', line.c),
-        detail || '—',
-        text(line.j),
-        num(line.h) > 0 ? hours(line.h) : '',
-        num(line.km) > 0 ? km(line.km) : '',
-      ];
-    }),
-    7.5,
-  ));
-  const notItemised = num(document?.notItemised);
-  if (notItemised > 0) blocks.push(note(`${counted(notItemised, 'further entry is', 'further entries are')} included in the totals above but ${notItemised === 1 ? 'is' : 'are'} not itemised because of the appendix line limit.`, 8));
-  return blocks;
 }

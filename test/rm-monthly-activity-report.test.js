@@ -41,25 +41,37 @@ test('generator keeps the live catalog body apart from activity and explicit NZ 
   assert.match(generatorBody, /get diagnostics v_written = row_count;\s+v_count := v_count \+ v_written;/);
 });
 
-test('only catalogue codes, parsed numbers and pattern-checked references leave imported payloads', () => {
+test('only catalogue codes, parsed numbers, pattern-checked references and normalised narratives leave imported payloads', () => {
   const payloadKeys = new Set([...builderBody.matchAll(/(?:payload|imported) ->>? '([a-z_]+)'/g)].map(m => m[1]));
   assert.deepEqual([...payloadKeys].sort(), [
-    'biosecurity_species_code', 'equipment_type_code', 'job_number', 'job_time_hours', 'material_type_code',
-    'materials_used', 'source_category', 'work_activity_code', 'work_subject_code',
+    'action_notes', 'biosecurity_species_code', 'comments', 'equipment_type_code', 'issue', 'job_number',
+    'material_type_code', 'materials_used', 'source_category', 'work_activity_code', 'work_subject_code',
   ]);
   const materialKeys = new Set([...builderBody.matchAll(/\bm (?:->>|\?) '([a-z_]+)'/g)].map(m => m[1]));
   assert.deepEqual([...materialKeys].sort(), ['calibre', 'material_type', 'quantity']);
-  for (const forbidden of ['comments', 'issue', 'action_', 'patroller', 'reg_raw', 'location_raw', 'reserve_raw', '_cost', 'charge_', 'unit_price', 'source_file', 'plate', 'gps', 'notes', 'title', 'description', 'display_name']) {
+  for (const key of ['comments', 'issue', 'action_notes']) {
+    const reads = [...builderBody.matchAll(new RegExp(`->> '${key}'`, 'g'))].length;
+    const normalised = [...builderBody.matchAll(new RegExp(`report_text_or_null\\([a-z]\\.(?:payload|imported) ->> '${key}'`, 'g'))].length;
+    assert.ok(reads > 0 && reads === normalised, `${key} is always normalised`);
+  }
+  for (const column of ['officer_notes', 'title', 'description', 'completion_note']) {
+    assert.match(builderBody, new RegExp(`report_text_or_null\\([a-z]\\.${column}, `), `${column} is normalised`);
+  }
+  for (const forbidden of ['patroller', 'reg_raw', 'location_raw', 'reserve_raw', 'action_by', 'closed_by', '_cost', 'charge_', 'unit_price', 'source_file', 'plate', 'gps', 'display_name', 'resolution_notes', '\\.summary\\b', 'legal_hold']) {
     assert.doesNotMatch(builderBody, new RegExp(forbidden), `builder must not read ${forbidden}`);
   }
+  assert.deepEqual([...new Set([...builderBody.matchAll(/\binv\.([a-z_]+)/g)].map(m => m[1]))].sort(),
+    ['id', 'investigation_reference', 'organization_id', 'status'], 'only the investigation reference and status reach the report');
+  assert.match(builderBody, /and not i\.is_staff_sensitive/, 'staff-sensitive incidents never reach a client report');
   assert.match(builderBody, /where e\.source is distinct from 'observation_trigger'/, 'observation mirror events are not counted twice');
+  assert.doesNotMatch(builderBody, /distance_km|job_time_hours/, 'travel distance and job hours are operational, not client report content');
   assert.match(builderBody, /'reconciled', \(/);
   assert.match(builderBody, /at time zone 'Pacific\/Auckland'/);
 });
 
 test('internal assemblers are postgres-only and the accounting check is provider-only', () => {
   for (const signature of [
-    'report_numeric_or_null(text)', 'report_code_or_null(text)', 'report_service_line(text)',
+    'report_numeric_or_null(text)', 'report_code_or_null(text)', 'report_service_line(text)', 'report_text_or_null(text, integer)',
     'report_activity_category(text, text, text, text, text, text, text, text)',
     'build_agreement_activity_report(uuid, timestamptz, timestamptz, integer)',
   ]) {
@@ -78,7 +90,8 @@ test('internal assemblers are postgres-only and the accounting check is provider
 const fixtureTables = ['organizations', 'user_profiles', 'service_agreements', 'service_agreement_locations', 'client_sites',
   'location_zones', 'location_events', 'location_events_superseded', 'observations', 'observation_supporting_evidence',
   'evidence_items', 'workshop_work_orders', 'reference_codes', 'patrol_import_record_versions', 'file_import_batches',
-  'monthly_report_packs', 'audit_log', 'sla_clocks', 'incidents', 'patrol_checkpoint_visits', 'breach_alerts'];
+  'monthly_report_packs', 'audit_log', 'sla_clocks', 'incidents', 'incident_attachments', 'investigations',
+  'patrol_checkpoint_visits', 'breach_alerts'];
 const tableDDL = name => {
   const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS "public"."${name}" (`);
   assert.ok(start >= 0, name);
@@ -94,7 +107,7 @@ const constraints = () => [...schema.matchAll(/ALTER TABLE ONLY "public"\."([^"]
     && (!sql.includes('FOREIGN KEY') || fixtureTables.includes(sql.match(/REFERENCES "public"\."([^"]+)"/)?.[1])))
   .map(([sql]) => sql).join('\n');
 
-test('real PostgreSQL builds a reconciled, private month-end activity statement', {
+test('real PostgreSQL builds a reconciled client site activity report', {
   skip: process.env.BOB_TEST_POSTGRES !== '1', timeout: 120000,
 }, async () => {
   const name = `fcm-rm-activity-${randomUUID()}`;
@@ -113,7 +126,12 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
   const pack = `(SELECT id FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}')`;
   const event = (n, zone, site, at, type, payload, km = 'null', source = 'rm_patrol_log_import') =>
     `('${ev(n)}','${client}',${zone ? `'${zone}'` : 'null'},${site ? `'${site}'` : 'null'},'${type}','patrol',${at},'${source}','${JSON.stringify(payload)}'::jsonb,${km})`;
-  const canaries = { comments: 'CANARY_COMMENT', patroller_raw: 'CANARY_OFFICER', reg_raw: 'CANARYPLATE', job_cost: '999.99', subject: 'CANARY_SUBJECT', issue: 'CANARY_ISSUE' };
+  const inc = n => id(400 + n);
+  const canaries = {
+    comments: 'Two possums culled near the north gate', issue: 'Cull', action_notes: 'Bait station\n   refilled',
+    patroller_raw: 'CANARY_OFFICER', action_by: 'CANARY_ACTION_BY', closed_by: 'CANARY_CLOSED_BY', reg_raw: 'CANARYPLATE',
+    job_cost: '999.99', subject: 'CANARY_SUBJECT',
+  };
   let created = false;
   try {
     docker(['run', '--detach', '--name', name, '--network', 'none', '--mount', 'type=tmpfs,destination=/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgis/postgis:17-3.5']);
@@ -195,23 +213,42 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
         ${event(14, alpha, null, nz('2026-11-01 00:30'), 'patrol_visit', { work_activity_code: 'cull' })},
         ${event(15, alpha, null, nz('2026-10-15 09:00'), 'patrol_visit', { work_activity_code: 'CANARY drop table' })},
         ${event(16, alpha, null, nz('2926-08-23 09:00'), 'patrol_visit', {})},
-        ${event(17, alpha, null, nz('2016-10-15 09:00'), 'patrol_visit', {})};
+        ${event(17, alpha, null, nz('2016-10-15 09:00'), 'patrol_visit', {})},
+        ${event(20, alpha, null, nz('2026-10-16 07:00'), 'patrol_visit', { comments: 'Start' })},
+        ${event(21, alpha, null, nz('2026-10-16 07:05'), 'patrol_visit', { work_activity_code: 'travel', work_subject_code: 'general', comments: 'Travel to site' })},
+        ${event(22, null, depot, nz('2026-10-16 07:10'), 'patrol_visit', { issue: 'Admin', comments: 'Timesheets' })},
+        ${event(23, alpha, null, nz('2026-10-16 18:00'), 'patrol_visit', { comments: 'Exit.' })};
       INSERT INTO public.observations(id,organization_id,zone_id,site_id,module_key,observed_at,plate_number,photo_url,distance_km,external_refs) VALUES
         ('${ob(1)}','${client}','${alpha}',null,'patrol',${nz('2026-10-20 10:00')},'CANARYPLATE2','scans/one.jpg',3,
-          '{"import":{"work_activity_code":"inspection","work_subject_code":"gate","job_number":"J-2002","comments":"CANARY_COMMENT2"}}'),
+          '{"import":{"work_activity_code":"inspection","work_subject_code":"gate","job_number":"J-2002","issue":"Check","comments":"Campervan parked overnight at the boat ramp"}}'),
         ('${ob(2)}','${client}',null,'${depot}','freedom_camping',${nz('2026-10-21 10:00')},'CANARYPLATE3',null,null,'{}'),
         ('${ob(3)}','${client}','${gamma}',null,'patrol',${nz('2026-10-22 10:00')},'OUTSIDE1',null,null,'{}');
-      INSERT INTO public.observation_supporting_evidence(organization_id,observation_id,evidence_kind,storage_path,notes) VALUES
-        ('${client}','${ob(1)}','external_photo','p/1.jpg','CANARY_NOTE');
+      INSERT INTO public.observation_supporting_evidence(organization_id,observation_id,evidence_kind,storage_bucket,storage_path,notes) VALUES
+        ('${client}','${ob(1)}','external_photo','bob-uploads','p/1.jpg','CANARY_NOTE');
       INSERT INTO public.evidence_items(organization_id,module_key,evidence_kind,storage_path,metadata,location_event_id) VALUES
         ('${client}','patrol','photo','p/1.jpg',jsonb_build_object('observation_id','${ob(1)}'),null),
         ('${client}','patrol','photo','p/2.jpg',jsonb_build_object('observation_id','${ob(1)}'),null),
         ('${client}','patrol','photo','e/1.jpg','{}','${ev(1)}'),
         ('${client}','patrol','photo','scans/one.jpg',jsonb_build_object('observation_id','${ob(1)}'),null),
-        ('${client}','patrol','photo','scans/one-original.jpg',jsonb_build_object('observation_id','${ob(1)}'),null);
+        ('${client}','patrol','photo','scans/one-original.jpg',jsonb_build_object('observation_id','${ob(1)}'),null),
+        ('${client}','patrol','photo','e/9.jpg','{}','${ev(9)}'),
+        ('${client}','patrol','photo','e/23.jpg','{}','${ev(23)}');
+      INSERT INTO public.evidence_items(id,organization_id,module_key,evidence_kind,storage_path) VALUES
+        ('${id(80)}','${client}','cctv','photo','i/1.jpg'),('${id(81)}','${client}','cctv','video','v/1.mp4'),
+        ('${id(82)}','${client}','cctv','photo','i/staff.jpg');
+      INSERT INTO public.investigations(id,organization_id,investigation_reference,title,summary,resolution_notes,status,created_by) VALUES
+        ('${id(90)}','${provider}','INV-2026-0042','CANARY_INV_TITLE','CANARY_INV_SUMMARY','CANARY_INV_RESOLUTION','active','${admin}');
+      INSERT INTO public.incidents(id,organization_id,zone_id,client_site_id,incident_type,severity,status,description,occurred_at,location_event_id,investigation_id,is_staff_sensitive) VALUES
+        ('${inc(1)}','${client}','${alpha}',null,'cctv_bookmark','high','in_review',E'Vehicle entered after closing;\n CCTV reviewed',${nz('2026-10-16 21:00')},'${ev(9)}','${id(90)}',false),
+        ('${inc(2)}','${provider}','${alpha}',null,'staff_injury','standard','open','CANARY_STAFF_SENSITIVE',${nz('2026-10-17 21:00')},null,null,true),
+        ('${inc(3)}','${otherProvider}','${alpha}',null,'trespass','standard','open','CANARY_OTHER_ORG',${nz('2026-10-17 21:00')},null,null,false),
+        ('${inc(4)}','${client}','${gamma}',null,'trespass','standard','open','CANARY_UNLINKED_PLACE',${nz('2026-10-17 21:00')},null,null,false);
+      INSERT INTO public.incident_attachments(organization_id,incident_id,evidence_item_id,attachment_kind) VALUES
+        ('${client}','${inc(1)}','${id(80)}','photo'),('${client}','${inc(1)}','${id(81)}','video'),
+        ('${provider}','${inc(2)}','${id(82)}','photo');
       UPDATE public.observations SET watermarked_photo_url=photo_url, original_photo_url='scans/one-original.jpg' WHERE id='${ob(1)}';
       INSERT INTO public.workshop_work_orders(id,organization_id,client_request_id,order_number,kind,status,title,service_agreement_id,zone_id,asset_id,scheduled_for,completed_at) VALUES
-        ('${wo(1)}','${provider}','${id(61)}','WO-1','maintenance','completed','CANARY_TITLE','${agreement}',null,'${id(65)}',null,${nz('2026-10-15 12:00')}),
+        ('${wo(1)}','${provider}','${id(61)}','WO-1','maintenance','completed','Repair gate hinge','${agreement}',null,'${id(65)}',null,${nz('2026-10-15 12:00')}),
         ('${wo(2)}','${provider}','${id(62)}','WO-2','fabrication','in_progress','Gate build',null,'${alpha}',null,${nz('2026-10-20 12:00')},null),
         ('${wo(3)}','${provider}','${id(63)}','WO-3','maintenance','cancelled','Cancelled','${agreement}','${alpha}',null,${nz('2026-10-20 12:00')},null),
         ('${wo(4)}','${provider}','${id(64)}','WO-4','maintenance','draft','Draft','${agreement}','${alpha}',null,${nz('2026-10-20 12:00')},null),
@@ -219,7 +256,7 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
         ('${wo(6)}','${otherProvider}','${id(67)}','PRIVATE-LINK','fabrication','completed','Private order','${agreement}',null,null,null,${nz('2026-10-20 12:00')});
       UPDATE public.workshop_work_orders
         SET work_subject_code_id=(SELECT id FROM public.reference_codes WHERE organization_id='${provider}' AND code_type='work_subject' AND code='gate'),
-            work_activity_code_id='${id(70)}' WHERE id='${wo(1)}';
+            work_activity_code_id='${id(70)}', description='Hinge bent by vehicle', completion_note='Hinge replaced and gate rehung' WHERE id='${wo(1)}';
       INSERT INTO public.file_import_batches(id,organization_id,batch_name,source_file,parser,status,row_count,duplicate_count,unresolved_count,created_by) VALUES
         ('${batch}','${provider}','October log','RM Patrol Log Oct.xlsx','rm_patrol_log','applied',100,2,1,'${admin}');
       INSERT INTO public.patrol_import_record_versions(provider_organization_id,client_organization_id,record_kind,record_id,external_ref,source_profile,source_file,source_sheet,source_row,source_sha256,derivative_sha256,source_fingerprint,batch_id,version_no,change_kind,state_after,applied_by,is_current) VALUES
@@ -239,40 +276,65 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
       SELECT public.assert_ok(public.generate_due_report_packs('2026-10-01','2026-10-31','${agreement}')=1,'one pack generated');
       RESET ROLE;
 
-      SELECT public.assert_ok((${report}->'totals')=jsonb_build_object('entries',15,'events',11,'observations',2,'workOrders',2,
-        'patrolVisits',9,'cameraActivations',1,'unattributedEntries',1,'places',2,'travelKm',19.5,'hours',3.5,'photos',4),'totals: '||(${report}->'totals')::text);
-      SELECT public.assert_ok((SELECT (data->>'patrolTravelKm')::numeric=(data->'activityReport'->'totals'->>'travelKm')::numeric
-        AND (data->>'operationalEvents')::int=12 FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'existing metrics unchanged and distance agrees');
+      SELECT public.assert_ok((${report}->'totals')=jsonb_build_object('entries',17,'events',12,'observations',2,'workOrders',2,'incidents',1,
+        'patrolVisits',10,'cameraActivations',1,'withNotes',5,'places',2,'photos',7),'totals: '||(${report}->'totals')::text);
+      SELECT public.assert_ok((SELECT (data->>'operationalEvents')::int=16 FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'existing metrics unchanged');
       SELECT public.assert_ok((SELECT jsonb_object_agg(c->>'code',(c->>'entries')::int) FROM jsonb_array_elements(${report}->'categories') c)=
-        '{"pest_control":3,"maintenance":2,"manufacture":2,"installation_removal":1,"securing":1,"inspection":1,"vehicle_observation":1,"patrol_visit":2,"camera_activation":1,"unclassified":1}'::jsonb,
+        '{"incident":1,"pest_control":3,"maintenance":2,"manufacture":2,"installation_removal":1,"securing":1,"inspection":1,"camera_activation":1,"vehicle_observation":1,"patrol_visit":3,"unclassified":1}'::jsonb,
         'categories: '||(${report}->'categories')::text);
-      SELECT public.assert_ok((${report}->'accountedFor')=jsonb_build_object('eventsInScope',12,'mirrorEventsExcluded',1,'activityEvents',11,
-        'observationsInScope',2,'workOrdersInScope',2,'entries',15,'itemised',15,'notItemised',0,'unclassified',1,'reconciled',true),'accounted for: '||(${report}->'accountedFor')::text);
+      SELECT public.assert_ok((SELECT array_agg(c->>'code' ORDER BY o) FROM jsonb_array_elements(${report}->'categories') WITH ORDINALITY x(c,o))
+        =ARRAY['incident','pest_control','maintenance','manufacture','installation_removal','securing','inspection','camera_activation','vehicle_observation','patrol_visit','unclassified'],
+        'categories follow the report order, incidents first');
+      SELECT public.assert_ok((${report}->'accountedFor')=jsonb_build_object('eventsInScope',16,'mirrorEventsExcluded',1,'activityEvents',15,
+        'observationsInScope',2,'workOrdersInScope',2,'incidentsInScope',1,'entries',20,'reported',17,'operationalWithheld',3,
+        'withheldTravelAdmin',2,'withheldShiftMarkers',1,'itemised',17,'notItemised',0,'unclassified',1,'reconciled',true),
+        'accounted for: '||(${report}->'accountedFor')::text);
+      SELECT public.assert_ok(position('Start' IN ${lines}::text)=0 AND position('Travel to site' IN ${lines}::text)=0
+        AND position('Timesheets' IN ${lines}::text)=0 AND NOT (${report}->'labels'->'category' ? 'travel_admin'),
+        'travel, administration and shift markers are withheld from the client report');
+      SELECT public.assert_ok((SELECT l->>'n'='Exit.' AND l->>'ph'='1' FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'t'='18:00'),
+        'a photographed movement entry is still reported');
       SELECT public.assert_ok((${report}->'pestControl'->'bySpecies')='[{"code":"goat","culls":0,"sightings":1,"other":0,"total":1},{"code":"possum","culls":1,"sightings":0,"other":0,"total":1}]'::jsonb,'pest species: '||(${report}->'pestControl'->'bySpecies')::text);
       SELECT public.assert_ok((${report}->'pestControl'->'ammunition')='[{"calibre":".22","entries":1,"rounds":3}]'::jsonb,'ammunition');
       SELECT public.assert_ok((${report}->'pestControl'->'byEquipment')='[{"code":"bait_station","entries":1}]'::jsonb,'pest equipment');
       SELECT public.assert_ok((${report}->'maintenance'->'workOrders')='{"completed":1,"open":0}'::jsonb
         AND (${report}->'manufacture'->'workOrders')='{"completed":0,"open":1}'::jsonb
-        AND (${report}->'maintenance'->>'hours')::numeric=2,'maintenance and manufacture');
-      SELECT public.assert_ok((${report}->'observations')->>'withPhoto'='1' AND (${report}->'observations')->>'photos'='3'
-        AND (${report}->'observations')->>'eventPhotos'='1','photos are counted once per stored file');
-      SELECT public.assert_ok((SELECT l->>'ph'='3' FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'j'='J-2002'),'appendix uses the same deduplicated photo count');
+        AND (${report}->'maintenance'->>'entries')::int=2,'maintenance and manufacture');
+      SELECT public.assert_ok((${report}->'observations')->>'withPhoto'='1' AND (${report}->'observations')->>'photos'='3','photos are counted once per stored file');
+      SELECT public.assert_ok((SELECT l->>'ph'='3' AND l->'pr' @> '[{"b":"bob-uploads","p":"p/1.jpg"},{"b":"bob-uploads","p":"p/2.jpg"},{"b":"scans","p":"scans/one.jpg"}]'::jsonb
+        AND jsonb_array_length(l->'pr')=3 AND l->>'ti'='Check' AND l->>'n'='Campervan parked overnight at the boat ramp' AND l->>'mo'='patrol'
+        FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'j'='J-2002'),'observation line carries its narrative and one reference per stored photo');
+      SELECT public.assert_ok((${report}->'incidents')='{"total":1,"investigations":1,"withMedia":1,"bySeverity":[{"code":"high","entries":1}],"byStatus":[{"code":"in_review","entries":1}]}'::jsonb,
+        'incidents: '||(${report}->'incidents')::text);
+      SELECT public.assert_ok((SELECT l - 'pr'=jsonb_build_object('d','2026-10-16','t','21:00','p','Alpha Reserve','k','incident','c','incident',
+          'it','cctv_bookmark','sev','high','st','in_review','inv','INV-2026-0042','ivs','active','n','Vehicle entered after closing; CCTV reviewed','ph',2,'vid',1)
+        AND l->'pr'='[{"b":"bob-uploads","p":"e/9.jpg"},{"b":"bob-uploads","p":"i/1.jpg"}]'::jsonb
+        FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'k'='incident'),'incident line: '||(SELECT string_agg(l::text,',') FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'k'='incident'));
+      SELECT public.assert_ok((SELECT count(*) FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'k'='incident')=1,
+        'staff-sensitive, other-organisation and unlinked incidents are excluded');
       SELECT public.assert_ok((${report}->'labels'->'activity'->>'cull')='Cull (provider)' AND (${report}->'labels'->'species'->>'goat')='Goat'
-        AND (${report}->'labels'->'serviceLine'->>'pest_control')='Pest control','provider catalogue labels with readable fallback');
-      SELECT public.assert_ok((SELECT array_agg(p->>'place' ORDER BY p->>'place') FROM jsonb_array_elements(${report}->'byPlace') p)=ARRAY['Alpha Reserve','Delta Depot','Not place-specific'],'places');
-      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=15 AND (${lines}->>'notItemised')::int=0,'all entries itemised');
-      SELECT public.assert_ok((${lines}->'lines'->0)=jsonb_build_object('d','2026-10-01','p','Alpha Reserve','k','event','c','pest_control','a','cull',
-        's','animal','sp','possum','j','J-1001','km',12.5,'h',1.5,'ph',1,'m',jsonb_build_array(jsonb_build_object('t','ammunition','cal','.22','q',3))),
+        AND (${report}->'labels'->'category'->>'incident')='Incidents and investigations','provider catalogue labels with readable fallback');
+      SELECT public.assert_ok((SELECT array_agg(p->>'place' ORDER BY p->>'place') FROM jsonb_array_elements(${report}->'byPlace') p)=ARRAY['Alpha Reserve','Delta Depot','Not location-specific'],'places');
+      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=17 AND (${lines}->>'notItemised')::int=0 AND (${lines}->>'version')::int=2,'all reported entries itemised');
+      SELECT public.assert_ok((${lines}->'lines'->0)=jsonb_build_object('d','2026-10-01','t','00:30','p','Alpha Reserve','k','event','c','pest_control','a','cull',
+        's','animal','sp','possum','j','J-1001','ph',1,'pr',jsonb_build_array(jsonb_build_object('b','bob-uploads','p','e/1.jpg')),
+        'm',jsonb_build_array(jsonb_build_object('t','ammunition','cal','.22','q',3)),
+        'ti','Cull','n','Two possums culled near the north gate','ac','Bait station refilled'),
         'first line: '||(${lines}->'lines'->0)::text);
       SELECT public.assert_ok((SELECT l->'m' FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'a'='rebait')='[{"t":"bait_feed","q":2}]'::jsonb,'materials keep type and count only');
-      SELECT public.assert_ok((SELECT l->>'s'='gate' AND l->>'a'='maintenance' FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'j'='WO-1'),'coded workshop subject and activity survive');
+      SELECT public.assert_ok((SELECT l->>'s'='gate' AND l->>'a'='maintenance' AND l->>'ti'='Repair gate hinge' AND l->>'n'='Hinge bent by vehicle'
+        AND l->>'ac'='Hinge replaced and gate rehung' AND NOT (l ? 'p') FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'j'='WO-1'),'coded workshop subject, activity and narrative survive');
       SELECT public.assert_ok(position('PRIVATE-' IN ${lines}::text)=0,'another provider cannot contribute work orders even at a shared place or by agreement ID');
       SELECT public.assert_ok((SELECT count(*) FROM jsonb_array_elements(${lines}->'lines') l WHERE l ? 'j' AND l->>'k'='event' AND l->>'a'='maintenance')=0,'free-text job references are dropped');
       SELECT public.assert_ok((SELECT position('CANARY' IN data::text || activity_lines::text)=0 AND position('999.99' IN data::text || activity_lines::text)=0
         AND position('unit_price' IN activity_lines::text)=0 AND position('.xlsx' IN data::text || activity_lines::text)=0
-        FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'no narratives, names, plates, costs or file names');
+        AND position('i/staff.jpg' IN activity_lines::text)=0
+        FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'no names, plates, costs, file names, investigation detail or excluded incidents');
+      SELECT public.assert_ok((SELECT NOT (data->'activityReport'->'totals' ? 'travelKm') AND NOT (data->'activityReport'->'totals' ? 'hours')
+        AND position('"km"' IN activity_lines::text)=0 AND position('"h"' IN activity_lines::text)=0
+        FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'no travel distance or job hours in the client report');
 
-      SELECT public.assert_ok((SELECT (r->'lines'->>'notItemised')::int=10 AND jsonb_array_length(r->'lines'->'lines')=5
+      SELECT public.assert_ok((SELECT (r->'lines'->>'notItemised')::int=12 AND jsonb_array_length(r->'lines'->'lines')=5
         AND (r->'report'->'accountedFor'->>'itemised')::int=5 AND (r->'report'->'accountedFor'->>'reconciled')::boolean
         AND r->'report'->>'itemisedDigest'=${report}->>'itemisedDigest'
         FROM public.build_agreement_activity_report('${agreement}',${nz('2026-10-01 00:00')},${nz('2026-11-01 00:00')},5) r),'line cap keeps exact totals and digest');
@@ -301,12 +363,12 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
       ${actor(admin)}
       INSERT INTO accounting SELECT public.get_report_pack_activity_accounting(id) FROM public.monthly_report_packs;
       RESET ROLE;
-      SELECT public.assert_ok((SELECT (data->'freshness'->>'matchesLive')::boolean AND (data->'freshness'->>'liveEntries')::int=15 FROM accounting),'fresh pack matches live');
-      SELECT public.assert_ok((SELECT data->'provenance'->'events'='{"inScope":11,"withLedger":2,"withoutLedger":9}'::jsonb
+      SELECT public.assert_ok((SELECT (data->'freshness'->>'matchesLive')::boolean AND (data->'freshness'->>'liveEntries')::int=17 FROM accounting),'fresh pack matches live');
+      SELECT public.assert_ok((SELECT data->'provenance'->'events'='{"inScope":15,"withLedger":2,"withoutLedger":13}'::jsonb
         AND data->'provenance'->'observations'='{"inScope":2,"withLedger":1,"withoutLedger":1}'::jsonb FROM accounting),'ledger provenance');
       SELECT public.assert_ok((SELECT data->'provenance'->'sources'->0 @> '{"sourceFile":"RM Patrol Log Oct.xlsx","sourceSheet":"Pest","batchStatus":"applied","batchRows":100,"events":2,"observations":0}'::jsonb FROM accounting),'source receipts');
       SELECT public.assert_ok((SELECT position('PRIVATE-' IN data::text)=0 FROM accounting),'foreign provider and client import receipts stay private');
-      SELECT public.assert_ok((SELECT data->'clientMonth'='{"entries":16,"thisAgreement":13,"otherAgreements":1,"noAgreementPlace":2,"unlinkedPlaces":[{"place":"Gamma Unlinked","entries":2}]}'::jsonb FROM accounting),
+      SELECT public.assert_ok((SELECT data->'clientMonth'='{"entries":20,"thisAgreement":17,"otherAgreements":1,"noAgreementPlace":2,"unlinkedPlaces":[{"place":"Gamma Unlinked","entries":2}]}'::jsonb FROM accounting),
         'client month: '||(SELECT (data->'clientMonth')::text FROM accounting));
       SELECT public.assert_ok((SELECT (data->'exceptions'->>'futureDated')::int=1 AND (data->'exceptions'->>'supersededDuplicates')::int=1
         AND data->'exceptions'->'sparseYears' @> '[{"year":2016,"entries":1}]'::jsonb FROM accounting),'exceptions: '||(SELECT (data->'exceptions')::text FROM accounting));
@@ -336,6 +398,9 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
         [`UPDATE public.location_events SET payload=jsonb_set(payload,'{materials_used,0,quantity}','7') WHERE id='${ev(1)}'`, 'ammunition'],
         [`UPDATE public.location_zones SET name='Corrected reserve' WHERE id='${alpha}'`, 'place'],
         [`UPDATE public.location_events SET payload=jsonb_set(payload,'{job_number}','"J-CORRECTED"') WHERE id='${ev(1)}'`, 'job reference'],
+        [`UPDATE public.location_events SET payload=jsonb_set(payload,'{comments}','"Three possums culled"') WHERE id='${ev(1)}'`, 'comment'],
+        [`UPDATE public.incidents SET status='resolved' WHERE id='${inc(1)}'`, 'incident status'],
+        [`INSERT INTO public.evidence_items(organization_id,module_key,evidence_kind,storage_path,location_event_id) VALUES ('${client}','patrol','photo','e/1b.jpg','${ev(1)}')`, 'photo'],
       ].map(([change, label]) => `
         BEGIN;
         ${change};
@@ -379,7 +444,7 @@ test('real PostgreSQL builds a reconciled, private month-end activity statement'
       ${actor(admin)}
       SELECT public.assert_ok(public.generate_due_report_packs('2026-10-01','2026-10-31','${agreement}')=0,'sent pack is not regenerated');
       RESET ROLE;
-      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=15,'sent pack keeps its frozen lines');
+      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=17,'sent pack keeps its frozen lines');
     `;
     try { docker(['exec', '-i', name, 'psql', '-X', '-q', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], setup); }
     catch (failure) { throw new Error(`${failure.stdout?.slice(-3000) ?? ''}\n${failure.stderr ?? failure.message}`); }

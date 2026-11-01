@@ -71,54 +71,89 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await testInfo.attach('report-review-published', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 });
 
-test('administrator reviews month-end activity, itemised lines and the live accounting check', async ({ page }, testInfo) => {
+test('administrator previews the client site activity report with incidents, photos, the site log and the completeness check', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   const lineReads: string[] = [];
+  const signedBatches: string[][] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.pathname.endsWith('/monthly_report_packs')) lineReads.push(url.searchParams.get('select') ?? '');
+    if (request.method() === 'POST' && url.pathname.includes('/storage/v1/object/sign/')) signedBatches.push((request.postDataJSON() as { paths: string[] }).paths);
   });
   await signInAsAdmin(page, '/admin/reports');
   await page.getByRole('button', { name: 'Generate report drafts' }).click();
   await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Review', exact: true }).click();
 
-  const activity = page.getByRole('region', { name: 'Month-end activity' });
-  await expect(activity.getByText('All 5 entries accounted for')).toBeVisible();
-  const totals = activity.getByRole('group', { name: 'Month-end activity totals' });
-  await expect(totals.getByText('4.25', { exact: true })).toBeVisible();
-  await expect(activity.getByRole('region', { name: 'Activity by category' }).getByText('Pest control')).toBeVisible();
-  expect(lineReads.filter((select) => select.includes('activity_lines'))).toEqual([]);
+  const report = page.getByRole('region', { name: 'Site activity report' });
+  await expect(report.getByText('Client report preview')).toBeVisible();
+  const glance = report.getByRole('group', { name: 'Report at a glance' });
+  await expect(glance.getByText('Pest culls recorded')).toBeVisible();
+  await expect(glance).not.toContainText(/hour|km|travel|distance/i);
+  await expect(page.getByText(/Patrol travel|Work hours/)).toHaveCount(0);
+  await expect(report.getByRole('region', { name: 'Entries by type of activity' }).getByText('Manufacture and fabrication')).toBeVisible();
 
-  await activity.locator('summary', { hasText: /^Pest control/ }).click();
-  await expect(activity.getByRole('region', { name: 'Pest control by species' }).getByText('Feral goat')).toBeVisible();
-
-  await activity.locator('summary', { hasText: 'Itemised activity' }).click();
-  const lines = activity.getByRole('region', { name: 'Itemised activity lines' });
-  await expect(lines.getByText('WO-0042')).toBeVisible();
-  await expect(lines.getByText('Shooting · Feral goat · Ammunition .223 × 12 · 1 photo')).toBeVisible();
-  await activity.getByLabel('Category', { exact: true }).selectOption('maintenance');
-  await expect(activity.getByText('Showing 1 of 1')).toBeVisible();
-  await expect(lines.getByText('WO-0042')).toHaveCount(0);
+  const incidents = report.getByRole('region', { name: 'Incidents and investigations' });
+  const incident = incidents.locator('article', { hasText: 'Vandalism' });
+  await expect(incident.getByText('INV-2026-031 · Open')).toBeVisible();
+  await expect(incident.getByText('Medium severity')).toBeVisible();
+  await expect(incident.locator('img')).toHaveCount(2);
+  await expect.poll(() => incident.locator('img').evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
   expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
+  expect(signedBatches).toEqual([['e2e/incidents/graffiti-1.jpg', 'e2e/incidents/graffiti-2.jpg']]);
+  await page.mouse.move(0, 0);
+  await expect(glance).toHaveScreenshot('report-site-activity-glance.png');
+  await expect(incidents).toHaveScreenshot('report-site-activity-incidents.png');
 
-  await activity.getByRole('button', { name: 'Check against live records' }).click();
-  await expect(activity.getByText(/This pack matches live records: 5 entries/)).toBeVisible();
-  await expect(activity.getByRole('region', { name: 'Import source files' }).getByText('Civic patrol log August.xlsx')).toBeVisible();
-  await expect(activity.getByRole('region', { name: 'Unlinked places with client records' }).getByText('Harbour Overflow Carpark')).toBeVisible();
-  await expect(activity.getByRole('button', { name: 'Check again' })).toBeVisible();
+  const opener = incident.getByRole('button', { name: 'Open photo 1 of 2' });
+  await opener.click();
+  const viewer = page.getByRole('dialog', { name: 'Photo 1 of 2' });
+  await expect(viewer.getByText('Vandalism · Civic Events Centre · Sun 2 Aug 2026 · 22:15')).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('dialog', { name: 'Photo 2 of 2' })).toBeVisible();
+  await testInfo.attach('report-photo-viewer', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(opener).toBeFocused();
+
+  await report.locator('summary', { hasText: /^Pest control/ }).click();
+  await expect(report.getByRole('region', { name: 'Pest control by species' }).getByText('Feral goat')).toBeVisible();
+
+  await report.locator('summary', { hasText: /^Site log/ }).click();
+  const log = report.locator('details', { has: page.locator('summary', { hasText: /^Site log/ }) });
+  await expect(log.getByRole('status')).toHaveText('5 entries with comments, work or photos');
+  await expect(log.getByRole('heading', { name: 'Civic Events Centre' })).toBeVisible();
+  await expect(log.getByText('1 routine patrol with nothing further to report (20 Aug).')).toBeVisible();
+  await expect(log.getByText('Ref WO-0042')).toBeVisible();
+  await expect(log.getByText('Ammunition .223 × 12')).toBeVisible();
+  await expect(log.getByText('Vandalism')).toHaveCount(0);
+  await log.getByLabel('Type of activity').selectOption('maintenance');
+  await expect(log.getByRole('status')).toHaveText('1 entry matches these filters');
+  await expect(log.getByText('Hinge replaced and the gate tested.')).toBeVisible();
+  await log.getByRole('button', { name: 'Clear filters' }).click();
+  await log.getByRole('checkbox', { name: 'With photos only' }).check();
+  await expect(log.getByRole('status')).toHaveText('2 entries match these filters');
+  await expect(log.locator('img')).toHaveCount(2);
+  await log.getByRole('button', { name: 'Clear filters' }).click();
+  expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
+  await testInfo.attach('report-site-activity-preview', { body: await report.screenshot(), contentType: 'image/png' });
+
+  const check = report.locator('details', { has: page.locator('summary', { hasText: /^Completeness check/ }) });
+  await expect(check.locator('summary')).toContainText('Provider only · All 9 records accounted for');
+  await check.locator('summary').click();
+  await expect(check.getByText('1 travel or administration record is kept out of the client report.')).toBeVisible();
+  await check.getByRole('button', { name: 'Check against live records' }).click();
+  await expect(check.getByText(/This pack matches live records: 7 entries/)).toBeVisible();
+  await expect(check.getByRole('region', { name: 'Source files' }).getByText('Civic patrol log August.xlsx')).toBeVisible();
+  await expect(check.getByRole('region', { name: 'Unlinked places with client records' }).getByText('Harbour Overflow Carpark')).toBeVisible();
+  await expect(check.getByRole('button', { name: 'Check again' })).toBeVisible();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
-  await testInfo.attach('report-month-end-activity', { body: await activity.screenshot(), contentType: 'image/png' });
 });
 
 test('administrator cannot mix activity from a newer report snapshot', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await signInAsAdmin(page, '/admin/reports');
-  await page.getByRole('button', { name: 'Generate report drafts' }).click();
-  await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Review', exact: true }).click();
   await page.route('**/rest/v1/monthly_report_packs?*', async (route) => {
     if (new URL(route.request().url()).searchParams.get('select') !== 'activity_lines,updated_at') {
       await route.fallback();
@@ -126,20 +161,25 @@ test('administrator cannot mix activity from a newer report snapshot', async ({ 
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       updated_at: '2026-08-31T09:30:00.000Z',
-      activity_lines: { version: 1, lines: [{ d: '2026-08-01', p: 'New place', k: 'event', c: 'maintenance', j: 'NEW-SNAPSHOT' }] },
+      activity_lines: { version: 2, lines: [{ d: '2026-08-01', p: 'New place', k: 'incident', c: 'incident', it: 'trespass', n: 'NEW-SNAPSHOT' }] },
     }) });
   });
   await page.route('**/rest/v1/rpc/get_report_pack_activity_accounting', (route) => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ version: 1, packUpdatedAt: '2026-08-31T09:30:00.000Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 5 } }),
+    body: JSON.stringify({ version: 1, packUpdatedAt: '2026-08-31T09:30:00.000Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 7 } }),
   }));
-  const activity = page.getByRole('region', { name: 'Month-end activity' });
-  await activity.locator('summary', { hasText: 'Itemised activity' }).click();
-  await expect(activity.getByText(/This report pack changed since you opened it/)).toBeVisible();
-  await expect(activity.getByText('NEW-SNAPSHOT')).toHaveCount(0);
-  await activity.getByRole('button', { name: 'Check against live records' }).click();
-  await expect(activity.getByText(/This report pack changed since you opened it/)).toHaveCount(2);
-  await expect(activity.getByText(/This pack matches live records/)).toHaveCount(0);
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  const report = page.getByRole('region', { name: 'Site activity report' });
+  await expect(report.getByRole('region', { name: 'Incidents and investigations' }).getByText(/This report pack changed since you opened it/)).toBeVisible();
+  await expect(report.getByText('NEW-SNAPSHOT')).toHaveCount(0);
+  const check = report.locator('details', { has: page.locator('summary', { hasText: /^Completeness check/ }) });
+  await check.locator('summary').click();
+  await check.getByRole('button', { name: 'Check against live records' }).click();
+  await expect(check.getByText(/This report pack changed since you opened it/)).toBeVisible();
+  await expect(report.getByText(/This pack matches live records/)).toHaveCount(0);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 

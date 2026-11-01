@@ -56,7 +56,7 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdf, /widthOfTextAtSize/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /return expected !== 0 \|\| completed !== 0/);
-  assert.match(send, /fcm-report-pack-pdf-lib-a4-v11/);
+  assert.match(send, /fcm-report-pack-pdf-lib-a4-v12/);
 });
 
 test('monthly client email summaries exclude provider-wide incident and alert totals', () => {
@@ -86,9 +86,10 @@ test('monthly report snapshots include agreement-place activity aggregates witho
   assert.match(operationalActivityMigration, /'vehicleObservations'/);
   assert.match(operationalActivityMigration, /'patrolTravelKm'/);
   assert.doesNotMatch(operationalActivityMigration, /event\.payload|job_cost|travel_cost|comments|plate_number/i);
-  assert.match(reviewPanel, /numberFrom\(pack\.data, 'patrolVisits'\)/);
-  assert.match(reviewPanel, /numberFrom\(pack\.data, 'vehicleObservations'\)/);
+  assert.match(reviewPanel, /numberFrom\(data, 'patrolVisits'\)/);
+  assert.match(reviewPanel, /numberFrom\(data, 'vehicleObservations'\)/);
   assert.match(reviewPanel, /SLA in progress/);
+  assert.doesNotMatch(reviewPanel, /patrolTravelKm|Patrol travel/, 'travel distance is operational, never shown beside the client report');
   assert.match(reviewPanel, /facilitiesFrom\(pack\.data\)/);
   assert.match(reviewPanel, /if \(expected === 0 && completed === 0\) return \[\]/);
   assert.match(reviewPanel, /key=\{`\$\{facility\.siteName\}-\$\{index\}`\}/);

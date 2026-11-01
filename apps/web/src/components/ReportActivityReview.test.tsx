@@ -1,20 +1,31 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ReportActivityReview } from './ReportActivityReview';
-import { activityReportFixture } from '../lib/reportActivity.fixture';
+import { activityLinesFixture, activityReportFixture } from '../lib/reportActivity.fixture';
 
-const { rpc, maybeSingle, select, eq, from } = vi.hoisted(() => {
+const { rpc, maybeSingle, select, eq, from, createSignedUrls, storageFrom } = vi.hoisted(() => {
   const maybeSingle = vi.fn();
-  const eq = vi.fn(() => ({ maybeSingle }));
-  const select = vi.fn(() => ({ eq }));
-  const from = vi.fn(() => ({ select }));
-  return { rpc: vi.fn(), maybeSingle, select, eq, from };
+  const eq = vi.fn();
+  const select = vi.fn();
+  const from = vi.fn();
+  const createSignedUrls = vi.fn();
+  const storageFrom = vi.fn();
+  return { rpc: vi.fn(), maybeSingle, select, eq, from, createSignedUrls, storageFrom };
 });
-vi.mock('../lib/supabase', () => ({ supabase: { from, rpc } }));
+vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, storage: { from: storageFrom } } }));
 
-const data = { patrolVisits: 2, activityReport: activityReportFixture };
 const updatedAt = '2026-10-01T00:00:00Z';
+const data = { patrolVisits: 3, activityReport: activityReportFixture };
+const linesRow = (lines: unknown = activityLinesFixture, at = updatedAt) => ({ data: { updated_at: at, activity_lines: lines }, error: null });
+const signed = (bucket: string, path: string) => `https://storage.test/${bucket}/${path}?token=t`;
+const noIncidents = {
+  ...activityReportFixture,
+  totals: { ...activityReportFixture.totals, entries: 8, incidents: 0 },
+  incidents: { total: 0, investigations: 0, withMedia: 0, bySeverity: [], byStatus: [] },
+};
+
 const group = (name: RegExp) => screen.getByText(name, { selector: 'summary' }).closest('details')!;
+const incidentsSection = () => screen.getByRole('region', { name: 'Incidents and investigations' });
 // Waits for the browser's own toggle event rather than dispatching a synthetic one.
 const setOpen = async (details: HTMLDetailsElement, open: boolean) => {
   await act(async () => {
@@ -24,13 +35,30 @@ const setOpen = async (details: HTMLDetailsElement, open: boolean) => {
   });
 };
 
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) { this.removeAttribute('open'); };
+});
+
+beforeEach(() => {
+  eq.mockImplementation(() => ({ maybeSingle }));
+  select.mockImplementation(() => ({ eq }));
+  from.mockImplementation(() => ({ select }));
+  maybeSingle.mockResolvedValue(linesRow());
+  storageFrom.mockImplementation((bucket: string) => ({ createSignedUrls: (paths: string[], seconds: number) => createSignedUrls(bucket, paths, seconds) }));
+  createSignedUrls.mockImplementation(async (bucket: string, paths: string[]) => ({
+    data: paths.map((path) => ({ path, signedUrl: signed(bucket, path), error: null })),
+    error: null,
+  }));
+});
+
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe('ReportActivityReview', () => {
-  it('explains how to add activity to a legacy draft and keeps sent packs unchanged', () => {
+  it('explains how to add the client report to a legacy draft and keeps sent packs unchanged', () => {
     const { rerender } = render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ patrolVisits: 2 }} status="draft" />);
     expect(screen.getByRole('note').textContent).toContain('Use Generate report drafts for this period');
     rerender(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ patrolVisits: 2 }} status="sent" />);
@@ -38,95 +66,179 @@ describe('ReportActivityReview', () => {
     expect(from).not.toHaveBeenCalled();
   });
 
-  it('shows the reconciled summary, categories and sections without loading lines', () => {
+  it('previews the client report without hours, travel or internal checks in the client sections', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
-    expect(screen.getByText('All 6 entries accounted for')).toBeTruthy();
-    const totals = screen.getByRole('group', { name: 'Month-end activity totals' });
-    expect(within(totals).getByText('Work hours').nextSibling?.textContent).toBe('3.5');
-    expect(within(totals).getByText('Entries without a visit')).toBeTruthy();
-    const categories = screen.getByRole('region', { name: 'Activity by category' });
-    expect(within(categories).getByText('Pest control')).toBeTruthy();
-    expect(screen.getByText(/1 automatic patrol-log copy of an observation was excluded/)).toBeTruthy();
+    expect(screen.getByText('Client report preview')).toBeTruthy();
+
+    const glance = screen.getByRole('group', { name: 'Report at a glance' });
+    expect([...glance.querySelectorAll('span')].map((node) => node.textContent)).toEqual([
+      'Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'CCTV activity', 'Photos', 'Pest culls recorded',
+    ]);
+    expect(within(glance).getByText('Incidents').closest('div')?.className).toBe('is-alert');
+    expect(within(glance).getByText('Pest culls recorded').nextSibling?.textContent).toBe('2');
+    expect(glance.textContent).not.toMatch(/hour|km|travel|distance/i);
+
+    const overview = screen.getByRole('region', { name: 'Entries by type of activity' });
+    expect(within(overview).getByText('CCTV and camera activity')).toBeTruthy();
     const pest = group(/^Pest control/);
     expect(within(pest).getByText('Goat')).toBeTruthy();
+    expect(within(pest).getByText('DOC 200 trap')).toBeTruthy();
     expect(within(pest).getByText('Calibre not recorded')).toBeTruthy();
     expect(within(pest).getByText('Not recorded')).toBeTruthy();
+    expect(within(group(/^Maintenance and repairs/)).getByText('Gate')).toBeTruthy();
     expect(screen.getByText('No manufacture or fabrication work was recorded during the period.')).toBeTruthy();
-    expect(from).not.toHaveBeenCalled();
+
+    const clientSections = [...document.querySelectorAll('.report-activity-section, .report-activity-group:not(.report-activity-check)')];
+    for (const section of clientSections) expect(section.textContent).not.toMatch(/import|ledger|batch|reconcil|start or finish|travel/i);
+    await screen.findByText('Trespass');
   });
 
-  it('uses singular wording for single entries', () => {
-    const report = activityReportFixture;
-    const single = {
-      ...report,
-      pestControl: { ...report.pestControl, entries: 1 },
-      accountedFor: { ...report.accountedFor, entries: 1, activityEvents: 1, observationsInScope: 0, workOrdersInScope: 0, itemised: 1 },
-    };
-    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: single }} status="draft" />);
-    expect(screen.getByText(/^1 entry reported: 1 patrol-log entry, 0 observations and 0 workshop work orders\./)).toBeTruthy();
-    expect(group(/^Pest control/).querySelector('summary')?.textContent).toContain('1 entry ·');
-    expect(group(/^Itemised activity/).querySelector('summary')?.textContent).toContain('1 line');
-    expect(document.body.textContent).not.toMatch(/\b1 (entries|lines|observations|photos)\b/);
-  });
+  it('leads with incidents and investigations, loading their detail and photos straight away', async () => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="generated" />);
+    const incidents = incidentsSection();
+    expect(within(incidents).getByText(/^1 incident was recorded at these locations; 1 investigation is linked; 1 with photo or video evidence\.$/)).toBeTruthy();
+    const breakdown = within(incidents).getByRole('list', { name: 'Incidents by severity and status' });
+    expect(within(breakdown).getByText('High severity · 1').className).toContain('report-chip-danger');
+    expect(within(breakdown).getByText('Under review · 1').className).toContain('report-chip-info');
 
-  it('lazy-loads itemised lines once, filters by category and retries after an error', async () => {
-    maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'network' } });
-    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
-    const itemised = group(/^Itemised activity/);
-    await setOpen(itemised, true);
-    expect(await within(itemised).findByRole('alert')).toBeTruthy();
-    expect(within(itemised).getByRole('alert').textContent).not.toContain('network');
-
-    maybeSingle.mockResolvedValueOnce({
-      data: {
-        updated_at: updatedAt,
-        activity_lines: {
-          version: 1,
-          notItemised: 0,
-          lines: [
-            { d: '2026-09-03', p: 'Alpha Reserve', k: 'event', c: 'pest_control', a: 'shooting', sp: 'goat', h: 1.5, km: 12 },
-            { d: '2026-09-04', p: 'Alpha Reserve', k: 'work_order', c: 'maintenance', s: 'gate', j: 'WO-1', ws: 'completed' },
-          ],
-        },
-      },
-      error: null,
-    });
-    fireEvent.click(within(itemised).getByRole('button', { name: 'Retry' }));
-    const table = await within(itemised).findByRole('region', { name: 'Itemised activity lines' });
+    const card = (await within(incidents).findByText('Trespass')).closest('article')!;
+    expect(card.className).toContain('is-incident');
+    expect(within(card).getByText('Wed 2 Sep 2026 · 21:40')).toBeTruthy();
+    expect(within(card).getByText(/Alpha Reserve/)).toBeTruthy();
+    expect(within(card).getByText('INV-2026-014 · Awaiting evidence')).toBeTruthy();
+    expect(within(card).getByText('1 video clip held on file')).toBeTruthy();
     expect(from).toHaveBeenCalledWith('monthly_report_packs');
     expect(select).toHaveBeenCalledWith('activity_lines,updated_at');
     expect(eq).toHaveBeenCalledWith('id', 'p1');
-    expect(within(table).getByText('03/09/2026')).toBeTruthy();
-    expect(within(table).getByText('WO-1')).toBeTruthy();
 
-    fireEvent.change(within(itemised).getByLabelText('Category'), { target: { value: 'maintenance' } });
-    expect(within(table).queryByText('03/09/2026')).toBeNull();
-    expect(within(itemised).getByText('Showing 1 of 1')).toBeTruthy();
-
-    await setOpen(itemised, false);
-    await setOpen(itemised, true);
-    expect(maybeSingle).toHaveBeenCalledTimes(2);
-    expect(within(itemised).getByText('WO-1')).toBeTruthy();
+    await waitFor(() => expect(card.querySelectorAll('img')).toHaveLength(2));
+    expect(createSignedUrls).toHaveBeenCalledWith('bob-uploads', ['org/incidents/fence-1.jpg', 'org/incidents/fence-2.jpg'], 900);
+    expect(card.querySelector('img')?.getAttribute('src')).toBe(signed('bob-uploads', 'org/incidents/fence-1.jpg'));
+    expect(within(card).getByRole('button', { name: 'Open photo 2 of 2' })).toBeTruthy();
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses newer itemised lines and reloads them only after the displayed snapshot changes', async () => {
-    const newer = '2026-10-02T00:00:00Z';
-    const response = {
-      data: { updated_at: newer, activity_lines: { version: 1, lines: [{ d: '2026-09-04', p: 'Alpha Reserve', k: 'event', c: 'maintenance', j: 'NEW-REF' }] } },
-      error: null,
+  it('opens photos in an accessible viewer, steps through them and returns focus', async () => {
+    const lines = {
+      ...activityLinesFixture,
+      lines: [{
+        ...activityLinesFixture.lines[0],
+        ph: 6,
+        pr: [1, 2, 3, 4].map((index) => ({ b: 'bob-uploads', p: `org/incidents/fence-${index}.jpg` })),
+      }],
     };
-    maybeSingle.mockResolvedValue(response);
-    const { rerender } = render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
-    await setOpen(group(/^Itemised activity/), true);
-    expect(await screen.findByText(/This report pack changed since you opened it/)).toBeTruthy();
-    expect(screen.queryByText('NEW-REF')).toBeNull();
-    await setOpen(group(/^Itemised activity/), false);
-    await setOpen(group(/^Itemised activity/), true);
-    expect(maybeSingle).toHaveBeenCalledTimes(1);
-    rerender(<ReportActivityReview packId="p1" updatedAt={newer} data={data} status="draft" />);
-    await setOpen(group(/^Itemised activity/), true);
-    expect(await screen.findByText('NEW-REF')).toBeTruthy();
+    maybeSingle.mockResolvedValue(linesRow(lines));
+    createSignedUrls.mockImplementation(async (bucket: string, paths: string[]) => ({
+      data: paths.map((path) => (path.endsWith('fence-3.jpg') ? { path, signedUrl: '', error: 'Object not found' } : { path, signedUrl: signed(bucket, path), error: null })),
+      error: null,
+    }));
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const card = (await within(incidentsSection()).findByText('Trespass')).closest('article')!;
+    await waitFor(() => expect(within(card).getByRole('button', { name: 'Photo 3 could not be loaded' })).toHaveProperty('disabled', true));
+    expect(within(card).getByText('2 further photos held on file')).toBeTruthy();
+
+    const opener = within(card).getByRole('button', { name: 'Open photo 2 of 4' });
+    opener.focus();
+    fireEvent.click(opener);
+    const viewer = await screen.findByRole('dialog', { name: 'Photo 2 of 4' });
+    expect(viewer.hasAttribute('open')).toBe(true);
+    expect(within(viewer).getByText('Trespass · Alpha Reserve · Wed 2 Sep 2026 · 21:40')).toBeTruthy();
+    expect(within(viewer).getByRole('img').getAttribute('alt')).toBe('Trespass · Alpha Reserve · Wed 2 Sep 2026 · 21:40, photo 2 of 4');
+
+    fireEvent.keyDown(viewer, { key: 'ArrowRight' });
+    expect(within(viewer).getByText('This photo could not be loaded.', { exact: false })).toBeTruthy();
+    fireEvent.click(within(viewer).getByRole('button', { name: /Next/ }));
+    expect(screen.getByRole('dialog', { name: 'Photo 4 of 4' })).toBeTruthy();
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('img').getAttribute('src')).toBe(signed('bob-uploads', 'org/incidents/fence-4.jpg')));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Next/ }));
+    expect(screen.getByRole('dialog', { name: 'Photo 1 of 4' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Open 1 more photo' }));
+    expect(await screen.findByRole('dialog', { name: 'Photo 4 of 4' })).toBeTruthy();
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('waits for the site log to open when there are no incidents, then filters, searches and folds routine patrols', async () => {
+    maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'network' } });
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: noIncidents }} status="draft" />);
+    expect(within(incidentsSection()).getByText('No incidents were recorded at these locations during the period.')).toBeTruthy();
+    expect(from).not.toHaveBeenCalled();
+
+    const log = group(/^Site log/);
+    expect(log.querySelector('summary')?.textContent).toContain('8 entries by location, with comments and photos');
+    await setOpen(log, true);
+    const alert = await within(log).findByRole('alert');
+    expect(alert.textContent).not.toContain('network');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+
+    const status = await within(log).findByText('6 entries with comments, work or photos');
+    expect(within(log).getByRole('heading', { name: 'Alpha Reserve' })).toBeTruthy();
+    expect(within(log).getByRole('heading', { name: 'Not location-specific' })).toBeTruthy();
+    expect(within(log).getByText('2 routine patrols with nothing further to report (7, 9 Sep).')).toBeTruthy();
+    expect(within(log).queryByText('Trespass')).toBeNull();
+    expect(within(log).getByText('Ref WO-1')).toBeTruthy();
+
+    fireEvent.change(within(log).getByLabelText('Type of activity'), { target: { value: 'maintenance' } });
+    expect(status.textContent).toBe('1 entry matches these filters');
+    expect(within(log).getByText('Repair north gate latch')).toBeTruthy();
+    expect(within(log).queryByText(/routine patrols/)).toBeNull();
+    expect(within(log).queryByRole('heading', { name: 'Not location-specific' })).toBeNull();
+
+    fireEvent.click(within(log).getByRole('button', { name: 'Clear filters' }));
+    fireEvent.change(within(log).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'GOAT' } });
+    expect(status.textContent).toBe('1 entry matches these filters');
+    expect(within(log).getByText('Shooting · Goat')).toBeTruthy();
+
+    fireEvent.click(within(log).getByRole('button', { name: 'Clear filters' }));
+    fireEvent.click(within(log).getByRole('checkbox', { name: 'With photos only' }));
+    expect(status.textContent).toBe('2 entries match these filters');
+    await waitFor(() => expect(createSignedUrls).toHaveBeenCalledWith('scans', ['org/pest/ridge.jpg', 'org/obs/1.jpg', 'org/obs/2.jpg', 'org/obs/3.jpg'], 900));
+
+    fireEvent.change(within(log).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'nothing like this' } });
+    expect(within(log).getByText('No entries match these filters.')).toBeTruthy();
+
+    await setOpen(log, false);
+    await setOpen(log, true);
     expect(maybeSingle).toHaveBeenCalledTimes(2);
+    expect(within(log).getByText('6 entries with comments, work or photos')).toBeTruthy();
+  });
+
+  it('refuses newer site log detail and reloads only after the displayed snapshot changes', async () => {
+    const newer = '2026-10-02T00:00:00Z';
+    maybeSingle.mockResolvedValue(linesRow(activityLinesFixture, newer));
+    const { rerender } = render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    expect(await within(incidentsSection()).findByText(/This report pack changed since you opened it/)).toBeTruthy();
+    expect(screen.queryByText('Trespass')).toBeNull();
+    await setOpen(group(/^Site log/), true);
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+
+    rerender(<ReportActivityReview packId="p1" updatedAt={newer} data={data} status="draft" />);
+    expect(await screen.findByText('Trespass')).toBeTruthy();
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the completeness check provider-only and explains what was kept out of the client report', async () => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const check = group(/^Completeness check/);
+    expect(check.querySelector('summary')?.textContent).toBe('Completeness checkProvider only · All 12 records accounted for');
+    expect(within(check).getByText('9 entries are in the client report; every record in scope is accounted for.')).toBeTruthy();
+    expect(within(check).getByText('2 travel and administration records are kept out of the client report.')).toBeTruthy();
+    expect(within(check).getByText('1 shift start or finish marker is kept out of the client report.')).toBeTruthy();
+    expect(within(check).getByText(/1 automatic patrol-log copy of an observation was excluded/)).toBeTruthy();
+    expect(screen.queryByRole('note')).toBeNull();
+    await screen.findByText('Trespass');
+    cleanup();
+
+    const unreconciled = { ...activityReportFixture, accountedFor: { ...activityReportFixture.accountedFor, entries: 1, reconciled: false } };
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: unreconciled }} status="draft" />);
+    expect(screen.getByRole('note').textContent).toContain('do not agree');
+    expect(group(/^Completeness check/).querySelector('summary')?.textContent).toContain('Totals need review');
+    await screen.findByText('Trespass');
   });
 
   it('runs the provider accounting check and warns when live records changed', async () => {
@@ -135,7 +247,7 @@ describe('ReportActivityReview', () => {
         version: 1,
         packUpdatedAt: updatedAt,
         checkedAt: '2026-10-01T00:00:00Z',
-        freshness: { hasFrozenReport: true, frozenEntries: 6, liveEntries: 7, matchesLive: false, changedCategories: [{ code: 'pest_control', frozen: 3, live: 4 }] },
+        freshness: { hasFrozenReport: true, frozenEntries: 9, liveEntries: 10, matchesLive: false, changedCategories: [{ code: 'pest_control', frozen: 2, live: 3 }] },
         provenance: { events: { inScope: 4, withLedger: 3, withoutLedger: 1 }, observations: { inScope: 1, withLedger: 0, withoutLedger: 1 }, sources: [] },
         clientMonth: { entries: 9, thisAgreement: 7, otherAgreements: 0, noAgreementPlace: 2, unlinkedPlaces: [{ place: 'Beta Hut', entries: 2 }] },
         exceptions: { futureDated: 0, sparseYears: [], supersededDuplicates: 0 },
@@ -143,32 +255,41 @@ describe('ReportActivityReview', () => {
       error: null,
     });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="generated" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
-    expect(await screen.findByText(/6 entries in the pack, 7 now/)).toBeTruthy();
+    const check = group(/^Completeness check/);
+    await setOpen(check, true);
+    fireEvent.click(within(check).getByRole('button', { name: 'Check against live records' }));
+    expect(await within(check).findByText(/9 entries in the pack, 10 now/)).toBeTruthy();
     expect(rpc).toHaveBeenCalledWith('get_report_pack_activity_accounting', { p_pack_id: 'p1' });
-    expect(screen.getByText(/Use Generate report drafts for this period to refresh it/)).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Categories that changed since generation' })).getByText('4')).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Unlinked places with client records' })).getByText('Beta Hut')).toBeTruthy();
-    expect(screen.getByText('No date or duplicate exceptions found.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy();
+    expect(within(check).getByText(/Use Generate report drafts for this period to refresh it/)).toBeTruthy();
+    expect(within(within(check).getByRole('region', { name: 'Categories that changed since generation' })).getByText('3')).toBeTruthy();
+    expect(within(within(check).getByRole('region', { name: 'Unlinked places with client records' })).getByText('Beta Hut')).toBeTruthy();
+    expect(within(check).getByText('No date or duplicate exceptions found.')).toBeTruthy();
+    expect(within(check).getByRole('button', { name: 'Check again' })).toBeTruthy();
+    await screen.findByText('Trespass');
   });
 
   it('does not certify an older on-screen snapshot using a newer accounting result', async () => {
     rpc.mockResolvedValueOnce({
-      data: { version: 1, packUpdatedAt: '2026-10-02T00:00:00Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 6 } },
+      data: { version: 1, packUpdatedAt: '2026-10-02T00:00:00Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 9 } },
       error: null,
     });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
-    expect(await screen.findByText(/This report pack changed since you opened it/)).toBeTruthy();
-    expect(screen.queryByText(/This pack matches live records/)).toBeNull();
+    const check = group(/^Completeness check/);
+    await setOpen(check, true);
+    fireEvent.click(within(check).getByRole('button', { name: 'Check against live records' }));
+    expect(await within(check).findByText(/This report pack changed since you opened it/)).toBeTruthy();
+    expect(within(check).queryByText(/This pack matches live records/)).toBeNull();
+    await screen.findByText('Trespass');
   });
 
   it('shows a permission state instead of the raw error for non-administrators', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'Provider administrator access required' } });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Only a provider administrator'));
-    expect(screen.queryByRole('alert')).toBeNull();
+    const check = group(/^Completeness check/);
+    await setOpen(check, true);
+    fireEvent.click(within(check).getByRole('button', { name: 'Check against live records' }));
+    await waitFor(() => expect(within(check).getByRole('status').textContent).toContain('Only a provider administrator'));
+    expect(within(check).queryByRole('alert')).toBeNull();
+    await screen.findByText('Trespass');
   });
 });

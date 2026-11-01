@@ -137,13 +137,19 @@ Generating a custom report never creates or sends a scheduled R&M monthly pack.
 
 Scheduled monthly packs share this renderer. Since migration
 `20261102210000_rm_monthly_activity_report.sql`, `generate_due_report_packs`
-also freezes a categorised activity report (`data.activityReport`) and up to
-2,000 itemised lines (`activity_lines`, a separate column that list queries do
-not select). The PDF adds activity sections, an accounting statement and an
-itemised appendix; packs without an activity report keep their earlier layout.
-Provider administrators can compare a pack with live records through
-`get_report_pack_activity_accounting`. That result is never persisted to
-client-readable data.
+also freezes a categorised client site activity report (`data.activityReport`,
+version 2) and up to 2,000 itemised lines (`activity_lines`, a separate column
+that list queries do not select). The PDF adds the client sections (at a
+glance, activity overview, incidents and investigations, pest control,
+maintenance, manufacture, observations) and a site log by location, with up to
+3 photos per entry and 60 per report; packs without an activity report keep
+their earlier layout. Travel, administration and shift markers are withheld
+from the client report. The PDF and email never describe the import or
+matching process; pack, snapshot and renderer provenance is kept in the PDF's
+document properties. Provider administrators see the withheld counts in a
+collapsed, provider-only completeness check and can compare a pack with live
+records through `get_report_pack_activity_accounting`. That result is never
+persisted to client-readable data.
 
 Generation and accounting use explicit Auckland midnight boundaries, independent
 of the database session timezone. Freshness compares every summary section and a

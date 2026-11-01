@@ -3364,42 +3364,49 @@ manufacture. Not applied live yet: it ships through a pull request.
 
 - **Before:** monthly report packs showed only SLA, patrol-visit, camera and
   vehicle counts. Pest-control, maintenance and manufacture work was already
-  stored as coded `location_events` (from the patrol-log importer), observations
-  and workshop work orders, but no report used those codes. No new
+  stored as coded `location_events` (from the patrol-log importer), observations,
+  workshop work orders and incidents, but no report used those codes. No new
   observation tables were needed.
 - **During:** `build_agreement_activity_report` puts every entry at an
-  agreement's places in the period into one category. The first match wins:
-  pest control, manufacture, maintenance, installation/removal, securing,
-  inspection, travel/admin, vehicle observation, camera activation, other
-  work, patrol visit, then "Not yet classified". Automatic patrol-log copies
+  agreement's places in the period into one category: incidents and
+  investigations, pest control, manufacture, maintenance, installation and
+  removal, securing, inspection, travel and administration, observations, CCTV
+  and camera activity, other site work, patrols, then "Other site activity"
+  for entries with no work code. Automatic patrol-log copies
   of observations (`source = 'observation_trigger'`) are left out so nothing
   is counted twice. Dates use New Zealand time. Code labels come only from the
   provider's own reference codes; another organisation's labels are never
   used.
 - **After:** `generate_due_report_packs` stores the summary in
-  `data.activityReport` and up to 2,000 itemised lines in the separate
-  `activity_lines` column. List screens never load that column. Each pack
-  shows:
-  - totals, by category and by place;
+  `data.activityReport` (version 2) and up to 2,000 itemised lines in the
+  separate `activity_lines` column. List screens never load that column. Each
+  pack shows:
+  - totals, by type of activity and by location;
+  - incidents and investigations by severity and status, each with its
+    description, investigation reference and status, and photos;
   - pest control by species (culls, sightings, other), activity, traps and
     equipment, and ammunition calibre with rounds;
   - maintenance and manufacture by item worked on, with work-order status;
   - observations and photos by type;
-  - an "accounted for" check: patrol-log entries + observations + work orders
-    must equal the category total and the place total.
-- **Review screen:** the Reports review panel shows these sections. It loads
-  the itemised lines only when opened, with a category filter. A provider
-  administrator can run "Check against live records"
+  - a site log of every entry by location, with its comments, action notes
+    and photos;
+  - a provider-only "accounted for" check: patrol-log entries + observations +
+    work orders + incidents must equal the reported total plus the withheld
+    travel/administration and shift-marker records, and the category and
+    location totals must agree.
+- **Review screen:** the Reports review panel previews the client report (see
+  "Client-facing site activity report" below). It loads the itemised lines
+  only when needed. A provider administrator can run "Check against live records"
   (`get_report_pack_activity_accounting`). The check shows whether the pack
   still matches live data and how many entries trace back to an import file
   and sheet. It also shows the client's records at this agreement's places,
   at other agreements' places and at unlinked places, plus date and duplicate
   exceptions. The check is never stored or shown to the client.
-- **PDF and email:** renderer `fcm-report-pack-pdf-lib-a4-v11` adds the
-  activity sections, an "Activity Accounting" statement and an itemised
-  appendix. Older packs keep their earlier layout. The email adds a short
-  activity summary. The PDF, send function and web app share one renderer
-  version, and a test keeps them equal.
+- **PDF and email:** renderer `fcm-report-pack-pdf-lib-a4-v12` adds the
+  client site activity sections, the site log and photos. Older packs keep
+  their earlier layout. The email adds a short activity summary. The PDF,
+  send function and web app share one renderer version, and a test keeps them
+  equal.
 - **PDF text fix (all PDFs):** pdf-lib drew the "fi" ligature with the wrong
   width, so words like "classified" showed a gap and copied as "classifi ed".
   Ligatures are now turned off in `_shared/pdf-noto-fonts.ts`. Letter widths
@@ -3411,7 +3418,7 @@ manufacture. Not applied live yet: it ships through a pull request.
 **Data caveats the report makes visible (not fixed by this change):**
 
 - About 10,857 older imported entries have no work-type code, so they show as
-  "Not yet classified" until they are re-coded.
+  "Other site activity" until they are re-coded.
 - Dates that look wrong for a client: 16 entries in 2016, 2 in 2028 and 2 in
   2926.
 - About 2,119 entries and 384 observations have no import-ledger record. They
@@ -3421,13 +3428,13 @@ manufacture. Not applied live yet: it ships through a pull request.
 
 **Deployment order (owner action):**
 
-1. Apply the migration. The v11 PDF function reads `activity_lines`, so it
+1. Apply the migration. The v12 PDF function reads `activity_lines`, so it
    fails if deployed before the column exists.
 2. Deploy `generate-report-pack-pdf` and `send-report-pack` together.
 3. Merge the web change.
 4. Regenerate the PDF for any published but unsent pack. The OneFortyOne
    September pack (email, v10 PDF) can't be sent until its PDF is regenerated
-   on v11. Only the PDF needs regenerating, not the draft: an older pack keeps
+   on v12. Only the PDF needs regenerating, not the draft: an older pack keeps
    its layout and its review. To add the activity sections, regenerate the
    draft for that period. The pack then goes back to draft and must be
    reviewed again. Sent packs never change.
@@ -3437,12 +3444,17 @@ Validation: PostgreSQL behaviour test `test/rm-monthly-activity-report.test.js`
 web unit and component tests, and a local PDF render checked by eye. The
 Reports Hub browser test (`apps/web/e2e/reports-hub.spec.ts`, desktop and
 mobile) covers the review screen end to end:
-- the summary loads without reading itemised lines;
-- opening "Itemised activity" reads the lines exactly once;
-- the category filter works;
-- the live accounting check shows the import provenance and the unlinked
-  places;
-- the page does not scroll sideways on a phone.
+- the client preview shows no hours, kilometres or travel;
+- incident photos are signed in one batch and open in the photo viewer, with
+  keyboard navigation and focus returned on close;
+- the itemised lines are read exactly once, whether opened from the incidents
+  or the site log;
+- the site log location, type, search and photo filters work;
+- the completeness check shows the withheld records, the import provenance
+  and the unlinked places;
+- the page does not scroll sideways on a phone;
+- screenshot baselines for the "Report at a glance" tiles and the incidents
+  section.
 
 Text uses "1 entry", not "1 entries", in the PDF, the email and on screen.
 The `report-pack-review-table` screenshot baselines in that spec were
@@ -3476,3 +3488,52 @@ shared-place providers, foreign catalogue/ledger rows, unknown quantities,
 same-count corrections and UTC/DST boundaries) and desktop/mobile offline
 browser tests for current and stale snapshots. No source records were re-coded,
 re-dated or promoted while making these fixes.
+
+### Client-facing site activity report (owner ruling, 2026-11-02)
+
+The owner ruled that the month-end report is for the client: a summary of what
+happened at its locations, then the itemised activity. It must not explain the
+app or how records were matched to imported data, and it must leave out travel,
+start and finish times, hours, kilometres and other operational information.
+It should carry the observations and the comments on events at each location,
+with photos where they belong to a CCTV, patrol, incident or investigation
+entry. This section reworks the unreleased PR #312 design to meet that ruling.
+
+- **Before:** the v1 snapshot and v11 PDF showed the import accounting
+  statement, an itemised appendix with source detail, and patrol travel
+  kilometres in the review tiles.
+- **During:** the v2 snapshot (`data.activityReport.version = 2`) withholds
+  travel and administration entries and start/finish/home shift markers from
+  the client report, but counts them in the provider accounting. An entry with
+  a photo is always reported. Incidents at the agreement's places are
+  included with type, severity, status, description and any linked
+  investigation's reference and status. Investigation titles, summaries and
+  resolution notes are never copied, and staff-sensitive incidents are left
+  out. Each line carries
+  references to the photos recorded with it (observation photos, event
+  evidence and incident attachments), never public URLs.
+- **After (PDF v12 and email):** At a Glance, Activity Overview, Incidents and
+  Investigations, Activity by Location, Pest Control, Maintenance,
+  Manufacture, Observations and a Site Log by location in date order. Routine
+  patrols with nothing to report are folded into one line per location. The PDF
+  embeds up to 3 photos per entry and 60 per report. It converts stored PNGs to
+  small JPEGs within a fixed CPU budget; any photo not embedded is "held on
+  file". Pack, snapshot and renderer provenance moves into the PDF's document
+  properties instead of the page text. The email headline reads "N entries
+  recorded across N locations, including …" with entries by type of activity.
+- **After (review screen):** the panel opens with a "Client report preview":
+  - eight tiles "at a glance", with incidents highlighted;
+  - the activity overview, then incidents and investigations with severity and
+    status chips, descriptions and photos;
+  - collapsible pest-control, maintenance, manufacture, observation and
+    location breakdowns;
+  - a site log with location, type, comment-search and photos-only filters;
+  - a photo viewer with previous/next, keyboard and focus return.
+
+  The provider-only "Completeness check" (withheld records, import provenance
+  and the live accounting comparison) stays collapsed below the preview. The
+  patrol travel kilometres tile is gone. Patrol, camera and vehicle source
+  tiles are hidden for v2 packs, and SLA tiles show only when one is non-zero.
+- **Unchanged:** the provider must still review every draft before it is
+  published, and sent packs never change. The migration is still not applied
+  live.
