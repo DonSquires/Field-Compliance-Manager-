@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+const { applyApprovalRuling } = require('./fixtures/client-approval-ruling');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
@@ -49,11 +50,13 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
     created = true;
     let ready = false;
     for (let i = 0; i < 120; i++) {
-      try { docker(['exec', name, 'pg_isready', '-U', 'postgres']); ready = true; break; }
+      try { docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']); ready = true; break; }
       catch { await new Promise(resolve => setTimeout(resolve, 250)); }
     }
     assert.ok(ready, 'PostGIS test database ready');
-    const setup = `
+    // Owner ruling 2026-11-01: functions loaded from the catalog or older migrations run with the
+    // client-approval gates removed, whether or not schema.sql has been refreshed yet.
+    const { sql: setup } = applyApprovalRuling(`
       CREATE EXTENSION IF NOT EXISTS postgis;
       CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN;
       CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO PUBLIC;
@@ -255,18 +258,23 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
         VALUES('${id(68)}','${provider}','${id(64)}','Expired engagement','operational',current_date-10,current_date-1,'not_invited');
       INSERT INTO public.test_receipts SELECT 'pending-profile',to_jsonb(updated_at) FROM public.organizations WHERE id='${id(60)}';
       ${actor(adminOfficer)}
-      SELECT public.expect_error($q$SELECT public.save_service_client('${id(62)}','${provider}','${id(60)}',
-        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Pending client','','','',false)$q$,'outside your managed');
       SELECT public.expect_error($q$SELECT public.save_service_client('${id(66)}','${provider}','${id(64)}',
         now(),'Other pending client','','','',true)$q$,'outside your managed');
       SELECT public.expect_error($q$SELECT public.save_service_client('${id(63)}','${provider}','${id(60)}',
         (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Must not persist','','','',true)$q$,'Several current agreements');
       RESET ROLE;
       SELECT public.assert_ok((SELECT name='Pending client' FROM public.organizations WHERE id='${id(60)}'),'ambiguous confirmation rolls back profile edits');
+      ${actor(adminOfficer)}
+      INSERT INTO public.test_receipts VALUES ('pending-edit',public.save_service_client('${id(62)}','${provider}','${id(60)}',
+        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Pending client','','','Edited before any approval',false));
+      RESET ROLE;
+      SELECT public.assert_ok((SELECT data->'engagement_confirmed'='true'::jsonb FROM public.test_receipts WHERE key='pending-edit'),'a current agreement is enough without client approval or provider confirmation');
+      SELECT public.assert_ok((SELECT invitation_status='not_invited' AND external_refs->'engagement_confirmation' IS NULL
+        FROM public.service_agreements WHERE id='${id(61)}'),'managing a client neither forges an invitation nor an attestation');
       DELETE FROM public.service_agreements WHERE id='${id(67)}';
       ${actor(adminOfficer)}
       SELECT public.assert_ok(public.save_service_client('${id(63)}','${provider}','${id(60)}',
-        (SELECT (data#>>'{}')::timestamptz FROM public.test_receipts WHERE key='pending-profile'),'Pending client','','','',true)->'engagement_confirmed'='true'::jsonb,'provider can explicitly confirm its own pending agreement');
+        (SELECT (data->>'updated_at')::timestamptz FROM public.test_receipts WHERE key='pending-edit'),'Pending client','','','',true)->'engagement_confirmed'='true'::jsonb,'provider can explicitly confirm its own pending agreement');
       RESET ROLE;
       SELECT public.assert_ok((SELECT invitation_status='not_invited' AND external_refs->'engagement_confirmation'->>'confirmed_by'='${adminOfficer}'
         FROM public.service_agreements WHERE id='${id(61)}'),'pending confirmation does not accept a portal invitation');
@@ -307,7 +315,7 @@ test('real PostGIS verifies client setup, field capture, isolation, retries and 
       SELECT public.assert_ok((SELECT service_agreement_id IS NULL AND metadata->>'created_via'='legacy_import'
         AND site_brief='Reviewed briefing' FROM public.client_sites WHERE id='${id(81)}'),'legacy profile edit leaves agreement decisions explicit');
       SELECT public.assert_ok((SELECT count(*)=0 FROM public.site_financial_config),'legacy profile edit does not infer financial defaults');
-    `;
+    `);
     try { docker(['exec', '-i', name, 'psql', '-X', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], setup); }
     catch (failure) { throw new Error(`${failure.stdout?.slice(-3000) ?? ''}\n${failure.stderr ?? failure.message}`); }
   } finally {

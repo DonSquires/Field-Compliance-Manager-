@@ -10,6 +10,16 @@
 > branches via `parent_organization_id`). See
 > `docs/design/ONBOARDING_AND_ENTITLEMENT_EXPERIENCE.md` for the full design.
 > Migration 0271 implements the access-layer fix. Issue #214, Epic #213.
+>
+> **Owner ruling 2026-11-01 — one service provider; client approval is not a
+> condition of service.** R & M Security and Investigations is the only
+> service provider; Iron Eagle is the platform owner for billing and app
+> management only; no other organisation may sign up. A provider's current
+> operational agreement is enough to deliver its service without client
+> approval. Where the text below describes many subscribing providers or
+> client acceptance as a gate,
+> [that ruling](#owner-ruling-2026-11-01--one-service-provider-client-approval-is-not-a-condition-of-service)
+> governs.
 
 ## Model A: every org is its own entity
 
@@ -62,6 +72,12 @@ the legacy trigger's inferred latest agreement. They do not seed default
 hourly billing, minimum hours or tax assumptions. Those decisions remain in
 the commercial workspace. Multiple current agreements require an explicit
 administrative review; the simple path never silently picks one.
+
+**Superseded in part by the owner ruling 2026-11-01** (end of this document):
+a current operational agreement qualifies whether or not it carries this
+confirmation, and accepted agreements no longer have separate authority. The
+confirmation is kept as provenance. Expired and future agreements still do
+not qualify.
 
 The `service_agreements` table is the canonical inter-org link:
 
@@ -147,6 +163,10 @@ columns correctly. For own-rooted org users: `organization_id` =
 convention.
 
 ## Platform-owner boundary (owner ruling, Don Squires, 2026-09-15)
+
+> **2026-11-01:** R & M is now the only provider and no other organisation may
+> subscribe. Iron Eagle's boundary below still holds; see the owner ruling
+> 2026-11-01 at the end of this document.
 
 Iron Eagle Security is the **platform owner**, not a co-operator of its
 subscribers. Every provider (R & M Security and Investigation is the first)
@@ -262,6 +282,10 @@ least one place (a site address or an area) — a zone is not specifically
 required. Delivery schedules may be written directly
 (`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
 both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.
+
+**Superseded in part 2026-11-01:** any current operational agreement can be
+configured whatever its `invitation_status`; a declined or expired invitation
+no longer blocks the provider.
 
 ## Ruling 2026-10-25 — Mainland Pest Control under R&M; group charge catalog
 
@@ -500,3 +524,57 @@ How the build holds this:
   `20261028090000_monthly_fee_drawdown.sql`, audited. It is the only R&M
   fixed-price agreement; the others without a fee were pay as you use and
   were switched to `pay_as_you_go` (migration `20261029100000`).
+
+## Owner ruling 2026-11-01 — one service provider; client approval is not a condition of service
+
+Owner direction (Don Squires, 2026-11-01): the app is now only for R&M, with
+Iron Eagle as the only separate login for billing and app management; other
+organisations cannot sign up; and "we will also not require the client org to
+approve anything for service to be given."
+
+**One service provider.**
+
+- R & M Security and Investigations is the only service provider. Every
+  client organisation, with its places, observations, vehicles and people, is
+  served under R&M.
+- Iron Eagle Security remains the platform owner for billing and app
+  management only. The platform-owner boundary above still applies to it.
+- No other organisation may sign up as a provider or subscriber; the
+  subscriber provisioning path closes.
+- Client organisations still sign in to the client portal, and client reports
+  are still created and released under Oracle governance.
+- Other providers' records move under R&M with a provenance ledger, or are
+  archived. Nothing is deleted.
+- Status: the consolidation and the sign-up lock are a separate migration.
+  Until it ships, this part of the ruling is the target, not the live state.
+
+**Client approval is not a condition of service.**
+
+- A provider's current operational agreement (inside its `starts_on` /
+  `ends_on` window) is enough to configure, deliver, record, report on and
+  invoice its service. Neither client acceptance nor a provider attestation
+  is required.
+- `service_agreements.invitation_status` records the client-portal invitation
+  lifecycle only. `external_refs.engagement_confirmation` is provenance (who
+  confirmed the engagement, and when). Neither grants nor withholds provider
+  authority.
+- Accepting a quote records the commercial acceptance on the quote and makes
+  its agreement operational. It no longer marks the portal invitation
+  accepted; the agreement keeps whatever invitation status it already had.
+- Invoicing no longer waits for client approval or a finance-share invite.
+  Finance, reporting, obligations, schedules, zone coverage and module
+  assignment can be configured on any operational agreement.
+- Client-side disclosure keeps acceptance. A client reads the provider's
+  evidence (`has_location_access(..., 'client_reads_provider')`) and
+  cross-organisation continuity is published
+  (`publish_location_event_continuity`) only on an accepted portal agreement.
+  Accepting the invitation is how a client opts in to seeing the provider's
+  records.
+- Expired and future agreements still do not authorise managing a client's
+  account and places or field capture. Historical reports, identity history
+  and finance posting stay reachable for agreements the provider held,
+  because the custodian keeps the record.
+- Several current agreements for one client still need an explicit
+  administrative choice; no path silently picks one.
+- Migration `20261102110000_service_without_client_approval.sql` implements
+  this part; `test/service-without-client-approval.test.js` holds it.

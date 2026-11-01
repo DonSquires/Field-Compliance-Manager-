@@ -8,6 +8,25 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-directed single provider and service without client approval, 2026-11-01
+(ruling in `docs/canon/ORG_SERVICE_MODEL.md`):
+
+- **Before:** many provider orgs could subscribe, and provider-side RPCs for
+  field places, CRM management, geography, identity, reports, finance and
+  invoicing required the client to accept the portal invitation (or a provider
+  attestation). Freedom-camping module assignment failed with a 400 for an
+  engaged but uninvited client.
+- **During:** migration `20261102110000_service_without_client_approval.sql`
+  rewrites 32 live function bodies in place, with an exact anchor count per
+  step, so a current operational agreement is enough.
+  `test/service-without-client-approval.test.js` and the PostGIS place
+  workflow fixture hold the rule. UI copy and filters stop asking for client
+  acceptance.
+- **After:** `invitation_status` describes portal access only. Client-side
+  disclosure (`client_reads_provider`, continuity publishing) still requires
+  acceptance. Consolidating all client data under R&M and closing sign-up are
+  the next migration; until then R&M-only is the target, not the live state.
+
 Owner-directed client/place simplification, 2026-10-28:
 
 - **Before:** admin navigation exposed five client-workflow destinations and

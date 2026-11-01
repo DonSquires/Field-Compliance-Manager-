@@ -84,7 +84,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
       try {
         const [org, agreements] = await Promise.all([
           supabase.from('organizations').select('id,name,updated_at,contact_email,contact_phone,account_notes').eq('id', accountId).single(),
-          supabase.from('service_agreements').select('id,starts_on,ends_on,invitation_status,external_refs')
+          supabase.from('service_agreements').select('id,starts_on,ends_on')
             .eq('provider_organization_id', providerId).eq('client_organization_id', accountId).eq('agreement_type', 'operational'),
         ]);
         if (org.error || agreements.error || !org.data) throw org.error ?? agreements.error ?? new Error('Client is not available.');
@@ -93,8 +93,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
         setClient(next); setForm({ name: next.name, email: next.contact_email ?? '', phone: next.contact_phone ?? '', notes: next.account_notes ?? '' });
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
         const confirmed = (agreements.data ?? []).some(item => (!item.starts_on || item.starts_on <= today)
-          && (!item.ends_on || item.ends_on >= today)
-          && (item.invitation_status === 'accepted' || item.external_refs?.engagement_confirmation?.confirmed_by));
+          && (!item.ends_on || item.ends_on >= today));
         setEngaged(confirmed); setEngagementSaved(confirmed);
       } catch (failure) { if (!cancelled) setError(placeFailure(failure)); }
       finally { if (!cancelled) setLoading(false); }
@@ -189,7 +188,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
           <label>Contact phone (optional)<input type="tel" value={form.phone} onChange={event => change('phone', event.target.value)} /></label>
           <label>Notes (optional)<textarea maxLength={10000} value={form.notes} onChange={event => change('notes', event.target.value)} /></label>
         </div>
-        {engagementSaved ? <p className="place-point-status">Operational engagement confirmed. Client portal invitations and commercial acceptance remain separate.</p>
+        {engagementSaved ? <p className="place-point-status">A current operational agreement is in place. Service does not wait for client approval; the client-portal invitation is separate.</p>
           : <label className="place-check"><input type="checkbox" checked={engaged} required={!client} onChange={event => {
             setEngaged(event.target.checked); setDirty(true); request.current = crypto.randomUUID();
           }} />I confirm this provider is engaged to deliver services for this client</label>}

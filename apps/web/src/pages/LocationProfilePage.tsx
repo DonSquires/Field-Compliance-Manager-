@@ -44,7 +44,7 @@ export default function LocationProfilePage({ locationId }: { locationId: string
         if (response.error || !response.data) throw response.error ?? new Error('Location profile returned no data.');
         const workspace = response.data as FieldPlaceWorkspace;
         const next = workspace.places.find(item => item.id === locationId);
-        if (!next) throw new Error('Location is outside the confirmed operational engagement.');
+        if (!next) throw new Error('Location is not covered by a current operational agreement.');
         if (cancelled) return;
         const site = next.sites[0];
         setPlace(next); setClientName(workspace.clients.find(item => item.id === next.organization_id)?.name ?? '');

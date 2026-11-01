@@ -52,7 +52,7 @@ export function FinanceLabourCostWorkspace({ activePeriodId, onChanged }: { acti
       supabase.from('timesheets').select('id,staff_id,shift_id,period_start,period_end,actual_hours,work_derived_hours,status').eq('organization_id', orgId).in('status', ['approved', 'paid']).not('shift_id', 'is', null).order('period_end', { ascending: false }).limit(100),
       supabase.from('finance_labour_cost_postings').select('timesheet_id').eq('organization_id', orgId).limit(500),
       supabase.from('finance_pl_periods').select('id,name,period_start,period_end').eq('organization_id', orgId).in('status', ['draft', 'locked']).order('period_start', { ascending: false }),
-      supabase.from('service_agreements').select('id,name').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').eq('invitation_status', 'accepted').order('name'),
+      supabase.from('service_agreements').select('id,name').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').order('name'),
       supabase.from('cost_centres').select('id,code,name').eq('organization_id', orgId).eq('active', true).order('code'),
       supabase.from('rate_rules').select('id,amount,pay_code,role_code,service_type,effective_from,effective_to,priority').eq('organization_id', orgId).eq('rule_kind', 'pay').eq('rate_type', 'hourly').eq('active', true),
     ]);

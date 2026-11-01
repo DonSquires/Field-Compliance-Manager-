@@ -103,7 +103,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(patrolIds);
 
   const providerAgreements = useMemo(() => agreements.filter((agreement) =>
-    agreement.agreement_type === 'operational' && agreement.invitation_status === 'accepted' && agreement.client_organization_id !== profile?.organizationId,
+    agreement.agreement_type === 'operational' && agreement.client_organization_id !== profile?.organizationId,
   ), [agreements, profile?.organizationId]);
 
   const placeNames = useMemo(() => {
