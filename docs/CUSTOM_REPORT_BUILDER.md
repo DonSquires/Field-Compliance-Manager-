@@ -135,7 +135,7 @@ Generating a custom report never creates or sends a scheduled R&M monthly pack.
 
 ## Monthly Packs: Month-End Activity
 
-Scheduled monthly packs share this renderer. The pending migration
+Scheduled monthly packs share this renderer. The migration
 `20261102210000_rm_monthly_activity_report.sql` extends `generate_due_report_packs`
 to freeze a categorised client site activity report (`data.activityReport`,
 version 2) and up to 2,000 itemised lines (`activity_lines`, a separate column

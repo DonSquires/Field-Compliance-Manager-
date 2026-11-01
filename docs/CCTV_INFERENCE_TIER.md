@@ -454,7 +454,8 @@ conservative engineering gates, not calibrated accuracy claims, and must be revi
 set. Plate reads are constrained to NZ formats, voted per character position with OCR character confidence
 where it still aligns with the normalised plate, and retain conflicting strings for human review.
 
-`record_cctv_entity_observations` and `find_cctv_portfolio_matches` (migration `20261102190000`) enforce the
+`record_cctv_entity_observations` and `find_cctv_portfolio_matches` (migration `20261102190100`, following
+`20261102190000`) enforce the
 same gates in the database: person and vehicle templates are neither stored nor matched unless the observation
 is `clear` and carries its explicit usability flag. Approved identity templates and accepted legacy face
 observations remain searchable; animal matching keeps its existing path. Only a stored, clear, usable face may
@@ -465,6 +466,20 @@ ingest (`complete_motion_inference`) therefore keeps its face rows in manual rev
 Laptop GPU workers must run
 `deploy/laptop-worker/update-watcher.ps1` after release; until they do, their faces and appearance templates
 lack the usability flags and are dropped from matching (fail safe, lower recall).
+
+Release verification, 2026-11-01 UTC: #304 was merged with the verified release
+author; the governed VPS lane applied and ledgered `20261102190100`, rebuilt
+the inference/watcher services, refreshed Atlas and merged live catalog #317.
+Release `7ce07f99` completed successfully. Live metadata confirms the separate
+512-dimensional vehicle vector and HNSW index. This is deployment evidence,
+not measured recognition accuracy or authority to reprocess historical clips.
+
+The laptop updater preserves both uncommitted changes and clean branches that
+cannot fast-forward to `origin/main`, using a detached temporary release
+worktree instead. An ancestry-inspection error fails closed. Coordinate laptop
+maintenance with the control-plane release timer and hold an expiring,
+holder-specific CCTV claim pause through queue drain, restart and health checks.
+Do not reset or rewrite a laptop branch merely to make deployment proceed.
 
 The Python inference-tier tests (`services/fcm-inference/test_inference_tier.py`) are not run by CI; run them
 locally with the service requirements and `pytest` before changing the inference service.

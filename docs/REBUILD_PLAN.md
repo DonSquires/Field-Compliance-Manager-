@@ -8,6 +8,29 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
+
+- Before: any attachment on the current message excludes cloud fallback;
+  earlier attachment descriptions are withheld.
+- During: add an unchecked per-message owner attestation and an additive
+  owner-only RPC recording consent with attachment IDs, actor, timestamp and
+  policy version. Replays cannot upgrade consent. Current-message extracted
+  text/local image descriptions may accompany approved Ollama Cloud fallback;
+  raw files never do. Private models retain history; cloud excludes earlier
+  attachment-bearing conversation/logs and pre-cloud exchanges.
+- After: synthetic routing and UI tests must prove default-local behavior,
+  explicit opt-in, selection/send reset, cloud receipts and historical-context
+  exclusion. No sensitive/live attachment is used for external testing.
+  The migration, runtime and web changes require governed publication and
+  deployment; a local pass is not a live-service acceptance claim.
+- Local acceptance: web lint and six component tests pass; four targeted
+  offline Playwright checks pass across desktop/mobile and opt-in on/off,
+  including persisted choice after reload and default-off on the next file.
+  The new migration executes in a disposable network-free PostgreSQL fixture;
+  synthetic checks cover denial, approval receipt, immutable replay,
+  rejected consent upgrade, owner scope, required request ID and grants.
+  These checks do not prove production RLS or actual cloud inference.
+
 Owner-directed single provider and service without client approval, 2026-11-01
 (ruling in `docs/canon/ORG_SERVICE_MODEL.md`):
 

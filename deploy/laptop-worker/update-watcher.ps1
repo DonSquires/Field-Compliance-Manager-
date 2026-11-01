@@ -79,12 +79,15 @@ try {
 
   $trackedChanges = git status --porcelain --untracked-files=no
   if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the laptop worker checkout.' }
-  if ($trackedChanges) {
+  git merge-base --is-ancestor HEAD origin/main
+  $ancestryExitCode = $LASTEXITCODE
+  if ($ancestryExitCode -notin @(0, 1)) { throw 'Could not determine whether the laptop branch can fast-forward.' }
+  if ($trackedChanges -or $ancestryExitCode -eq 1) {
     $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) ("fcm-laptop-release-$([guid]::NewGuid().ToString('N'))")
     git worktree add --detach $temporaryWorktree origin/main
     if ($LASTEXITCODE -ne 0) { throw 'Could not create a clean temporary release from origin/main.' }
     $releaseRoot = $temporaryWorktree
-    Write-Host 'Tracked local changes preserved; deploying from a clean temporary release.'
+    Write-Host 'Tracked local changes or a non-fast-forward branch preserved; deploying from a clean temporary release.'
   } else {
     git merge --ff-only origin/main
     if ($LASTEXITCODE -ne 0) { throw 'The checkout cannot fast-forward cleanly.' }
