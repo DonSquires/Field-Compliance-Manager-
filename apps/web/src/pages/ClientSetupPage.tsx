@@ -156,7 +156,7 @@ const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithC
       if (org.error || !org.data) throw org.error ?? new Error('Client not found or not accessible.');
       const [sites, agreements] = await Promise.all([
         supabase.from('client_sites').select('id,name,location_id,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
-        supabase.from('service_agreements').select('id,ends_on').eq('client_organization_id', id).eq('provider_organization_id', branchId).eq('agreement_type', 'operational').in('invitation_status', ['not_invited', 'invited', 'accepted']),
+        supabase.from('service_agreements').select('id,ends_on').eq('client_organization_id', id).eq('provider_organization_id', branchId).eq('agreement_type', 'operational'),
       ]);
       if (sites.error || agreements.error) throw sites.error ?? agreements.error;
       const active = (agreements.data ?? []).filter((agreement) => !agreement.ends_on || agreement.ends_on >= new Date().toISOString().slice(0, 10));

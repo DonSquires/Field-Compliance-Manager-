@@ -120,7 +120,8 @@ describe('governed CRM accounts', () => {
   it('shows agreement billing readiness before generating an invoice and does not offer fallback billing', () => {
     expect(page).toContain("supabase.from('crm_commercial_settings')");
     expect(page).toContain(".eq('status', 'accepted')");
-    expect(page).toContain("agreement.invitation_status === 'accepted'");
+    expect(page).not.toContain('client_approval_required');
+    expect(page).not.toContain('The client has not approved this service agreement yet');
     expect(page).toContain("invoiceReadiness?.source === 'missing'");
     expect(page).toContain('Configure accepted quote lines or commercial settings before creating a draft invoice.');
   });
@@ -129,7 +130,8 @@ describe('governed CRM accounts', () => {
     expect(page).toContain(".eq('client_organization_id', orgId)");
     expect(page).toContain(".eq('agreement_type', 'financial')");
     expect(page).toContain('Platform subscription');
-    expect(page).toContain("agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId) && agreement.invitation_status === 'accepted'");
+    // Owner ruling 2026-11-01: invoicing does not wait for the client to accept a portal invitation
+    expect(page).toContain("state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId)).map(");
   });
 
   it('shows parent oversight through a branch-preserving consolidated commercial read model', () => {

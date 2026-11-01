@@ -74,7 +74,7 @@ export function FinanceControlPanel({ mode = 'all', activePeriodId, onPeriodChan
     const [periodResponse, taxResponse, agreementResponse, shiftResponse] = await Promise.all([
       supabase.from('finance_pl_periods').select('id,name,status').eq('organization_id', profile.organizationId).in('status', ['draft', 'locked']).order('period_end', { ascending: false }),
       supabase.from('finance_tax_periods').select('id,period_start,period_end,status,net_tax_due').eq('organization_id', profile.organizationId).in('status', ['open', 'prepared']).order('period_end', { ascending: false }),
-      supabase.from('service_agreements').select('id,name').eq('provider_organization_id', profile.organizationId).eq('invitation_status', 'accepted').order('name'),
+      supabase.from('service_agreements').select('id,name').eq('provider_organization_id', profile.organizationId).order('name'),
       supabase.from('shifts').select('id,service_type,scheduled_start,status,officer_user_id,service_agreement_location_id,service_agreement_module_id,work_unit_id').eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress']).order('scheduled_start', { ascending: false }).limit(50),
     ]);
     const baseFailure = periodResponse.error ?? taxResponse.error ?? agreementResponse.error ?? shiftResponse.error;

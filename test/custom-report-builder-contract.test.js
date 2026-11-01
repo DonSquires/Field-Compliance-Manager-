@@ -71,8 +71,9 @@ test('the report hub builds custom drafts and reuses the existing review queue',
   assert.match(builder, /rpc\('get_custom_report_scope_options'/);
   assert.match(builder, /rpc\('generate_custom_report_pack'/);
   assert.match(builder, /Any selected Site or Zone, and any selected Person, and any selected Vehicle/);
-  assert.match(builder, /agreement\.invitation_status === 'accepted' && agreement\.agreement_type === 'operational'/);
-  assert.match(builder, /No accepted operational agreement is available/);
+  assert.match(builder, /agreements\.filter\(\(agreement\) => agreement\.agreement_type === 'operational'\)/);
+  assert.doesNotMatch(builder, /invitation_status/, 'owner ruling 2026-11-01: custom reports do not wait for client portal acceptance');
+  assert.match(builder, /No operational agreement is available for a custom report/);
   assert.match(builder, /private identity attributes are excluded/i);
   assert.match(hub, /<CustomReportBuilder/);
   assert.match(hub, /pack\.report_kind === 'custom'/);

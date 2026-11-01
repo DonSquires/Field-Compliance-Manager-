@@ -28,6 +28,8 @@ interface RelationshipRecord {
   name: string;
   agreement_type: string;
   invitation_status: string;
+  starts_on: string | null;
+  ends_on: string | null;
   provider_organization_id: string;
   client_organization_id: string;
   client_portal_access_mode: string | null;
@@ -71,7 +73,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
       const { data: agreements, error: agreementsErr } = await supabase
         .from('service_agreements')
         .select(
-          'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
+          'id, name, agreement_type, invitation_status, starts_on, ends_on, provider_organization_id, client_organization_id, client_portal_access_mode, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
         )
         .or(`provider_organization_id.eq.${operatingBranchId},client_organization_id.eq.${operatingBranchId}`)
         .order('created_at', { ascending: false });
@@ -113,6 +115,8 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
           name: agreement.name,
           agreement_type: agreement.agreement_type,
           invitation_status: agreement.invitation_status,
+          starts_on: agreement.starts_on ?? null,
+          ends_on: agreement.ends_on ?? null,
           provider_organization_id: agreement.provider_organization_id,
           client_organization_id: agreement.client_organization_id,
           client_portal_access_mode: agreement.client_portal_access_mode,
@@ -144,11 +148,14 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
   }, [loadRelationships]);
 
   const summary = useMemo(() => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
     return {
       totalAgreements: relationships.length,
       totalSites: relationships.reduce((sum, relationship) => sum + relationship.site_count, 0),
       totalZones: relationships.reduce((sum, relationship) => sum + relationship.zone_count, 0),
-      activeAgreements: relationships.filter((relationship) => relationship.invitation_status === 'accepted').length,
+      activeAgreements: relationships.filter((relationship) => relationship.agreement_type === 'operational'
+        && (!relationship.starts_on || relationship.starts_on <= today)
+        && (!relationship.ends_on || relationship.ends_on >= today)).length,
     };
   }, [relationships]);
 
@@ -187,7 +194,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
         <SummaryCard label="Agreements" value={String(summary.totalAgreements)} />
         <SummaryCard label="Sites linked" value={String(summary.totalSites)} />
         <SummaryCard label="Zones linked" value={String(summary.totalZones)} />
-        <SummaryCard label="Accepted" value={String(summary.activeAgreements)} />
+        <SummaryCard label="In force" value={String(summary.activeAgreements)} />
       </div>
 
       {relationships.length === 0 ? (
@@ -286,7 +293,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
                     )}
                   </div>
                 </div>
-                {isProvider && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--color-border)' }}><button type="button" className="btn btn-secondary" onClick={() => setWorkspaceAccount({ id: relationship.counterpart_id, name: counterpartName, agreementId: relationship.id })}>Manage relationship</button>{relationship.agreement_type === 'operational' && relationship.invitation_status === 'accepted' && <><button type="button" className="btn btn-secondary" onClick={() => setReadinessAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name })}>Review readiness</button><button type="button" className="btn btn-primary" onClick={() => setSetupAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name, invitationStatus: relationship.invitation_status })}>Configure agreement</button></>}</div>}
+                {isProvider && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--color-border)' }}><button type="button" className="btn btn-secondary" onClick={() => setWorkspaceAccount({ id: relationship.counterpart_id, name: counterpartName, agreementId: relationship.id })}>Manage relationship</button>{relationship.agreement_type === 'operational' && <><button type="button" className="btn btn-secondary" onClick={() => setReadinessAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name })}>Review readiness</button><button type="button" className="btn btn-primary" onClick={() => setSetupAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name, invitationStatus: relationship.invitation_status })}>Configure agreement</button></>}</div>}
               </div>
             );
           })}

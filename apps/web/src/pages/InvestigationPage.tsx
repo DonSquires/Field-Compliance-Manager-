@@ -73,7 +73,7 @@ const InvestigationPage: React.FC = () => {
       supabase.from('investigations').select('id,investigation_reference,title,investigation_type,status,priority,summary,opened_at').eq('id', investigationId).single(),
       supabase.from('investigation_links').select('id,entity_type,entity_id,link_role,link_reason,linked_at').eq('investigation_id', investigationId).order('linked_at', { ascending: true }),
       supabase.from('investigation_events').select('id,event_type,description,created_at').eq('investigation_id', investigationId).order('created_at', { ascending: false }),
-      orgId ? supabase.from('service_agreements').select('id,name,client_organization_id').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').eq('invitation_status', 'accepted').order('name') : Promise.resolve({ data: [], error: null }),
+      orgId ? supabase.from('service_agreements').select('id,name,client_organization_id').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').order('name') : Promise.resolve({ data: [], error: null }),
       orgId ? supabase.from('client_sites').select('id,name,address').eq('organization_id', orgId).eq('active', true).order('name') : Promise.resolve({ data: [], error: null }),
       supabase.from('dispatch_jobs').select('id,status,origin_type,assigned_officer_id,briefing_notes').eq('investigation_id', investigationId).order('created_at', { ascending: false }),
     ]);

@@ -522,7 +522,7 @@ export default function AccountOnboardingPage({
             </header>
             <p>
               This makes the organization active. The server will lock and
-              recheck the prospect, ledger version, accepted agreement, primary
+              recheck the prospect, ledger version, current operational agreement, primary
               contact, and all operational readiness dimensions.
             </p>
             <footer>
