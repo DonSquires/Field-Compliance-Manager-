@@ -40,14 +40,14 @@ test('consolidateFaces clusters continuous frames into one subject and handles r
 
   const frames = [
     // Person A seen consecutively at t=0, 1, 2
-    { frame_index: 0, relative_timestamp_seconds: 0.0, sha256_hash: 'h0', face: { success: true, faces: [{ embedding: embA, bbox: { width: 40, height: 40 } }] } },
-    { frame_index: 10, relative_timestamp_seconds: 1.0, sha256_hash: 'h1', face: { success: true, faces: [{ embedding: embA, bbox: { width: 50, height: 50 } }] } },
-    { frame_index: 20, relative_timestamp_seconds: 2.0, sha256_hash: 'h2', face: { success: true, faces: [{ embedding: embA, bbox: { width: 45, height: 45 } }] } },
+    { frame_index: 0, relative_timestamp_seconds: 0.0, sha256_hash: 'h0', face: { success: true, faces: [{ embedding: embA, bbox: { width: 40, height: 40 }, usable_for_matching: true, face_quality_score: 0.8 }] } },
+    { frame_index: 10, relative_timestamp_seconds: 1.0, sha256_hash: 'h1', face: { success: true, faces: [{ embedding: embA, bbox: { width: 50, height: 50 }, usable_for_matching: true, face_quality_score: 0.9 }] } },
+    { frame_index: 20, relative_timestamp_seconds: 2.0, sha256_hash: 'h2', face: { success: true, faces: [{ embedding: embA, bbox: { width: 45, height: 45 }, usable_for_matching: true, face_quality_score: 0.85 }] } },
     // Person B seen at t=2.5
-    { frame_index: 25, relative_timestamp_seconds: 2.5, sha256_hash: 'h3', face: { success: true, faces: [{ embedding: embB, bbox: { width: 30, height: 30 } }] } },
+    { frame_index: 25, relative_timestamp_seconds: 2.5, sha256_hash: 'h3', face: { success: true, faces: [{ embedding: embB, bbox: { width: 30, height: 30 }, usable_for_matching: true, face_quality_score: 0.7 }] } },
     // Person A returns after 30 seconds (gap > 15s) at t=35.0, 36.0
-    { frame_index: 350, relative_timestamp_seconds: 35.0, sha256_hash: 'h4', face: { success: true, faces: [{ embedding: embA, bbox: { width: 60, height: 60 } }] } },
-    { frame_index: 360, relative_timestamp_seconds: 36.0, sha256_hash: 'h5', face: { success: true, faces: [{ embedding: embA, bbox: { width: 65, height: 65 } }] } },
+    { frame_index: 350, relative_timestamp_seconds: 35.0, sha256_hash: 'h4', face: { success: true, faces: [{ embedding: embA, bbox: { width: 60, height: 60 }, usable_for_matching: true, face_quality_score: 0.95 }] } },
+    { frame_index: 360, relative_timestamp_seconds: 36.0, sha256_hash: 'h5', face: { success: true, faces: [{ embedding: embA, bbox: { width: 65, height: 65 }, usable_for_matching: true, face_quality_score: 0.9 }] } },
   ];
 
   const { events, uniqueSubjectsCount } = await consolidateFaces(frames, { maxGapSeconds: 15.0 });
@@ -69,7 +69,18 @@ test('consolidateFaces clusters continuous frames into one subject and handles r
   assert.equal(events[1].subject_id, 2);
   assert.equal(events[1].subject_label, 'Person #2');
   assert.equal(events[1].frame_count, 1);
+  assert.equal(events[0].usable_for_matching, true);
+  assert.equal(events[0].face_template_frames, 5);
 
+});
+
+test('face observations without a passed quality gate cannot form identity clusters', async () => {
+  const { events, uniqueSubjectsCount } = await consolidateFaces([{
+    relative_timestamp_seconds: 1,
+    face: { success: true, faces: [{ embedding: [1, 0], bbox: { width: 80, height: 80 }, usable_for_matching: false }] },
+  }]);
+  assert.equal(uniqueSubjectsCount, 0);
+  assert.deepEqual(events, []);
 });
 
 test('consolidateVehicles clusters ALPR plate detections and handles returns', async () => {
@@ -103,6 +114,48 @@ test('consolidateVehicles clusters ALPR plate detections and handles returns', a
   assert.equal(events[1].plate, 'XYZ789');
   assert.equal(events[1].frame_count, 1);
 
+});
+
+test('plate aggregation votes by position and retains a conflicting OCR alternative', async () => {
+  const frames = [
+    { relative_timestamp_seconds: 1, alpr: { success: true, results: [{ plate: 'ABC123', score: 0.8, char_confidences: [0.95, 0.95, 0.95, 0.95, 0.95, 0.95] }] } },
+    { relative_timestamp_seconds: 2, alpr: { success: true, results: [{ plate: 'ABC128', score: 0.7, char_confidences: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9] }] } },
+    { relative_timestamp_seconds: 3, alpr: { success: true, results: [{ plate: 'ABC128', score: 0.65, char_confidences: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9] }] } },
+  ];
+  const { events } = await consolidateVehicles(frames);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].plate, 'ABC128');
+  assert.equal(events[0].plate_conflict, true);
+  assert.ok(events[0].plate_alternatives.includes('ABC123'));
+  assert.deepEqual(events[0].plate_character_votes[5].votes, { '8': 1.215, '3': 0.76 });
+});
+
+test('plate character votes ignore OCR confidences that no longer align with the normalised plate', async () => {
+  const frames = [
+    { relative_timestamp_seconds: 1, alpr: { success: true, results: [{ plate: 'ABC123', score: 0.8, char_confidences: [0.1, 0.1, 0.1, 0.1, 0.1] }] } },
+    { relative_timestamp_seconds: 2, alpr: { success: true, results: [{ plate: 'ABC128', score: 0.7, char_confidences: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9] }] } },
+    { relative_timestamp_seconds: 3, alpr: { success: true, results: [{ plate: 'ABC128', score: 0.65, char_confidences: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9] }] } },
+  ];
+  const { events } = await consolidateVehicles(frames);
+  assert.deepEqual(events[0].plate_character_votes[5].votes, { '8': 1.215, '3': 0.8 });
+});
+
+test('vehicle re-identification templates aggregate only quality-gated detector crops across frames', async () => {
+  const attributes = {
+    appearance_embedding: Array(256).fill(1 / 16),
+    appearance_embedding_model: 'vehicle-reid-0001.xml',
+    appearance_embedding_usable: true,
+    appearance_quality_score: 0.8,
+    vehicle_crop_status: 'detector_crop',
+  };
+  const { events } = await consolidateVehicles([
+    { relative_timestamp_seconds: 1, triage: { vehicles: [{ bbox: { x: 100, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes }] } },
+    { relative_timestamp_seconds: 2, triage: { vehicles: [{ bbox: { x: 104, y: 82, width: 180, height: 90 }, confidence: 0.95, attributes }] } },
+  ]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].appearance_embedding_usable, true);
+  assert.equal(events[0].appearance_template_frames, 2);
+  assert.equal(events[0].appearance_embedding.length, 256);
 });
 
 test('consolidateMotionSummary wraps events and counts into summary', async () => {

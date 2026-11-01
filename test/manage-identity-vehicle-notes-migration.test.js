@@ -13,6 +13,7 @@ const { randomUUID } = require('node:crypto');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./record-identity-person-details-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-enterprise-inference-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-inference-claim-gate-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-recognition-quality-gates.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');

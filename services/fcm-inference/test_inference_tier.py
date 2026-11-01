@@ -277,6 +277,7 @@ def test_read_plates_anchors_on_vehicle_crop_and_scores_from_character_confidenc
     best = result['results'][0]
     assert best['vehicle_bbox'] == vehicle and best['plate_source'] == 'vehicle_crop'
     assert best['char_confidence_min'] == 0.95 and best['nz_pattern'] == 'standard_modern' and best['corrections'] == []
+    assert best['char_confidences'] == [0.99, 0.98, 0.97, 0.99, 0.96, 0.95]
     # crop coordinates map back into the frame: origin (376, 284), divided by the 1.6667 upscale
     assert best['box'] == {'x': 436, 'y': 404, 'width': 96, 'height': 30}
     assert fake_detector.calls[1][1] == 480  # the vehicle crop was upscaled to the detector's target width
@@ -371,3 +372,73 @@ def test_vehicle_inference_returns_embedding_and_explicit_review_state():
     assert result['vehicle_make'] is None
     assert result['vehicle_colour'] == 'white'
     assert result['review_required'] is True
+
+
+def test_vehicle_attribute_model_uses_the_detector_crop_without_recropping(monkeypatch):
+    seen = {}
+
+    class Output:
+        def __init__(self, name):
+            self.any_name = name
+
+    class FakeRuntime:
+        def __call__(self, _batch):
+            return {colour: np.array([0.9, 0.1]), kind: np.array([0.1, 0.9])}
+
+    colour, kind = Output('color'), Output('type')
+    image = np.zeros((60, 120, 3), dtype=np.uint8)
+    monkeypatch.setattr(appmod, '_vehicle_runtime', lambda: FakeRuntime())
+    monkeypatch.setattr(appmod, '_vehicle_region', lambda _image: pytest.fail('detector crop must not be recropped'))
+    monkeypatch.setattr(appmod.cv2.dnn, 'blobFromImage', lambda region, *args, **kwargs: seen.setdefault('shape', region.shape) or region)
+    result = appmod._trained_vehicle_attributes(image, detector_crop=True)
+    assert seen['shape'] == image.shape
+    assert result['vehicle_colour'] == 'white'
+    assert result['vehicle_type'] == 'van'
+
+
+def test_person_embedding_requires_real_model_and_minimum_visual_evidence(monkeypatch):
+    image = np.random.default_rng(17).integers(0, 256, (320, 160, 3), dtype=np.uint8)
+    monkeypatch.setattr(appmod, '_person_reid_embedding', lambda _crop: [1.0, 0.0])
+    good = appmod._person_appearance_attributes(image, {'x': 10, 'y': 10, 'width': 100, 'height': 280}, 0.9)
+    assert good['appearance_embedding_usable'] is True
+    assert good['appearance_quality_score'] > 0
+
+    small = appmod._person_appearance_attributes(image, {'x': 10, 'y': 10, 'width': 40, 'height': 100}, 0.9)
+    assert small['appearance_embedding_usable'] is False
+    assert small['appearance_quality_reason'] == 'insufficient_crop_or_visual_quality'
+
+    monkeypatch.setattr(appmod, '_person_reid_embedding', lambda _crop: (_ for _ in ()).throw(FileNotFoundError('model missing')))
+    fallback = appmod._person_appearance_attributes(image, {'x': 10, 'y': 10, 'width': 100, 'height': 280}, 0.9)
+    assert fallback['appearance_embedding_model'] == 'deterministic_hsv_layout_v1'
+    assert fallback['appearance_embedding_usable'] is False
+
+
+def test_face_inference_is_scoped_to_person_head_regions_and_marks_quality(monkeypatch):
+    seen_shapes = []
+
+    class FakeDetector:
+        def setInputSize(self, size):
+            self.input_size = size
+
+        def detect(self, region):
+            seen_shapes.append(region.shape)
+            detection = np.array([20, 5, 80, 80, 40, 25, 60, 25, 50, 42, 42, 65, 58, 65, 0.98], dtype=np.float32)
+            return 1, np.array([detection])
+
+    class FakeRecognizer:
+        def alignCrop(self, _image, _detection):
+            return np.zeros((112, 112, 3), dtype=np.uint8)
+
+        def feature(self, _aligned):
+            return np.array([3.0, 4.0], dtype=np.float32)
+
+    image = np.random.default_rng(29).integers(0, 256, (320, 240, 3), dtype=np.uint8)
+    monkeypatch.setattr(appmod, '_face_models', lambda: (FakeDetector(), FakeRecognizer()))
+    monkeypatch.setattr(appmod, 'MIN_FACE_CROP_WIDTH', 64)
+    faces = appmod._face_sync(image, [{'bbox': {'x': 20, 'y': 10, 'width': 120, 'height': 250}}])
+    assert len(faces) == 1
+    assert seen_shapes[0] != image.shape, 'YuNet only receives the person head-region crop'
+    assert faces[0]['bbox'] == {'x': 30.0, 'y': 10.0, 'width': 80.0, 'height': 80.0}
+    assert faces[0]['usable_for_matching'] is True
+    assert faces[0]['embedding'] == [0.6, 0.8]
+    assert appmod._face_sync(image, []) == [], 'an explicit empty person list does not fall back to full-frame face detection'
