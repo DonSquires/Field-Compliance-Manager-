@@ -82,7 +82,8 @@ Do these, in order. Nothing else should need to change in other modules.
    Verify table names against the LIVE schema first (standing rule).
 3. **Data tables** — migration for the module's own operational table(s) +
    (if it has admin-set rules) a config row in `module_rule_sets` or a dedicated
-   `*_config` table. Org-scoped, RLS `org_access_allowed(organization_id)`.
+   `*_config` table. Org-scoped, with RLS in the initPlan reach form on
+   `organization_id` (see Non-negotiables).
 4. **Officer surface** — add the field capture page + `MODULE_META` entry +
    `renderModuleContent()` case in `OfficerShell`. The module tile auto-gates via
    the manifest + org enablement (A3). Mount the ReportButton inside the portal
@@ -125,7 +126,9 @@ Do these, in order. Nothing else should need to change in other modules.
 - **Never re-implement a spine.** Register into it.
 - **Never hardcode org-specific rules/thresholds** in a module page — put them in
   the module's config (`module_rule_sets`/`*_config`), admin-editable.
-- **Always org-scope + RLS** every module table (`org_access_allowed`).
+- **Always org-scope + RLS** every module table. Policies use the initPlan
+  reach form with `accessible_org_ids()`, not a per-row `org_access_allowed`
+  call (see `ORG_SERVICE_MODEL.md`, "Policy form").
 - **Gate every surface** by org enablement (and user access). Fail-open only for
   unconfigured orgs (see A2/A3).
 - **Verify columns against the live schema** before writing any migration or
