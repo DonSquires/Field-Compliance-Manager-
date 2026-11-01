@@ -369,7 +369,7 @@ measurement, reviewer workspace, local VLM); reprocessing of completed jobs keep
   `/opt/fcm/.env` (compose maps them to the watcher's `OLLAMA_VISION_*`); do not set `OLLAMA_VISION_*` there,
   because Bob Vibe reads those names for its own images. `VISION_PINNED_DETECTOR_MODEL` defaults to
   `rf-detr-large-704-coco`.
-* **Database** (migration `20261102140000_cctv_enterprise_inference.sql`):
+* **Database** (migration `20261102150000_cctv_enterprise_inference.sql`):
   `reconcile_cctv_reviewed_observations` supersedes a reprocessed unreviewed sighting that duplicates an
   accepted or rejected one (same footage and kind, overlapping time, and the same plate, box IoU ≥ 0.3 or a
   stationary position) and records `carried_review_state`; reviewed rows are never changed.
