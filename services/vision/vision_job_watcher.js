@@ -17,10 +17,6 @@ const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '
 const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
 const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-inference:3000').replace(/\/+$/, '');
 const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
-const RUNPOD_API_URL = (process.env.RUNPOD_API_URL || 'https://api.runpod.ai/v2/katqqnmds1dphs').replace(/\/+$/, '');
-const RUNPOD_API_KEY = process.env.RUNPOD_API || process.env.RUNPOD_API_KEY || '';
-const RUNPOD_CAPTURE_API_URL = (process.env.RUNPOD_CAPTURE_API_URL || '').replace(/\/+$/, '');
-const RUNPOD_CAPTURE_API_KEY = process.env.RUNPOD_CAPTURE_API_KEY || RUNPOD_API_KEY;
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
 const VIDEO_CACHE_ROOT = path.resolve(process.env.VISION_VIDEO_CACHE_ROOT || path.join(DERIVED_ROOT, 'source-cache'));
@@ -34,29 +30,25 @@ const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 3
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
 const MAX_OBSERVATION_DERIVATIVES = Math.max(1, Math.min(MAX_JOB_DERIVATIVES, Number(process.env.VISION_MAX_OBSERVATION_DERIVATIVES || 8)));
-const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
+const TRIAGE_BATCH_SIZE = Math.max(1, Number(process.env.VISION_TRIAGE_BATCH_SIZE || 6));
 // How long a budget-deferred job waits before the queue offers it again (bounded by the budget's reset time).
 const BUDGET_DEFER_MIN_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MIN_SECONDS || 900);
 const BUDGET_DEFER_MAX_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MAX_SECONDS || 6 * 3600);
-const configuredRunpodBackoff = Number(process.env.VISION_RUNPOD_BACKOFF_MS);
-const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0, configuredRunpodBackoff) : 5 * 60_000;
-// Cold starts on the serverless GPU run 45-90 s; a shorter limit turned every first call into a "timeout".
-const RUNPOD_TIMEOUT_MS = Number(process.env.VISION_RUNPOD_TIMEOUT_MS || 90_000);
-// Where detector work runs. Owner ruling 2026-11-01 (docs/CCTV_INFERENCE_TIER.md) replaced local_gpu_first with
-// gpu_consistent: every frame of a job is read by ONE detector model on a GPU (the laptop first, RunPod when
-// the laptop cannot answer). The VPS CPU small model is never mixed in: its boxes and confidences differ from
-// the large model's, which split one parked car into many portfolios. A frame no matching GPU answered keeps
-// the job deferred rather than completing on a weaker model.
-const INFERENCE_POLICIES = ['gpu_consistent', 'vps_first', 'vps_only', 'gpu_first', 'local_gpu_first'];
+// Where detector work runs. Owner rulings 2026-11-01 (docs/CCTV_INFERENCE_TIER.md): gpu_consistent reads every
+// frame of a job with ONE detector model on the laptop GPU, and RunPod is not part of the stack. The VPS CPU
+// small model is never mixed in: its boxes and confidences differ from the large model's, which split one parked
+// car into many portfolios. A frame the laptop did not answer keeps the job deferred rather than completing on a
+// weaker model.
+const INFERENCE_POLICIES = ['gpu_consistent', 'vps_first', 'vps_only', 'local_gpu_first'];
 const INFERENCE_POLICY = INFERENCE_POLICIES.includes(process.env.VISION_INFERENCE_POLICY) ? process.env.VISION_INFERENCE_POLICY : 'gpu_consistent';
 // An empty value pins each job to the model of its first accepted answer instead of a named model.
 const PINNED_DETECTOR_MODEL = (process.env.VISION_PINNED_DETECTOR_MODEL ?? 'rf-detr-large-704-coco').trim();
 const RECOGNITION_TASKS = ['person', 'vehicle', 'animal', 'plate', 'face'];
-const TRIAGE_PROVIDER_LABELS = { vps: 'local_detect', local_gpu: 'laptop_gpu', gpu: 'runpod' };
+const TRIAGE_PROVIDER_LABELS = { vps: 'local_detect', local_gpu: 'laptop_gpu' };
 const LOCAL_DETECT_CONCURRENCY = Math.max(1, Number(process.env.VISION_LOCAL_DETECT_CONCURRENCY || 2));
 const LOCAL_DETECT_TIMEOUT_MS = Number(process.env.VISION_LOCAL_DETECT_TIMEOUT_MS || 90_000);
-// A technician's own GPU (e.g. a laptop reachable over Tailscale), running the same fcm-inference image RunPod
-// runs, exposing /infer/batch. Unset by default; the local_gpu machine is skipped when this is empty.
+// The laptop GPU reachable over Tailscale, running the fcm-inference image and exposing /infer/batch. Unset by
+// default; the local_gpu machine is skipped when this is empty (and gpu_consistent jobs defer).
 const LOCAL_GPU_INFERENCE_URL = (process.env.LOCAL_GPU_INFERENCE_URL || '').replace(/\/+$/, '');
 const LOCAL_GPU_INFERENCE_API_KEY = process.env.LOCAL_GPU_INFERENCE_API_KEY || INFERENCE_API_KEY;
 const LOCAL_GPU_TIMEOUT_MS = Number(process.env.VISION_LOCAL_GPU_TIMEOUT_MS || 30_000);
@@ -72,11 +64,10 @@ const STARVED_DEFER_SECONDS = Math.min(86_400, Math.max(60, Number(process.env.V
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
 const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
-// /infer/detect on the VPS (person + vehicle + animal triage in one call) when RunPod returned nothing for a frame.
+// /infer/detect on the VPS (person + vehicle + animal triage in one call) for policies that allow the VPS.
 const LOCAL_DETECT_INFERENCE = process.env.VISION_LOCAL_DETECT_INFERENCE !== 'false';
 const WATCHER_HEALTH_PATH = path.resolve(process.env.VISION_WATCHER_HEALTH_PATH || '/tmp/fcm-vision-watcher-health');
 const WATCHER_HEALTH_INTERVAL_MS = Math.max(5_000, Number(process.env.VISION_WATCHER_HEALTH_INTERVAL_MS || 10_000));
-let runpodUnavailableUntil = 0;
 let localGpuUnavailableUntil = 0;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -378,11 +369,11 @@ function selectFramesForClassification(segments, maxFrames) {
 }
 
 function applyTriageResult(frame, result) {
-  // `runpod` is the consolidator's name for "the triage answer"; `triage_provider` inside it says which machine gave it.
-  frame.runpod = result;
+  // `triage` is the detector answer for this frame; `triage_provider` inside it says which machine gave it.
+  frame.triage = result;
   frame.detect = result;
   frame.people = Array.isArray(result?.people)
-    ? { success: true, people: result.people, provider: result.people_provider || result.detector_provider || 'runpod' }
+    ? { success: true, people: result.people, provider: result.people_provider || result.detector_provider || triageProviderLabel(result?.triage_provider) }
     : { success: false, people: [], error: 'person_detector_unavailable' };
   frame.animals = normaliseAnimals(result, null);
   const vehicle = result?.vehicle || null;
@@ -392,28 +383,48 @@ function applyTriageResult(frame, result) {
 }
 
 function triageProviderLabel(triageProvider) {
-  return TRIAGE_PROVIDER_LABELS[triageProvider] || 'runpod';
+  return TRIAGE_PROVIDER_LABELS[triageProvider] || 'unreported';
 }
 
-// Under gpu_consistent an answer counts only when it came from the job's detector model; any other answer
+// ONNX Runtime reports the provider that actually ran the detector session; only these count as "on a GPU".
+const GPU_EXECUTION_PROVIDERS = new Set(['CUDAExecutionProvider', 'TensorrtExecutionProvider']);
+
+// Under gpu_consistent an answer counts only when the job's detector model produced it on a GPU; any other answer
 // leaves the frame unanswered (and the job deferred). `pin.model` starts as PINNED_DETECTOR_MODEL, or is set by
-// the first accepted answer when that is empty; rejected models are counted for the manifest.
+// the first accepted answer when that is empty; rejected answers are counted for the manifest, keyed by model
+// (or model@execution-provider when the right model ran on a CPU or did not say where it ran).
 function acceptTriageAnswer(answer, pin, policy = INFERENCE_POLICY) {
   if (policy !== 'gpu_consistent') return true;
-  const model = answer?.success === false ? null : answer?.detector_model || null;
-  if (!model) {
-    if (pin) pin.rejected.unreported = (pin.rejected.unreported || 0) + 1;
+  const reject = (reason) => {
+    if (pin) pin.rejected[reason] = (pin.rejected[reason] || 0) + 1;
     return false;
-  }
+  };
+  const model = answer?.success === false ? null : answer?.detector_model || null;
+  if (!model) return reject('unreported');
+  const executionProvider = answer.detector_execution_provider || null;
+  if (!GPU_EXECUTION_PROVIDERS.has(executionProvider)) return reject(`${model}@${executionProvider || 'unreported_provider'}`);
   if (!pin) return true;
   if (!pin.model) pin.model = model;
   if (model === pin.model) return true;
-  pin.rejected[model] = (pin.rejected[model] || 0) + 1;
-  return false;
+  return reject(model);
 }
 
 function detectorPin(model = PINNED_DETECTOR_MODEL) {
   return { model: model || null, rejected: {} };
+}
+
+// A checkpoint written by another policy, model or engine must not leak a different detector into this job.
+// Recognition re-read the frame, so its answer passes the same pin; a recognition checkpoint written before the
+// `triage` field existed cannot show which detector answered and is recognised again rather than trusted.
+function admitCheckpoint(checkpointFrames, pin, policy = INFERENCE_POLICY) {
+  for (const [hash, entry] of Object.entries(checkpointFrames)) {
+    if (entry?.triage && !acceptTriageAnswer(entry.triage, pin, policy)) {
+      delete checkpointFrames[hash];
+      continue;
+    }
+    if (entry?.recognition && !('triage' in entry.recognition && acceptTriageAnswer(entry.recognition.triage, pin, policy))) delete entry.recognition;
+  }
+  return checkpointFrames;
 }
 
 function representativeFrameHashes(summary) {
@@ -431,13 +442,10 @@ async function classifyFrames(summary, job) {
   if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
   const totalFrames = summary.motion_segments.reduce((total, segment) => total + (segment.frames?.length || 0), 0);
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
-  const triageBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
+  const triageBatches = Math.ceil(selectedFrames.length / TRIAGE_BATCH_SIZE);
   const checkpointFrames = await readClassificationCheckpoint(job.id);
   const pin = detectorPin();
-  // A checkpoint written by another policy or model must not leak a different detector into this job.
-  for (const [hash, entry] of Object.entries(checkpointFrames)) {
-    if (entry?.triage && !acceptTriageAnswer(entry.triage, pin)) delete checkpointFrames[hash];
-  }
+  admitCheckpoint(checkpointFrames, pin);
   // Metered per job: every call to either machine, every frame sent to the GPU, wall time spent waiting.
   const usage = { gpu_calls: 0, frames_sent: 0, gpu_ms: 0, vps_calls: 0, vps_ms: 0 };
   const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
@@ -455,9 +463,9 @@ async function classifyFrames(summary, job) {
       }
     }
   };
-  for (let batchStart = 0; batchStart < frameInputs.length; batchStart += RUNPOD_BATCH_SIZE) {
-    const batch = frameInputs.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
-    const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
+  for (let batchStart = 0; batchStart < frameInputs.length; batchStart += TRIAGE_BATCH_SIZE) {
+    const batch = frameInputs.slice(batchStart, batchStart + TRIAGE_BATCH_SIZE);
+    const batchNumber = Math.floor(batchStart / TRIAGE_BATCH_SIZE) + 1;
     const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]?.triage);
     await updateProgress(job, 'running_inference', {
       current: batchStart,
@@ -484,10 +492,10 @@ async function classifyFrames(summary, job) {
   if (triageComplete) await consolidateMotionSummary(summary, { metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null, hints: false });
   const representativeHashes = new Set(triageComplete ? representativeFrameHashes(summary) : []);
   const representatives = frameInputs.filter(({ frame }) => representativeHashes.has(frame.sha256_hash));
-  const recognitionBatches = Math.ceil(representatives.length / RUNPOD_BATCH_SIZE);
-  for (let batchStart = 0; batchStart < representatives.length; batchStart += RUNPOD_BATCH_SIZE) {
-    const batch = representatives.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
-    const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
+  const recognitionBatches = Math.ceil(representatives.length / TRIAGE_BATCH_SIZE);
+  for (let batchStart = 0; batchStart < representatives.length; batchStart += TRIAGE_BATCH_SIZE) {
+    const batch = representatives.slice(batchStart, batchStart + TRIAGE_BATCH_SIZE);
+    const batchNumber = Math.floor(batchStart / TRIAGE_BATCH_SIZE) + 1;
     const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]?.recognition);
     await updateProgress(job, 'running_inference', {
       current: batchStart,
@@ -504,7 +512,7 @@ async function classifyFrames(summary, job) {
         Object.assign(frame, checkpoint.recognition);
         continue;
       }
-      const triageAnswer = gpuResults.get(frame.sha256_hash) || frame.runpod || null;
+      const triageAnswer = gpuResults.get(frame.sha256_hash) || frame.triage || null;
       const recognition = await enrichRepresentativeFrame(frame, image, job, triageAnswer);
       Object.assign(frame, recognition);
       checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), recognition };
@@ -513,6 +521,8 @@ async function classifyFrames(summary, job) {
   }
   if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   summary.classification_plan = {
+    // Motion-frame artifacts available for sampling; total_frames_parsed also counts static and warm-up frames.
+    motion_frames: totalFrames,
     sampled_frames: selectedFrames.length,
     representative_frames: representatives.length,
     policy: 'detector_triage_then_one_full_recognition_per_unique_observation',
@@ -525,9 +535,9 @@ async function classifyFrames(summary, job) {
   return summary;
 }
 
-// /infer/detect on the VPS (and /infer/batch on a local GPU tier) answer in the shape of one RunPod
-// infer_batch result, so triage, recognition and the consolidator read any of them without caring which
-// machine looked. Provenance stays inside the answer via `triage_provider`.
+// /infer/detect on the VPS and /infer/batch on the laptop GPU answer in one shape, so triage, recognition and
+// the consolidator read either without caring which machine looked. Provenance stays inside the answer via
+// `triage_provider`.
 function localTriageResult(detect, provider = 'vps') {
   if (!detect?.success) return null;
   const vehicles = Array.isArray(detect.vehicles) ? detect.vehicles : [];
@@ -553,12 +563,13 @@ function localTriageResult(detect, provider = 'vps') {
 }
 
 // The machines a policy asks, in order. Each is asked only about frames the previous one left unanswered.
+// An unknown policy name (including the retired gpu_first) never reaches here: INFERENCE_POLICY falls back
+// to gpu_consistent.
 function triageOrderFor(policy) {
-  if (policy === 'gpu_consistent') return ['local_gpu', 'gpu'];
-  if (policy === 'gpu_first') return ['gpu', 'vps'];
+  if (policy === 'gpu_consistent') return ['local_gpu'];
   if (policy === 'vps_only') return ['vps'];
-  if (policy === 'local_gpu_first') return ['local_gpu', 'vps', 'gpu'];
-  return ['vps', 'gpu'];
+  if (policy === 'local_gpu_first') return ['local_gpu', 'vps'];
+  return ['vps'];
 }
 
 function triageCoverage(frames) {
@@ -567,7 +578,7 @@ function triageCoverage(frames) {
   for (const frame of frames) {
     if (!frame.detect?.success) continue;
     triaged += 1;
-    const provider = frame.runpod?.triage_provider || 'gpu';
+    const provider = frame.triage?.triage_provider || 'unreported';
     providers[provider] = (providers[provider] || 0) + 1;
   }
   return { frames_selected: frames.length, frames_triaged: triaged, frames_untriaged: frames.length - triaged, triage_providers: providers };
@@ -606,9 +617,7 @@ async function triageBatch(batch, usage, pin = null) {
   for (const machine of triageOrderFor(INFERENCE_POLICY)) {
     const remaining = batch.filter(({ frame }) => !results.has(frame.sha256_hash));
     if (!remaining.length) break;
-    const answers = machine === 'gpu'
-      ? new Map([...await classifyWithRunpodBatch(remaining, ['person', 'vehicle', 'animal', 'detect'], usage)].map(([hash, answer]) => [hash, { ...answer, triage_provider: 'gpu' }]))
-      : machine === 'local_gpu'
+    const answers = machine === 'local_gpu'
       ? await classifyWithLocalGpuBatch(remaining, ['person', 'vehicle', 'animal', 'detect'], usage)
       : await triageWithLocalDetect(remaining, usage);
     for (const [hash, answer] of answers) {
@@ -618,25 +627,13 @@ async function triageBatch(batch, usage, pin = null) {
   return results;
 }
 
-// gpu_first: RunPod re-reads the representatives. gpu_consistent: the laptop GPU, then RunPod, each answer
-// kept only when it came from the job's detector model. Other policies build on the triage answer.
+// gpu_consistent: the laptop GPU re-reads the representatives with every recognition task, each answer kept only
+// when the job's detector model produced it on the GPU. Other policies build on the triage answer.
 async function recognitionAnswers(batch, usage, pin, policy = INFERENCE_POLICY) {
   const answers = new Map();
-  if (!batch.length) return answers;
-  if (policy === 'gpu_first') {
-    for (const [hash, answer] of await classifyWithRunpodBatch(batch, undefined, usage)) answers.set(hash, { ...answer, triage_provider: 'gpu' });
-    return answers;
-  }
-  if (policy !== 'gpu_consistent') return answers;
-  for (const machine of ['local_gpu', 'gpu']) {
-    const remaining = batch.filter(({ frame }) => !answers.has(frame.sha256_hash));
-    if (!remaining.length) break;
-    const results = machine === 'local_gpu'
-      ? await classifyWithLocalGpuBatch(remaining, RECOGNITION_TASKS, usage)
-      : new Map([...await classifyWithRunpodBatch(remaining, RECOGNITION_TASKS, usage)].map(([hash, answer]) => [hash, { ...answer, triage_provider: 'gpu' }]));
-    for (const [hash, answer] of results) {
-      if (acceptTriageAnswer(answer, pin, policy)) answers.set(hash, answer);
-    }
+  if (!batch.length || policy !== 'gpu_consistent') return answers;
+  for (const [hash, answer] of await classifyWithLocalGpuBatch(batch, RECOGNITION_TASKS, usage)) {
+    if (acceptTriageAnswer(answer, pin, policy)) answers.set(hash, answer);
   }
   return answers;
 }
@@ -646,7 +643,7 @@ function modelManifest(frames, pin, policy = INFERENCE_POLICY) {
   const detectorModels = {};
   for (const frame of frames) {
     if (!frame.detect?.success) continue;
-    const model = frame.runpod?.detector_model || 'unreported';
+    const model = frame.triage?.detector_model || 'unreported';
     detectorModels[model] = (detectorModels[model] || 0) + 1;
   }
   return {
@@ -684,7 +681,7 @@ async function deferIfBudgetExhausted(job) {
   return deferred === true;
 }
 
-async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
+async function enrichRepresentativeFrame(frame, image, job, triageAnswer) {
       if (frame.visual_quality === 'degraded') {
         frame.inference_quality = {
           state: 'degraded',
@@ -702,29 +699,29 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         return form;
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
-      if (runpodResult) frame.runpod = runpodResult;
+      if (triageAnswer) frame.triage = triageAnswer;
       // The triage answer may have come from the GPU or the VPS; labels below say which. It carries ALPR (plate
       // detector + OCR on the detected vehicles) and, from the GPU, faces. The VPS is asked only for what it lacks.
-      const triageProvider = triageProviderLabel(runpodResult?.triage_provider);
-      const runpodAlpr = runpodResult?.alpr?.success ? runpodResult.alpr : null;
-      const runpodFace = runpodResult?.face?.success && Array.isArray(runpodResult.face.faces) ? runpodResult.face : null;
-      const runpodVehicleBoxes = Array.isArray(runpodResult?.vehicles)
-        ? runpodResult.vehicles.map((vehicle) => vehicle?.bbox || vehicle?.attributes?.detection?.bbox).filter(Boolean)
+      const triageProvider = triageProviderLabel(triageAnswer?.triage_provider);
+      const triageAlpr = triageAnswer?.alpr?.success ? triageAnswer.alpr : null;
+      const triageFace = triageAnswer?.face?.success && Array.isArray(triageAnswer.face.faces) ? triageAnswer.face : null;
+      const triageVehicleBoxes = Array.isArray(triageAnswer?.vehicles)
+        ? triageAnswer.vehicles.map((vehicle) => vehicle?.bbox || vehicle?.attributes?.detection?.bbox).filter(Boolean)
         : [];
       // gpu_consistent never asks the VPS CPU detector: a missing triage answer stays missing.
-      const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';
+      const needLocalDetect = !triageAnswer && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';
       // No triage answer at all: the VPS /infer/detect route (people + vehicles + animals + ALPR in one call)
       // fills it in. /infer/people alone is only needed when the answer came without a people list.
       // Every route goes through classifyLocally: a timeout or a 503 from a busy server is that route's answer
       // for this frame ({ success: false, error }), not a reason to fail the whole job.
       const localRequests = [
-        runpodAlpr || needLocalDetect
+        triageAlpr || needLocalDetect
           ? Promise.resolve(null)
-          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: runpodVehicleBoxes.length ? runpodVehicleBoxes : null })),
-        runpodFace
+          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: triageVehicleBoxes.length ? triageVehicleBoxes : null })),
+        triageFace
           ? Promise.resolve(null)
           : classifyLocally(INFERENCE_SERVICE_URL, '/infer/face', headers, buildForm),
-        LOCAL_PEOPLE_INFERENCE && runpodResult && !Array.isArray(runpodResult.people)
+        LOCAL_PEOPLE_INFERENCE && triageAnswer && !Array.isArray(triageAnswer.people)
           ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm)
           : Promise.resolve(null),
         needLocalDetect ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
@@ -734,8 +731,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         if (result && result.success === false && result.detail) log('inference_route_unavailable', { route, frame_hash: frame.sha256_hash, error: result.error, detail: result.detail });
       }
       if (localDetect) frame.detect = localDetect;
-      if (runpodAlpr) {
-        frame.alpr = { ...runpodAlpr, provider: triageProvider };
+      if (triageAlpr) {
+        frame.alpr = { ...triageAlpr, provider: triageProvider };
       } else if (frame.detect?.alpr?.success) {
         frame.alpr = { ...frame.detect.alpr, provider: 'local_detect' };
       } else if (alprResult) {
@@ -745,27 +742,26 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         const localVehicleBoxes = Array.isArray(frame.detect?.vehicles) ? frame.detect.vehicles.map((vehicle) => vehicle?.bbox).filter(Boolean) : [];
         frame.alpr = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: localVehicleBoxes.length ? localVehicleBoxes : null }));
       }
-      if (runpodFace) {
-        frame.face = { ...runpodFace, provider: triageProvider };
+      if (triageFace) {
+        frame.face = { ...triageFace, provider: triageProvider };
       } else if (faceResult) {
         frame.face = faceResult;
       } else {
         frame.face = { success: false, error: 'face_unavailable' };
       }
       const detectorCoverage = new Set([
-        ...(Array.isArray(runpodResult?.detector_coverage) ? runpodResult.detector_coverage : []),
+        ...(Array.isArray(triageAnswer?.detector_coverage) ? triageAnswer.detector_coverage : []),
         ...(Array.isArray(frame.detect?.detector_coverage) ? frame.detect.detector_coverage : []),
       ]);
       const vehicleCovered = detectorCoverage.has('vehicle');
-      const inferenceResult = !runpodResult?.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE
+      const inferenceResult = !triageAnswer?.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE
         ? await classifyLocally(INFERENCE_SERVICE_URL, '/infer', headers, () => buildForm(frame.alpr.plate_bbox))
         : null;
-      frame.capture_recognition = await runCaptureRecognition(frame, image, job);
 
       // The triage answer is primary for vehicle and people work. The VPS routes are called only
       // when it lacked that capability or no answer came at all.
-      if (runpodResult?.people && Array.isArray(runpodResult.people)) {
-        frame.people = { success: true, people: runpodResult.people, provider: runpodResult.people_provider || triageProvider };
+      if (triageAnswer?.people && Array.isArray(triageAnswer.people)) {
+        frame.people = { success: true, people: triageAnswer.people, provider: triageAnswer.people_provider || triageProvider };
       } else if (frame.detect?.success && Array.isArray(frame.detect.people) && (frame.detect.people.length || frame.detect.people_provider || detectorCoverage.has('person'))) {
         // /infer/detect already ran a person detector; an empty list means nobody was seen, not "not checked".
         frame.people = { success: true, people: frame.detect.people, provider: frame.detect.people_provider || frame.detect.detector_provider || 'local_detect' };
@@ -774,11 +770,11 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       } else {
         frame.people = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm);
       }
-      frame.animals = normaliseAnimals(runpodResult, frame.detect);
-      const detectedVehicle = runpodResult?.vehicle || frame.detect?.vehicles?.[0]?.attributes || null;
+      frame.animals = normaliseAnimals(triageAnswer, frame.detect);
+      const detectedVehicle = triageAnswer?.vehicle || frame.detect?.vehicles?.[0]?.attributes || null;
       if (detectedVehicle) {
-        frame.inference = { success: true, data: detectedVehicle, provider: runpodResult?.vehicle ? triageProvider : 'local_detect' };
-        if (!frame.runpod?.vehicle) frame.runpod = { ...(frame.runpod || {}), vehicle: detectedVehicle };
+        frame.inference = { success: true, data: detectedVehicle, provider: triageAnswer?.vehicle ? triageProvider : 'local_detect' };
+        if (!frame.triage?.vehicle) frame.triage = { ...(frame.triage || {}), vehicle: detectedVehicle };
       } else if (inferenceResult) {
         frame.inference = inferenceResult;
       } else if (vehicleCovered) {
@@ -792,9 +788,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         people: frame.people,
         animals: frame.animals,
         detect: frame.detect,
-        capture_recognition: frame.capture_recognition,
         inference: frame.inference,
-        runpod: frame.runpod,
+        triage: frame.triage,
       };
 }
 
@@ -807,13 +802,13 @@ async function classifyLocally(baseUrl, route, headers, buildForm, timeoutMs = 3
   }
 }
 
-// Animal detections arrive as a list (RunPod infer_batch) or under a triage object (/infer/detect). The
+// Animal detections arrive as a list (/infer/batch on the laptop) or under a triage object (/infer/detect). The
 // consolidator reads { animals: [...], status }; status says whether an empty list means "none seen" or
 // "no model could look".
-function normaliseAnimals(runpodResult, localDetect) {
-  if (runpodResult) {
-    const list = Array.isArray(runpodResult.animals) ? runpodResult.animals : Array.isArray(runpodResult.animals?.detections) ? runpodResult.animals.detections : [];
-    return { success: true, animals: list, status: runpodResult.animal_detection_status || 'unknown', provider: runpodResult.detector_provider || 'runpod' };
+function normaliseAnimals(triageAnswer, localDetect) {
+  if (triageAnswer) {
+    const list = Array.isArray(triageAnswer.animals) ? triageAnswer.animals : Array.isArray(triageAnswer.animals?.detections) ? triageAnswer.animals.detections : [];
+    return { success: true, animals: list, status: triageAnswer.animal_detection_status || 'unknown', provider: triageAnswer.detector_provider || triageProviderLabel(triageAnswer.triage_provider) };
   }
   if (localDetect?.success) {
     const covered = Array.isArray(localDetect.detector_coverage) && localDetect.detector_coverage.includes('animal');
@@ -951,53 +946,8 @@ function stillEntityObservations(recognition, context = {}) {
   }));
 }
 
-async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face'], usage = null) {
-  if (!RUNPOD_API_KEY || batch.length === 0) return new Map();
-  if (Date.now() < runpodUnavailableUntil) {
-    log('runpod_inference_circuit_open', { retry_after_ms: runpodUnavailableUntil - Date.now(), batch_size: batch.length });
-    return new Map();
-  }
-  const startedAt = Date.now();
-  const meter = () => { if (usage) { usage.gpu_calls += 1; usage.frames_sent += batch.length; usage.gpu_ms += Date.now() - startedAt; } };
-  try {
-    const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: {
-          action: 'infer_batch',
-          frames: batch.map(({ frame, image }) => ({ frame_id: frame.sha256_hash, image_base64: image.toString('base64') })),
-          tasks,
-        },
-      }),
-      signal: AbortSignal.timeout(RUNPOD_TIMEOUT_MS),
-    });
-    meter();
-    if (!response.ok) {
-      runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
-      log('runpod_inference_degraded', { status: response.status, retry_after_ms: RUNPOD_BACKOFF_MS });
-      return new Map();
-    }
-    const payload = await response.json();
-    if (payload.status && payload.status !== 'COMPLETED') {
-      runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
-      log('runpod_inference_deferred', { status: payload.status, job_id: payload.id, retry_after_ms: RUNPOD_BACKOFF_MS });
-      return new Map();
-    }
-    const results = payload.output?.results || payload.results;
-    runpodUnavailableUntil = 0;
-    return new Map(Array.isArray(results) ? results.filter((item) => item?.frame_id).map((item) => [item.frame_id, item.result || item]) : []);
-  } catch (error) {
-    meter();
-    runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
-    log('runpod_inference_unavailable', { error: error.message, retry_after_ms: RUNPOD_BACKOFF_MS });
-    return new Map();
-  }
-}
-
-// A technician's own GPU (over Tailscale), running the fcm-inference image's /infer/batch route — same
-// answer shape as RunPod's infer_batch, no per-second billing, no cold start. Same circuit-breaker pattern
-// as RunPod: a failure opens the breaker for LOCAL_GPU_BACKOFF_MS so a job never waits on an offline laptop.
+// The laptop GPU (over Tailscale), running the fcm-inference image's /infer/batch route. A failure opens the
+// breaker for LOCAL_GPU_BACKOFF_MS so a job never waits on an offline laptop; it is deferred instead.
 async function classifyWithLocalGpuBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face'], usage = null) {
   if (!LOCAL_GPU_INFERENCE_URL || batch.length === 0) return new Map();
   if (Date.now() < localGpuUnavailableUntil) {
@@ -1041,37 +991,6 @@ async function classifyWithLocalGpuBatch(batch, tasks = ['person', 'vehicle', 'a
 }
 
 
-async function runCaptureRecognition(frame, image, job) {
-  if (!RUNPOD_CAPTURE_API_URL || !RUNPOD_CAPTURE_API_KEY) {
-    return { state: 'unavailable', reason: 'capture_endpoint_not_configured', review_required: true };
-  }
-  try {
-    const response = await fetch(`${RUNPOD_CAPTURE_API_URL}/runsync`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${RUNPOD_CAPTURE_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: {
-          action: 'capture_recognition',
-          source_frame_hash: frame.sha256_hash,
-          relative_timestamp_seconds: frame.relative_timestamp_seconds,
-          image_base64: image.toString('base64'),
-          crop: frame.alpr?.plate_bbox || frame.runpod?.vehicle?.detection?.bbox || null,
-          tasks: ['alpr', 'face_embedding', 'vehicle_attributes', 'animal_detection'],
-          enhancement_profile: 'deterministic_capture_v1',
-          source_job_id: job.id,
-        },
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
-    if (!response.ok) return { state: 'unavailable', reason: `capture_endpoint_http_${response.status}`, review_required: true };
-    const payload = await response.json();
-    return { ...payload.output, state: payload.status === 'COMPLETED' ? 'candidate' : 'unavailable', review_required: true, authority: 'provisional' };
-  } catch (error) {
-    log('capture_recognition_unavailable', { job_id: job.id, frame_hash: frame.sha256_hash, error: error.message });
-    return { state: 'unavailable', reason: 'capture_endpoint_error', detail: error.message, review_required: true };
-  }
-}
-
 function observationEventMap(summary) {
   const events = summary.consolidated_events || {};
   return new Map([
@@ -1108,24 +1027,6 @@ async function callLaptopEnhancement(image, sourceFrameHash) {
   }
 }
 
-async function callRunpodEnhancement(image, sourceFrameHash) {
-  if (!RUNPOD_API_KEY || Date.now() < runpodUnavailableUntil) return null;
-  try {
-    const startedAt = Date.now();
-    const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
-      method: 'POST', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { action: 'capture_recognition', source_frame_hash: sourceFrameHash, image_base64: image.toString('base64'), tasks: ['alpr', 'face_embedding', 'vehicle_attributes', 'animal_detection'], enhancement_profile: 'realesrgan_x4plus_onnx_v1' } }),
-      signal: AbortSignal.timeout(RUNPOD_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    const payload = await response.json();
-    return payload?.status === 'COMPLETED' && payload.output?.enhanced_image_base64 ? { ...payload.output, provider: 'runpod_fallback', gpu_elapsed_ms: Date.now() - startedAt } : null;
-  } catch (error) {
-    log('runpod_enhancement_unavailable', { error: error.message });
-    return null;
-  }
-}
-
 async function recogniseDeterministicFallback(original, enhanced) {
   const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
   const detect = (bytes, name) => classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, () => {
@@ -1158,8 +1059,7 @@ async function buildObservationDerivatives(job, evidence, summary) {
       const originalBytes = await fs.readFile(localReceipt.original_artifact.file);
       const fusedBytes = await fs.readFile(localReceipt.fused_artifact.file);
       const deterministicBytes = await fs.readFile(localReceipt.enhanced_artifact.file);
-      const gpu = await callLaptopEnhancement(fusedBytes, localReceipt.source_frame_hash)
-        || await callRunpodEnhancement(fusedBytes, localReceipt.source_frame_hash);
+      const gpu = await callLaptopEnhancement(fusedBytes, localReceipt.source_frame_hash);
       const finalEnhanced = gpu?.enhanced_image_base64 ? Buffer.from(gpu.enhanced_image_base64, 'base64') : deterministicBytes;
       const recognition = gpu?.recognition || await recogniseDeterministicFallback(originalBytes, finalEnhanced);
       const provider = gpu?.provider || 'worker_deterministic';
@@ -1235,11 +1135,10 @@ async function processStillEvidence(job, evidence) {
   let answer = await callLaptopEnhancement(originalBytes, frameSha256);
   let localRecognition = null;
   if (!answer) localRecognition = await recogniseDeterministicFallback(originalBytes, originalBytes);
-  if (!answer) answer = await callRunpodEnhancement(originalBytes, frameSha256);
   const recognition = answer?.recognition || localRecognition;
   const recognitionAnswered = recognition?.source?.success === true || recognition?.enhanced?.success === true;
   if (!recognitionAnswered) {
-    const reason = 'Deferred: the laptop, local detector and RunPod did not answer for this photo; analysis retries automatically';
+    const reason = 'Deferred: neither the laptop GPU nor the local detector answered for this photo; analysis retries automatically';
     const { data: deferred, error } = await supabase.rpc('defer_cctv_inference_job', {
       p_job_id: job.id, p_lease_token: job.lease_token, p_reason: reason, p_not_before_seconds: DETECTOR_DEFER_SECONDS,
     });
@@ -1313,7 +1212,7 @@ async function processStillEvidence(job, evidence) {
   await recordSharedAlprEvidence(job);
   await recordSharedPersonEvidence(job);
   await recordSharedVehicleAttributeEvidence(job);
-  if (provider === 'laptop_gpu' || provider === 'runpod_fallback') {
+  if (provider === 'laptop_gpu') {
     await recordInferenceUsage(job, { frames_sampled: 1, frames_recognised: 1, frames_sent: 1, gpu_calls: 1, gpu_ms: Number(answer?.gpu_elapsed_ms) || 0 });
   }
 
@@ -1676,7 +1575,7 @@ async function processOne() {
     await recordSharedAlprEvidence(job);
     await recordSharedPersonEvidence(job);
     await recordSharedVehicleAttributeEvidence(job);
-    const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu' || derivative.provider === 'runpod_fallback');
+    const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu');
     if (observationDerivatives.length) await recordInferenceUsage(job, {
       frames_sampled: 0, frames_recognised: observationDerivatives.length,
       frames_sent: gpuDerivatives.length, gpu_calls: gpuDerivatives.length,
@@ -1734,4 +1633,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, recordEntityObservations, recordInferenceDeviceEvents, buildObservationDerivatives, recordObservationDerivatives, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, PINNED_DETECTOR_MODEL, acceptTriageAnswer, detectorPin, recognitionAnswers, modelManifest, triageProviderLabel, loadCloudVehicleVlmPolicy, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, recordEntityObservations, recordInferenceDeviceEvents, buildObservationDerivatives, recordObservationDerivatives, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, PINNED_DETECTOR_MODEL, acceptTriageAnswer, detectorPin, admitCheckpoint, recognitionAnswers, modelManifest, triageProviderLabel, loadCloudVehicleVlmPolicy, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };

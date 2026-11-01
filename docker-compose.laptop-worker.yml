@@ -20,8 +20,8 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
     ports:
-      # Tailscale-only: lets the VPS's own vision watcher route triage work here under local_gpu_first,
-      # instead of paying for RunPod. Never bind 0.0.0.0 — this API key is shared, not internet-safe.
+      # Tailscale-only: lets the VPS's own vision watcher route triage and recognition work here
+      # (gpu_consistent, local_gpu_first). Never bind 0.0.0.0 — this API key is shared, not internet-safe.
       - "100.114.240.13:3000:3000"
     environment:
       DETECTOR_MODEL: rf-detr-large-704-coco
@@ -60,12 +60,10 @@ services:
       INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
       LOCAL_GPU_INFERENCE_URL: http://fcm-inference:3000
       LOCAL_GPU_INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
-      # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer, and an
-      # answer from any detector other than the pinned model leaves the frame unanswered (gpu_consistent).
+      # This instance's own GPU is the only triage machine; an answer from any detector other than the pinned
+      # model, or one that ran on the CPU, leaves the frame unanswered and the job waits (gpu_consistent).
       VISION_INFERENCE_POLICY: gpu_consistent
       VISION_PINNED_DETECTOR_MODEL: rf-detr-large-704-coco
-      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
-      RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
       VISION_LOCAL_DETECT_INFERENCE: "true"
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"

@@ -83,6 +83,19 @@ describe('triage keyboard', () => {
     expect(triageKeyAction({ key: 'x' })).toBeNull();
   });
 
+  it('never decides from a held key, but keeps repeating navigation', () => {
+    expect(triageKeyAction({ key: 'a', repeat: true })).toBeNull();
+    expect(triageKeyAction({ key: 'R', repeat: true })).toBeNull();
+    expect(triageKeyAction({ key: 'j', repeat: true })).toBe('next');
+    expect(triageKeyAction({ key: 'ArrowUp', repeat: true })).toBe('previous');
+  });
+
+  it('turns every single-character shortcut off on request, leaving the arrow keys (WCAG 2.1.4)', () => {
+    for (const key of ['a', 'A', 'r', 'R', 'j', 'J', 'k', 'K']) expect(triageKeyAction({ key, characterShortcuts: false })).toBeNull();
+    expect(triageKeyAction({ key: 'ArrowDown', characterShortcuts: false })).toBe('next');
+    expect(triageKeyAction({ key: 'ArrowUp', characterShortcuts: false })).toBe('previous');
+  });
+
   it('moves to the next undecided sighting, wrapping once', () => {
     const list = [
       observation({ id: 'a' }),
@@ -147,9 +160,9 @@ describe('inference coverage', () => {
     const coverage = inferenceCoverage({
       total_frames_parsed: 1480,
       classification_truncated: true,
-      classification_plan: { coverage: { frames_selected: 120, frames_triaged: 120, frames_untriaged: 0, triage_providers: { vps: 42, local_gpu: 78 } } },
+      classification_plan: { motion_frames: 960, coverage: { frames_selected: 120, frames_triaged: 120, frames_untriaged: 0, triage_providers: { vps: 42, local_gpu: 78 } } },
     });
-    expect(coverage).toMatchObject({ framesParsed: 1480, framesSampled: 120, framesExamined: 120, framesUnanswered: 0, capped: true, mixedDetectors: true, engineVersion: null });
+    expect(coverage).toMatchObject({ framesParsed: 1480, motionFrames: 960, framesSampled: 120, framesExamined: 120, framesUnanswered: 0, capped: true, mixedDetectors: true, engineVersion: null });
     expect(coverage!.providers).toEqual([
       { provider: 'local_gpu', label: 'Laptop GPU', frames: 78 },
       { provider: 'vps', label: 'VPS CPU', frames: 42 },
@@ -166,7 +179,17 @@ describe('inference coverage', () => {
     });
     expect(coverage).toMatchObject({ framesUnanswered: 2, capped: false, mixedDetectors: false, engineVersion: 'cctv-engine-v2', pinnedModel: 'rf-detr-large-704-coco' });
     expect(coverage!.detectorModels).toEqual([{ model: 'rf-detr-large-704-coco', frames: 58 }]);
+    expect(coverage!.motionFrames).toBeNull();
+    expect(coverage!.providers.find((entry) => entry.provider === 'gpu')?.label).toBe('RunPod GPU (legacy)');
     expect(inferenceCoverage({ total_frames_parsed: 10 })).toBeNull();
     expect(inferenceCoverage(null)).toBeNull();
+  });
+
+  it('does not claim full coverage for a legacy plan that never counted the examined frames', () => {
+    // Skipped detector batches left plans like this one: sampled frames, no examination count.
+    expect(inferenceCoverage({ total_frames_parsed: 900, classification_plan: { sampled_frames: 120 } })).toBeNull();
+    expect(inferenceCoverage({ classification_plan: { sampled_frames: 120, coverage: { frames_selected: 120 } } })).toBeNull();
+    expect(inferenceCoverage({ classification_plan: { coverage: { frames_selected: 120, frames_triaged: 0, triage_providers: {} } } }))
+      .toMatchObject({ framesSampled: 120, framesExamined: 0, framesUnanswered: 120 });
   });
 });

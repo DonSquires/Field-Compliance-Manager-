@@ -2252,8 +2252,10 @@ destructive bulk operations).
    118 capabilities are supported by 11,289 invocation observations; static
    refresh preserves rather than invents those claims.
 5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
-6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
-   infrastructure.
+6. ~~Re-create the RunPod QA endpoint~~ — withdrawn by the 2026-11-01 stack
+   ruling (RunPod is not part of the stack). Run `full-page-audit` on Bob's
+   own infrastructure: the VPS QA worker, with the laptop GPU for any visual
+   model work.
 7. Compile every document and media perception path into the shared evidence
    contract in
    [Bob enterprise agent architecture](BOB_ENTERPRISE_AGENT_ARCHITECTURE.md):

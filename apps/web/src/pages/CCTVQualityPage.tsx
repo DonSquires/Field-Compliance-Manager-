@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Car, Check, Cloud, ExternalLink, EyeOff, Gauge, ListChecks, Loader2, PawPrint, RefreshCw, ShieldCheck, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -21,6 +21,7 @@ import './CCTVTriagePage.css';
 import './CCTVQualityPage.css';
 
 type Period = 30 | 90 | 365;
+const sinceFor = (days: Period) => new Date(Date.now() - days * 86_400_000).toISOString();
 type QualityError = ConsoleFailure & { retry: (() => void) | null };
 type ReportState = 'open' | 'confirmed_missed' | 'not_missed';
 type MissedReport = {
@@ -104,14 +105,19 @@ const CCTVQualityPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [policyDraft, setPolicyDraft] = useState<{ enabled: boolean; model: string; reason: string } | null>(null);
 
+  // Each load supersedes the one before it: a slow 90-day answer must not overwrite a newer 30-day one, nor a
+  // previous organisation's answer the current one.
+  const loadGeneration = useRef(0);
+
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     if (!organizationId) {
       setLoading(false);
       setError({ kind: 'permission', text: 'Organisation access could not be confirmed, so detection quality is unavailable.', retryable: false, retry: null });
       return;
     }
     setLoading(true);
-    const since = new Date(Date.now() - period * 86_400_000).toISOString();
+    const since = sinceFor(period);
     const [summaryRes, reportsRes, policyRes, receiptsRes] = await Promise.all([
       supabase.rpc('cctv_accuracy_summary', { p_organization_id: organizationId, p_since: since }),
       supabase
@@ -124,6 +130,7 @@ const CCTVQualityPage: React.FC = () => {
       supabase.from('cctv_inference_policies').select('cloud_vehicle_vlm_enabled, cloud_vehicle_vlm_model, reason, set_at').eq('organization_id', organizationId).maybeSingle(),
       supabase.from('cctv_cloud_inference_receipts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('created_at', since),
     ]);
+    if (generation !== loadGeneration.current) return;
     setLoading(false);
     if (summaryRes.error) {
       setError({ ...describeFailure(summaryRes.error.message, 'detection quality'), retry: () => void load() });
@@ -150,6 +157,18 @@ const CCTVQualityPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  // The per-kind cards come from the governed summary, so a resolved report is reflected by reading it again.
+  const refreshSummary = async (): Promise<string | null> => {
+    if (!organizationId) return null;
+    const generation = loadGeneration.current;
+    const since = sinceFor(period);
+    const { data, error: summaryError } = await supabase.rpc('cctv_accuracy_summary', { p_organization_id: organizationId, p_since: since });
+    if (generation !== loadGeneration.current) return null;
+    if (summaryError) return summaryError.message;
+    setSummary(parseAccuracySummary(data));
+    return null;
+  };
+
   const kinds = useMemo(() => (summary ? accuracyByKind(summary, CURRENT_ENGINE_VERSION) : []), [summary]);
   const legacyKinds = useMemo(() => (summary ? accuracyByKind(summary, 'legacy') : []), [summary]);
   const groups = useMemo(() => (summary?.groups ?? []).slice().sort((a, b) => (
@@ -175,8 +194,11 @@ const CCTVQualityPage: React.FC = () => {
     setBusy(null);
     if (resolveError) { setMessage(resolveError.message); return; }
     setReports((current) => current.map((report) => (report.id === resolveDraft.id ? { ...report, state: resolveDraft.state, resolutionNotes: resolveDraft.notes.trim() || null } : report)));
-    setMessage(resolveDraft.state === 'confirmed_missed' ? 'Recorded as a confirmed miss. It now counts against detection quality.' : 'Recorded as not a miss. The report is kept for the record and does not count.');
+    const recorded = resolveDraft.state === 'confirmed_missed' ? 'Recorded as a confirmed miss. It now counts against detection quality.' : 'Recorded as not a miss. The report is kept for the record and does not count.';
+    setMessage(recorded);
     setResolveDraft(null);
+    const refreshError = await refreshSummary();
+    if (refreshError) setMessage(`${recorded} The quality figures could not be refreshed (${refreshError}); use Refresh to update them.`);
   };
 
   const savePolicy = async () => {

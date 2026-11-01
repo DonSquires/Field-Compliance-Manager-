@@ -90,7 +90,7 @@ export function CCTVStillComparison({ original, enhanced = null, receipt = null,
   const operations = receipt?.operations?.length
     ? receipt.operations.map((operation) => operation.replaceAll('_', ' ')).join(' · ')
     : 'auto levels · IR cast correction · denoise · high-quality resize · sharpen';
-  const providerLabel = provider === 'laptop_gpu' ? 'Laptop GPU' : provider === 'runpod_fallback' ? 'RunPod fallback' : provider === 'worker_deterministic' ? 'Worker deterministic' : null;
+  const providerLabel = provider === 'laptop_gpu' ? 'Laptop GPU' : provider === 'runpod_fallback' ? 'RunPod (legacy)' : provider === 'worker_deterministic' ? 'Worker deterministic' : null;
   const sourcePlate = recognitionComparison?.alpr?.source;
   const enhancedPlate = recognitionComparison?.alpr?.enhanced;
 

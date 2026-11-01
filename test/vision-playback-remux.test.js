@@ -90,13 +90,9 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /frame\.visual_quality === 'degraded'/);
   assert.match(source, /visual_quality_gate/);
   assert.match(source, /human_review_required: true/);
-  assert.match(source, /RUNPOD_CAPTURE_API_URL/);
-  assert.match(source, /capture_recognition/);
   assert.match(source, /detector_triage_then_one_full_recognition_per_unique_observation/);
-  assert.match(source, /deterministic_capture_v1/);
-  assert.match(source, /capture_endpoint_not_configured/);
-  assert.match(source, /RUNPOD_CAPTURE_API_KEY/);
-  assert.match(source, /RUNPOD_CAPTURE_API_URL/);
+  // The RunPod-only capture-recognition worker was retired with RunPod (owner ruling 2026-11-01).
+  assert.doesNotMatch(source, /RUNPOD_CAPTURE_API_(URL|KEY)|runCaptureRecognition/);
   assert.match(source, /WORKER_CONCURRENCY/);
   assert.match(source, /worker_concurrency/);
 });
@@ -105,13 +101,13 @@ test('vision watcher meters GPU use per job and defers (never fails) when the da
   const fs = require('node:fs');
   const path = require('node:path');
   const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
-  // Every RunPod call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
+  // Every laptop GPU call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
   assert.match(source, /const meter = \(\) => \{ if \(usage\) \{ usage\.gpu_calls \+= 1; usage\.frames_sent \+= batch\.length; usage\.gpu_ms \+= Date\.now\(\) - startedAt; \} \};/);
-  // Triage asks RunPod only for frames an earlier machine left unanswered; recognition re-reads on a GPU only
-  // under gpu_first and gpu_consistent, and those reads are metered through the same usage object.
-  assert.match(source, /await classifyWithRunpodBatch\(remaining, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
-  assert.match(source, /if \(policy === 'gpu_first'\) \{\s*for \(const \[hash, answer\] of await classifyWithRunpodBatch\(batch, undefined, usage\)\)/);
-  assert.match(source, /await classifyWithRunpodBatch\(remaining, RECOGNITION_TASKS, usage\)/);
+  // Triage asks each machine only for frames an earlier one left unanswered; recognition re-reads on the laptop GPU
+  // only under gpu_consistent, and those reads are metered through the same usage object.
+  assert.match(source, /await classifyWithLocalGpuBatch\(remaining, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
+  assert.match(source, /await classifyWithLocalGpuBatch\(batch, RECOGNITION_TASKS, usage\)/);
+  assert.doesNotMatch(source, /classifyWithRunpodBatch/);
   // VPS work is metered too, so the two machines' shares are visible per job.
   assert.match(source, /usage\.vps_calls \+= 1; usage\.vps_ms \+= Date\.now\(\) - startedAt;/);
   assert.match(source, /supabase\.rpc\('record_cctv_inference_usage', \{ p_job_id: job\.id, p_usage: usage \}\)/);

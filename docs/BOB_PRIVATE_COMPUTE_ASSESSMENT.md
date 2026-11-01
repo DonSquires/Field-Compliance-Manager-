@@ -172,6 +172,11 @@ calculation is an illustration, not a monthly plan or a spending approval.
 Lambda's retrieved pricing table did not preserve GPU-name/price alignment
 reliably enough to include a competing quote.
 
+**Owner ruling 2026-11-01:** RunPod is not part of the stack ("unstable and
+expensive"); the approved compute is the VPS, the laptop GPU, Ollama Cloud and
+OpenAI. The RunPod rates above are kept as dated market context only, not as
+an option.
+
 ## Required controls before a new private endpoint
 
 - Preserve the private-source boundary; review any rented infrastructure as a

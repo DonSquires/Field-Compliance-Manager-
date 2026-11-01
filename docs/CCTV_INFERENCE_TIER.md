@@ -25,6 +25,25 @@ receipt written before the crop leaves. Completed jobs are reprocessed with engi
 decision is kept. Owner scope: accuracy engine, model governance, accuracy measurement, reviewer workspace and
 the local VLM upgrade. Details, the expected-versus-present record and the remaining gaps are in §9.
 
+**Owner ruling 2026-11-01 (stack) — RunPod is retired.** "Runpod is not part of the stack … stack is supabase,
+vps hpanel, Laptop GPU, Ollama cloud, opne ai, github, vercel." This supersedes every RunPod route in this
+document, including the GPU fallback in the two rulings above, §2, §6, §7 and §8: those passages are kept as
+the history of what ran, not as the current design. Present behaviour:
+
+* `gpu_consistent` (default) reads every frame on the laptop GPU only; a frame the laptop did not answer on a
+  GPU execution provider (an answer reporting CPU, or no provider at all, is refused) stays unanswered and the
+  job is deferred. `local_gpu_first` asks the laptop, then the VPS CPU tier; `vps_first` and `vps_only` use
+  the VPS only. No policy calls a third-party GPU host.
+* Recognition enhancement is laptop GPU Real-ESRGAN, then the deterministic `deterministic_capture_v1`
+  profile. `runpod_handler.py`, the `fcm-capture-inference` worker and `runpod-qa-worker/` are deleted; the
+  inference image now starts uvicorn directly.
+* `check-services-health` never calls a RunPod host: if `INFERENCE_SERVICE_URL` still names one it reports
+  `retired_provider`. It otherwise reads `GET /health` on the configured inference service.
+* Historic `runpod_fallback` / `runpod` provenance stays readable (labelled legacy) and the database CHECK keeps
+  accepting it for existing rows; nothing new writes it.
+* Face recognition, person re-identification, ANPR and vehicle recognition remain in scope and are being
+  improved on this stack (laptop GPU first; OpenAI and Ollama Cloud only under the egress rules in §9.2).
+
 ## 1. What the tier is for
 
 One motion frame in, one **advisory** answer out: every person, vehicle and animal in the frame, each with a
@@ -46,7 +65,7 @@ wide, however confident the OCR claims to be.
 
 | Role | Model | Licence | Runtime | Where it runs |
 |---|---|---|---|---|
-| Entity detector (person / vehicle / animal) | RF-DETR COCO, `rf-detr-large-704-coco` | Apache-2.0 (weights via open-image-models, MIT wrapper) | onnxruntime CUDA | RunPod GPU workers |
+| Entity detector (person / vehicle / animal) | RF-DETR COCO, `rf-detr-large-704-coco` | Apache-2.0 (weights via open-image-models, MIT wrapper) | onnxruntime CUDA | laptop GPU (RunPod GPU workers until the 2026-11-01 stack ruling) |
 | Entity detector, CPU tier | RF-DETR COCO, `rf-detr-small-512-coco` | Apache-2.0 | onnxruntime CPU | VPS `fcm-inference` |
 | Plate detector | `yolo-v9-s-608-license-plate-end2end` | MIT | onnxruntime | both |
 | Plate OCR | `cct-s-v2-global-model` (fast-plate-ocr; region head includes New Zealand) | MIT | onnxruntime | both |
@@ -54,7 +73,7 @@ wide, however confident the OCR claims to be.
 | Person re-ID / vehicle colour-type | OpenVINO person-reidentification-retail-0288, vehicle-attributes-recognition-barrier-0039 | Apache-2.0 | OpenVINO CPU | both |
 | Vehicle-only fallback | OpenVINO vehicle-detection-0200 | Apache-2.0 | OpenVINO CPU | only when no RF-DETR export is present in `MODELS_DIR` |
 | Species | SpeciesNet v4.0.2a `always_crop` (Google; EfficientNetV2-M, 2,498 labels, camera-trap trained), exported to ONNX at image build from the Addax Data Science Hugging Face mirror (Apache-2.0, pinned revision `c56465f`), geofenced `NZL` | Apache-2.0 | onnxruntime | both |
-| Recognition still super-resolution | Real-ESRGAN x4plus, pinned ONNX SHA-256 `0a06c68f…eac2dc5` (upstream BSD-3-Clause; MIT-packaged conversion at fixed commit) | BSD-3-Clause / MIT packaging | onnxruntime CUDA, CPU fallback | laptop GPU primary; RunPod fallback |
+| Recognition still super-resolution | Real-ESRGAN x4plus, pinned ONNX SHA-256 `0a06c68f…eac2dc5` (upstream BSD-3-Clause; MIT-packaged conversion at fixed commit) | BSD-3-Clause / MIT packaging | onnxruntime CUDA, CPU fallback | laptop GPU; deterministic fallback (RunPod fallback retired 2026-11-01) |
 
 Rejected: Ultralytics YOLO (AGPL-3.0 — incompatible with a closed SaaS), Plate Recognizer / cloud ALPR
 (evidence leaves the custodian's control), tesseract on contour heuristics (kept only as the not-staged
@@ -73,8 +92,8 @@ medium 195 ms, large 297 ms per full frame; the VPS CPU tier (small-512, 5 passe
 Only observations that enter human review receive derivatives (default 8/job, hard cap 20). Up to 12
 usable source crops around the observation window are quality-ranked, affine-aligned and temporal-median
 fused (`aligned_temporal_median_v1`). Frames that cannot align at the minimum correlation are excluded and
-named in the receipt. The fused crop is sent to Real-ESRGAN on the laptop GPU; RunPod is the paid fallback;
-OpenCV levels/denoise/sharpen is the non-generative final fallback.
+named in the receipt. The fused crop is sent to Real-ESRGAN on the laptop GPU; OpenCV levels/denoise/sharpen
+is the non-generative fallback (the RunPod fallback was retired by the 2026-11-01 stack ruling).
 
 ALPR, face and animal/vehicle recognition run independently on the source crop and enhanced derivative.
 Both answers and their agreement are stored; disagreement never auto-resolves. The original and enhanced
@@ -118,7 +137,7 @@ is then superseded rather than promoted.
   detections").
 * **Provider honesty.** `onnx_providers()` offers CUDA only when `/proc/driver/nvidia/version`,
   `/dev/nvidia*` or `NVIDIA_VISIBLE_DEVICES` proves a driver; `create_session()` retries on CPU if CUDA
-  fails to initialise. The bound provider is reported on `/health`, in the RunPod `ping`, and on every
+  fails to initialise. The bound provider is reported on `/health` and on every
   result (`detector_execution_provider`, `detector_provider = rf_detr:<model>@<provider>`).
 * **Far-field tile pass.** Frames at least 1.5x the model input in both dimensions get a 2x2 overlapping
   (15 %) tile pass in the same batch (`passes: 5`). Tile detections must clear 0.45, must not span more than
@@ -183,8 +202,9 @@ registration; the console's enhancement/zoom gets the located box.
 
 ## 6. Consumers
 
-* RunPod `infer_batch` (`runpod_handler.py`) now returns `alpr` and `face` blocks per frame in addition to
-  the triage; `ping` returns the full health payload including providers.
+* `/infer/batch` returns `alpr` and `face` blocks per frame in addition to the triage, and `/health` returns
+  the full payload including execution providers. (Until the 2026-11-01 stack ruling the RunPod
+  `runpod_handler.py` exposed the same answer as `infer_batch`; it is deleted.)
 * **Vehicle-attribute evidence.** The worker preserves OpenVINO colour/type
   confidence, model/provider, crop and inference status instead of flattening
   them into an unlabelled observation. Make/model from the vision LLM remains

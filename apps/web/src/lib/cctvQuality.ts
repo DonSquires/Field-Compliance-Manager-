@@ -92,15 +92,21 @@ export function detectionBox(observation: ConsoleObservation, containerRatio = 4
 
 export type TriageKeyAction = 'next' | 'previous' | 'accept' | 'reject';
 
-export function triageKeyAction(event: { key: string; targetTag?: string | null; isEditable?: boolean; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean }): TriageKeyAction | null {
+// Single-character shortcuts (J/K/A/R) can be switched off (WCAG 2.1.4) so speech-input and other character-key
+// users never decide a sighting by accident; the arrow keys keep moving through the queue either way. A held key
+// repeats navigation but never decides: one keystroke is one human decision.
+export function triageKeyAction(event: { key: string; targetTag?: string | null; isEditable?: boolean; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; repeat?: boolean; characterShortcuts?: boolean }): TriageKeyAction | null {
   if (event.metaKey || event.ctrlKey || event.altKey || event.isEditable) return null;
   const tag = (event.targetTag ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return null;
+  if (event.key === 'ArrowDown') return 'next';
+  if (event.key === 'ArrowUp') return 'previous';
+  if (event.characterShortcuts === false) return null;
   switch (event.key) {
-    case 'j': case 'J': case 'ArrowDown': return 'next';
-    case 'k': case 'K': case 'ArrowUp': return 'previous';
-    case 'a': case 'A': return 'accept';
-    case 'r': case 'R': return 'reject';
+    case 'j': case 'J': return 'next';
+    case 'k': case 'K': return 'previous';
+    case 'a': case 'A': return event.repeat ? null : 'accept';
+    case 'r': case 'R': return event.repeat ? null : 'reject';
     default: return null;
   }
 }
@@ -258,22 +264,27 @@ export function engineLabel(engineVersion: string | null): string {
   return engineVersion;
 }
 
+// RunPod was retired from the stack on 2026-11-01; its names stay only so older results still read correctly.
 const TRIAGE_PROVIDER_NAMES: Record<string, string> = {
   local_gpu: 'Laptop GPU',
-  gpu: 'RunPod GPU',
-  runpod: 'RunPod GPU',
+  gpu: 'RunPod GPU (legacy)',
+  runpod: 'RunPod GPU (legacy)',
   vps: 'VPS CPU',
+  unreported: 'Unreported machine',
 };
 
 export type InferenceCoverage = {
+  // Every source frame position the extractor parsed, static and warm-up frames included.
   framesParsed: number | null;
+  // Motion-frame artifacts the sampler chose from; null for results recorded before the worker counted them.
+  motionFrames: number | null;
   framesSampled: number;
   framesExamined: number;
   framesUnanswered: number;
   capped: boolean;
   providers: Array<{ provider: string; label: string; frames: number }>;
-  // Different detector models read frames of one job (the v1 failure engine v2 forbids). Laptop GPU and RunPod
-  // running the same pinned model is not mixed.
+  // Different detector models read frames of one job (the v1 failure engine v2 forbids). Two GPU machines running
+  // the same pinned model is not mixed.
   mixedDetectors: boolean;
   engineVersion: string | null;
   pinnedModel: string | null;
@@ -286,14 +297,17 @@ const frameCounts = (value: unknown): Array<[string, number]> => Object.entries(
   .sort((left, right) => right[1] - left[1]);
 
 // What the detector actually looked at for one job, from the worker's own classification plan. Null for a
-// result that predates the plan, so the page says "not recorded" instead of implying full coverage.
+// result that predates the plan or never counted the examined frames, so the page says "not recorded" instead of
+// implying full coverage.
 export function inferenceCoverage(result: unknown): InferenceCoverage | null {
   const record = asRecord(result);
   const plan = asRecord(record.classification_plan);
   const coverage = asRecord(plan.coverage);
   const sampled = count(coverage.frames_selected) ?? count(plan.sampled_frames);
-  if (sampled === null) return null;
-  const examined = count(coverage.frames_triaged) ?? sampled;
+  const examined = count(coverage.frames_triaged);
+  // A legacy plan can list sampled frames whose detector batches were skipped; without an examined count it
+  // proves nothing about coverage.
+  if (sampled === null || examined === null) return null;
   const providers = frameCounts(coverage.triage_providers).map(([provider, frames]) => ({
     provider,
     label: TRIAGE_PROVIDER_NAMES[provider] ?? provider.replace(/_/g, ' '),
@@ -305,6 +319,7 @@ export function inferenceCoverage(result: unknown): InferenceCoverage | null {
   const vpsWithGpu = providerNames.has('vps') && [...providerNames].some((provider) => provider !== 'vps');
   return {
     framesParsed: count(record.total_frames_parsed),
+    motionFrames: count(plan.motion_frames),
     framesSampled: sampled,
     framesExamined: examined,
     framesUnanswered: count(coverage.frames_untriaged) ?? Math.max(0, sampled - examined),
