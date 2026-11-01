@@ -44,20 +44,30 @@ that reviewed revision for the next timer tick without rewriting its own in-flig
 Switch to live with `BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run
 plans have been read.
 
-Control-plane and `fcm-api` replacement and rollback use the shared `bob-runtime-idle.js` probe.
-`cctv-vision` instead waits until no `inference_jobs` row is `processing` (checked before and after
-the image build; an unreadable queue defers), is healthy when `fcm-inference` passes its own
-healthcheck and the watcher heartbeat is fresh, and rolls back by rebuilding the previous release.
-Every rollback rebuilds the previous release first: service images have fixed tags, so `up` alone
-would restart the image that just failed. The laptop worker's watcher is not reached by the lane;
-`deploy/laptop-worker/update-watcher.ps1` updates it on the laptop.
-It reads only the server activity credentials, queries running/queued model
+Control-plane and `fcm-api` replacement and rollback use the shared `bob-runtime-idle.js` probe,
+checked after each image build (including the rollback build) and immediately before recreation; a
+busy or unverifiable probe defers, and a deferred rollback is reported as such, never as rolled back.
+The probe reads only the server activity credentials, queries running/queued model
 and verification receipts, and checks in-process Builder execution. Missing
 configuration, failed requests or malformed health responses defer the release.
-The probe runs again after the image build; a generated patch awaiting verification
-is not proof of idle. The helper is installed alongside the lane and updated
+A generated patch awaiting verification is not proof of idle. The helper is installed alongside the lane and updated
 as a `release-lane` target. Never force a restart merely to apply a larger timeout
 to a future run.
+
+`cctv-vision` cannot rely on a queue read: a watcher (VPS or laptop) can claim a job a moment later.
+After its images build, the lane pauses claims in the database (`pause_cctv_inference_claims`,
+honoured by `claim_cctv_inference_job` for every watcher version, expiring after 45 minutes as a
+backstop) and waits up to `BOB_RELEASE_CCTV_DRAIN_SECONDS` (default 900) for no `video_motion` job to
+be `processing`. A pause that fails, an unreadable queue or work that does not drain defers the
+release with claims resumed. The pause is held through replacement, the health check
+(`fcm-inference` passes its own healthcheck and the watcher heartbeat is fresh) and any rollback,
+then `resume_cctv_inference_claims` releases it; an exit on any path also resumes.
+
+A build failure leaves the running services untouched. A failed `up` is a replacement failure: Compose
+may already have replaced part of the target, so it is rolled back like an unhealthy release. Every
+rollback rebuilds the previous release first: service images have fixed tags, so `up` alone would
+restart the image that just failed. The laptop worker's watcher is not reached by the lane;
+`deploy/laptop-worker/update-watcher.ps1` updates it on the laptop.
 
 ## What stays with a person
 
