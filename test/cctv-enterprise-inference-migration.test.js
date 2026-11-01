@@ -10,7 +10,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
-const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261102140000_cctv_enterprise_inference.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261102150000_cctv_enterprise_inference.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
 const watcher = fs.readFileSync(path.join(__dirname, '../services/vision/vision_job_watcher.js'), 'utf8');
 

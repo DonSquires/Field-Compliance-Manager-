@@ -118,7 +118,7 @@ if (SCOPE_NAME === 'engine-v2') {
   // The engine-v2 worker calls these after writing observations; requeueing before they exist fails every job.
   const [ready] = await sql(`SELECT to_regprocedure('public.reconcile_cctv_reviewed_observations(uuid)') IS NOT NULL
     AND to_regprocedure('public.link_cctv_resident_vehicle_observations(uuid)') IS NOT NULL AS ready`);
-  if (!ready?.ready) throw new Error('Apply migration 20261102140000_cctv_enterprise_inference and redeploy the watcher before reprocessing');
+  if (!ready?.ready) throw new Error('Apply migration 20261102150000_cctv_enterprise_inference and redeploy the watcher before reprocessing');
 }
 console.log(`\nRe-running ${ids.length} jobs…`);
 await sql(`BEGIN;
