@@ -47,7 +47,13 @@ def run_vps_cmd(cmd_to_run):
 
 ---
 
-## 2. RunPod Serverless AI Inference
+## 2. RunPod Serverless AI Inference — retired
+
+> **Retired by owner ruling 2026-11-01:** "Runpod is not part of the stack … stack is supabase, vps hpanel,
+> Laptop GPU, Ollama cloud, opne ai, github, vercel." No code path calls this endpoint: the CCTV watcher reads
+> frames on the laptop GPU (`gpu_consistent`) or the VPS, and `check-services-health` reports a RunPod
+> `INFERENCE_SERVICE_URL` as `retired_provider` without calling it. The record below is history of what ran
+> until then. Remove the `RUNPOD_API` secret and the endpoint once no historic job still needs inspection.
 
 - **Endpoint Name**: `fieldops-ai-engine`
 - **Endpoint ID**: `katqqnmds1dphs`
@@ -115,7 +121,7 @@ def run_vps_cmd(cmd_to_run):
 |---|---|
 | `GRANDMASTER_TEST_PASSWORD` | Password auth for SSH into VPS `root@72.61.123.97:22` |
 | `MASTER_TEST_PASSWORD` | Alternate password auth for VPS SSH |
-| `RUNPOD_API` | API Bearer key for RunPod (`katqqnmds1dphs`) |
+| `RUNPOD_API` | Retired 2026-11-01 — RunPod is not part of the stack; no code reads it. Safe to delete |
 | `SUPABASE_URL` | Primary Supabase URL (`https://dotczcyyzgabmtmnglqj.supabase.co`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Primary Supabase Service-Role Key (data-plane only; cannot deploy functions) |
 | `FIELD_COMPLIANCE_CODESPACE` | Supabase personal access token (`sbp_…`) for the Management API / CLI. Sees both projects (`dotczcyyzgabmtmnglqj`, `kxwjcupuxnnbnzcgmkoi`). Use as `SUPABASE_ACCESS_TOKEN` for `supabase functions deploy` |

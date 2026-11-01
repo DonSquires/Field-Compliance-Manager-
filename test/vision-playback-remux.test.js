@@ -42,6 +42,35 @@ test('selectFramesForClassification samples across a segment instead of only its
   assert.ok(Math.max(...indices) > 200, `expected samples spread past frame 200, got ${indices}`);
 });
 
+test('selectFramesForClassification gives budget a short segment cannot use to the long segments', () => {
+  // Measured live 2026-11-01: 21 of 319 capped jobs sampled as few as 80 of 120 frames because short segments
+  // kept an equal share they could not fill while a long walk-through stayed undersampled.
+  const segments = [{ frames: framesRange(2) }, { frames: framesRange(3) }, { frames: framesRange(900) }];
+  const selected = selectFramesForClassification(segments, 120);
+  assert.equal(selected.length, 120);
+  assert.equal(selected.filter((frame) => segments[0].frames.includes(frame)).length, 2);
+  assert.equal(selected.filter((frame) => segments[1].frames.includes(frame)).length, 3);
+  assert.equal(new Set(selected).size, 120, 'a frame is never examined twice');
+});
+
+test('selectFramesForClassification covers the whole clip when there are more segments than budget', () => {
+  const segments = Array.from({ length: 300 }, () => ({ frames: framesRange(5) }));
+  const selected = selectFramesForClassification(segments, 120);
+  assert.equal(selected.length, 120);
+  const touched = segments.map((segment, index) => (selected.some((frame) => segment.frames.includes(frame)) ? index : -1)).filter((index) => index >= 0);
+  assert.equal(touched[0], 0);
+  assert.equal(touched[touched.length - 1], 299, 'the last motion segment must still be examined');
+});
+
+test('selectFramesForClassification keeps chronological order and never exceeds the frames available', () => {
+  const segments = [{ frames: framesRange(4) }, { frames: framesRange(6) }];
+  const selected = selectFramesForClassification(segments, 120);
+  assert.equal(selected.length, 10);
+  assert.deepEqual(selected, [...segments[0].frames, ...segments[1].frames]);
+  assert.deepEqual(selectFramesForClassification([], 120), []);
+  assert.deepEqual(selectFramesForClassification(segments, 0), []);
+});
+
 test('representativeFrameHashes deduplicates a twelve-frame tracked observation before recognition', () => {
   const summary = {
     consolidated_events: {
@@ -61,13 +90,9 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /frame\.visual_quality === 'degraded'/);
   assert.match(source, /visual_quality_gate/);
   assert.match(source, /human_review_required: true/);
-  assert.match(source, /RUNPOD_CAPTURE_API_URL/);
-  assert.match(source, /capture_recognition/);
   assert.match(source, /detector_triage_then_one_full_recognition_per_unique_observation/);
-  assert.match(source, /deterministic_capture_v1/);
-  assert.match(source, /capture_endpoint_not_configured/);
-  assert.match(source, /RUNPOD_CAPTURE_API_KEY/);
-  assert.match(source, /RUNPOD_CAPTURE_API_URL/);
+  // The RunPod-only capture-recognition worker was retired with RunPod (owner ruling 2026-11-01).
+  assert.doesNotMatch(source, /RUNPOD_CAPTURE_API_(URL|KEY)|runCaptureRecognition/);
   assert.match(source, /WORKER_CONCURRENCY/);
   assert.match(source, /worker_concurrency/);
 });
@@ -76,11 +101,13 @@ test('vision watcher meters GPU use per job and defers (never fails) when the da
   const fs = require('node:fs');
   const path = require('node:path');
   const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
-  // Every RunPod call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
+  // Every laptop GPU call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
   assert.match(source, /const meter = \(\) => \{ if \(usage\) \{ usage\.gpu_calls \+= 1; usage\.frames_sent \+= batch\.length; usage\.gpu_ms \+= Date\.now\(\) - startedAt; \} \};/);
-  // Triage asks the GPU only for frames the VPS left unanswered (vps_first); recognition re-reads on the GPU only under gpu_first.
-  assert.match(source, /await classifyWithRunpodBatch\(remaining, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
-  assert.match(source, /INFERENCE_POLICY === 'gpu_first' \? await classifyWithRunpodBatch\(pendingBatch, undefined, usage\) : new Map\(\)/);
+  // Triage asks each machine only for frames an earlier one left unanswered; recognition re-reads on the laptop GPU
+  // only under gpu_consistent, and those reads are metered through the same usage object.
+  assert.match(source, /await classifyWithLocalGpuBatch\(remaining, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
+  assert.match(source, /await classifyWithLocalGpuBatch\(batch, RECOGNITION_TASKS, usage\)/);
+  assert.doesNotMatch(source, /classifyWithRunpodBatch/);
   // VPS work is metered too, so the two machines' shares are visible per job.
   assert.match(source, /usage\.vps_calls \+= 1; usage\.vps_ms \+= Date\.now\(\) - startedAt;/);
   assert.match(source, /supabase\.rpc\('record_cctv_inference_usage', \{ p_job_id: job\.id, p_usage: usage \}\)/);

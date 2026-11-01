@@ -2270,8 +2270,10 @@ destructive bulk operations).
    118 capabilities are supported by 11,289 invocation observations; static
    refresh preserves rather than invents those claims.
 5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
-6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
-   infrastructure.
+6. ~~Re-create the RunPod QA endpoint~~ — withdrawn by the 2026-11-01 stack
+   ruling (RunPod is not part of the stack). Run `full-page-audit` on Bob's
+   own infrastructure: the VPS QA worker, with the laptop GPU for any visual
+   model work.
 7. Compile every document and media perception path into the shared evidence
    contract in
    [Bob enterprise agent architecture](BOB_ENTERPRISE_AGENT_ARCHITECTURE.md):
@@ -2320,6 +2322,24 @@ attributes. The dedicated attribute review is the only canonical promotion
 path and records corrections without erasing the original candidate. The live
 backfill recorded 190 envelopes from 177 jobs and replayed all 190
 idempotently. Smoke, noise and other vertical-module adapters remain.
+
+Phase C CCTV accuracy engine v2 (owner ruling 2026-11-01): built to make CCTV
+sightings measurably accurate rather than merely plentiful. One pinned GPU
+detector reads every frame of a job (`gpu_consistent`; the VPS small model is
+never mixed in and an unanswered frame defers the job); a one-to-one,
+bounded-gate tracker replaces greedy association; the whole frame budget is
+spent across the clip; Qwen3-VL on the laptop replaces moondream, with Ollama
+Cloud limited to opted-in, person-free, plate-masked, receipted vehicle crops;
+reprocessing carries every human decision forward; parked vehicles that recur
+on a camera share one provisional portfolio; reviewers can report misses; and
+`cctv_accuracy_summary` reports precision with a Wilson lower bound, calibrated
+only at 30 human decisions. The reviewer workspace adds detector boxes,
+provenance, keyboard triage, a Detection quality page and detector coverage on
+job review; there is deliberately no bulk accept. Expected versus present,
+measured baselines and gaps are recorded in
+[CCTV inference tier §9](CCTV_INFERENCE_TIER.md#9-engine-v2-accuracy-owner-ruling-2026-11-01).
+Nothing here is exercised until a reprocessed batch writes engine v2 results
+and reviewers decide them.
 
 Phase C biosecurity-photo slice shipped 2026-10-11: the governed submission
 retains structured classifier details, reasoning, confidence and model receipt,

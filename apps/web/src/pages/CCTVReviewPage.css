@@ -153,6 +153,9 @@
 .cctv-quality-panel { background: var(--color-status-watch-bg); border-left: 4px solid var(--color-warning); color: var(--color-warning); display: grid; gap: 4px; line-height: 1.35; padding: 11px 12px; }
 .cctv-quality-panel strong { font-size: 12px; }
 .cctv-quality-panel span { font-size: 12px; }
+.cctv-coverage-panel { background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 4px solid var(--color-brand-primary); border-radius: 6px; color: var(--color-text-secondary); display: grid; font-size: 12px; gap: 4px; line-height: 1.4; padding: 10px 12px; }
+.cctv-coverage-panel strong { color: var(--color-text-primary); font-size: 12px; overflow-wrap: anywhere; }
+.cctv-coverage-panel.is-warning { background: var(--color-status-watch-bg); border-left-color: var(--color-warning); }
 .cctv-verify-receipt { background: var(--color-bg-surface); border-left-color: var(--color-brand-primary); color: var(--color-text-secondary); }
 .cctv-verify-receipt label { display: grid; font-size: 12px; gap: 3px; }
 .cctv-verify-receipt input { border: 1px solid var(--color-border-subtle); border-radius: 4px; font: inherit; font-family: Menlo, Consolas, monospace; font-size: 12px; padding: 6px 8px; }

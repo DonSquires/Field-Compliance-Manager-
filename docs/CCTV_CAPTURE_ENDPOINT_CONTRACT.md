@@ -4,8 +4,10 @@
 
 The capture endpoint is the recognition-derivative lane. The vision watcher first quality-ranks and aligns
 up to 12 source crops, then sends the fused crop to the laptop GPU. Real-ESRGAN produces a 4× interpretive
-derivative; RunPod is the final GPU fallback; deterministic enhancement is the availability fallback.
-That final fallback remains the receipted `deterministic_capture_v1` profile and is labelled non-generative.
+derivative; deterministic enhancement is the availability fallback. That fallback remains the receipted
+`deterministic_capture_v1` profile and is labelled non-generative. RunPod is retired from the stack (owner ruling,
+2026-11-01, recorded in `CCTV_INFERENCE_TIER.md`) and is never called; historic `runpod_fallback` receipts stay
+readable as legacy provenance.
 
 It does not replace the original frame, create identity truth, confirm a plate, or make an enforcement decision.
 
@@ -56,7 +58,7 @@ It does not replace the original frame, create identity truth, confirm a plate, 
 - Every result is provisional and review-required.
 - Face matching may suggest candidates but cannot assign identity.
 - ALPR may suggest text but cannot confirm a plate.
-- Laptop GPU is primary; RunPod is fallback, never the default route.
+- Laptop GPU is primary; the deterministic worker profile is the only fallback. No third-party GPU host is called.
 - Temporal alignment/fusion is deterministic and fully receipted.
 - Real-ESRGAN output is generative and must be labelled interpretive. It cannot establish identity, plate or species truth.
 - Source and enhanced recognition answers remain separate; agreement raises confidence but never confirms.
