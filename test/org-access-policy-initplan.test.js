@@ -20,7 +20,7 @@ const migrations = fs.readdirSync(path.join(root, 'supabase/migrations'))
 // quoting, schema prefixes, sub-select aliases and spacing; normalise both.
 const normalise = (sql) => sql.replace(/"/g, '').replace(/\s+AS\s+\w+/gi, '').replace(/\bpublic\./gi, '')
   .toLowerCase().replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')');
-const PER_ROW_CALL = /\borg_access_allowed\s*\(/i;
+const PER_ROW_CALL = /(?:\bpublic\b|"public")\s*\.\s*"?org_access_allowed"?\s*\(|\borg_access_allowed"?\s*\(/i;
 const REACH_HEAD = '(select is_grand_master()) or coalesce(';
 const REACH_TAIL = /= any \(\(select accessible_org_ids\(\)\)::uuid\[\]\)\)?, false$/;
 
@@ -117,6 +117,8 @@ test('the reach template is recognised in migration and pg_dump form and nowhere
   assert.equal(reachShape('organization_id = ANY ((SELECT public.accessible_org_ids())::uuid[])').unguarded, true, 'no NULL guard');
   assert.equal(reachShape('COALESCE(organization_id = ANY ((SELECT accessible_org_ids())::uuid[]), false)').unguarded, true, 'no grand-master arm');
   assert.equal(reachShape('(org_access_allowed(organization_id))').perRow, true);
+  assert.equal(reachShape('(public."org_access_allowed"(organization_id))').perRow, true, 'quoted function identifier');
+  assert.equal(reachShape('("public"."org_access_allowed"(organization_id))').perRow, true, 'quoted schema and function identifiers');
 });
 
 test('accessible_org_ids is a locked-down set form of org_access_allowed', () => {
@@ -191,6 +193,8 @@ test('the initPlan form admits exactly the rows org_access_allowed admits', {
   const name = `fcm-org-access-initplan-${randomUUID()}`;
   const docker = (args, input) => execFileSync('docker', args, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
   const fixture = seededFixture();
+  const activeOrgAccessAllowed = currentDefinition('org_access_allowed');
+  const activeAccessibleOrgIds = currentDefinition('accessible_org_ids');
   const template = migration.match(/\(\(SELECT public\.is_grand_master\(\)\) OR COALESCE\(\(organization_id\) = ANY \(\(SELECT public\.accessible_org_ids\(\)\)::uuid\[\]\), false\)\)/);
   assert.ok(template, 'the migration rewrites a plain organization_id call');
   const prelude = migration.slice(0, migration.search(/^ALTER POLICY /m));
@@ -227,8 +231,9 @@ test('the initPlan form admits exactly the rows org_access_allowed admits', {
       CREATE TABLE public.service_agreements(provider_organization_id uuid, client_organization_id uuid, ends_on date, agreement_type text);
       ${currentDefinition('is_grand_master')}
       ${currentDefinition('get_descendant_organizations')}
-      ${currentDefinition('org_access_allowed')}
+      ${activeOrgAccessAllowed}
       ${prelude}
+      ${activeAccessibleOrgIds}
       INSERT INTO public.organizations VALUES ${fixture.organisations.join(',\n')};
       INSERT INTO public.user_profiles VALUES ${fixture.profiles.join(',\n')};
       INSERT INTO public.provider_client_access_grants VALUES ${fixture.grants.join(',\n')};
