@@ -78,7 +78,7 @@ Single-provider consolidation acceptance evidence:
   unchanged. Hosted public sign-up was closed and its rejection verified
   separately. Still to exercise after release: the server-side invitation path.
 
-Post-release helper grant finding, 2026-11-02 (follow-up migration pending):
+Post-release helper grant finding, 2026-11-02 (applied; #296):
 
 - The live catalog confirmed that `anon` could directly execute six
   deactivation-aware `SECURITY DEFINER` policy helpers. Atlas confirms the
@@ -90,11 +90,52 @@ Post-release helper grant finding, 2026-11-02 (follow-up migration pending):
 - Migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
   revokes `PUBLIC`/`anon` execution while preserving authenticated and
   service-role access, and retargets those ten unchanged policy predicates to
-  `authenticated`. Regression tests assert both changes. Before calling this
-  complete, rehearse the migration in a live rollback transaction, apply it
-  through the release path, regenerate `schema.sql` from the live catalog, and
-  refresh Atlas; verify anon execution is false and authenticated execution is
-  true for all six helpers.
+  `authenticated`. Regression tests assert both changes. Rehearsed in a live
+  rollback transaction, then applied by the release lane (ledger head
+  `20261102160000`). `schema.sql` was regenerated from the live catalog (#299),
+  and Atlas was refreshed for that head. Live checks: all six helpers have anon
+  execute false and authenticated execute true; all ten policies target
+  `authenticated`; anonymous RPC calls to the helpers return 401; and
+  anonymous reads of the affected tables still succeed without errors.
+
+Anonymous RLS exposure finding, 2026-11-02 (migration
+`20261102180000_close_anonymous_rls_exposure.sql`, pending release):
+
+- **Before:** a count-only anonymous sweep of the 252 relations `anon` can
+  select from, cross-checked against the live catalog and `schema.sql`, found
+  twenty policies with no `TO` clause (so PUBLIC, including `anon`) whose
+  `true` or `organization_id IS NULL` arm admitted the anon key.
+  - Atlas: 23,023 `bob_app_map_edges`, 4,963 `bob_capability_map` and
+    `app_map_expectations` rows.
+  - Bob governance: `bob_learnings`, `bob_owner_rulings`, `bob_knowledge_cards`.
+  - Org-less `audit_log` rows, including desktop signing-material read audits.
+  - System `access_presets` and `retention_policies`.
+  - The invite rate-limit ledger: full CRUD, because the "Service role" policy
+    applied to PUBLIC.
+  - Writes: anon could also insert org-less audit rows, and SCV import rows
+    were writable. Every signed-in user could likewise forge org-less or
+    other-actor audit rows and clear the invite ledger. The
+    `check_invite_rate_limit` definer RPC trusted any caller id from `anon`.
+- **During:** Atlas and source show no anonymous consumer. The Atlas readers
+  (`bob-query-atlas`, `onspace-ai-chat`, `bob-plan-patrol-import`), every
+  `audit_log` writer, `import-scv-csv`, `invite-org` and `fcm-api` use
+  service-role clients. Every SQL writer of `audit_log` is `SECURITY DEFINER`,
+  and the web pages that read `access_presets` and `user_management_audit` are
+  authenticated.
+- **After (live rollback rehearsal):**
+  - Anonymous reads of all fifteen tables are 0.
+  - Anonymous inserts and the anonymous RPC call are denied (42501).
+  - An officer's own-organisation audit insert succeeds; org-less and
+    other-actor audit inserts are denied.
+  - Only `service_role` can call the rate-limit RPC.
+  - Grand-master and officer row counts are unchanged, except the invite
+    ledger, which is now service-only.
+  - No PUBLIC policy remains on these tables.
+  - Still to verify after release: the live catalog refresh, a re-run of the
+    anonymous sweep, and an Atlas refresh.
+- **Owner question (open):** org-less audit rows and the Atlas/Bob governance
+  tables stay readable by every authenticated account, including officers.
+  Narrowing that to platform roles is a separate access decision.
 
 Owner-directed client/place simplification, 2026-10-28:
 

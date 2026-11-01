@@ -595,8 +595,20 @@ approve anything for service to be given."
   Follow-up migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
   revokes direct `PUBLIC`/`anon` execution on the six policy helpers and changes
   their ten helper-backed policies from `public` to `authenticated`; it keeps
-  authenticated and service-role helper access intact. Until that migration is
-  applied, the live grants still allow direct anonymous execution.
+  authenticated and service-role helper access intact. Applied 2026-11-02
+  (#296); the live catalog shows all six helpers closed to `anon` and open to
+  `authenticated`, and anonymous calls to them are rejected.
+  A follow-on sweep found twenty more policies with no `TO` clause whose `true`
+  or `organization_id IS NULL` arm admitted the anonymous key. Through them,
+  anonymous clients could read Atlas, Bob governance, org-less audit and
+  system-default rows, forge org-less audit rows, and read or erase the
+  invite rate-limit ledger. Migration
+  `20261102180000_close_anonymous_rls_exposure.sql` moves them to
+  `authenticated`, or to `service_role` where the policy was named for it. It
+  limits direct audit inserts to the caller's own action in an organisation it
+  can access, and makes the invite rate-limit RPC callable by the service role
+  only. `test/anonymous-rls-exposure.test.js` fails if any such PUBLIC policy
+  returns.
   The remaining exposure, until the access token expires (at most one hour),
   is a deactivated user's own self-row data and any definer RPC that reads
   `user_profiles` directly instead of using the deactivation-aware helpers.
