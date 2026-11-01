@@ -87,7 +87,7 @@ Post-release helper grant finding, 2026-11-02 (follow-up migration pending):
   thereby proven exercised. Ten RLS policies that directly call these helpers
   were also scoped to `public`, so removing anonymous function access alone
   would turn those anonymous table requests into permission errors.
-- Migration `20261102150000_revoke_anon_execute_from_deactivation_helpers.sql`
+- Migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
   revokes `PUBLIC`/`anon` execution while preserving authenticated and
   service-role access, and retargets those ten unchanged policy predicates to
   `authenticated`. Regression tests assert both changes. Before calling this

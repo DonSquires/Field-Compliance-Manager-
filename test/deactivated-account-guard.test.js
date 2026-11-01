@@ -6,7 +6,7 @@ const test = require('node:test');
 const read = (relative) => fs.readFileSync(path.resolve(__dirname, '..', relative), 'utf8');
 const schema = read('supabase/schema.sql');
 const migration = read('supabase/migrations/20261102140000_rm_verified_only_operational_custody_consolidation.sql');
-const helperGrantMigration = read('supabase/migrations/20261102150000_revoke_anon_execute_from_deactivation_helpers.sql');
+const helperGrantMigration = read('supabase/migrations/20261102160000_revoke_anon_execute_from_deactivation_helpers.sql');
 
 const policies = [...schema.matchAll(/CREATE POLICY "([^"]+)" ON "public"\."([^"]+)"([\s\S]*?);\n/g)]
   .map(([, name, table, body]) => ({ name, table, body }));

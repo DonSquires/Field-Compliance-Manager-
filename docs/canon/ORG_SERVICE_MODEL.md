@@ -592,7 +592,7 @@ approve anything for service to be given."
   (`test/deactivated-account-guard.test.js` holds these rules against
   `supabase/schema.sql`). Roster-only profiles with no Auth account are audited
   in `audit_log`, because the user-management audit is keyed to Auth users.
-  Follow-up migration `20261102150000_revoke_anon_execute_from_deactivation_helpers.sql`
+  Follow-up migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
   revokes direct `PUBLIC`/`anon` execution on the six policy helpers and changes
   their ten helper-backed policies from `public` to `authenticated`; it keeps
   authenticated and service-role helper access intact. Until that migration is
