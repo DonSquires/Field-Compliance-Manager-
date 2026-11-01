@@ -35228,6 +35228,7 @@ export type Database = {
       }
       accept_client_invitation: { Args: never; Returns: Json }
       accept_quote: { Args: { p_quote_id: string }; Returns: string }
+      accessible_org_ids: { Args: never; Returns: string[] }
       acknowledge_operational_continuity_item: {
         Args: {
           p_acknowledgement_notes?: string
