@@ -276,24 +276,24 @@ test('real PostgreSQL builds a reconciled client site activity report', {
       SELECT public.assert_ok(public.generate_due_report_packs('2026-10-01','2026-10-31','${agreement}')=1,'one pack generated');
       RESET ROLE;
 
-      SELECT public.assert_ok((${report}->'totals')=jsonb_build_object('entries',17,'events',12,'observations',2,'workOrders',2,'incidents',1,
-        'patrolVisits',10,'cameraActivations',1,'withNotes',5,'places',2,'photos',7),'totals: '||(${report}->'totals')::text);
+      SELECT public.assert_ok((${report}->'totals')=jsonb_build_object('entries',16,'events',11,'observations',2,'workOrders',2,'incidents',1,
+        'patrolVisits',9,'cameraActivations',1,'withNotes',4,'places',2,'photos',6),'totals: '||(${report}->'totals')::text);
       SELECT public.assert_ok((SELECT (data->>'operationalEvents')::int=16 FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'existing metrics unchanged');
       SELECT public.assert_ok((SELECT jsonb_object_agg(c->>'code',(c->>'entries')::int) FROM jsonb_array_elements(${report}->'categories') c)=
-        '{"incident":1,"pest_control":3,"maintenance":2,"manufacture":2,"installation_removal":1,"securing":1,"inspection":1,"camera_activation":1,"vehicle_observation":1,"patrol_visit":3,"unclassified":1}'::jsonb,
+        '{"incident":1,"pest_control":3,"maintenance":2,"manufacture":2,"installation_removal":1,"securing":1,"inspection":1,"camera_activation":1,"vehicle_observation":1,"patrol_visit":2,"unclassified":1}'::jsonb,
         'categories: '||(${report}->'categories')::text);
       SELECT public.assert_ok((SELECT array_agg(c->>'code' ORDER BY o) FROM jsonb_array_elements(${report}->'categories') WITH ORDINALITY x(c,o))
         =ARRAY['incident','pest_control','maintenance','manufacture','installation_removal','securing','inspection','camera_activation','vehicle_observation','patrol_visit','unclassified'],
         'categories follow the report order, incidents first');
       SELECT public.assert_ok((${report}->'accountedFor')=jsonb_build_object('eventsInScope',16,'mirrorEventsExcluded',1,'activityEvents',15,
-        'observationsInScope',2,'workOrdersInScope',2,'incidentsInScope',1,'entries',20,'reported',17,'operationalWithheld',3,
-        'withheldTravelAdmin',2,'withheldShiftMarkers',1,'itemised',17,'notItemised',0,'unclassified',1,'reconciled',true),
+        'observationsInScope',2,'workOrdersInScope',2,'incidentsInScope',1,'entries',20,'reported',16,'operationalWithheld',4,
+        'withheldTravelAdmin',2,'withheldShiftMarkers',2,'itemised',16,'notItemised',0,'unclassified',1,'reconciled',true),
         'accounted for: '||(${report}->'accountedFor')::text);
       SELECT public.assert_ok(position('Start' IN ${lines}::text)=0 AND position('Travel to site' IN ${lines}::text)=0
         AND position('Timesheets' IN ${lines}::text)=0 AND NOT (${report}->'labels'->'category' ? 'travel_admin'),
         'travel, administration and shift markers are withheld from the client report');
-      SELECT public.assert_ok((SELECT l->>'n'='Exit.' AND l->>'ph'='1' FROM jsonb_array_elements(${lines}->'lines') l WHERE l->>'t'='18:00'),
-        'a photographed movement entry is still reported');
+      SELECT public.assert_ok(position('Exit.' IN ${lines}::text)=0 AND position('e/23.jpg' IN ${lines}::text)=0,
+        'a photo does not turn a movement marker into client-facing activity');
       SELECT public.assert_ok((${report}->'pestControl'->'bySpecies')='[{"code":"goat","culls":0,"sightings":1,"other":0,"total":1},{"code":"possum","culls":1,"sightings":0,"other":0,"total":1}]'::jsonb,'pest species: '||(${report}->'pestControl'->'bySpecies')::text);
       SELECT public.assert_ok((${report}->'pestControl'->'ammunition')='[{"calibre":".22","entries":1,"rounds":3}]'::jsonb,'ammunition');
       SELECT public.assert_ok((${report}->'pestControl'->'byEquipment')='[{"code":"bait_station","entries":1}]'::jsonb,'pest equipment');
@@ -315,7 +315,7 @@ test('real PostgreSQL builds a reconciled client site activity report', {
       SELECT public.assert_ok((${report}->'labels'->'activity'->>'cull')='Cull (provider)' AND (${report}->'labels'->'species'->>'goat')='Goat'
         AND (${report}->'labels'->'category'->>'incident')='Incidents and investigations','provider catalogue labels with readable fallback');
       SELECT public.assert_ok((SELECT array_agg(p->>'place' ORDER BY p->>'place') FROM jsonb_array_elements(${report}->'byPlace') p)=ARRAY['Alpha Reserve','Delta Depot','Not location-specific'],'places');
-      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=17 AND (${lines}->>'notItemised')::int=0 AND (${lines}->>'version')::int=2,'all reported entries itemised');
+      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=16 AND (${lines}->>'notItemised')::int=0 AND (${lines}->>'version')::int=2,'all reported entries itemised');
       SELECT public.assert_ok((${lines}->'lines'->0)=jsonb_build_object('d','2026-10-01','t','00:30','p','Alpha Reserve','k','event','c','pest_control','a','cull',
         's','animal','sp','possum','j','J-1001','ph',1,'pr',jsonb_build_array(jsonb_build_object('b','bob-uploads','p','e/1.jpg')),
         'm',jsonb_build_array(jsonb_build_object('t','ammunition','cal','.22','q',3)),
@@ -334,7 +334,7 @@ test('real PostgreSQL builds a reconciled client site activity report', {
         AND position('"km"' IN activity_lines::text)=0 AND position('"h"' IN activity_lines::text)=0
         FROM public.monthly_report_packs WHERE service_agreement_id='${agreement}'),'no travel distance or job hours in the client report');
 
-      SELECT public.assert_ok((SELECT (r->'lines'->>'notItemised')::int=12 AND jsonb_array_length(r->'lines'->'lines')=5
+      SELECT public.assert_ok((SELECT (r->'lines'->>'notItemised')::int=11 AND jsonb_array_length(r->'lines'->'lines')=5
         AND (r->'report'->'accountedFor'->>'itemised')::int=5 AND (r->'report'->'accountedFor'->>'reconciled')::boolean
         AND r->'report'->>'itemisedDigest'=${report}->>'itemisedDigest'
         FROM public.build_agreement_activity_report('${agreement}',${nz('2026-10-01 00:00')},${nz('2026-11-01 00:00')},5) r),'line cap keeps exact totals and digest');
@@ -363,7 +363,7 @@ test('real PostgreSQL builds a reconciled client site activity report', {
       ${actor(admin)}
       INSERT INTO accounting SELECT public.get_report_pack_activity_accounting(id) FROM public.monthly_report_packs;
       RESET ROLE;
-      SELECT public.assert_ok((SELECT (data->'freshness'->>'matchesLive')::boolean AND (data->'freshness'->>'liveEntries')::int=17 FROM accounting),'fresh pack matches live');
+      SELECT public.assert_ok((SELECT (data->'freshness'->>'matchesLive')::boolean AND (data->'freshness'->>'liveEntries')::int=16 FROM accounting),'fresh pack matches live');
       SELECT public.assert_ok((SELECT data->'provenance'->'events'='{"inScope":15,"withLedger":2,"withoutLedger":13}'::jsonb
         AND data->'provenance'->'observations'='{"inScope":2,"withLedger":1,"withoutLedger":1}'::jsonb FROM accounting),'ledger provenance');
       SELECT public.assert_ok((SELECT data->'provenance'->'sources'->0 @> '{"sourceFile":"RM Patrol Log Oct.xlsx","sourceSheet":"Pest","batchStatus":"applied","batchRows":100,"events":2,"observations":0}'::jsonb FROM accounting),'source receipts');
@@ -372,6 +372,22 @@ test('real PostgreSQL builds a reconciled client site activity report', {
         'client month: '||(SELECT (data->'clientMonth')::text FROM accounting));
       SELECT public.assert_ok((SELECT (data->'exceptions'->>'futureDated')::int=1 AND (data->'exceptions'->>'supersededDuplicates')::int=1
         AND data->'exceptions'->'sparseYears' @> '[{"year":2016,"entries":1}]'::jsonb FROM accounting),'exceptions: '||(SELECT (data->'exceptions')::text FROM accounting));
+
+      BEGIN;
+      UPDATE public.location_events SET payload=payload || '{"source_category":"PEST CONTROL","equipment_type_code":"trap"}'
+        WHERE id IN ('${ev(21)}','${ev(22)}');
+      UPDATE public.location_events SET payload=payload || '{"work_activity_code":"administration"}' WHERE id='${ev(22)}';
+      INSERT INTO public.evidence_items(organization_id,module_key,evidence_kind,storage_path,location_event_id) VALUES
+        ('${client}','patrol','photo','operational/start.jpg','${ev(20)}'),
+        ('${client}','patrol','photo','operational/travel.jpg','${ev(21)}'),
+        ('${client}','patrol','photo','operational/admin.jpg','${ev(22)}');
+      SELECT public.assert_ok((SELECT r->'report'->'totals'=${report}->'totals'
+        AND r->'report'->'pestControl'=${report}->'pestControl'
+        AND r->'lines'=${lines}
+        AND r->'report'->'accountedFor'=${report}->'accountedFor'
+        FROM public.build_agreement_activity_report('${agreement}',${nz('2026-10-01 00:00')},${nz('2026-11-01 00:00')},2000) r),
+        'photos and pest classifications cannot disclose travel, administration or shift markers or inflate client statistics');
+      ROLLBACK;
 
       BEGIN;
       UPDATE public.workshop_work_orders SET work_activity_code_id='${id(71)}' WHERE id='${wo(1)}';
@@ -444,7 +460,7 @@ test('real PostgreSQL builds a reconciled client site activity report', {
       ${actor(admin)}
       SELECT public.assert_ok(public.generate_due_report_packs('2026-10-01','2026-10-31','${agreement}')=0,'sent pack is not regenerated');
       RESET ROLE;
-      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=17,'sent pack keeps its frozen lines');
+      SELECT public.assert_ok(jsonb_array_length(${lines}->'lines')=16,'sent pack keeps its frozen lines');
     `;
     try { docker(['exec', '-i', name, 'psql', '-X', '-q', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], setup); }
     catch (failure) { throw new Error(`${failure.stdout?.slice(-3000) ?? ''}\n${failure.stderr ?? failure.message}`); }

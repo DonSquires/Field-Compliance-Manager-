@@ -41,6 +41,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
   eq.mockImplementation(() => ({ maybeSingle }));
   select.mockImplementation(() => ({ eq }));
   from.mockImplementation(() => ({ select }));
@@ -55,6 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe('ReportActivityReview', () => {
@@ -134,7 +136,8 @@ describe('ReportActivityReview', () => {
     }));
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const card = (await within(incidentsSection()).findByText('Trespass')).closest('article')!;
-    await waitFor(() => expect(within(card).getByRole('button', { name: 'Photo 3 could not be loaded' })).toHaveProperty('disabled', true));
+    await within(card).findByRole('button', { name: 'Photo 3 unavailable. Open to retry' });
+    expect(within(card).getByRole('status').textContent).toBe('1 photo could not be loaded. Open it to retry.');
     expect(within(card).getByText('2 further photos held on file')).toBeTruthy();
 
     const opener = within(card).getByRole('button', { name: 'Open photo 2 of 4' });
@@ -161,6 +164,54 @@ describe('ReportActivityReview', () => {
     expect(await screen.findByRole('dialog', { name: 'Photo 4 of 4' })).toBeTruthy();
     fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each(['response', 'rejection'])('offers a safe retry after a photo signing %s failure', async (failure) => {
+    if (failure === 'response') createSignedUrls.mockResolvedValueOnce({ data: null, error: { message: 'PRIVATE_STORAGE_DETAIL' } });
+    else createSignedUrls.mockRejectedValueOnce(new Error('PRIVATE_STORAGE_DETAIL'));
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const incidents = incidentsSection();
+    const opener = await within(incidents).findByRole('button', { name: 'Photo 1 unavailable. Open to retry' });
+    expect(within(incidents).getByRole('status').textContent).toBe('2 photos could not be loaded. Open one to retry.');
+    fireEvent.click(opener);
+    const viewer = screen.getByRole('dialog', { name: 'Photo 1 of 2' });
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Retry photo' }));
+    await waitFor(() => expect(within(viewer).getByRole('img').getAttribute('src')).toBe(signed('bob-uploads', 'org/incidents/fence-1.jpg')));
+    expect(createSignedUrls).toHaveBeenLastCalledWith('bob-uploads', ['org/incidents/fence-1.jpg'], 900);
+    expect(createSignedUrls).toHaveBeenCalledTimes(2);
+    expect(within(incidents).getByRole('button', { name: 'Photo 2 unavailable. Open to retry' })).toBeTruthy();
+    expect(document.body.textContent).not.toContain('PRIVATE_STORAGE_DETAIL');
+    expect(console.warn).toHaveBeenCalledWith('Report photos could not be loaded.');
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('PRIVATE_STORAGE_DETAIL'));
+  });
+
+  it.each(['thumbnail', 'viewer'])('recovers a failed or expired %s image without losing its context', async (surface) => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const card = (await within(incidentsSection()).findByText('Trespass')).closest('article')!;
+    await waitFor(() => expect(card.querySelectorAll('img')).toHaveLength(2));
+    const open = () => fireEvent.click(within(card).getByRole('button', { name: /(?:Open photo 1|Photo 1 unavailable)/ }));
+    if (surface === 'thumbnail') {
+      fireEvent.error(card.querySelector('img')!);
+      open();
+    } else {
+      open();
+      fireEvent.error(within(screen.getByRole('dialog')).getByRole('img'));
+    }
+    const viewer = screen.getByRole('dialog', { name: 'Photo 1 of 2' });
+    expect(within(viewer).getByText('This photo could not be loaded.')).toBeTruthy();
+    expect(within(viewer).getByText('Trespass · Alpha Reserve · Wed 2 Sep 2026 · 21:40')).toBeTruthy();
+
+    let finish!: (value: unknown) => void;
+    createSignedUrls.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Retry photo' }));
+    expect(within(viewer).getByRole('status').textContent).toBe('Loading photo…');
+    expect(within(viewer).queryByRole('button', { name: 'Retry photo' })).toBeNull();
+    await act(async () => finish({ data: [{ path: 'org/incidents/fence-1.jpg', signedUrl: 'https://storage.test/renewed', error: null }], error: null }));
+    expect(within(viewer).getByRole('img').getAttribute('src')).toBe('https://storage.test/renewed');
+    expect(card.querySelector('img')?.getAttribute('src')).toBe('https://storage.test/renewed');
+    expect(createSignedUrls).toHaveBeenCalledTimes(2);
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('waits for the site log to open when there are no incidents, then filters, searches and folds routine patrols', async () => {

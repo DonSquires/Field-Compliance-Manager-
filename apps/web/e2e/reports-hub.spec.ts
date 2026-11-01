@@ -136,7 +136,7 @@ test('administrator previews the client site activity report with incidents, pho
   await expect(log.locator('img')).toHaveCount(2);
   await log.getByRole('button', { name: 'Clear filters' }).click();
   expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
-  await testInfo.attach('report-site-activity-preview', { body: await report.screenshot(), contentType: 'image/png' });
+  await testInfo.attach('report-site-activity-preview', { body: await page.screenshot(), contentType: 'image/png' });
 
   const check = report.locator('details', { has: page.locator('summary', { hasText: /^Completeness check/ }) });
   await expect(check.locator('summary')).toContainText('Provider only · All 9 records accounted for');
@@ -148,6 +148,38 @@ test('administrator previews the client site activity report with incidents, pho
   await expect(check.getByRole('region', { name: 'Unlinked places with client records' }).getByText('Harbour Overflow Carpark')).toBeVisible();
   await expect(check.getByRole('button', { name: 'Check again' })).toBeVisible();
 
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
+test('administrator can retry an unavailable report photo in context', async ({ page }, testInfo) => {
+  const browserErrors = monitorBrowserErrors(page);
+  let unavailable = true;
+  await page.route('**/storage/v1/object/sign/scans/e2e/incidents/graffiti-1.jpg?*', async (route) => {
+    if (unavailable) {
+      await route.fulfill({ status: 200, contentType: 'image/jpeg', headers: { 'cache-control': 'no-store' }, body: 'invalid image fixture' });
+    } else {
+      await route.fallback();
+    }
+  });
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  const incident = page.getByRole('region', { name: 'Incidents and investigations' }).locator('article', { hasText: 'Vandalism' });
+  await incident.scrollIntoViewIfNeeded();
+  await expect(incident.getByRole('status')).toHaveText('1 photo could not be loaded. Open it to retry.');
+  await incident.getByRole('button', { name: 'Photo 1 unavailable. Open to retry' }).click();
+  const viewer = page.getByRole('dialog', { name: 'Photo 1 of 2' });
+  await expect(viewer.getByRole('status')).toContainText('This photo could not be loaded.');
+  await expect(viewer.getByText('Vandalism · Civic Events Centre · Sun 2 Aug 2026 · 22:15')).toBeVisible();
+  await testInfo.attach('report-photo-retry', { body: await page.screenshot(), contentType: 'image/png' });
+  unavailable = false;
+  await viewer.getByRole('button', { name: 'Retry photo' }).click();
+  await expect.poll(() => viewer.getByRole('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(viewer.getByRole('status')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(incident.getByRole('button', { name: 'Open photo 1 of 2' })).toBeFocused();
+  await expect(incident.getByRole('status')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

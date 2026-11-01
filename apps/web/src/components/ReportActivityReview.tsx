@@ -35,8 +35,9 @@ const REFRESH_HINT = 'This report pack changed since you opened it. Refresh the 
 
 type Column = { label: string; numeric?: boolean };
 type Label = (dim: string, code: string) => string;
-type PhotoUrls = Record<string, string | null>;
+type PhotoUrls = Record<string, string | null | undefined>;
 type OpenPhoto = (photos: ReportPhotoRef[], index: number, caption: string) => void;
+type PhotoError = (ref: ReportPhotoRef, url: string) => void;
 type ChipTone = 'neutral' | 'danger' | 'warning' | 'info' | 'success';
 
 type LinesState =
@@ -102,19 +103,23 @@ function placeMix(categories: Record<string, number>, label: Label): string {
 async function signPhotos(bucket: string, paths: string[]): Promise<PhotoUrls> {
   const result: PhotoUrls = {};
   try {
-    const { data } = await supabase.storage.from(bucket).createSignedUrls(paths, PHOTO_URL_SECONDS);
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(paths, PHOTO_URL_SECONDS);
+    if (error) throw error;
     const signed = new Map((data ?? []).filter((item) => item.signedUrl && !item.error && item.path).map((item) => [item.path as string, item.signedUrl]));
     for (const path of paths) result[`${bucket}/${path}`] = signed.get(path) ?? null;
+    if (paths.some((path) => result[`${bucket}/${path}`] === null)) console.warn('Some report photos could not be loaded.');
   } catch {
+    console.warn('Report photos could not be loaded.');
     for (const path of paths) result[`${bucket}/${path}`] = null;
   }
   return result;
 }
 
-/** Short-lived signed URLs for report photos, requested once each and only for what is on screen. */
+/** Requests only visible photos; an explicit retry renews a failed or expired URL. */
 function usePhotoUrls() {
   const [urls, setUrls] = useState<PhotoUrls>({});
   const requested = useRef(new Set<string>());
+  const pending = useRef(new Set<string>());
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -126,22 +131,37 @@ function usePhotoUrls() {
       const key = photoKey(ref);
       if (!isReportPhotoRef(ref) || requested.current.has(key)) continue;
       requested.current.add(key);
+      pending.current.add(key);
       byBucket.set(ref.bucket, [...(byBucket.get(ref.bucket) ?? []), ref.path]);
     }
     for (const [bucket, paths] of byBucket) {
       for (let start = 0; start < paths.length; start += SIGN_BATCH) {
         void signPhotos(bucket, paths.slice(start, start + SIGN_BATCH)).then((signed) => {
+          for (const key of Object.keys(signed)) pending.current.delete(key);
           if (mounted.current) setUrls((current) => ({ ...current, ...signed }));
         });
       }
     }
   }, []);
-  return { urls, request };
+  const retry = useCallback((ref: ReportPhotoRef) => {
+    const key = photoKey(ref);
+    if (pending.current.has(key)) return;
+    requested.current.delete(key);
+    setUrls((current) => ({ ...current, [key]: undefined }));
+    request([ref]);
+  }, [request]);
+  const failed: PhotoError = useCallback((ref, url) => {
+    console.warn('A report photo could not be displayed.');
+    const key = photoKey(ref);
+    setUrls((current) => current[key] === url ? { ...current, [key]: null } : current);
+  }, []);
+  return { urls, request, retry, failed };
 }
 
-function PhotoStrip({ entry, caption, urls, onOpen }: { entry: ActivityEntry; caption: string; urls: PhotoUrls; onOpen: OpenPhoto }) {
+function PhotoStrip({ entry, caption, urls, onOpen, onPhotoError }: { entry: ActivityEntry; caption: string; urls: PhotoUrls; onOpen: OpenPhoto; onPhotoError: PhotoError }) {
   const photos = entry.photos.filter(isReportPhotoRef);
   const shown = photos.slice(0, PHOTOS_PER_ENTRY);
+  const unavailable = shown.filter((ref) => urls[photoKey(ref)] === null).length;
   const onFile = Math.max(entry.photoCount - photos.length, 0);
   if (shown.length === 0 && onFile === 0) return null;
   return (
@@ -156,10 +176,9 @@ function PhotoStrip({ entry, caption, urls, onOpen }: { entry: ActivityEntry; ca
                   type="button"
                   className="report-photo-thumb"
                   onClick={() => onOpen(photos, index, caption)}
-                  disabled={url === null}
-                  aria-label={url === null ? `Photo ${index + 1} could not be loaded` : `Open photo ${index + 1} of ${photos.length}`}
+                  aria-label={url === null ? `Photo ${index + 1} unavailable. Open to retry` : `Open photo ${index + 1} of ${photos.length}`}
                 >
-                  {url ? <img src={url} alt="" loading="lazy" decoding="async" /> : url === null ? <ImageOff size={20} aria-hidden="true" /> : <span className="report-photo-loading" aria-hidden="true" />}
+                  {url ? <img src={url} alt="" loading="lazy" decoding="async" onError={() => onPhotoError(ref, url)} /> : url === null ? <ImageOff size={20} aria-hidden="true" /> : <span className="report-photo-loading" aria-hidden="true" />}
                 </button>
               </li>
             );
@@ -173,12 +192,13 @@ function PhotoStrip({ entry, caption, urls, onOpen }: { entry: ActivityEntry; ca
           )}
         </ul>
       )}
+      {unavailable > 0 && <p role="status">{counted(unavailable, 'photo could', 'photos could')} not be loaded. Open {unavailable === 1 ? 'it' : 'one'} to retry.</p>}
       {onFile > 0 && <p>{counted(onFile, 'further photo', 'further photos')} held on file</p>}
     </div>
   );
 }
 
-function EntryCard({ entry, place, urls, onOpenPhoto }: { entry: ActivityEntry; place?: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto }) {
+function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError }: { entry: ActivityEntry; place?: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError }) {
   const caption = [entry.title || entry.tags[0], place, entry.when].filter(Boolean).join(' · ');
   return (
     <article className={`report-entry${entry.tone === 'incident' ? ' is-incident' : ''}`}>
@@ -195,14 +215,14 @@ function EntryCard({ entry, place, urls, onOpenPhoto }: { entry: ActivityEntry; 
       {entry.lines.map((line, index) => (
         <p key={index} className="report-entry-line">{line.label && <strong>{line.label}: </strong>}{line.text}</p>
       ))}
-      <PhotoStrip entry={entry} caption={caption} urls={urls} onOpen={onOpenPhoto} />
+      <PhotoStrip entry={entry} caption={caption} urls={urls} onOpen={onOpenPhoto} onPhotoError={onPhotoError} />
     </article>
   );
 }
 
 interface ViewerState { photos: ReportPhotoRef[]; index: number; caption: string }
 
-function PhotoViewer({ viewer, urls, onClose, onIndex }: { viewer: ViewerState; urls: PhotoUrls; onClose: () => void; onIndex: (index: number) => void }) {
+function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: { viewer: ViewerState; urls: PhotoUrls; onClose: () => void; onIndex: (index: number) => void; onPhotoError: PhotoError; onRetry: (ref: ReportPhotoRef) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -239,8 +259,11 @@ function PhotoViewer({ viewer, urls, onClose, onIndex }: { viewer: ViewerState; 
         <button type="button" className="report-photo-viewer-close" onClick={onClose} aria-label="Close photo"><X size={18} aria-hidden="true" /></button>
       </header>
       <div className="report-photo-viewer-stage">
-        {url ? <img src={url} alt={`${viewer.caption}, photo ${viewer.index + 1} of ${total}`} /> : (
-          <p className="report-activity-empty">{url === null ? 'This photo could not be loaded.' : 'Loading photo…'}</p>
+        {url ? <img src={url} alt={`${viewer.caption}, photo ${viewer.index + 1} of ${total}`} onError={() => onPhotoError(ref, url)} /> : (
+          <div className="report-photo-state" role="status">
+            <p>{url === null ? 'This photo could not be loaded.' : 'Loading photo…'}</p>
+            {url === null && ref && <button type="button" className="btn btn-secondary" onClick={() => onRetry(ref)}><RefreshCw size={16} aria-hidden="true" /> Retry photo</button>}
+          </div>
         )}
       </div>
       {total > 1 && (
@@ -280,6 +303,7 @@ interface SiteLogProps {
   urls: PhotoUrls;
   requestPhotos: (refs: ReportPhotoRef[]) => void;
   onOpenPhoto: OpenPhoto;
+  onPhotoError: PhotoError;
   idPrefix: string;
 }
 
@@ -287,7 +311,7 @@ function entrySearchText(entry: ActivityEntry, place: string): string {
   return [entry.when, place, entry.title, ...entry.tags, ...entry.lines.map((line) => `${line.label ?? ''} ${line.text}`)].join(' ').toLowerCase();
 }
 
-function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpenPhoto, idPrefix }: SiteLogProps) {
+function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpenPhoto, onPhotoError, idPrefix }: SiteLogProps) {
   const [place, setPlace] = useState('all');
   const [category, setCategory] = useState('all');
   const [photosOnly, setPhotosOnly] = useState(false);
@@ -373,7 +397,7 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
             <h5 id={`${idPrefix}-place-${index}`}><MapPin size={15} aria-hidden="true" /> {group.place}</h5>
             <span>{counted(group.lines.length, 'entry', 'entries')}</span>
           </header>
-          {group.cards.map((card) => <EntryCard key={card.key} entry={card.entry} urls={urls} onOpenPhoto={onOpenPhoto} />)}
+          {group.cards.map((card) => <EntryCard key={card.key} entry={card.entry} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} />)}
           {group.showRoutine && <p className="report-log-routine">{routineSummary(group.routine)}</p>}
         </section>
       ))}
@@ -479,7 +503,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
   const [accounting, setAccounting] = useState<AccountingState>({ state: 'idle' });
   const [logOpen, setLogOpen] = useState(false);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
-  const { urls, request: requestPhotos } = usePhotoUrls();
+  const { urls, request: requestPhotos, retry: retryPhoto, failed: photoFailed } = usePhotoUrls();
   const label: Label = useCallback((dim: string, code: string) => activityLabel(report, dim, code), [report]);
   const { totals, accountedFor, pest, observations, incidents } = report;
 
@@ -561,7 +585,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         <div>
           <span className="report-activity-kicker"><FileText size={15} aria-hidden="true" /> Client report preview</span>
           <h4 id={headingId}>Site activity report</h4>
-          <p>What the client receives: what happened at their locations, with comments, incidents and photos. Travel, shift records and internal checks are kept out of it.</p>
+          <p>A location-by-location account of recorded activity, observations and investigations, with comments and supporting photos.</p>
         </div>
       </header>
       {!accountedFor.reconciled && (
@@ -602,7 +626,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
             )}
             <div aria-live="polite">
               <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
-              {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} />)}
+              {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
               {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
             </div>
           </>
@@ -688,7 +712,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
           <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
         </div>
         {logOpen && lines.state === 'ready' && lines.lines.length > 0 && (
-          <SiteLog report={report} lines={lines.lines} notItemised={lines.notItemised} label={label} urls={urls} requestPhotos={requestPhotos} onOpenPhoto={openPhoto} idPrefix={headingId} />
+          <SiteLog report={report} lines={lines.lines} notItemised={lines.notItemised} label={label} urls={urls} requestPhotos={requestPhotos} onOpenPhoto={openPhoto} onPhotoError={photoFailed} idPrefix={headingId} />
         )}
       </Group>
 
@@ -719,7 +743,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         </div>
       </Group>
 
-      {viewer && <PhotoViewer viewer={viewer} urls={urls} onClose={() => setViewer(null)} onIndex={(index) => setViewer((current) => (current ? { ...current, index } : current))} />}
+      {viewer && <PhotoViewer viewer={viewer} urls={urls} onPhotoError={photoFailed} onRetry={retryPhoto} onClose={() => setViewer(null)} onIndex={(index) => setViewer((current) => (current ? { ...current, index } : current))} />}
     </section>
   );
 }

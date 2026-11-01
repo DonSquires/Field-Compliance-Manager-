@@ -105,6 +105,9 @@
 .report-photo-viewer-close:focus-visible { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
 .report-photo-viewer-stage { display: grid; flex: 1 1 auto; min-height: 240px; place-items: center; padding: 12px; overflow: auto; background: #000; }
 .report-photo-viewer-stage img { max-width: 100%; max-height: calc(100vh - 200px); object-fit: contain; }
+.report-photo-state { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.report-photo-state p { margin: 0; color: var(--color-text-secondary); }
+.report-photo-state .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
 .report-photo-viewer-nav { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--color-border, #334155); }
 .report-photo-viewer-nav .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
 

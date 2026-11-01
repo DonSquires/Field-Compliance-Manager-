@@ -425,10 +425,10 @@ acts as materialized (
 		c.category,
 		-- Travel, administration and shift or movement markers are how the work was
 		-- run, not what happened at the place, so the client report withholds them.
-		-- A photographed entry is always reported.
+		-- Photos and service-line classifications do not override this boundary.
 		case
-			when coalesce(pc.n, 0) > 0 then null
-			when c.category = 'travel_admin' then 'travel_admin'
+			when a.activity in ('travel', 'administration', 'materials')
+				or c.category = 'travel_admin' then 'travel_admin'
 			when c.category in ('patrol_visit', 'other_work', 'unclassified')
 				and regexp_replace(lower(coalesce(a.title, '')), '[^a-z]', '', 'g') in ('travel', 'admin', 'administration')
 				then 'travel_admin'

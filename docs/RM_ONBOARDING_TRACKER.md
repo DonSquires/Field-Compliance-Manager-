@@ -3504,8 +3504,9 @@ entry. This section reworks the unreleased PR #312 design to meet that ruling.
   kilometres in the review tiles.
 - **During:** the v2 snapshot (`data.activityReport.version = 2`) withholds
   travel and administration entries and start/finish/home shift markers from
-  the client report, but counts them in the provider accounting. An entry with
-  a photo is always reported. Incidents at the agreement's places are
+  the client report, but counts them in the provider accounting. Photos do not
+  override those exclusions, nor does a pest-control classification override
+  an explicit travel or administration activity. Incidents at the agreement's places are
   included with type, severity, status, description and any linked
   investigation's reference and status. Investigation titles, summaries and
   resolution notes are never copied, and staff-sensitive incidents are left
@@ -3528,7 +3529,8 @@ entry. This section reworks the unreleased PR #312 design to meet that ruling.
   - collapsible pest-control, maintenance, manufacture, observation and
     location breakdowns;
   - a site log with location, type, comment-search and photos-only filters;
-  - a photo viewer with previous/next, keyboard and focus return.
+  - a photo viewer with previous/next, keyboard and focus return, plus visible
+    loading/error states and a retry that renews only the unavailable photo.
 
   The provider-only "Completeness check" (withheld records, import provenance
   and the live accounting comparison) stays collapsed below the preview. The
@@ -3537,3 +3539,8 @@ entry. This section reworks the unreleased PR #312 design to meet that ruling.
 - **Unchanged:** the provider must still review every draft before it is
   published, and sent packs never change. The migration is still not applied
   live.
+- **Verification:** the photo-exclusion follow-up passes the isolated
+  PostgreSQL report/renderer checks, web unit/guard tests, type checks and build,
+  and six offline desktop/mobile browser cases including image failure and
+  recovery. Atlas was regenerated locally only. Live schema inspection still
+  finds no `activity_lines` column; no pack or source record was changed.

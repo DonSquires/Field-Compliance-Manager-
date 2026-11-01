@@ -135,9 +135,9 @@ Generating a custom report never creates or sends a scheduled R&M monthly pack.
 
 ## Monthly Packs: Month-End Activity
 
-Scheduled monthly packs share this renderer. Since migration
-`20261102210000_rm_monthly_activity_report.sql`, `generate_due_report_packs`
-also freezes a categorised client site activity report (`data.activityReport`,
+Scheduled monthly packs share this renderer. The pending migration
+`20261102210000_rm_monthly_activity_report.sql` extends `generate_due_report_packs`
+to freeze a categorised client site activity report (`data.activityReport`,
 version 2) and up to 2,000 itemised lines (`activity_lines`, a separate column
 that list queries do not select). The PDF adds the client sections (at a
 glance, activity overview, incidents and investigations, pest control,
@@ -150,6 +150,16 @@ document properties. Provider administrators see the withheld counts in a
 collapsed, provider-only completeness check and can compare a pack with live
 records through `get_report_pack_activity_accounting`. That result is never
 persisted to client-readable data.
+
+Photos do not make travel, administration or shift markers reportable, and a
+pest-control classification cannot override an explicit operational activity.
+These records remain accounted for privately, without contributing entries,
+photos or pest statistics to the client report. Site comments, CCTV evidence,
+observations and incident photos remain beside their corresponding entries.
+The review page gives unavailable photos a visible retry action, including
+when a previously issued photo link has expired. Retrying renews that photo's
+short-lived link under the same storage permissions; it does not change the
+report or its evidence.
 
 Generation and accounting use explicit Auckland midnight boundaries, independent
 of the database session timezone. Freshness compares every summary section and a
