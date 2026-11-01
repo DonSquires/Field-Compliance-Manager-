@@ -13,6 +13,7 @@ import { CrmSiteDialog } from './CrmSiteDialog';
 import { OperationalPlaceManager } from './OperationalPlaceManager';
 import { GeneratedArtifactActions } from './GeneratedArtifactActions';
 import type { EditableCrmOrganization } from './CrmOrganizationDialog';
+import { isReportPackPdfCurrent } from '../lib/reportPackRenderer';
 import './CrmAccountWorkspace.css';
 import './CrmAccountWorkspaceResponsive.css';
 
@@ -37,10 +38,8 @@ interface OrganizationModule { id: string; module_key: string; enabled: boolean;
 interface GeofenceConfig { config_key: string; config_value: number; zone_type: string | null; }
 interface JobRow { id: string; job_type: string; status: string; priority: string; sla_breached: boolean; created_at: string; service_agreement_id: string | null; client_site_id: string | null; zone_id: string | null; }
 interface ReportPackRow { id: string; template_code: string; period_start: string; period_end: string; status: string; updated_at: string; pdf_path: string | null; pdf_renderer_version: string | null; pdf_source_updated_at: string | null; }
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v9';
 function hasCurrentReportPdf(pack: ReportPackRow): boolean {
-  return Boolean(pack.pdf_path && pack.pdf_source_updated_at === pack.updated_at
-    && (pack.status === 'sent' || pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER));
+  return isReportPackPdfCurrent(pack);
 }
 interface QuoteRow { id: string; title: string; status: string; total_charge: number; created_at: string; service_agreement_id: string | null; provider_org_id: string; tender_id: string | null; discount_schedule_id: string | null; }
 export type WorkspaceQuote = QuoteRow;

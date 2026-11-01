@@ -17,6 +17,7 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
+import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -25,7 +26,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v10';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v12';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -124,14 +125,29 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     const pct = expected > 0 ? Math.round(completed / expected * 100) : 0;
     return `<tr><td>${escapeHtml(facility.siteName)}</td><td align="right">${expected}</td><td align="right">${completed}</td><td align="right">${pct}%</td></tr>`;
   }).join('');
+  const activity = activityEmailSummary(d);
+  // The client activity report replaces the legacy patrol line; travel,
+  // hours and operational detail are never part of the client email.
+  const activityHtml = activity ? `<h3>Activity at your locations</h3>
+    <p>${escapeHtml(activity.headline)}</p>
+    ${activity.categories.length ? `<table border="1" cellpadding="4" cellspacing="0">
+      <tr><th align="left">Type of activity</th><th>Entries</th></tr>
+      ${activity.categories.map(([category, entries]) => `<tr><td>${escapeHtml(category)}</td><td align="right">${escapeHtml(entries)}</td></tr>`).join('')}
+    </table>` : ''}
+    <p>The PDF report sets out what happened at each location, with incidents, comments and photos.</p>`
+    : `<h3>Patrol &amp; Activity Summary</h3>
+    <p>Patrol visits: ${escapeHtml(d.patrolVisits ?? 'Not recorded')} · Camera activations: ${escapeHtml(d.cameraActivations ?? 'Not recorded')} · Vehicle observations: ${escapeHtml(d.vehicleObservations ?? 'Not recorded')}</p>`;
+  const slaCounts = [d.slaMet, d.slaBreached, d.slaRunning].map((value) => typeof value === 'number' ? value : 0);
+  const slaHtml = slaCounts.some((value) => value > 0)
+    ? `<h3>Service Level Performance</h3>
+    <p>${escapeHtml(slaCounts[0])} met · ${escapeHtml(slaCounts[1])} breached · ${escapeHtml(slaCounts[2])} in progress</p>`
+    : '';
   return `
     <h2>${escapeHtml(editorial.title || 'Monthly Report Pack')}</h2>
     <p>Period: ${escapeHtml(pack.period_start)} to ${escapeHtml(pack.period_end)}</p>
     ${editorialHtml(editorial)}
-    <h3>SLA Performance</h3>
-    <p>${escapeHtml(d.slaMet ?? 0)} met · ${escapeHtml(d.slaBreached ?? 0)} breached · ${escapeHtml(d.slaRunning ?? 0)} running</p>
-    <h3>Patrol &amp; Activity Summary</h3>
-    <p>Patrol visits: ${escapeHtml(d.patrolVisits ?? 'Not recorded')} · Camera activations: ${escapeHtml(d.cameraActivations ?? 'Not recorded')} · Vehicle observations: ${escapeHtml(d.vehicleObservations ?? 'Not recorded')} · Patrol travel: ${escapeHtml(d.patrolTravelKm ?? 'Not recorded')} km</p>
+    ${activityHtml}
+    ${slaHtml}
     ${facilities.length ? `<h3>Site Coverage</h3>
     <table border="1" cellpadding="4" cellspacing="0">
       <tr><th align="left">Site</th><th>Planned activities</th><th>Completed activities</th><th>Completion</th></tr>

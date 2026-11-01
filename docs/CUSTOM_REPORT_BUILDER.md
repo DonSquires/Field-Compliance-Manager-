@@ -109,7 +109,9 @@ roles have no direct `INSERT`, `UPDATE`, or `DELETE` privilege or policy on
 report-pack rows.
 
 The PDF renderer embeds pinned Noto Sans fonts so Māori names and macrons remain
-faithful. Its metadata update uses the pack's `updated_at` value as an optimistic
+faithful. Ligatures are disabled at embed time because pdf-lib advances the
+"fi" glyph incorrectly, which split words visually and in copied text. Its
+metadata update uses the pack's `updated_at` value as an optimistic
 lock, wraps text by actual font width without truncating report evidence, and
 removes a newly uploaded artifact if the report changed while rendering.
 The footer states the pack's actual availability: provider-private draft,
@@ -130,3 +132,45 @@ This keeps client-admin restrictions effective at both the database row and
 private object boundaries.
 
 Generating a custom report never creates or sends a scheduled R&M monthly pack.
+
+## Monthly Packs: Month-End Activity
+
+Scheduled monthly packs share this renderer. The pending migration
+`20261102210000_rm_monthly_activity_report.sql` extends `generate_due_report_packs`
+to freeze a categorised client site activity report (`data.activityReport`,
+version 2) and up to 2,000 itemised lines (`activity_lines`, a separate column
+that list queries do not select). The PDF adds the client sections (at a
+glance, activity overview, incidents and investigations, pest control,
+maintenance, manufacture, observations) and a site log by location, with up to
+3 photos per entry and 60 per report; packs without an activity report keep
+their earlier layout. Travel, administration and shift markers are withheld
+from the client report. The PDF and email never describe the import or
+matching process; pack, snapshot and renderer provenance is kept in the PDF's
+document properties. Provider administrators see the withheld counts in a
+collapsed, provider-only completeness check and can compare a pack with live
+records through `get_report_pack_activity_accounting`. That result is never
+persisted to client-readable data.
+
+Photos do not make travel, administration or shift markers reportable, and a
+pest-control classification cannot override an explicit operational activity.
+These records remain accounted for privately, without contributing entries,
+photos or pest statistics to the client report. Site comments, CCTV evidence,
+observations and incident photos remain beside their corresponding entries.
+The review page gives unavailable photos a visible retry action, including
+when a previously issued photo link has expired. Retrying renews that photo's
+short-lived link under the same storage permissions; it does not change the
+report or its evidence.
+
+Generation and accounting use explicit Auckland midnight boundaries, independent
+of the database session timezone. Freshness compares every summary section and a
+stable digest of all reportable itemised lines, even beyond the display cap.
+The review panel checks the displayed pack version before showing lazy-loaded
+lines or live accounting; if another administrator regenerated the pack, refresh
+and reopen it rather than combining two snapshots.
+
+`generate-report-pack-pdf`, `send-report-pack` and
+`apps/web/src/lib/reportPackRenderer.ts` must name the same renderer version;
+`test/report-activity-sections.test.js` enforces it. Raising the version makes
+published but unsent PDFs stale until they are regenerated. See
+`docs/RM_ONBOARDING_TRACKER.md` for categories, data caveats and deployment
+order.

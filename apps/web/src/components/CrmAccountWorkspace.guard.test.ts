@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
+const rendererSource = readFileSync(resolve(process.cwd(), 'src/lib/reportPackRenderer.ts'), 'utf8');
 
 describe('client portfolio hub', () => {
   it('loads dispatch history through account agreements so Site and Zone jobs are included', () => {
@@ -94,8 +95,10 @@ describe('client portfolio hub', () => {
   });
 
   it('offers only current report-pack PDFs for preview and download', () => {
-    expect(source).toContain('pdf_source_updated_at === pack.updated_at');
-    expect(source).toContain('pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER');
+    expect(source).toContain('return isReportPackPdfCurrent(pack);');
+    expect(source).not.toContain('fcm-report-pack-pdf-lib-a4-');
+    expect(rendererSource).toContain('pack.pdf_source_updated_at === pack.updated_at');
+    expect(rendererSource).toContain('pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER');
     expect(source).toContain('GeneratedArtifactActions bucket="bob-uploads"');
     expect(source).toContain('pdf_path,pdf_renderer_version,pdf_source_updated_at');
   });

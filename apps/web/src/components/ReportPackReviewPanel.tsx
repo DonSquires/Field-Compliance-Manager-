@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { FileCheck2, ShieldCheck } from 'lucide-react';
 import { CustomReportSnapshot } from './CustomReportSnapshot';
+import { ReportActivityReview } from './ReportActivityReview';
+import { readActivityReport } from '../lib/reportActivity';
 import { supabase } from '../lib/supabase';
 import './ReportPackReviewPanel.css';
 
@@ -51,6 +53,32 @@ function numberFrom(data: Record<string, unknown> | null, key: string): string {
   return typeof value === 'number' ? String(value) : '0';
 }
 
+const SLA_TILES: Array<[string, string]> = [['SLA met', 'slaMet'], ['SLA breached', 'slaBreached'], ['SLA in progress', 'slaRunning']];
+
+/**
+ * Generated values shown beside the client report preview. A pack with the client site activity
+ * report already shows patrols, CCTV and observations there, and its PDF has SLA figures only when
+ * one is recorded, so those tiles follow the PDF. Travel distance is never shown: it is not client content.
+ */
+function sourceTiles(data: Record<string, unknown> | null, hasActivityReport: boolean, subjectSummary: Record<string, unknown> | null): Array<[string, string]> {
+  const tiles: Array<[string, string]> = [];
+  if (!hasActivityReport || SLA_TILES.some(([, key]) => numberFrom(data, key) !== '0')) {
+    tiles.push(...SLA_TILES.map(([label, key]): [string, string] => [label, numberFrom(data, key)]));
+  }
+  if (!hasActivityReport) {
+    tiles.push(['Patrol visits', numberFrom(data, 'patrolVisits')], ['Camera activations', numberFrom(data, 'cameraActivations')], ['Vehicle observations', numberFrom(data, 'vehicleObservations')]);
+  }
+  if (subjectSummary) {
+    tiles.push(
+      ['Repeat vehicles', numberFrom(subjectSummary, 'repeatVehicles')],
+      ['Vehicles seen at multiple places', numberFrom(subjectSummary, 'vehiclesAtMultiplePlaces')],
+      ['Supporting evidence items', numberFrom(subjectSummary, 'supportingEvidenceItems')],
+      ['Records with action notes', numberFrom(subjectSummary, 'recordsWithActionNotes')],
+    );
+  }
+  return tiles;
+}
+
 function facilitiesFrom(data: Record<string, unknown> | null): Array<{ siteName: string; expected: number; completed: number }> {
   if (!Array.isArray(data?.facilities)) return [];
   return data.facilities.flatMap((value) => {
@@ -81,6 +109,8 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
   const [error, setError] = useState<string | null>(null);
   const subjectSummary = subjectSummaryFrom(pack.data);
   const facilities = facilitiesFrom(pack.data);
+  const hasActivityReport = pack.report_kind === 'monthly' && readActivityReport(pack.data) !== null;
+  const tiles = pack.report_kind === 'custom' ? [] : sourceTiles(pack.data, hasActivityReport, subjectSummary);
 
   useEffect(() => {
     setTitle(pack.editorial?.title ?? defaultTitle(pack));
@@ -143,23 +173,12 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
 
+      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} updatedAt={pack.updated_at} data={pack.data} status={pack.status} />}
       {pack.report_kind === 'custom' ? (
         <CustomReportSnapshot data={pack.data} reportScope={pack.report_scope} idPrefix={`report-${pack.id}`} />
-      ) : (
+      ) : tiles.length > 0 && (
         <div className="report-review-source" aria-label="Generated source metrics">
-          <div><span>SLA met</span><strong>{numberFrom(pack.data, 'slaMet')}</strong></div>
-          <div><span>SLA breached</span><strong>{numberFrom(pack.data, 'slaBreached')}</strong></div>
-          <div><span>SLA in progress</span><strong>{numberFrom(pack.data, 'slaRunning')}</strong></div>
-          <div><span>Patrol visits</span><strong>{numberFrom(pack.data, 'patrolVisits')}</strong></div>
-          <div><span>Camera activations</span><strong>{numberFrom(pack.data, 'cameraActivations')}</strong></div>
-          <div><span>Vehicle observations</span><strong>{numberFrom(pack.data, 'vehicleObservations')}</strong></div>
-          <div><span>Patrol travel (km)</span><strong>{numberFrom(pack.data, 'patrolTravelKm')}</strong></div>
-          {subjectSummary && <>
-            <div><span>Repeat vehicles</span><strong>{numberFrom(subjectSummary, 'repeatVehicles')}</strong></div>
-            <div><span>Vehicles seen at multiple places</span><strong>{numberFrom(subjectSummary, 'vehiclesAtMultiplePlaces')}</strong></div>
-            <div><span>Supporting evidence items</span><strong>{numberFrom(subjectSummary, 'supportingEvidenceItems')}</strong></div>
-            <div><span>Records with action notes</span><strong>{numberFrom(subjectSummary, 'recordsWithActionNotes')}</strong></div>
-          </>}
+          {tiles.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
         </div>
       )}
       {pack.report_kind === 'monthly' && facilities.length > 0 && (
