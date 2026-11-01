@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // Without normalising, git's CRLF checkout on Windows would make that pattern never match
 // regardless of whether the bad code is genuinely absent - a silent false pass, not a real check.
 const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8').replace(/\r\n/g, '\n');
+const shellStyles = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.css'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('AdminShell access and routing boundaries', () => {
   it('never redirects a page to itself, which trapped users on Reports in a replace loop', () => {
@@ -31,7 +32,7 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
     expect(source).toContain("if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals' || page === 'nzta-register') && !isAdminTierRole(role)) return false;");
-    expect(source).toContain('.filter((item) => isPageEnabled(item.id) && (!item.area || isFieldOpsAreaEnabled(item.area)))');
+    expect(source).toContain('(isPageEnabled(item.id) || (item.id === \'roster\' && rosterSetupFallback))');
     expect(source).toContain('items: enabledNavItems(items)');
     expect(source).toContain('{enabledNavItems(items).map((item) => {');
   });
@@ -140,6 +141,22 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).not.toContain("label: 'Work Units & Coverage'");
     expect(source).toContain("new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage key={isRosteringHrView(location.search) ? 'rostering' : 'people'} />");
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
+  });
+
+  it('preserves HR-gated roster setup without bypassing roster role access or losing workflow context', () => {
+    expect(source).toContain('shouldShowRosterSetupFallback(');
+    expect(source).toContain("canAccessAdminPage('roster', profile?.role, () => true)");
+    expect(source).toContain("else if (item.id === 'roster' && rosterSetupFallback) openRosterSetup()");
+    expect(source).toContain("const contextQuery = workflowContextQuery(workflowContext)");
+    expect(source).toContain("`${ROSTER_SETUP_PATH}${contextQuery ? `&${contextQuery.slice(1)}` : ''}`");
+  });
+
+  it('uses the semantic primary foreground for selected Workforce sections', () => {
+    const selectedSectionRule = shellStyles.slice(
+      shellStyles.indexOf(".admin-workforce-sections button[aria-current='page']"),
+      shellStyles.indexOf('.admin-workforce-sections button:focus-visible'),
+    );
+    expect(selectedSectionRule).toContain('color: var(--color-primary-text);');
   });
 
   it('keeps specialist routes visible until their container pages exist locally', () => {
