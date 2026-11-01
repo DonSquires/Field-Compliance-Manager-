@@ -15,8 +15,8 @@ RUN mkdir -p /export/out && if [ "$WITH_SPECIESNET" = "1" ]; then \
 # --- Stage 2: runtime ----------------------------------------------------------------------------------------
 FROM python:3.12-slim
 
-# GPU=1 installs onnxruntime-gpu (CUDA 12 / cuDNN 9 as pip packages) for RunPod serverless workers; the default
-# GPU=0 image is the CPU tier that runs on the VPS. Both carry the same models (RF-DETR large + small, plate
+# GPU=1 installs onnxruntime-gpu (CUDA 12 / cuDNN 9 as pip packages) for the laptop GPU worker
+# (docker-compose.laptop-worker.yml); the default GPU=0 image is the CPU tier that runs on the VPS. Both carry the same models (RF-DETR large + small, plate
 # detector, plate OCR, SpeciesNet ONNX, OpenVINO attribute models), so the tier is chosen by the host, not by
 # the build.
 ARG GPU=0
@@ -41,10 +41,10 @@ COPY download_models.py ./
 RUN mkdir -p /app/models && python download_models.py
 COPY --from=speciesnet-export /export/out/ /app/models/
 
-COPY app.py detector.py plates.py species.py super_resolution.py runpod_handler.py ./
+COPY app.py detector.py plates.py species.py super_resolution.py ./
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 EXPOSE 3000
-CMD ["python", "runpod_handler.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]

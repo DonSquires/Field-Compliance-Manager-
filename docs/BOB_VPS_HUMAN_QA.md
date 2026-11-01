@@ -61,5 +61,6 @@ bounded by timeout, memory, CPU, and PID limits. Live tests use only a dedicated
 test identity and never receive service-role, GitHub, Vercel, or Supabase
 management credentials.
 
-RunPod is optional for model/inference or visual-analysis workloads. It is not
-the verification controller and is not needed for the main-health loop.
+GPU model/inference and visual-analysis work runs on the laptop GPU. RunPod is
+not part of the stack (owner ruling 2026-11-01): it is not the verification
+controller, not an overflow runner and is not needed for the main-health loop.

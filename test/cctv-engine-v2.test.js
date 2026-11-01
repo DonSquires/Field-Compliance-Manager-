@@ -5,9 +5,7 @@ process.env.OLLAMA_VISION_URL = 'http://local-vlm.test:11434';
 process.env.OLLAMA_API_TOKEN = 'test-cloud-token';
 delete process.env.OLLAMA_VISION_MODEL;
 process.env.LOCAL_GPU_INFERENCE_URL = 'http://laptop-gpu.test:3000';
-process.env.RUNPOD_API = 'test-runpod-key';
 process.env.VISION_LOCAL_GPU_BACKOFF_MS = '0';
-process.env.VISION_RUNPOD_BACKOFF_MS = '0';
 delete process.env.VISION_INFERENCE_POLICY;
 delete process.env.VISION_PINNED_DETECTOR_MODEL;
 process.env.SUPABASE_URL = 'https://example.invalid';
@@ -20,6 +18,7 @@ const crypto = require('node:crypto');
 const {
   ENGINE_VERSION,
   trackDetections,
+  assignPairs,
   evidenceWeightedConfidence,
   wilsonLowerBound,
   isWeakEmbeddingModel,
@@ -30,6 +29,7 @@ const {
   consolidateMotionSummary,
   buildEntityObservations,
   isReviewableCandidate,
+  cloudHintContext,
 } = require('../services/vision/motion_consolidator');
 const hints = require('../services/vision/vision_hints');
 
@@ -52,6 +52,50 @@ test('two people walking side by side stay two tracks: one detection per track p
   for (const track of tracks) {
     const xs = track.observations.map((observation) => observation.bbox.x);
     assert.ok(xs.every((x, index) => index === 0 || x > xs[index - 1]), 'each track follows one walker');
+  }
+});
+
+test('association maximises continued tracks before cost: a short backward step cannot strand a neighbour', () => {
+  // Greedy cheapest-pair took 200->150 (cost 0.5) and left 0 without a partner inside its gate, producing
+  // [0], [200, 150], [350]: one track reversed and a spurious extra sighting.
+  const { tracks } = trackDetections([
+    frameAt(0, [{ bbox: box(0, 0), confidence: 0.9 }, { bbox: box(200, 0), confidence: 0.9 }]),
+    frameAt(1, [{ bbox: box(150, 0), confidence: 0.9 }, { bbox: box(350, 0), confidence: 0.9 }]),
+  ], fromFrame);
+  assert.deepEqual(tracks.map((track) => track.observations.map((observation) => observation.bbox.x)), [[0, 150], [200, 350]]);
+});
+
+test('the assignment is optimal: most continued tracks, then lowest total cost (checked against brute force)', () => {
+  let seed = 7;
+  const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const best = (pairs, used = new Set(), usedDetections = new Set(), index = 0) => {
+    if (index === pairs.length) return { count: 0, cost: 0 };
+    let result = best(pairs, used, usedDetections, index + 1);
+    const pair = pairs[index];
+    if (!used.has(pair.trackIndex) && !usedDetections.has(pair.detectionIndex)) {
+      used.add(pair.trackIndex); usedDetections.add(pair.detectionIndex);
+      const rest = best(pairs, used, usedDetections, index + 1);
+      used.delete(pair.trackIndex); usedDetections.delete(pair.detectionIndex);
+      const taken = { count: rest.count + 1, cost: rest.cost + pair.cost };
+      if (taken.count > result.count || (taken.count === result.count && taken.cost < result.cost - 1e-9)) result = taken;
+    }
+    return result;
+  };
+  for (let trial = 0; trial < 300; trial += 1) {
+    const trackCount = 1 + Math.floor(random() * 5);
+    const detectionCount = 1 + Math.floor(random() * 5);
+    const pairs = [];
+    for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+      for (let detectionIndex = 0; detectionIndex < detectionCount; detectionIndex += 1) {
+        if (random() < 0.55) pairs.push({ trackIndex, detectionIndex, cost: Math.round(random() * 400) / 100 });
+      }
+    }
+    const chosen = assignPairs(pairs);
+    assert.equal(new Set(chosen.map((pair) => pair.trackIndex)).size, chosen.length, 'one detection per track');
+    assert.equal(new Set(chosen.map((pair) => pair.detectionIndex)).size, chosen.length, 'one track per detection');
+    const optimum = best(pairs);
+    assert.equal(chosen.length, optimum.count, `trial ${trial}: continued tracks`);
+    assert.ok(Math.abs(chosen.reduce((sum, pair) => sum + pair.cost, 0) - optimum.cost) < 1e-6, `trial ${trial}: total cost`);
   }
 });
 
@@ -129,7 +173,7 @@ function vehicleFrame(seconds, vehicles, alpr) {
     relative_timestamp_seconds: seconds,
     sha256_hash: `v-${seconds}`,
     quality_state: 'clear',
-    runpod: { detector_model: 'rf-detr-large-704-coco', detector_provider: 'local_gpu', vehicles },
+    triage: { detector_model: 'rf-detr-large-704-coco', detector_provider: 'local_gpu', vehicles },
     ...(alpr ? { alpr } : {}),
   };
 }
@@ -365,6 +409,30 @@ test('the cloud hint is skipped when a person is in the crop, the plate scan is 
   }
 });
 
+test('plate masking counts as complete only when every detected plate has its own located box', () => {
+  const policy = { cloudVehicleVlm: { enabled: true, model: 'gemma4:31b', recordReceipt: async () => ({ id: 'r' }) } };
+  const plate = (x) => ({ box: box(x, 400, 60, 20), confidence: 0.9 });
+  const frameWith = (alpr) => ({ alpr: { success: true, ...alpr }, people: { success: true, people: [] } });
+  const fiveLocated = [0, 100, 200, 300, 400].map(plate);
+  // plates.py caps located_plates at five while plates_detected counts them all; anchor, read and rejected boxes
+  // repeat located ones and must not make up the shortfall.
+  const sixDetected = cloudHintContext(frameWith({
+    plates_detected: 6, located_plates: fiveLocated, box: fiveLocated[0].box, plate_bbox: fiveLocated[0].box,
+    results: [{ box: fiveLocated[0].box }, { box: fiveLocated[1].box }], rejected: [{ box: fiveLocated[2].box }],
+  }), policy, 'event-1').cloud;
+  assert.equal(sixDetected.plateBoxesComplete, false);
+  const noCount = cloudHintContext(frameWith({ located_plates: [plate(0)] }), policy, 'event-1').cloud;
+  assert.equal(noCount.plateBoxesComplete, false, 'a reader that does not report its count is not proof of full masking');
+  const allLocated = cloudHintContext(frameWith({
+    plates_detected: 2, located_plates: [plate(0), plate(100)], box: plate(0).box, plate_bbox: plate(0).box, results: [{ box: plate(0).box }],
+  }), policy, 'event-1').cloud;
+  assert.equal(allLocated.plateBoxesComplete, true);
+  assert.equal(allLocated.plateBoxes.length, 2, 'each physical plate is masked once and counted once on the receipt');
+  const none = cloudHintContext(frameWith({ plates_detected: 0, located_plates: [] }), policy, 'event-1').cloud;
+  assert.equal(none.plateBoxesComplete, true);
+  assert.equal(none.plateBoxes.length, 0);
+});
+
 test('weapon and scene prompts never leave the local tier', async () => {
   const calls = stubVlm({ local: { possible_weapon: true, description: 'long object in right hand' } });
   const weapon = await hints.getWeaponHint('/tmp/frame.jpg', box(10, 10, 60, 180));
@@ -380,57 +448,89 @@ const watcher = require('../services/vision/vision_job_watcher');
 
 const LARGE = 'rf-detr-large-704-coco';
 const SMALL = 'rf-detr-small-512-coco';
+const CUDA = 'CUDAExecutionProvider';
 const gpuItem = (hash) => ({ frame: { sha256_hash: hash }, image: Buffer.from(hash) });
+const onGpu = (model) => ({ success: true, detector_model: model, detector_execution_provider: CUDA });
 
-test('gpu_consistent is the default policy and pins the GPU large detector', () => {
+test('gpu_consistent is the default policy and asks only the laptop GPU', () => {
   assert.equal(watcher.INFERENCE_POLICY, 'gpu_consistent');
   assert.equal(watcher.PINNED_DETECTOR_MODEL, LARGE);
-  assert.deepEqual(watcher.triageOrderFor('gpu_consistent'), ['local_gpu', 'gpu'], 'the VPS CPU detector is never asked');
+  assert.deepEqual(watcher.triageOrderFor('gpu_consistent'), ['local_gpu'], 'neither the VPS CPU detector nor RunPod is asked');
 });
 
 test('an answer from a different detector model is rejected and counted, never mixed into the job', () => {
   const pin = watcher.detectorPin();
-  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: LARGE }, pin), true);
-  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: SMALL }, pin), false);
+  assert.equal(watcher.acceptTriageAnswer(onGpu(LARGE), pin), true);
+  assert.equal(watcher.acceptTriageAnswer(onGpu(SMALL), pin), false);
   assert.equal(watcher.acceptTriageAnswer({ success: true }, pin), false, 'an answer that does not say which model looked is not trusted');
   assert.deepEqual(pin.rejected, { [SMALL]: 1, unreported: 1 });
   // An empty pin takes the job's first accepted model and holds every later answer to it.
   const open = watcher.detectorPin('');
-  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: SMALL }, open), true);
+  assert.equal(watcher.acceptTriageAnswer(onGpu(SMALL), open), true);
   assert.equal(open.model, SMALL);
-  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: LARGE }, open), false);
+  assert.equal(watcher.acceptTriageAnswer(onGpu(LARGE), open), false);
   // Other policies keep their historical behaviour.
   assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: SMALL }, pin, 'local_gpu_first'), true);
 });
 
-test('recognition asks the laptop GPU first, RunPod for the rest, and drops a mismatched model', async (t) => {
+test('the pinned model is accepted only when it ran on a GPU execution provider', () => {
+  const pin = watcher.detectorPin();
+  // The laptop's ONNX Runtime silently falling back to the CPU still reports the large model by name.
+  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: LARGE, detector_execution_provider: 'CPUExecutionProvider' }, pin), false);
+  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: LARGE }, pin), false, 'an answer that does not say where it ran is not trusted');
+  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: LARGE, detector_execution_provider: 'TensorrtExecutionProvider' }, pin), true);
+  assert.deepEqual(pin.rejected, { [`${LARGE}@CPUExecutionProvider`]: 1, [`${LARGE}@unreported_provider`]: 1 });
+  // A CPU answer never sets an empty pin.
+  const open = watcher.detectorPin('');
+  assert.equal(watcher.acceptTriageAnswer({ success: true, detector_model: SMALL, detector_execution_provider: 'CPUExecutionProvider' }, open), false);
+  assert.equal(open.model, null);
+});
+
+test('resumed checkpoints keep only triage and recognition answers that pass the pin', () => {
+  const pin = watcher.detectorPin();
+  const checkpoint = {
+    kept: { triage: onGpu(LARGE), recognition: { triage: onGpu(LARGE), alpr: { success: true } } },
+    cpuRecognition: { triage: onGpu(LARGE), recognition: { triage: { ...onGpu(LARGE), detector_execution_provider: 'CPUExecutionProvider' } } },
+    otherModelRecognition: { triage: onGpu(LARGE), recognition: { triage: onGpu(SMALL) } },
+    legacyRecognition: { triage: onGpu(LARGE), recognition: { runpod: onGpu(LARGE) } },
+    otherModelTriage: { triage: onGpu(SMALL), recognition: { triage: onGpu(LARGE) } },
+  };
+  watcher.admitCheckpoint(checkpoint, pin, 'gpu_consistent');
+  assert.deepEqual(Object.keys(checkpoint).sort(), ['cpuRecognition', 'kept', 'legacyRecognition', 'otherModelRecognition']);
+  assert.ok(checkpoint.kept.recognition, 'a recognition answer from the pinned GPU model is resumed');
+  for (const hash of ['cpuRecognition', 'otherModelRecognition', 'legacyRecognition']) {
+    assert.equal(checkpoint[hash].recognition, undefined, `${hash}: recognition is redone`);
+    assert.ok(checkpoint[hash].triage, `${hash}: the accepted triage answer is kept`);
+  }
+  // Other policies resume whatever was checkpointed, except recognition that predates the triage field.
+  const relaxed = { a: { triage: { detector_model: SMALL }, recognition: { triage: null } }, b: { recognition: { runpod: {} } } };
+  watcher.admitCheckpoint(relaxed, watcher.detectorPin(), 'vps_first');
+  assert.ok(relaxed.a.recognition);
+  assert.equal(relaxed.b.recognition, undefined);
+});
+
+test('recognition asks only the laptop GPU and drops a mismatched model', async (t) => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const body = JSON.parse(init.body);
-    if (String(url).startsWith('http://laptop-gpu.test:3000/infer/batch')) {
-      calls.push({ machine: 'laptop', frames: body.frames.map((f) => f.frame_id), tasks: body.tasks });
-      // The laptop answers frame a with the pinned model and frame b with the wrong one; c gets no answer.
-      return new Response(JSON.stringify({ results: [
-        { frame_id: 'a', result: { success: true, detector_model: LARGE, people: [], vehicles: [] } },
-        { frame_id: 'b', result: { success: true, detector_model: SMALL, people: [], vehicles: [] } },
-      ] }), { status: 200 });
-    }
-    calls.push({ machine: 'runpod', frames: body.input.frames.map((f) => f.frame_id), tasks: body.input.tasks });
-    return new Response(JSON.stringify({ status: 'COMPLETED', output: { results: [
-      { frame_id: 'b', result: { success: true, detector_model: LARGE, people: [] } },
-      { frame_id: 'c', result: { success: true, detector_model: SMALL, people: [] } },
-    ] } }), { status: 200 });
+    assert.ok(String(url).startsWith('http://laptop-gpu.test:3000/infer/batch'), `no other machine is asked (${url})`);
+    calls.push({ machine: 'laptop', frames: body.frames.map((f) => f.frame_id), tasks: body.tasks });
+    // The laptop answers frame a with the pinned model on CUDA, b with the wrong model, c on the CPU; d gets no answer.
+    return new Response(JSON.stringify({ results: [
+      { frame_id: 'a', result: { ...onGpu(LARGE), people: [], vehicles: [] } },
+      { frame_id: 'b', result: { ...onGpu(SMALL), people: [], vehicles: [] } },
+      { frame_id: 'c', result: { success: true, detector_model: LARGE, detector_execution_provider: 'CPUExecutionProvider', people: [], vehicles: [] } },
+    ] }), { status: 200 });
   });
   const pin = watcher.detectorPin();
   const usage = { gpu_calls: 0, frames_sent: 0, gpu_ms: 0, vps_calls: 0, vps_ms: 0 };
-  const answers = await watcher.recognitionAnswers([gpuItem('a'), gpuItem('b'), gpuItem('c')], usage, pin, 'gpu_consistent');
-  assert.deepEqual(calls.map((call) => [call.machine, call.frames]), [['laptop', ['a', 'b', 'c']], ['runpod', ['b', 'c']]]);
+  const answers = await watcher.recognitionAnswers([gpuItem('a'), gpuItem('b'), gpuItem('c'), gpuItem('d')], usage, pin, 'gpu_consistent');
+  assert.deepEqual(calls.map((call) => [call.machine, call.frames]), [['laptop', ['a', 'b', 'c', 'd']]]);
   assert.deepEqual(calls[0].tasks, ['person', 'vehicle', 'animal', 'plate', 'face'], 'recognition asks for every task');
   assert.equal(answers.get('a').triage_provider, 'local_gpu');
-  assert.equal(answers.get('b').triage_provider, 'gpu');
-  assert.equal(answers.has('c'), false, 'a RunPod answer from another model is not used; c keeps its pinned triage answer');
-  assert.deepEqual(pin.rejected, { [SMALL]: 2 });
-  assert.equal(usage.gpu_calls, 2);
+  assert.deepEqual([...answers.keys()], ['a'], 'b, c and d keep their pinned triage answers');
+  assert.deepEqual(pin.rejected, { [SMALL]: 1, [`${LARGE}@CPUExecutionProvider`]: 1 });
+  assert.equal(usage.gpu_calls, 1);
   // Policies without a GPU recognition pass do not call anything.
   calls.length = 0;
   assert.equal((await watcher.recognitionAnswers([gpuItem('a')], usage, pin, 'vps_first')).size, 0);
@@ -441,8 +541,8 @@ test('the model manifest records the pinned model, the models that answered and 
   const pin = watcher.detectorPin();
   pin.rejected[SMALL] = 3;
   const frames = [
-    { detect: { success: true }, runpod: { detector_model: LARGE } },
-    { detect: { success: true }, runpod: { detector_model: LARGE } },
+    { detect: { success: true }, triage: { detector_model: LARGE } },
+    { detect: { success: true }, triage: { detector_model: LARGE } },
     {},
   ];
   assert.deepEqual(watcher.modelManifest(frames, pin, 'gpu_consistent'), {

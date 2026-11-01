@@ -300,7 +300,7 @@ function trackEvidence(track) {
 }
 
 function detectorModelOf(frame) {
-  const source = frame?.runpod || frame?.detect || null;
+  const source = frame?.triage || frame?.detect || null;
   return source?.detector_model || null;
 }
 
@@ -519,9 +519,9 @@ function rawVehicleDetections(frame) {
     confidence: vehicle?.confidence ?? vehicle?.attributes?.detection?.confidence,
     attributes: vehicle?.attributes || null,
   }));
-  if (Array.isArray(frame?.runpod?.vehicles)) return fromList(frame.runpod.vehicles);
+  if (Array.isArray(frame?.triage?.vehicles)) return fromList(frame.triage.vehicles);
   if (Array.isArray(frame?.detect?.vehicles)) return fromList(frame.detect.vehicles);
-  const legacy = frame?.runpod?.vehicle;
+  const legacy = frame?.triage?.vehicle;
   if (legacy?.detection?.bbox) return [{ bbox: legacy.detection.bbox, confidence: legacy.detection.confidence, attributes: legacy }];
   return [];
 }
@@ -633,24 +633,42 @@ function meanSpeed(points, maxGap) {
 // describes the first vehicle only, so it is trusted only when the frame held at most one vehicle.
 function frameVehicleData(frame) {
   if (rawVehicleDetections(frame).length > 1) return {};
-  return frame?.inference?.data || frame?.runpod?.vehicle || {};
+  return frame?.inference?.data || frame?.triage?.vehicle || {};
 }
 
+// Every plate box the reader reported, each physical plate once (anchor, read and rejected boxes repeat the
+// located ones), so the mask covers them all and the receipt counts plates rather than mentions.
 function plateMaskBoxes(frame) {
   const alpr = frame?.alpr || {};
+  const seen = new Set();
   return [
+    ...(Array.isArray(alpr.located_plates) ? alpr.located_plates.map((item) => item?.box) : []),
     alpr.box, alpr.plate_bbox,
     ...(Array.isArray(alpr.results) ? alpr.results.map((item) => item?.box) : []),
-    ...(Array.isArray(alpr.located_plates) ? alpr.located_plates.map((item) => item?.box) : []),
     ...(Array.isArray(alpr.rejected) ? alpr.rejected.map((item) => item?.box) : []),
-  ].map(normaliseBbox).filter(Boolean);
+  ].map(normaliseBbox).filter((box) => {
+    if (!box) return false;
+    const key = [box.x, box.y, box.width, box.height].map((value) => Math.round(value)).join(',');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Masking is complete only when the reader said how many plates it found and every one of them is in
+// located_plates (plates.py lists at most five); a missing count or a shortfall refuses cloud egress.
+function plateMaskingComplete(alpr) {
+  if (alpr?.success !== true) return false;
+  const detected = Number(alpr.plates_detected);
+  if (!Number.isInteger(detected) || detected < 0) return false;
+  const located = Array.isArray(alpr.located_plates) ? alpr.located_plates.filter((item) => normaliseBbox(item?.box)).length : 0;
+  return located >= detected;
 }
 
 function cloudHintContext(frame, options, sourceEventId) {
   const policy = options.cloudVehicleVlm;
   if (!policy?.enabled) return {};
   const alpr = frame?.alpr || {};
-  const located = Array.isArray(alpr.located_plates) ? alpr.located_plates.length : 0;
   return {
     cloud: {
       enabled: true,
@@ -658,7 +676,7 @@ function cloudHintContext(frame, options, sourceEventId) {
       recordReceipt: policy.recordReceipt,
       sourceEventId,
       plateScanned: alpr.success === true,
-      plateBoxesComplete: alpr.success === true && (Number(alpr.plates_detected) || 0) <= Math.max(located, plateMaskBoxes(frame).length),
+      plateBoxesComplete: plateMaskingComplete(alpr),
       plateBoxes: plateMaskBoxes(frame),
       personScanned: frame?.people?.success === true,
       personBoxes: [
@@ -817,7 +835,7 @@ async function consolidateVehicles(frames, options = {}) {
       plate_char_confidence_min: alprBest?.char_confidence_min ?? null,
       plate_width_px: alprBest?.plate_width_px ?? null,
       plate_bbox: bestRead.box,
-      detector_provider: bestRead.frame?.runpod?.detector_provider ?? bestRead.frame?.detect?.detector_provider ?? null,
+      detector_provider: bestRead.frame?.triage?.detector_provider ?? bestRead.frame?.detect?.detector_provider ?? null,
       detector_model: detectorModelOf(bestRead.frame),
       engine_version: ENGINE_VERSION,
       track_hits: entityTracks.reduce((sum, platedTrack) => sum + platedTrack.track.hits, 0),
@@ -864,7 +882,7 @@ async function consolidateVehicles(frames, options = {}) {
       plate_scan_state: plateScanState(track),
       confidence: round2(track.confidence),
       ...trackEvidence(track),
-      detector_provider: best.frame?.runpod?.detector_provider ?? best.frame?.detect?.detector_provider ?? null,
+      detector_provider: best.frame?.triage?.detector_provider ?? best.frame?.detect?.detector_provider ?? null,
       detector_model: detectorModelOf(best.frame),
       is_return: false,
       first_seen_seconds: round2(track.firstSeen),
@@ -1288,6 +1306,7 @@ module.exports = {
   plateReadsFor,
   clusterPlates,
   ENGINE_VERSION,
+  cloudHintContext,
   getVehicleVisionHint,
   getWeaponHint,
   getSceneSynopsis,

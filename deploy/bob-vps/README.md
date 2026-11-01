@@ -1,8 +1,9 @@
 # Bob VPS Human QA
 
-The VPS is the default CPU runner for the full Playwright human suite. RunPod
-remains available as scale-to-zero overflow capacity and for future GPU visual
-analysis.
+The VPS is the default CPU runner for the full Playwright human suite. GPU work
+(model inference and visual analysis) runs on the owner's laptop GPU over
+Tailscale. RunPod is not part of the stack (owner ruling 2026-11-01) and is not
+an overflow option.
 
 ## Shipping a release (control plane / fcm-api / worker image)
 

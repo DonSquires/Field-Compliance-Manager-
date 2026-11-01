@@ -81,6 +81,42 @@ describe('CCTV detection quality page', () => {
     expect(screen.queryByRole('button', { name: 'Resolve…' })).toBeNull();
   });
 
+  it('re-reads the governed summary after a resolution so the quality cards count the decision', async () => {
+    let resolved = false;
+    rpc.mockImplementation(async (name: string) => {
+      if (name === 'resolve_cctv_missed_detection') { resolved = true; return { data: 'confirmed_missed', error: null }; }
+      if (name === 'cctv_accuracy_summary') {
+        return { data: { ...summary, missed_detections: [{ entity_kind: 'person', engine_version: 'cctv-engine-v2', open: resolved ? 0 : 1, confirmed_missed: resolved ? 2 : 1, not_missed: 0 }] }, error: null };
+      }
+      return { data: null, error: null };
+    });
+    render(<MemoryRouter><CCTVQualityPage /></MemoryRouter>);
+    expect((await screen.findByRole('article', { name: 'People detection quality' })).textContent).toContain('1 to check');
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save resolution' }));
+    await waitFor(() => expect(screen.getByRole('article', { name: 'People detection quality' }).textContent).not.toContain('1 to check'));
+    expect(rpc.mock.calls.filter(([name]) => name === 'cctv_accuracy_summary')).toHaveLength(2);
+  });
+
+  it('discards a slower answer for a period the reviewer has already moved away from', async () => {
+    const pending: Array<{ since: string; resolve: (value: unknown) => void }> = [];
+    rpc.mockImplementation((name: string, args: { p_since: string }) => {
+      if (name !== 'cctv_accuracy_summary') return Promise.resolve({ data: null, error: null });
+      return new Promise((resolve) => pending.push({ since: args.p_since, resolve }));
+    });
+    render(<MemoryRouter><CCTVQualityPage /></MemoryRouter>);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: '30 days' }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    // The newer 30-day answer lands first; the older 90-day answer arrives afterwards and must be ignored.
+    pending[1].resolve({ data: { ...summary, groups: [group('person', 38, 2)] }, error: null });
+    await screen.findByRole('article', { name: 'People detection quality' });
+    pending[0].resolve({ data: { ...summary, groups: [group('person', 5, 5)] }, error: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole('heading', { name: /last 30 days/ })).toBeTruthy();
+    expect(screen.getByRole('article', { name: 'People detection quality' }).textContent).toContain('95%');
+  });
+
   it('requires a reason before an administrator allows cloud vehicle hints', async () => {
     render(<MemoryRouter><CCTVQualityPage /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'Change…' }));

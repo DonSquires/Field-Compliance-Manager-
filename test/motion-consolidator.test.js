@@ -155,8 +155,8 @@ test('consolidatePeople excludes degraded glare/occlusion frames before tracking
 
 test('consolidateVehicles preserves a bounded no-plate vehicle candidate for review', async () => {
   const result = await consolidateVehicles([
-    { relative_timestamp_seconds: 1, sha256_hash: 'v0', runpod: { vehicle: { detection: { confidence: 0.72, bbox: { x: 40, y: 50, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
-    { relative_timestamp_seconds: 2, sha256_hash: 'v1', runpod: { vehicle: { detection: { confidence: 0.68, bbox: { x: 45, y: 52, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
+    { relative_timestamp_seconds: 1, sha256_hash: 'v0', triage: { vehicle: { detection: { confidence: 0.72, bbox: { x: 40, y: 50, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
+    { relative_timestamp_seconds: 2, sha256_hash: 'v1', triage: { vehicle: { detection: { confidence: 0.68, bbox: { x: 45, y: 52, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
   ]);
   assert.equal(result.events.length, 1);
   assert.equal(result.events[0].plate, 'Unconfirmed vehicle');

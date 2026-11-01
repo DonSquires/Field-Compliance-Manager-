@@ -40,7 +40,7 @@ test('watcher probes before remuxing, falls back to transcode on a failed copy, 
 });
 
 test('normaliseAnimals distinguishes "none seen" from "no model could look"', () => {
-  assert.deepEqual(normaliseAnimals({ animals: [], animal_detection_status: 'model_not_staged', detector_provider: null }, null), { success: true, animals: [], status: 'model_not_staged', provider: 'runpod' });
+  assert.deepEqual(normaliseAnimals({ animals: [], animal_detection_status: 'model_not_staged', detector_provider: null }, null), { success: true, animals: [], status: 'model_not_staged', provider: 'unreported' });
   const seen = normaliseAnimals({ animals: [{ kind: 'animal', species: 'possum', bbox: { x: 1, y: 1, width: 10, height: 10 } }], animal_detection_status: 'ready', detector_provider: 'megadetector:md_v5a.0.0.pt' }, null);
   assert.equal(seen.animals.length, 1);
   assert.equal(seen.status, 'ready');
@@ -95,36 +95,40 @@ test('enhanced-only face detection is visible but never emits an identity embedd
 
 test('watcher skips the full-frame vehicle pass when a detector covered vehicles and found none', () => {
   assert.match(watcherSource, /const vehicleCovered = detectorCoverage\.has\('vehicle'\);/);
-  assert.match(watcherSource, /!runpodResult\?\.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE/);
+  assert.match(watcherSource, /!triageAnswer\?\.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE/);
   assert.match(watcherSource, /error: 'no_vehicle_detected', review_required: false/);
   assert.match(watcherSource, /classifyLocally\(INFERENCE_SERVICE_URL, '\/infer\/detect', headers, buildForm\)/);
 });
 
 test('watcher takes ALPR and faces from the triage answer and only asks the VPS for what is missing', () => {
   // The triage answer (GPU or VPS) carries alpr + face; the VPS ALPR route is skipped when either answered.
-  assert.match(watcherSource, /const runpodAlpr = runpodResult\?\.alpr\?\.success \? runpodResult\.alpr : null;/);
-  assert.match(watcherSource, /const runpodFace = runpodResult\?\.face\?\.success && Array\.isArray\(runpodResult\.face\.faces\) \? runpodResult\.face : null;/);
-  assert.match(watcherSource, /runpodAlpr \|\| needLocalDetect\s*\?\s*Promise\.resolve\(null\)/);
-  // Provenance follows the machine that answered: a VPS or laptop triage is never labelled as RunPod's work.
-  assert.match(watcherSource, /const triageProvider = triageProviderLabel\(runpodResult\?\.triage_provider\);/);
+  assert.match(watcherSource, /const triageAlpr = triageAnswer\?\.alpr\?\.success \? triageAnswer\.alpr : null;/);
+  assert.match(watcherSource, /const triageFace = triageAnswer\?\.face\?\.success && Array\.isArray\(triageAnswer\.face\.faces\) \? triageAnswer\.face : null;/);
+  assert.match(watcherSource, /triageAlpr \|\| needLocalDetect\s*\?\s*Promise\.resolve\(null\)/);
+  // Provenance follows the machine that answered; an answer that does not say which machine is never relabelled.
+  assert.match(watcherSource, /const triageProvider = triageProviderLabel\(triageAnswer\?\.triage_provider\);/);
   assert.equal(triageProviderLabel('vps'), 'local_detect');
   assert.equal(triageProviderLabel('local_gpu'), 'laptop_gpu');
-  assert.equal(triageProviderLabel('gpu'), 'runpod');
-  assert.match(watcherSource, /frame\.alpr = \{ \.\.\.runpodAlpr, provider: triageProvider \};/);
-  assert.match(watcherSource, /frame\.face = \{ \.\.\.runpodFace, provider: triageProvider \};/);
-  assert.doesNotMatch(watcherSource, /provider: 'runpod' \}/, 'no answer is hard-labelled as RunPod');
+  assert.equal(triageProviderLabel('gpu'), 'unreported', 'the retired RunPod tier has no label');
+  assert.match(watcherSource, /frame\.alpr = \{ \.\.\.triageAlpr, provider: triageProvider \};/);
+  assert.match(watcherSource, /frame\.face = \{ \.\.\.triageFace, provider: triageProvider \};/);
   assert.match(watcherSource, /else if \(frame\.detect\?\.alpr\?\.success\) \{\s*frame\.alpr = \{ \.\.\.frame\.detect\.alpr, provider: 'local_detect' \};/);
   // the VPS ALPR is anchored on the vehicle boxes the detector already found
-  assert.match(watcherSource, /vehicle_bboxes: runpodVehicleBoxes\.length \? runpodVehicleBoxes : null/);
+  assert.match(watcherSource, /vehicle_bboxes: triageVehicleBoxes\.length \? triageVehicleBoxes : null/);
   assert.match(watcherSource, /vehicle_bboxes: localVehicleBoxes\.length \? localVehicleBoxes : null/);
 });
 
-test('watcher opens a bounded local-fallback circuit after an unavailable RunPod batch', () => {
-  assert.match(watcherSource, /const RUNPOD_BACKOFF_MS = Number\.isFinite\(configuredRunpodBackoff\) \? Math\.max\(0, configuredRunpodBackoff\) : 5 \* 60_000;/);
-  assert.match(watcherSource, /if \(Date\.now\(\) < runpodUnavailableUntil\) \{/);
-  assert.match(watcherSource, /runpod_inference_circuit_open/);
-  assert.match(watcherSource, /runpodUnavailableUntil = Date\.now\(\) \+ RUNPOD_BACKOFF_MS;/);
-  assert.match(watcherSource, /runpodUnavailableUntil = 0;/);
+test('watcher opens a bounded circuit after an unavailable laptop GPU batch', () => {
+  assert.match(watcherSource, /const LOCAL_GPU_BACKOFF_MS = Number\.isFinite\(configuredLocalGpuBackoff\) \? Math\.max\(0, configuredLocalGpuBackoff\) : 60_000;/);
+  assert.match(watcherSource, /if \(Date\.now\(\) < localGpuUnavailableUntil\) \{/);
+  assert.match(watcherSource, /local_gpu_inference_circuit_open/);
+  assert.match(watcherSource, /localGpuUnavailableUntil = Date\.now\(\) \+ LOCAL_GPU_BACKOFF_MS;/);
+  assert.match(watcherSource, /localGpuUnavailableUntil = 0;/);
+});
+
+test('RunPod is not part of the stack (owner ruling 2026-11-01)', () => {
+  assert.doesNotMatch(watcherSource, /RUNPOD_|runpod\.ai|classifyWithRunpodBatch|callRunpodEnhancement|runpod_fallback/);
+  assert.doesNotMatch(watcherSource, /frame\.runpod\b/);
 });
 
 function animalFrame(seconds, bbox, species, speciesConfidence, extra = {}) {
@@ -178,14 +182,14 @@ async function summaryFixture() {
   const frames = [
     { frame_index: 15, relative_timestamp_seconds: 1.0, sha256_hash: 'v1', quality_state: 'clear',
       alpr: { success: true, plate: 'ABC123', confidence: 0.9, plate_bbox: { x: 10, y: 10, width: 40, height: 12 } },
-      runpod: { vehicle: { detection: { bbox: { x: 100, y: 100, width: 300, height: 180 }, confidence: 0.98 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1', inference_provider: 'test' } },
+      triage: { vehicle: { detection: { bbox: { x: 100, y: 100, width: 300, height: 180 }, confidence: 0.98 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1', inference_provider: 'test' } },
       people: { success: true, people: [{ bbox: { x: 600, y: 150, width: 60, height: 190 }, confidence: 0.95, attributes: { appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'person-reidentification-retail-0288.xml', upper_body_colour: 'blue' } }] },
       face: { success: true, faces: [{ embedding: Array(128).fill(0.088), bbox: { x: 610, y: 150, width: 30, height: 30 } }] } },
     { frame_index: 30, relative_timestamp_seconds: 2.0, sha256_hash: 'v2', quality_state: 'clear',
       alpr: { success: true, plate: 'ABC123', confidence: 0.92 },
-      runpod: { vehicle: { detection: { bbox: { x: 130, y: 100, width: 300, height: 180 }, confidence: 0.97 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
+      triage: { vehicle: { detection: { bbox: { x: 130, y: 100, width: 300, height: 180 }, confidence: 0.97 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
     { frame_index: 45, relative_timestamp_seconds: 3.0, sha256_hash: 'v3', quality_state: 'clear',
-      runpod: { vehicle: { detection: { bbox: { x: 700, y: 300, width: 200, height: 120 }, confidence: 0.7 }, vehicle_colour: 'red', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
+      triage: { vehicle: { detection: { bbox: { x: 700, y: 300, width: 200, height: 120 }, confidence: 0.7 }, vehicle_colour: 'red', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
     animalFrame(40.0, { x: 100, y: 500, width: 60, height: 40 }, 'possum', 0.9),
     { frame_index: 900, relative_timestamp_seconds: 60.0, sha256_hash: 'g1', quality_state: 'glitch', visual_quality: 'degraded',
       people: { success: true, people: [{ bbox: { x: 1, y: 1, width: 500, height: 500 }, confidence: 0.3 }] } },
@@ -303,7 +307,6 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   assert.match(watcherSource, /attribute_confidence: confidence\(attributes\.vehicle_attribute_confidence\)/);
   assert.match(watcherSource, /vehicle_attribute_model: attributes\.vehicle_model_name/);
   assert.match(watcherSource, /callLaptopEnhancement\(fusedBytes/);
-  assert.match(watcherSource, /callRunpodEnhancement\(fusedBytes/);
   assert.match(watcherSource, /select\('source_event_id'\).*?\.neq\('review_state', 'superseded'\)/);
   assert.match(watcherSource, /VISION_MAX_OBSERVATION_DERIVATIVES \|\| 8/);
   assert.match(watcherSource, /gpuDerivatives\.reduce\(\(total, derivative\)/);
@@ -360,25 +363,27 @@ test('the VPS detector answer takes the shape of a GPU answer, with its own prov
   assert.equal(localTriageResult(null), null);
 });
 
-test('inference runs on one GPU detector model by default: the laptop first, RunPod as the fallback, never the VPS', () => {
+test('inference runs on one GPU detector model by default: the laptop GPU only, never the VPS or RunPod', () => {
   assert.equal(INFERENCE_POLICY, 'gpu_consistent');
-  assert.deepEqual(triageOrderFor('gpu_consistent'), ['local_gpu', 'gpu']);
-  assert.deepEqual(triageOrderFor('local_gpu_first'), ['local_gpu', 'vps', 'gpu']);
-  assert.deepEqual(triageOrderFor('vps_first'), ['vps', 'gpu']);
+  assert.deepEqual(triageOrderFor('gpu_consistent'), ['local_gpu']);
+  assert.deepEqual(triageOrderFor('local_gpu_first'), ['local_gpu', 'vps']);
+  assert.deepEqual(triageOrderFor('vps_first'), ['vps']);
   assert.deepEqual(triageOrderFor('vps_only'), ['vps']);
-  assert.deepEqual(triageOrderFor('gpu_first'), ['gpu', 'vps']);
-  assert.deepEqual(triageOrderFor(undefined), ['vps', 'gpu']);
+  assert.deepEqual(triageOrderFor(undefined), ['vps']);
+  for (const policy of ['gpu_consistent', 'local_gpu_first', 'vps_first', 'vps_only']) {
+    assert.ok(!triageOrderFor(policy).includes('gpu'), `${policy} never asks the retired RunPod tier`);
+  }
   // Recognition follows the same policy and the same model pin.
   assert.match(watcherSource, /const gpuResults = await recognitionAnswers\(pendingBatch, usage, pin\);/);
-  assert.match(watcherSource, /const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';/);
+  assert.match(watcherSource, /const needLocalDetect = !triageAnswer && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';/);
 });
 
 test('observation derivative candidates are bounded, quality-ranked and stored under the evidence identity', () => {
-  const summary = { motion_segments: [{ frames: Array.from({ length: 20 }, (_, index) => ({ file_path: `/tmp/${index}.jpg`, sha256_hash: `h${index}`, frame_index: index, relative_timestamp_seconds: index / 2, sharpness_score: index, quality_state: 'clear', runpod: { vehicles: [{ bbox: { x: 10 + index, y: 10, width: 80, height: 40 } }] } })) }] };
+  const summary = { motion_segments: [{ frames: Array.from({ length: 20 }, (_, index) => ({ file_path: `/tmp/${index}.jpg`, sha256_hash: `h${index}`, frame_index: index, relative_timestamp_seconds: index / 2, sharpness_score: index, quality_state: 'clear', triage: { vehicles: [{ bbox: { x: 10 + index, y: 10, width: 80, height: 40 } }] } })) }] };
   const candidates = candidateFramesForEvent(summary, { first_seen_seconds: 1, last_seen_seconds: 8, best_bbox: { x: 12, y: 10, width: 80, height: 40 } }, 'vehicle');
   assert.equal(candidates.length, 12);
   assert.ok(candidates[0].sharpness_score > candidates.at(-1).sharpness_score);
-  assert.deepEqual(enhancementProviderOrder(), ['laptop_gpu', 'runpod_fallback', 'worker_deterministic']);
+  assert.deepEqual(enhancementProviderOrder(), ['laptop_gpu', 'worker_deterministic']);
   assert.deepEqual(derivativeStoragePaths({ id: 'e1', organization_id: 'o1', metadata: { storage_bucket: 'private' } }, 'vehicle/ABC 123'), { bucket: 'private', original: 'org/o1/cctv-derivatives/e1/vehicle-ABC-123/original.jpg', enhanced: 'org/o1/cctv-derivatives/e1/vehicle-ABC-123/enhanced.jpg' });
 });
 
@@ -393,12 +398,13 @@ test('source and enhanced recognition stay separate and require human review', (
 });
 
 test('coverage counts the frames nobody answered, and the watcher defers instead of completing on a gap', () => {
-  const answered = { detect: { success: true }, runpod: { triage_provider: 'vps' } };
-  const gpuAnswered = { detect: { success: true }, runpod: { triage_provider: 'gpu' } };
-  const coverage = triageCoverage([answered, answered, gpuAnswered, {}, { detect: { success: false } }]);
-  assert.deepEqual(coverage, { frames_selected: 5, frames_triaged: 3, frames_untriaged: 2, triage_providers: { vps: 2, gpu: 1 } });
+  const answered = { detect: { success: true }, triage: { triage_provider: 'vps' } };
+  const gpuAnswered = { detect: { success: true }, triage: { triage_provider: 'local_gpu' } };
+  const unlabelled = { detect: { success: true } };
+  const coverage = triageCoverage([answered, answered, gpuAnswered, unlabelled, {}, { detect: { success: false } }]);
+  assert.deepEqual(coverage, { frames_selected: 6, frames_triaged: 4, frames_untriaged: 2, triage_providers: { vps: 2, local_gpu: 1, unreported: 1 } });
   assert.deepEqual(triageCoverage([]), { frames_selected: 0, frames_triaged: 0, frames_untriaged: 0, triage_providers: {} });
-  // The 2026-09-20 incident: RunPod timed out once, the circuit breaker skipped 19 batches, and the job completed
+  // The 2026-09-20 incident: the (since retired) RunPod tier timed out once, the circuit breaker skipped 19 batches, and the job completed
   // as "no sightings" for 114 unexamined frames. A coverage gap now defers the job through the governed RPC.
   assert.match(watcherSource, /if \(coverage\?\.frames_untriaged > 0\) \{[\s\S]*?supabase\.rpc\('defer_cctv_inference_job'/);
   assert.match(watcherSource, /const unanswered = frameInputs\.filter\(\(\{ frame \}\) => !frame\.detect\);/, 'unanswered frames get one more pass before the gate');

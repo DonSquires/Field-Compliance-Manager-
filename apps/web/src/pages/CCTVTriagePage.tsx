@@ -34,6 +34,7 @@ type TriageError = ConsoleFailure & { retry: (() => void) | null };
 type DecisionReceipt = { id: string; title: string; text: string };
 
 const ADVANCE_KEY = 'fcm.cctvTriage.advanceAfterDecision';
+const SHORTCUTS_KEY = 'fcm.cctvTriage.characterShortcuts';
 const DECISION_TEXT: Partial<Record<ReviewAction, string>> = {
   accept: 'Accepted',
   reject: 'Rejected',
@@ -43,6 +44,10 @@ const DECISION_TEXT: Partial<Record<ReviewAction, string>> = {
 
 function readAdvancePreference(): boolean {
   try { return window.localStorage.getItem(ADVANCE_KEY) !== 'off'; } catch { return true; }
+}
+
+function readShortcutPreference(): boolean {
+  try { return window.localStorage.getItem(SHORTCUTS_KEY) !== 'off'; } catch { return true; }
 }
 
 const KIND_ICON: Record<EntityKind, React.ReactNode> = {
@@ -97,6 +102,9 @@ const CCTVTriagePage: React.FC = () => {
   const [originalDerivativeStill, setOriginalDerivativeStill] = useState<string | null>(null);
   const [enhancedStill, setEnhancedStill] = useState<string | null>(null);
   const [advanceAfterDecision, setAdvanceAfterDecision] = useState(readAdvancePreference);
+  const [characterShortcuts, setCharacterShortcuts] = useState(readShortcutPreference);
+  // With auto-advance off, the sighting just decided stays open even though the pending queue no longer lists it.
+  const [heldId, setHeldId] = useState<string | null>(null);
   const [lastDecision, setLastDecision] = useState<DecisionReceipt | null>(null);
 
   const load = useCallback(async () => {
@@ -152,7 +160,10 @@ const CCTVTriagePage: React.FC = () => {
     .sort((a, b) => a.observedAtMs - b.observedAtMs), [observations, kindFilter, showReviewed]);
 
   const pendingCount = useMemo(() => observations.filter((observation) => !isReviewed(observation)).length, [observations]);
-  const selected = filtered.find((observation) => observation.id === selectedId) ?? filtered[0] ?? null;
+  const selected = filtered.find((observation) => observation.id === selectedId)
+    ?? (heldId !== null && heldId === selectedId ? observations.find((observation) => observation.id === heldId) : undefined)
+    ?? filtered[0]
+    ?? null;
   const selectedCamera = selected?.importId ? cameras[selected.importId] ?? null : null;
   const captureRecognition = selected ? asRecord(selected.attributes.capture_recognition) : {};
   const enhancementReceipt = asRecord(captureRecognition.enhancement) as EnhancementReceipt;
@@ -259,12 +270,22 @@ const CCTVTriagePage: React.FC = () => {
     const saved = await runReview(observation, action);
     if (!saved) return;
     setLastDecision({ id: observation.id, title: entityTitle(observation), text: DECISION_TEXT[action] ?? 'Saved' });
-    if (nextId) setSelectedId(nextId);
+    if (nextId) {
+      setSelectedId(nextId);
+    } else if (!advanceAfterDecision) {
+      setSelectedId(observation.id);
+      setHeldId(observation.id);
+    }
   }, [advanceAfterDecision, filtered, runReview]);
 
   const toggleAdvance = useCallback((value: boolean) => {
     setAdvanceAfterDecision(value);
     try { window.localStorage.setItem(ADVANCE_KEY, value ? 'on' : 'off'); } catch { /* preference is optional */ }
+  }, []);
+
+  const toggleShortcuts = useCallback((value: boolean) => {
+    setCharacterShortcuts(value);
+    try { window.localStorage.setItem(SHORTCUTS_KEY, value ? 'on' : 'off'); } catch { /* preference is optional */ }
   }, []);
 
   const reopenDecision = useCallback((id: string) => {
@@ -276,7 +297,7 @@ const CCTVTriagePage: React.FC = () => {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const action = triageKeyAction({ key: event.key, targetTag: target?.tagName, isEditable: target?.isContentEditable, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey });
+      const action = triageKeyAction({ key: event.key, targetTag: target?.tagName, isEditable: target?.isContentEditable, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey, repeat: event.repeat, characterShortcuts });
       if (!action) return;
       if (action === 'next' || action === 'previous') {
         event.preventDefault();
@@ -290,7 +311,7 @@ const CCTVTriagePage: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [decide, filtered, reviewBusy, selected]);
+  }, [characterShortcuts, decide, filtered, reviewBusy, selected]);
 
   const runVehicleAttributeReview = useCallback(async (observation: ConsoleObservation, action: 'confirm' | 'correct' | 'reject') => {
     if (action === 'correct' && !correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim()) {
@@ -402,10 +423,17 @@ const CCTVTriagePage: React.FC = () => {
         ))}
         <label className="cctv-console__toggle"><input type="checkbox" checked={showReviewed} onChange={(event) => setShowReviewed(event.target.checked)} /> show reviewed</label>
         <label className="cctv-console__toggle"><input type="checkbox" checked={advanceAfterDecision} onChange={(event) => toggleAdvance(event.target.checked)} /> move to next after deciding</label>
+        <label className="cctv-console__toggle"><input type="checkbox" checked={characterShortcuts} onChange={(event) => toggleShortcuts(event.target.checked)} /> single-key shortcuts</label>
         <span className="cctv-triage__count">{pendingCount} pending</span>
-        <span className="cctv-triage__keys" aria-label="Keyboard shortcuts: J next, K previous, A accept, R reject">
-          <Keyboard size={13} aria-hidden="true" /><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> accept · <kbd>R</kbd> reject
-        </span>
+        {characterShortcuts ? (
+          <span className="cctv-triage__keys" aria-label="Keyboard shortcuts: J or down arrow next, K or up arrow previous, A accept, R reject">
+            <Keyboard size={13} aria-hidden="true" /><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> accept · <kbd>R</kbd> reject
+          </span>
+        ) : (
+          <span className="cctv-triage__keys" aria-label="Keyboard shortcuts: down arrow next, up arrow previous">
+            <Keyboard size={13} aria-hidden="true" /><kbd>↓</kbd>/<kbd>↑</kbd> move
+          </span>
+        )}
       </div>
 
       {lastDecision ? (
@@ -627,10 +655,10 @@ const CCTVTriagePage: React.FC = () => {
                     <label className="cctv-entity__field">Plate (if you can read it) <input value={newPlate} onChange={(event) => setNewPlate(event.target.value.toUpperCase())} placeholder="e.g. ABC123" /></label>
                   ) : null}
                   <div className="cctv-entity__actions">
-                    <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'accept')} aria-keyshortcuts="A"><Check size={14} aria-hidden="true" /> {selected.kind === 'vehicle' && (selected.plate || newPlate.trim()) ? 'Accept · record vehicle' : 'Accept'}</button>
+                    <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'accept')} aria-keyshortcuts={characterShortcuts ? 'A' : undefined}><Check size={14} aria-hidden="true" /> {selected.kind === 'vehicle' && (selected.plate || newPlate.trim()) ? 'Accept · record vehicle' : 'Accept'}</button>
                     {selected.kind === 'person' && !selected.personRecordId ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void decide(selected, 'new_person')}><UserRound size={14} aria-hidden="true" /> New person</button> : null}
                     {selected.kind === 'vehicle' && !selected.plate ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newPlate.trim()} onClick={() => void decide(selected, 'new_vehicle')}><Car size={14} aria-hidden="true" /> Record vehicle</button> : null}
-                    <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'reject')} aria-keyshortcuts="R"><X size={14} aria-hidden="true" /> Not a {selected.kind}</button>
+                    <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'reject')} aria-keyshortcuts={characterShortcuts ? 'R' : undefined}><X size={14} aria-hidden="true" /> Not a {selected.kind}</button>
                   </div>
                 </>
               ) : (

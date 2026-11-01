@@ -31,7 +31,7 @@ const observation = {
   review_notes: null,
 };
 
-test('CCTV triage uses the Admin light palette without changing its governed review workflow', async ({ page }) => {
+test('CCTV triage uses the shared Admin dark tokens without changing its governed review workflow', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   const writeCalls: string[] = [];
   let observationQuery = '';
@@ -56,15 +56,31 @@ test('CCTV triage uses the Admin light palette without changing its governed rev
   await signInAsAdmin(page, '/admin/field-ops?area=cctv-triage');
   const triage = page.locator('.cctv-triage');
   await expect(triage).toBeVisible();
-  await expect(page.locator('.place-context-banner, .operating-spine')).toHaveCount(0);
+  // Triage is an organisation-wide evidence workspace: it says so and offers no service-place filter.
+  await expect(page.locator('.operating-spine')).toHaveCount(0);
+  const placeContext = page.getByRole('region', { name: 'Service place context' });
+  await expect(placeContext).toContainText('Organisation-wide evidence workspace · not filtered by service place');
+  await expect(placeContext.getByRole('combobox')).toHaveCount(0);
   await expect(triage.getByRole('heading', { name: 'Review observations' })).toBeVisible();
   await expect(triage.getByRole('heading', { name: 'Person · Person at north gate' })).toBeVisible();
   const viewport = page.viewportSize();
   await expect(triage.getByRole('heading', { name: 'Review observations' })).toHaveCSS('font-size', (viewport?.width ?? 0) <= 900 ? '26px' : '30px');
   expect(observationQuery).toContain(`organization_id=eq.${organizationId}`);
-  await expect(triage.locator('.cctv-triage__detail')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-  await expect(triage.getByRole('button', { name: 'Accept', exact: true })).toHaveCSS('background-color', 'rgb(180, 35, 50)');
-  await expect(page).toHaveScreenshot('cctv-triage-light-queue-first-viewport.png');
+  // The Admin shell is dark-only (shared design tokens, 2026-10-24); the console tokens must reach the triage surfaces.
+  await expect(page.locator('.admin-shell')).toHaveAttribute('data-theme', 'dark');
+  const token = (name: string) => triage.evaluate((element, variable) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = `var(${variable})`;
+    element.appendChild(probe);
+    const value = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return value;
+  }, name);
+  await expect(triage.locator('.cctv-triage__detail')).toHaveCSS('background-color', await token('--cc-surface'));
+  await expect(triage.getByRole('button', { name: /^Accept$/ })).toHaveCSS('background-color', await token('--cc-brand'));
+  await expect(triage.getByRole('button', { name: /^Accept$/ })).toHaveAttribute('aria-keyshortcuts', 'A');
+  await expect(triage.getByLabel('single-key shortcuts')).toBeChecked();
+  await expect(page).toHaveScreenshot('cctv-triage-queue-first-viewport.png');
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(writeCalls).toEqual([]);

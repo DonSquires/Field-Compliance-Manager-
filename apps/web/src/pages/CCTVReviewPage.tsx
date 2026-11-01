@@ -1596,8 +1596,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 coverage ? (
                   <div className={`cctv-coverage-panel${coverage.framesUnanswered > 0 || coverage.mixedDetectors ? ' is-warning' : ''}`} aria-label="Detector coverage">
                     <strong>Detector coverage · {engineLabel(coverage.engineVersion)}{coverage.pinnedModel ? ` · ${coverage.pinnedModel}` : ''}</strong>
-                    {coverage.capped && coverage.framesParsed ? (
-                      <span>The detector examined {coverage.framesExamined.toLocaleString()} sampled frame{coverage.framesExamined === 1 ? '' : 's'} spread across {coverage.framesParsed.toLocaleString()} motion frames (about 1 in every {Math.max(1, Math.round(coverage.framesParsed / Math.max(1, coverage.framesSampled))).toLocaleString()}). Motion between samples was not examined, so a brief sighting there can be missed — report it from the console if you see one.</span>
+                    {coverage.capped && coverage.motionFrames ? (
+                      <span>The detector examined {coverage.framesExamined.toLocaleString()} sampled frame{coverage.framesExamined === 1 ? '' : 's'} spread across {coverage.motionFrames.toLocaleString()} motion frames (about 1 in every {Math.max(1, Math.round(coverage.motionFrames / Math.max(1, coverage.framesSampled))).toLocaleString()}). Motion between samples was not examined, so a brief sighting there can be missed — report it from the console if you see one.</span>
+                    ) : coverage.capped ? (
+                      <span>The detector examined {coverage.framesExamined.toLocaleString()} sampled motion frame{coverage.framesExamined === 1 ? '' : 's'}; this clip had more motion than the sampling budget{coverage.framesParsed ? ` (${coverage.framesParsed.toLocaleString()} source frame positions parsed, static footage included)` : ''}. Motion between samples was not examined, so a brief sighting there can be missed — report it from the console if you see one.</span>
                     ) : (
                       <span>The detector examined {coverage.framesExamined.toLocaleString()} of {coverage.framesSampled.toLocaleString()} motion frame{coverage.framesSampled === 1 ? '' : 's'}.</span>
                     )}

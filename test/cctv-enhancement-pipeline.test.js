@@ -9,7 +9,6 @@ const watcherHealthcheck = read('services/vision/watcher_healthcheck.js');
 const visionDockerfile = read('services/vision/Dockerfile');
 const derivativeHelpers = read('services/vision/observation_derivatives.js');
 const inference = read('services/fcm-inference/app.py');
-const runpodHandler = read('services/fcm-inference/runpod_handler.py');
 const superResolution = read('services/fcm-inference/super_resolution.py');
 const models = read('services/fcm-inference/download_models.py');
 const migration = read('supabase/migrations/20260925140000_cctv_observation_derivatives.sql');
@@ -19,12 +18,19 @@ const vpsCompose = read('docker-compose.full.yml');
 const laptopCompose = read('docker-compose.laptop-worker.yml');
 const laptopUpdater = read('deploy/laptop-worker/update-watcher.ps1');
 
-test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and RunPod is the GPU fallback', () => {
+test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and RunPod is not part of the stack', () => {
   assert.match(vpsCompose, /VISION_INFERENCE_POLICY: \$\{VISION_INFERENCE_POLICY:-gpu_consistent\}/);
   assert.match(vpsCompose, /VISION_PINNED_DETECTOR_MODEL: \$\{VISION_PINNED_DETECTOR_MODEL:-rf-detr-large-704-coco\}/);
-  assert.match(watcher, /if \(policy === 'gpu_consistent'\) return \['local_gpu', 'gpu'\]/);
-  assert.match(watcher, /if \(policy === 'local_gpu_first'\) return \['local_gpu', 'vps', 'gpu'\]/);
-  assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?callRunpodEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
+  assert.match(watcher, /if \(policy === 'gpu_consistent'\) return \['local_gpu'\];/);
+  assert.match(watcher, /if \(policy === 'local_gpu_first'\) return \['local_gpu', 'vps'\];/);
+  assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
+  // Owner ruling 2026-11-01 (docs/CCTV_INFERENCE_TIER.md): the stack is Supabase, the VPS, the laptop GPU, Ollama
+  // Cloud, OpenAI, GitHub and Vercel. Nothing in the vision path may call or configure RunPod.
+  for (const [name, source] of [['watcher', watcher], ['inference', inference], ['vps compose', vpsCompose], ['laptop compose', laptopCompose]]) {
+    assert.doesNotMatch(source, /RUNPOD_|runpod\.(ai|io)|import runpod|callRunpodEnhancement/i, `${name} carries no RunPod wiring`);
+  }
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'services/fcm-inference/runpod_handler.py')), false);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'services/fcm-capture-inference')), false);
   assert.match(laptopCompose, /VISION_INFERENCE_POLICY: gpu_consistent/);
   assert.match(laptopCompose, /VISION_PINNED_DETECTOR_MODEL: rf-detr-large-704-coco/);
   assert.match(laptopCompose, /DETECTOR_MODEL: rf-detr-large-704-coco/);
@@ -34,7 +40,6 @@ test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and 
   assert.doesNotMatch(vpsCompose, /\$\{OLLAMA_VISION_(URL|MODEL)/);
   assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_URL: http:\/\/fcm-inference:3000/);
   assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_API_KEY: \$\{LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required\}/);
-  assert.match(laptopCompose, /RUNPOD_API_URL:/);
   assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
   assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
   assert.match(laptopUpdater, /git worktree add --detach \$temporaryWorktree origin\/main/);
@@ -85,8 +90,8 @@ test('face candidates carry model and crop provenance on both inference paths', 
   assert.match(inference, /"alignment_basis": alignment_basis/);
   assert.match(inference, /"face_detector_model": YUNET_MODEL_PATH\.name/);
   assert.match(inference, /"face_embedding_model": SFACE_MODEL_PATH\.name/);
-  assert.match(runpodHandler, /_face_sync/);
-  assert.doesNotMatch(runpodHandler, /detector, recognizer = _face_models\(\)/);
+  assert.match(inference, /def _face_sync\(image: np\.ndarray\)/);
+  assert.match(inference, /faces = _face_sync\(image\)/, 'the batch answer uses the same face path as \/infer\/face');
 });
 
 test('derivatives are bounded, private, evidence-scoped and persisted only through the service writer', () => {
@@ -116,7 +121,8 @@ test('photos use immutable evidence, the laptop-first worker, and a service-only
   assert.match(photoMigration, /REVOKE ALL ON FUNCTION public\.complete_cctv_still_inference[\s\S]*authenticated/);
   assert.match(photoMigration, /GRANT EXECUTE ON FUNCTION public\.complete_cctv_still_inference[\s\S]*TO service_role/);
   assert.match(watcher, /evidence\.evidence_kind === 'photo'/);
-  assert.match(watcher, /callLaptopEnhancement\(originalBytes[\s\S]*recogniseDeterministicFallback\(originalBytes, originalBytes\)[\s\S]*callRunpodEnhancement\(originalBytes/);
+  assert.match(watcher, /callLaptopEnhancement\(originalBytes[\s\S]*recogniseDeterministicFallback\(originalBytes, originalBytes\)/);
+  assert.doesNotMatch(watcher, /callRunpodEnhancement/);
   assert.match(watcher, /complete_cctv_still_inference/);
   assert.match(watcher, /playback_transcode_profile: 'photo-normalised-jpeg-v1'/);
 });

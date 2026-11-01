@@ -183,6 +183,67 @@ function associationCost(track, detection, timestamp, options) {
   return distance / Math.max(gate, 0.001) + (1 - iou) * 0.5 + appearanceTerm;
 }
 
+// Minimum-cost assignment (Hungarian, rows <= columns); returns the column chosen for each row.
+function hungarian(cost) {
+  const rows = cost.length;
+  const columns = cost[0].length;
+  const u = new Array(rows + 1).fill(0);
+  const v = new Array(columns + 1).fill(0);
+  const owner = new Array(columns + 1).fill(0);
+  const way = new Array(columns + 1).fill(0);
+  for (let row = 1; row <= rows; row += 1) {
+    owner[0] = row;
+    let column = 0;
+    const minimum = new Array(columns + 1).fill(Infinity);
+    const used = new Array(columns + 1).fill(false);
+    do {
+      used[column] = true;
+      const current = owner[column];
+      let delta = Infinity;
+      let next = 0;
+      for (let candidate = 1; candidate <= columns; candidate += 1) {
+        if (used[candidate]) continue;
+        const reduced = cost[current - 1][candidate - 1] - u[current] - v[candidate];
+        if (reduced < minimum[candidate]) { minimum[candidate] = reduced; way[candidate] = column; }
+        if (minimum[candidate] < delta) { delta = minimum[candidate]; next = candidate; }
+      }
+      for (let candidate = 0; candidate <= columns; candidate += 1) {
+        if (used[candidate]) { u[owner[candidate]] += delta; v[candidate] -= delta; } else minimum[candidate] -= delta;
+      }
+      column = next;
+    } while (owner[column] !== 0);
+    do { const previous = way[column]; owner[column] = owner[previous]; column = previous; } while (column);
+  }
+  const chosen = new Array(rows).fill(-1);
+  for (let column = 1; column <= columns; column += 1) if (owner[column]) chosen[owner[column] - 1] = column - 1;
+  return chosen;
+}
+
+// One-to-one association over the gated pairs that continues as many tracks as possible and, among those,
+// has the lowest total cost. Greedy cheapest-first can let one short step strand a neighbouring track.
+function assignPairs(pairs) {
+  if (!pairs.length) return [];
+  const trackIds = [...new Set(pairs.map((pair) => pair.trackIndex))];
+  const detectionIds = [...new Set(pairs.map((pair) => pair.detectionIndex))];
+  const transpose = trackIds.length > detectionIds.length;
+  const rowIds = transpose ? detectionIds : trackIds;
+  const columnIds = transpose ? trackIds : detectionIds;
+  // A forbidden pair costs more than every allowed pair together, so one more continued track always wins.
+  const forbidden = pairs.reduce((sum, pair) => sum + pair.cost, 0) + 1;
+  const matrix = rowIds.map(() => new Array(columnIds.length).fill(forbidden));
+  const allowed = new Map();
+  for (const pair of pairs) {
+    const row = rowIds.indexOf(transpose ? pair.detectionIndex : pair.trackIndex);
+    const column = columnIds.indexOf(transpose ? pair.trackIndex : pair.detectionIndex);
+    matrix[row][column] = pair.cost;
+    allowed.set(`${row}:${column}`, pair);
+  }
+  return hungarian(matrix)
+    .map((column, row) => allowed.get(`${row}:${column}`))
+    .filter(Boolean)
+    .sort((a, b) => a.trackIndex - b.trackIndex);
+}
+
 // detectionsForFrame(frame) -> [{ bbox, confidence, embedding?, embeddingModel?, payload? }]
 function trackDetections(frames, detectionsForFrame, overrides = {}) {
   const options = { ...TRACKER_DEFAULTS, ...overrides };
@@ -222,12 +283,8 @@ function trackDetections(frames, detectionsForFrame, overrides = {}) {
         if (cost !== null) pairs.push({ trackIndex, detectionIndex, cost });
       }
     }
-    pairs.sort((a, b) => a.cost - b.cost || a.trackIndex - b.trackIndex || a.detectionIndex - b.detectionIndex);
-    const usedTracks = new Set();
     const usedDetections = new Set();
-    for (const pair of pairs) {
-      if (usedTracks.has(pair.trackIndex) || usedDetections.has(pair.detectionIndex)) continue;
-      usedTracks.add(pair.trackIndex);
+    for (const pair of assignPairs(pairs)) {
       usedDetections.add(pair.detectionIndex);
       updateTrack(tracks[pair.trackIndex], detections[pair.detectionIndex], frame, timestamp);
     }
@@ -317,6 +374,7 @@ module.exports = {
   ENGINE_VERSION,
   TRACKER_DEFAULTS,
   trackDetections,
+  assignPairs,
   evidenceWeightedConfidence,
   bboxIou,
   bboxCenter,
