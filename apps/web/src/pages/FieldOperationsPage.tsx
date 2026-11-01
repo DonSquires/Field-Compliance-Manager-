@@ -24,7 +24,7 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'person-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'person-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-quality' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;

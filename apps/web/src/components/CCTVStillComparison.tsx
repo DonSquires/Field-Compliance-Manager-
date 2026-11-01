@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Image, ScanSearch, ShieldCheck } from 'lucide-react';
 import { analyseFramePixels, cssFilterFor, planEnhancement } from '../lib/cctvEnhance';
+import type { DetectionBox } from '../lib/cctvQuality';
 import './CCTVStillComparison.css';
 
 export type EnhancementReceipt = {
@@ -28,12 +29,23 @@ export type CCTVStillComparisonProps = {
   provider?: string | null;
   recognitionComparison?: RecognitionComparison | null;
   subjectLabel: string;
+  /** Detector box over `original`; pass it only when `original` is the whole frame the box was measured on. */
+  detection?: DetectionBox | null;
 };
 
 const ANALYSIS_WIDTH = 128;
 const MAX_PREVIEW_WIDTH = 1600;
 
-export function CCTVStillComparison({ original, enhanced = null, receipt = null, provider = null, recognitionComparison = null, subjectLabel }: CCTVStillComparisonProps) {
+export function DetectionOverlay({ box, subjectLabel }: { box: DetectionBox; subjectLabel: string }) {
+  return <span
+    className="cctv-still-compare__box"
+    style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${box.width}%`, height: `${box.height}%` }}
+    role="img"
+    aria-label={`Detector box around the ${subjectLabel}`}
+  />;
+}
+
+export function CCTVStillComparison({ original, enhanced = null, receipt = null, provider = null, recognitionComparison = null, subjectLabel, detection = null }: CCTVStillComparisonProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const storedDerivative = Boolean(enhanced);
@@ -89,8 +101,8 @@ export function CCTVStillComparison({ original, enhanced = null, receipt = null,
     </header>
     <div className="cctv-still-compare__grid">
       <figure>
-        <div className="cctv-still-compare__image"><img src={original} alt={`Original observation still for ${subjectLabel}`} /></div>
-        <figcaption><strong>Original observation still</strong><span>Source crop · unchanged</span></figcaption>
+        <div className="cctv-still-compare__image"><img src={original} alt={`Original observation still for ${subjectLabel}`} />{detection ? <DetectionOverlay box={detection} subjectLabel={subjectLabel} /> : null}</div>
+        <figcaption><strong>Original observation still</strong><span>{detection ? 'Full frame · unchanged · detector box outlined' : 'Source crop · unchanged'}</span></figcaption>
       </figure>
       <figure>
         <div className="cctv-still-compare__image">

@@ -138,6 +138,7 @@ const CCTVVideoLibraryPage = React.lazy(() => import('../pages/CCTVVideoLibraryP
 const CCTVImportPage = React.lazy(() => import('../pages/CCTVImportPage'));
 const CCTVConsolePage = React.lazy(() => import('../pages/CCTVConsolePage'));
 const CCTVTriagePage = React.lazy(() => import('../pages/CCTVTriagePage'));
+const CCTVQualityPage = React.lazy(() => import('../pages/CCTVQualityPage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
@@ -596,7 +597,7 @@ const AdminShell: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage');
+  const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage' || fieldOpsSubArea === 'cctv-quality');
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
     // While subscriptions are still loading, isModuleEnabled() answers false for everything; that is "unknown", not "denied".
     // Role checks still apply, and the route effect re-evaluates the module gate once loading finishes.
@@ -806,6 +807,8 @@ const AdminShell: React.FC = () => {
             return <CCTVConsolePage />;
           case 'cctv-triage':
             return <CCTVTriagePage />;
+          case 'cctv-quality':
+            return <CCTVQualityPage />;
           case 'cctv-review':
             return <CCTVReviewPage />;
           case 'cctv-library':

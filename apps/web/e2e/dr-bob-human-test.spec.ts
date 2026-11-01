@@ -255,7 +255,7 @@ test.describe("Dr. Bob's human browser test", () => {
     { name: 'Mission Control', routes: ['/admin/hub', '/admin/approvals'] },
     { name: 'Field Operations core', routes: ['/admin/field-ops', '/admin/field-ops?area=dispatch', '/admin/field-ops?area=patrol', '/admin/field-ops?area=live-map', '/admin/field-ops?area=field-reports', '/admin/field-ops?area=officer-activity', '/admin/field-ops?area=welfare-alerts', '/admin/field-ops?area=breach-review', '/admin/field-ops?area=vehicle-search', '/admin/field-ops?area=observation-search', '/admin/field-ops?area=debrief-followup'] },
     { name: 'Field specialties', routes: ['/admin/field-ops?area=parking', '/admin/field-ops?area=noise-control', '/admin/field-ops?area=biosecurity', '/admin/field-ops?area=smoke-control'] },
-    { name: 'Video evidence', routes: ['/admin/field-ops?area=cctv-console', '/admin/field-ops?area=cctv-triage', '/admin/field-ops?area=cctv-review', '/admin/field-ops?area=cctv-library', '/admin/field-ops?area=cctv-import'] },
+    { name: 'Video evidence', routes: ['/admin/field-ops?area=cctv-console', '/admin/field-ops?area=cctv-triage', '/admin/field-ops?area=cctv-quality', '/admin/field-ops?area=cctv-review', '/admin/field-ops?area=cctv-library', '/admin/field-ops?area=cctv-import'] },
     { name: 'Site and location workspaces', routes: ['/admin/site-360', '/admin/locations', '/admin/zones'] },
     { name: 'Geofence and Workshop', routes: ['/admin/sites', '/admin/workshop'] },
     { name: 'Clients and workforce', routes: ['/admin/crm', '/admin/relationships', '/admin/client-setup', '/admin/onboarding', '/admin/handoffs', '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/users'] },

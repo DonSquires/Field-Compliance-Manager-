@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Car, Check, Database, Eye, ExternalLink, History, Loader2, PawPrint, RefreshCw, UserRound, X } from 'lucide-react';
+import { AlertTriangle, Car, Check, Database, Eye, ExternalLink, Gauge, History, Keyboard, Loader2, PawPrint, RefreshCw, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { CCTVStillComparison, type EnhancementReceipt } from '../components/CCTVStillComparison';
+import { CCTVStillComparison, DetectionOverlay, type EnhancementReceipt } from '../components/CCTVStillComparison';
 import { supabase } from '../lib/supabase';
+import { adjacentId, detectionBox, engineLabel, nextPendingId, observationProvenance, triageKeyAction } from '../lib/cctvQuality';
 import {
   asRecord,
   candidateAction,
@@ -30,6 +31,19 @@ import './CCTVTriagePage.css';
 type KindFilter = 'all' | EntityKind;
 type CameraLookup = { label: string; place: string; timeZone: string };
 type TriageError = ConsoleFailure & { retry: (() => void) | null };
+type DecisionReceipt = { id: string; title: string; text: string };
+
+const ADVANCE_KEY = 'fcm.cctvTriage.advanceAfterDecision';
+const DECISION_TEXT: Partial<Record<ReviewAction, string>> = {
+  accept: 'Accepted',
+  reject: 'Rejected',
+  new_person: 'Recorded as a new person',
+  new_vehicle: 'Recorded as a new vehicle',
+};
+
+function readAdvancePreference(): boolean {
+  try { return window.localStorage.getItem(ADVANCE_KEY) !== 'off'; } catch { return true; }
+}
 
 const KIND_ICON: Record<EntityKind, React.ReactNode> = {
   person: <UserRound size={14} aria-hidden="true" />,
@@ -82,6 +96,8 @@ const CCTVTriagePage: React.FC = () => {
   const [correctYear, setCorrectYear] = useState('');
   const [originalDerivativeStill, setOriginalDerivativeStill] = useState<string | null>(null);
   const [enhancedStill, setEnhancedStill] = useState<string | null>(null);
+  const [advanceAfterDecision, setAdvanceAfterDecision] = useState(readAdvancePreference);
+  const [lastDecision, setLastDecision] = useState<DecisionReceipt | null>(null);
 
   const load = useCallback(async () => {
     if (!organizationId) {
@@ -146,6 +162,10 @@ const CCTVTriagePage: React.FC = () => {
   const enhancedStoragePath = typeof captureRecognition.enhanced_storage_path === 'string' ? captureRecognition.enhanced_storage_path : null;
   const enhancedStorageBucket = typeof captureRecognition.enhanced_storage_bucket === 'string' ? captureRecognition.enhanced_storage_bucket : 'bob-uploads';
   const comparisonOriginal = originalDerivativeStill || selected?.thumbnail || null;
+  const selectedBox = selected ? detectionBox(selected) : null;
+  // The box is measured on the whole frame, so it is drawn only over the full-frame thumbnail, never a crop.
+  const originalIsFullFrame = Boolean(selected?.thumbnail) && comparisonOriginal === selected?.thumbnail;
+  const provenance = selected ? observationProvenance(selected) : null;
 
   useEffect(() => {
     let active = true;
@@ -211,7 +231,7 @@ const CCTVTriagePage: React.FC = () => {
     setObservations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   }, []);
 
-  const runReview = useCallback(async (observation: ConsoleObservation, action: ReviewAction, targetId: string | null = null) => {
+  const runReview = useCallback(async (observation: ConsoleObservation, action: ReviewAction, targetId: string | null = null): Promise<boolean> => {
     setReviewBusy(`${observation.id}:${action}`);
     setReviewMessage(null);
     const { data, error: reviewError } = await supabase.rpc('review_cctv_entity_observation', {
@@ -223,13 +243,54 @@ const CCTVTriagePage: React.FC = () => {
       p_notes: notes.trim() || null,
     });
     setReviewBusy(null);
-    if (reviewError) { setReviewMessage(reviewError.message); return; }
+    if (reviewError) { setReviewMessage(reviewError.message); return false; }
     const updated = data && typeof data === 'object' ? toObservation(data as Record<string, unknown>) : null;
     if (updated) patchObservation(updated);
     setReviewMessage(action === 'reject' ? 'Rejected.' : action === 'accept_portfolio' ? 'Applied to the whole portfolio.' : 'Saved.');
     // A portfolio-wide accept touches rows beyond the one the RPC returns.
     if (action === 'accept_portfolio') void load();
+    return true;
   }, [newName, newPlate, notes, patchObservation, load]);
+
+  // One decision per sighting, by design: there is no bulk accept, because every accepted sighting is a
+  // human claim about a person, vehicle or animal at a place and must be attributable to the reviewer who saw it.
+  const decide = useCallback(async (observation: ConsoleObservation, action: ReviewAction) => {
+    const nextId = advanceAfterDecision ? nextPendingId(filtered, observation.id) : null;
+    const saved = await runReview(observation, action);
+    if (!saved) return;
+    setLastDecision({ id: observation.id, title: entityTitle(observation), text: DECISION_TEXT[action] ?? 'Saved' });
+    if (nextId) setSelectedId(nextId);
+  }, [advanceAfterDecision, filtered, runReview]);
+
+  const toggleAdvance = useCallback((value: boolean) => {
+    setAdvanceAfterDecision(value);
+    try { window.localStorage.setItem(ADVANCE_KEY, value ? 'on' : 'off'); } catch { /* preference is optional */ }
+  }, []);
+
+  const reopenDecision = useCallback((id: string) => {
+    setShowReviewed(true);
+    setKindFilter('all');
+    setSelectedId(id);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const action = triageKeyAction({ key: event.key, targetTag: target?.tagName, isEditable: target?.isContentEditable, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey });
+      if (!action) return;
+      if (action === 'next' || action === 'previous') {
+        event.preventDefault();
+        const id = adjacentId(filtered, selected?.id ?? null, action === 'next' ? 1 : -1);
+        if (id) setSelectedId(id);
+        return;
+      }
+      if (!selected || isReviewed(selected) || reviewBusy !== null) return;
+      event.preventDefault();
+      void decide(selected, action);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [decide, filtered, reviewBusy, selected]);
 
   const runVehicleAttributeReview = useCallback(async (observation: ConsoleObservation, action: 'confirm' | 'correct' | 'reject') => {
     if (action === 'correct' && !correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim()) {
@@ -320,7 +381,10 @@ const CCTVTriagePage: React.FC = () => {
           <h1 className="page-title"><Eye size={20} aria-hidden="true" /> Review observations</h1>
           <p className="page-subtitle">Work through AI-flagged people, vehicles and animals one at a time - confirm identities, confirm or correct AI suggestions, and clear the queue.</p>
         </div>
-        <button type="button" className="page-action" onClick={() => void load()} disabled={loading}><RefreshCw size={14} aria-hidden="true" /> Refresh</button>
+        <div className="cctv-triage__header-actions">
+          <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-quality')}><Gauge size={14} aria-hidden="true" /> Detection quality</button>
+          <button type="button" className="page-action" onClick={() => void load()} disabled={loading}><RefreshCw size={14} aria-hidden="true" /> Refresh</button>
+        </div>
       </header>
 
       {error ? (
@@ -337,8 +401,21 @@ const CCTVTriagePage: React.FC = () => {
           </button>
         ))}
         <label className="cctv-console__toggle"><input type="checkbox" checked={showReviewed} onChange={(event) => setShowReviewed(event.target.checked)} /> show reviewed</label>
+        <label className="cctv-console__toggle"><input type="checkbox" checked={advanceAfterDecision} onChange={(event) => toggleAdvance(event.target.checked)} /> move to next after deciding</label>
         <span className="cctv-triage__count">{pendingCount} pending</span>
+        <span className="cctv-triage__keys" aria-label="Keyboard shortcuts: J next, K previous, A accept, R reject">
+          <Keyboard size={13} aria-hidden="true" /><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> accept · <kbd>R</kbd> reject
+        </span>
       </div>
+
+      {lastDecision ? (
+        <div className="cctv-triage__receipt" role="status">
+          <Check size={14} aria-hidden="true" />
+          <span>{lastDecision.text}: <strong>{lastDecision.title}</strong>. Recorded against your account in the audit trail.</span>
+          {lastDecision.id !== selected?.id ? <button type="button" className="page-action" onClick={() => reopenDecision(lastDecision.id)}>Back to it</button> : null}
+          <button type="button" className="cctv-triage__receipt-close" onClick={() => setLastDecision(null)} aria-label="Dismiss decision receipt"><X size={13} aria-hidden="true" /></button>
+        </div>
+      ) : null}
 
       <div className="cctv-triage__layout">
         <ul className="cctv-triage__queue" aria-label="Observation queue">
@@ -388,11 +465,29 @@ const CCTVTriagePage: React.FC = () => {
                 ) : null}
               </div>
 
-              {comparisonOriginal ? <CCTVStillComparison original={comparisonOriginal} enhanced={enhancedStill} receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null} provider={typeof captureRecognition.provider === 'string' ? captureRecognition.provider : null} recognitionComparison={Object.keys(recognitionComparison).length ? recognitionComparison : null} subjectLabel={entityTitle(selected)} /> : null}
+              {comparisonOriginal ? <CCTVStillComparison original={comparisonOriginal} enhanced={enhancedStill} receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null} provider={typeof captureRecognition.provider === 'string' ? captureRecognition.provider : null} recognitionComparison={Object.keys(recognitionComparison).length ? recognitionComparison : null} subjectLabel={entityTitle(selected)} detection={originalIsFullFrame ? selectedBox : null} /> : null}
+              {selectedBox && selected.thumbnail && !originalIsFullFrame ? (
+                <figure className="cctv-triage__frame">
+                  <div className="cctv-still-compare__image"><img src={selected.thumbnail} alt={`Full frame for ${entityTitle(selected)}`} /><DetectionOverlay box={selectedBox} subjectLabel={entityTitle(selected)} /></div>
+                  <figcaption>Where it is in the frame · detector box outlined</figcaption>
+                </figure>
+              ) : null}
 
               <small className={`cctv-entity__state${isWeakInferenceCandidate(selected) ? ' is-weak' : ''}`}>
                 {isReviewed(selected) ? selected.reviewState.replace(/_/g, ' ') : `${inferenceReviewLabel(selected)} · ${selected.candidates.length ? `${selected.candidates.length} possible match${selected.candidates.length === 1 ? '' : 'es'}` : selected.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}`}
               </small>
+
+              {provenance ? (
+                <ul className="cctv-triage__provenance" aria-label="How this sighting was detected">
+                  <li title={provenance.engineVersion ?? 'Recorded before engine versions were stored'}>{engineLabel(provenance.engineVersion)}</li>
+                  {provenance.detectorModel ? <li title="Detector model that found this sighting">{provenance.detectorModel}</li> : null}
+                  {provenance.basis ? <li title="Why this sighting was put in front of a reviewer">{provenance.basisLabel}</li> : null}
+                  {provenance.trackConfirmed !== null ? <li className={provenance.trackConfirmed ? '' : 'is-weak'} title={provenance.trackHits !== null ? `Tracked across ${provenance.trackHits} sampled frame${provenance.trackHits === 1 ? '' : 's'}` : undefined}>{provenance.trackConfirmed ? 'track confirmed' : 'track not confirmed'}</li> : null}
+                  {provenance.motionState ? <li>{provenance.motionState.replace(/_/g, ' ')}</li> : null}
+                  {provenance.residentObjectId ? <li title={provenance.residentFirstSeenAt ? `First seen ${formatDate(new Date(provenance.residentFirstSeenAt).getTime(), selectedCamera?.timeZone ?? 'Pacific/Auckland')}` : undefined}>resident object{provenance.residentSightings !== null ? ` · ${provenance.residentSightings} sightings` : ''}</li> : null}
+                  {provenance.carriedDecision ? <li title="A reviewer decided this sighting on an earlier engine run; the decision was carried forward">decision carried from earlier run</li> : null}
+                </ul>
+              ) : null}
 
               <div className="cctv-triage__record-state" aria-label="Canonical record status">
                 <Database size={15} aria-hidden="true" />
@@ -532,10 +627,10 @@ const CCTVTriagePage: React.FC = () => {
                     <label className="cctv-entity__field">Plate (if you can read it) <input value={newPlate} onChange={(event) => setNewPlate(event.target.value.toUpperCase())} placeholder="e.g. ABC123" /></label>
                   ) : null}
                   <div className="cctv-entity__actions">
-                    <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void runReview(selected, 'accept')}><Check size={14} aria-hidden="true" /> {selected.kind === 'vehicle' && (selected.plate || newPlate.trim()) ? 'Accept · record vehicle' : 'Accept'}</button>
-                    {selected.kind === 'person' && !selected.personRecordId ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void runReview(selected, 'new_person')}><UserRound size={14} aria-hidden="true" /> New person</button> : null}
-                    {selected.kind === 'vehicle' && !selected.plate ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newPlate.trim()} onClick={() => void runReview(selected, 'new_vehicle')}><Car size={14} aria-hidden="true" /> Record vehicle</button> : null}
-                    <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void runReview(selected, 'reject')}><X size={14} aria-hidden="true" /> Not a {selected.kind}</button>
+                    <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'accept')} aria-keyshortcuts="A"><Check size={14} aria-hidden="true" /> {selected.kind === 'vehicle' && (selected.plate || newPlate.trim()) ? 'Accept · record vehicle' : 'Accept'}</button>
+                    {selected.kind === 'person' && !selected.personRecordId ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void decide(selected, 'new_person')}><UserRound size={14} aria-hidden="true" /> New person</button> : null}
+                    {selected.kind === 'vehicle' && !selected.plate ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newPlate.trim()} onClick={() => void decide(selected, 'new_vehicle')}><Car size={14} aria-hidden="true" /> Record vehicle</button> : null}
+                    <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void decide(selected, 'reject')} aria-keyshortcuts="R"><X size={14} aria-hidden="true" /> Not a {selected.kind}</button>
                   </div>
                 </>
               ) : (

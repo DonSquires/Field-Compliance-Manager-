@@ -1,0 +1,68 @@
+/* Detection quality — how often the CCTV engine is right, from reviewers' decisions. Tokens and the light
+   theme come from .cctv-console and .cctv-triage (both classes sit on the page root). */
+.cctv-quality .page-title { align-items: center; display: inline-flex; gap: 10px; }
+.cctv-quality__periods { display: inline-flex; gap: 4px; }
+.cctv-quality__message { background: var(--cc-brand-dim); border: 1px solid var(--cc-line-strong); border-radius: 6px; color: var(--cc-text); font-size: 13px; margin: 0 0 12px; padding: 8px 12px; }
+.cctv-quality__section { background: var(--cc-surface); border: 1px solid var(--cc-line); border-radius: 8px; margin-bottom: 16px; padding: 16px; }
+.cctv-quality__section-head { margin-bottom: 12px; }
+.cctv-quality__section-head h2 { align-items: center; color: var(--cc-text); display: flex; font-size: 16px; gap: 8px; margin: 0 0 4px; }
+.cctv-quality__section-head h2 em { background: rgba(242, 191, 58, .18); border-radius: 12px; color: var(--cc-watch); font-size: 12px; font-style: normal; font-weight: 700; padding: 2px 8px; }
+.cctv-quality__section-head p { font-size: 13px; margin: 0; max-width: 900px; }
+.cctv-quality__empty { background: var(--cc-elevated); border: 1px dashed var(--cc-line-strong); border-radius: 6px; color: var(--cc-text-2); font-size: 13px; margin: 0 0 12px; padding: 12px; }
+
+.cctv-quality__cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.cctv-quality__card { background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 8px; padding: 12px 14px; }
+.cctv-quality__card.is-calibrated { border-color: var(--cc-line-strong); }
+.cctv-quality__card header { align-items: center; color: var(--cc-text); display: flex; gap: 8px; margin-bottom: 10px; }
+.cctv-quality__card header .cctv-quality__badge { margin-left: auto; }
+.cctv-quality__figure { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+.cctv-quality__figure span { display: grid; gap: 2px; }
+.cctv-quality__figure b { color: var(--cc-text); font-family: var(--cc-mono); font-size: 26px; line-height: 1.1; }
+.cctv-quality__figure small { color: var(--cc-text-3); font-size: 11px; }
+.cctv-quality__card dl { display: grid; gap: 4px; margin: 0; }
+.cctv-quality__card dl div { display: flex; font-size: 12px; justify-content: space-between; gap: 8px; }
+.cctv-quality__card dt { color: var(--cc-text-3); }
+.cctv-quality__card dd { color: var(--cc-text); font-family: var(--cc-mono); margin: 0; text-align: right; }
+.cctv-quality__badge { background: rgba(242, 191, 58, .14); border: 1px solid rgba(242, 191, 58, .35); border-radius: 10px; color: var(--cc-watch); font-size: 11px; font-weight: 600; padding: 1px 8px; white-space: nowrap; }
+.cctv-quality__badge.is-on { background: rgba(76, 195, 138, .14); border-color: rgba(76, 195, 138, .4); color: var(--cc-normal); }
+.cctv-quality__legacy { font-size: 12px; margin: 12px 0 0; }
+
+.cctv-quality__table-wrap { overflow-x: auto; }
+.cctv-quality__table { border-collapse: collapse; font-size: 12px; min-width: 720px; width: 100%; }
+.cctv-quality__table th { border-bottom: 1px solid var(--cc-line-strong); color: var(--cc-text-3); font-weight: 600; padding: 6px 8px; text-align: left; white-space: nowrap; }
+.cctv-quality__table td { border-bottom: 1px solid var(--cc-line); color: var(--cc-text-2); padding: 6px 8px; }
+.cctv-quality__table td:nth-child(n+5) { font-family: var(--cc-mono); }
+.cctv-quality__table td small { color: var(--cc-text-3); font-family: inherit; }
+
+.cctv-quality__reports { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.cctv-quality__report { align-items: flex-start; background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 6px; display: flex; gap: 10px; padding: 10px 12px; }
+.cctv-quality__report.is-open { border-left: 3px solid var(--cc-watch); }
+.cctv-quality__report-icon { color: var(--cc-text-2); flex: 0 0 auto; padding-top: 2px; }
+.cctv-quality__report-body { display: grid; flex: 1 1 auto; gap: 4px; min-width: 0; }
+.cctv-quality__report-body strong { color: var(--cc-text); font-size: 13px; overflow-wrap: anywhere; }
+.cctv-quality__report-body small { color: var(--cc-text-3); font-size: 12px; }
+.cctv-quality__report-body p { color: var(--cc-text-2); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.cctv-quality__state { font-size: 12px; font-weight: 600; }
+.cctv-quality__state.is-open { color: var(--cc-watch); }
+.cctv-quality__state.is-confirmed_missed { color: var(--cc-action); }
+.cctv-quality__state.is-not_missed { color: var(--cc-normal); }
+.cctv-quality__report-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.cctv-quality__resolve, .cctv-quality__policy-form { display: grid; gap: 8px; margin-top: 8px; max-width: 560px; }
+.cctv-quality__resolve fieldset { border: 1px solid var(--cc-line); border-radius: 6px; display: grid; gap: 6px; margin: 0; padding: 8px 10px; }
+.cctv-quality__resolve legend { color: var(--cc-text-3); font-size: 12px; padding: 0 4px; }
+.cctv-quality__resolve label, .cctv-quality__policy-form label { color: var(--cc-text-2); font-size: 13px; }
+.cctv-quality__policy-form textarea { font: inherit; resize: vertical; }
+
+.cctv-quality__policy { align-items: center; background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 6px; display: flex; gap: 10px; padding: 10px 12px; }
+.cctv-quality__policy > svg { color: var(--cc-normal); flex: 0 0 auto; }
+.cctv-quality__policy > div { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.cctv-quality__policy strong { color: var(--cc-text); font-size: 14px; }
+.cctv-quality__policy small { color: var(--cc-text-3); font-size: 12px; overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  .cctv-quality { width: 100%; }
+  .cctv-quality__section { padding: 12px; }
+  .cctv-quality__report { flex-wrap: wrap; }
+  .cctv-quality__report-actions { justify-content: flex-start; width: 100%; }
+  .cctv-quality__policy { align-items: flex-start; flex-wrap: wrap; }
+}

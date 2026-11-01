@@ -19,11 +19,19 @@ const vpsCompose = read('docker-compose.full.yml');
 const laptopCompose = read('docker-compose.laptop-worker.yml');
 const laptopUpdater = read('deploy/laptop-worker/update-watcher.ps1');
 
-test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback', () => {
-  assert.match(vpsCompose, /VISION_INFERENCE_POLICY: \$\{VISION_INFERENCE_POLICY:-local_gpu_first\}/);
+test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and RunPod is the GPU fallback', () => {
+  assert.match(vpsCompose, /VISION_INFERENCE_POLICY: \$\{VISION_INFERENCE_POLICY:-gpu_consistent\}/);
+  assert.match(vpsCompose, /VISION_PINNED_DETECTOR_MODEL: \$\{VISION_PINNED_DETECTOR_MODEL:-rf-detr-large-704-coco\}/);
+  assert.match(watcher, /if \(policy === 'gpu_consistent'\) return \['local_gpu', 'gpu'\]/);
   assert.match(watcher, /if \(policy === 'local_gpu_first'\) return \['local_gpu', 'vps', 'gpu'\]/);
   assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?callRunpodEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
-  assert.match(laptopCompose, /VISION_INFERENCE_POLICY: vps_first/);
+  assert.match(laptopCompose, /VISION_INFERENCE_POLICY: gpu_consistent/);
+  assert.match(laptopCompose, /VISION_PINNED_DETECTOR_MODEL: rf-detr-large-704-coco/);
+  assert.match(laptopCompose, /DETECTOR_MODEL: rf-detr-large-704-coco/);
+  // The CCTV vision-language model is configured by watcher-only names so Bob Vibe's OLLAMA_VISION_* stay his own.
+  assert.match(vpsCompose, /OLLAMA_VISION_MODEL: "\$\{CCTV_VLM_MODEL:-qwen3-vl:4b\}"/);
+  assert.match(laptopCompose, /OLLAMA_VISION_MODEL: "\$\{CCTV_VLM_MODEL:-qwen3-vl:4b\}"/);
+  assert.doesNotMatch(vpsCompose, /\$\{OLLAMA_VISION_(URL|MODEL)/);
   assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_URL: http:\/\/fcm-inference:3000/);
   assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_API_KEY: \$\{LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required\}/);
   assert.match(laptopCompose, /RUNPOD_API_URL:/);

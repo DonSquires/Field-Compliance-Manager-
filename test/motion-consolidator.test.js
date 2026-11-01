@@ -169,7 +169,7 @@ test('consolidateVehicles preserves a bounded no-plate vehicle candidate for rev
 // never throw, never block, and never be confused with "checked and clear".
 test('getVehicleVisionHint returns explicit unknown fields when no vision-LLM is configured', async () => {
   const hint = await getVehicleVisionHint('/tmp/does-not-matter.jpg', { x: 0, y: 0, width: 100, height: 100 });
-  assert.deepEqual(hint, { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null });
+  assert.deepEqual(hint, { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null, vehicle_make_model_status: 'vlm_unavailable' });
 });
 
 test('getWeaponHint omits the flag entirely (not present:false) when no vision-LLM is configured', async () => {
@@ -178,7 +178,7 @@ test('getWeaponHint omits the flag entirely (not present:false) when no vision-L
 });
 
 test('getVehicleVisionHint and getWeaponHint tolerate a missing bbox/file path without throwing', async () => {
-  assert.deepEqual(await getVehicleVisionHint(null, null), { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null });
+  assert.deepEqual(await getVehicleVisionHint(null, null), { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null, vehicle_make_model_status: 'no_crop' });
   assert.equal(await getWeaponHint(null, null), null);
 });
 
