@@ -45,7 +45,7 @@ export const assignmentWords = (preview: AssignmentPreview): { tone: 'ok' | 'war
   if (preview.conflict) notes.push({ tone: 'stop', text: `The roster will refuse this: ${preview.conflict}.` });
   const load = `${hoursWords(preview.week_hours)} in the week starting ${dayWords(preview.week_start)}${preview.rules ? ` (limit ${hoursWords(preview.rules.max_hours_per_week)})` : ''} · ${preview.rest_hours === null ? 'no other shift nearby' : `${hoursWords(preview.rest_hours)} rest from the nearest other shift`} · day ${preview.consecutive_days} in a row${preview.rules ? ` (limit ${preview.rules.max_consecutive_days})` : ''}.`;
   if (!preview.conflict) notes.push({ tone: 'ok', text: load });
-  if (!preview.rules) notes.push({ tone: 'warn', text: 'No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in People & HR › Rostering › Rest & hours rules.' });
+  if (!preview.rules) notes.push({ tone: 'warn', text: 'No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in Rosters › Shift setup & open shifts › Rest & hours rules.' });
   else if (!preview.rules.enforced) notes.push({ tone: 'warn', text: 'The employer\'s rest and hours rules are recorded but not enforced — the roster will accept this even if it breaks them.' });
   if (preview.availability_conflict && !preview.conflict) notes.push({ tone: 'warn', text: 'The officer has marked themselves unavailable for part of this time.' });
   for (const warning of preview.credential_warnings ?? []) notes.push({ tone: 'warn', text: warning.expiry_date ? `${credentialTypeLabel(warning.credential_type)} expires ${dayWords(warning.expiry_date)}, before this shift ends.` : `${credentialTypeLabel(warning.credential_type)} is not verified.` });
@@ -71,10 +71,10 @@ import { importedLabourLabel, isPricedRosterLabour, type ImportedLabourRefs } fr
 interface Staff { id: string; staffId: string; name: string; workReady: boolean; employmentType: string | null; credentialRisk: 'clear' | 'expiring' | 'expired' | 'unverified' | 'unknown'; credentialExpiry: string | null; }
 /** Aggregate credential readiness; the assignment preview supplies type-specific warnings. */
 export const credentialBlocker = (person: Pick<Staff, 'name' | 'credentialRisk' | 'credentialExpiry'>, endValue: string): string | null => {
-  if (person.credentialRisk === 'unknown') return `${person.name}'s credentials have not been confirmed. Check People & HR › Credentials before assigning.`;
-  if (person.credentialRisk === 'unverified') return `${person.name} has unverified credentials on file. Verify them in People & HR › Credentials first.`;
-  if (person.credentialRisk === 'expired') return `${person.name} has an expired credential${person.credentialExpiry ? ` (${dayWords(person.credentialExpiry)})` : ''}. Record the renewal in People & HR › Credentials first.`;
-  if (person.credentialExpiry && endValue && new Date(person.credentialExpiry).getTime() < new Date(endValue).getTime()) return `${person.name} has a credential expiring ${dayWords(person.credentialExpiry)}, before this shift ends. Record the renewal in People & HR › Credentials first.`;
+  if (person.credentialRisk === 'unknown') return `${person.name}'s credentials have not been confirmed. Check People › Credentials before assigning.`;
+  if (person.credentialRisk === 'unverified') return `${person.name} has unverified credentials on file. Verify them in People › Credentials first.`;
+  if (person.credentialRisk === 'expired') return `${person.name} has an expired credential${person.credentialExpiry ? ` (${dayWords(person.credentialExpiry)})` : ''}. Record the renewal in People › Credentials first.`;
+  if (person.credentialExpiry && endValue && new Date(person.credentialExpiry).getTime() < new Date(endValue).getTime()) return `${person.name} has a credential expiring ${dayWords(person.credentialExpiry)}, before this shift ends. Record the renewal in People › Credentials first.`;
   return null;
 };
 /** The branch RPC aggregates all credential types; it does not prove a specific licence. */

@@ -7,6 +7,7 @@ const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migration
 const rosterPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterOperationsPage.tsx'), 'utf8');
 const hrPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterHRPage.tsx'), 'utf8');
 const rulesPanel = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/RosterRulesPanel.tsx'), 'utf8');
+const workforceSections = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/lib/workforceSections.ts'), 'utf8');
 
 test('rest and hours are measured the way a rosterer reads them: NZ Monday-Sunday week, nearest other shift, days in a row', () => {
   assert.match(migration, /create or replace function public\.roster_assignment_load\(p_staff_id uuid, p_scheduled_start timestamptz, p_scheduled_end timestamptz, p_exclude_slot_id uuid default null\)/);
@@ -49,7 +50,7 @@ test('the rosterer sees rest, hours and days in a row before the shift exists, a
   assert.match(rosterPage, /supabase\.rpc\('preview_roster_assignment', \{ p_staff_id: person\.staffId, p_scheduled_start: new Date\(form\.start\)\.toISOString\(\), p_scheduled_end: new Date\(form\.end\)\.toISOString\(\) \}\)/);
   assert.match(rosterPage, /The roster will refuse this: \$\{preview\.conflict\}\./);
   assert.match(rosterPage, /rest from the nearest other shift/);
-  assert.match(rosterPage, /No rest and hours rules are set for this officer\\'s employer, so the roster is not checking fatigue\. Set them in People & HR › Rostering › Rest & hours rules\./);
+  assert.match(rosterPage, /No rest and hours rules are set for this officer\\'s employer, so the roster is not checking fatigue\. Set them in Rosters › Shift setup & open shifts › Rest & hours rules\./);
   assert.match(rosterPage, /recorded but not enforced — the roster will accept this even if it breaks them/);
   assert.match(rosterPage, /expires \$\{dayWords\(warning\.expiry_date\)\}, before this shift ends\./);
   assert.match(rosterPage, /className="roster-assignment-note is-stop roster-dialog-error" role="alert"/);
@@ -57,9 +58,10 @@ test('the rosterer sees rest, hours and days in a row before the shift exists, a
   assert.doesNotMatch(rosterPage, /disabled=\{[^}]*assignmentPreview/);
 });
 
-test('People & HR owns the rules for the employing organisation, in plain words', () => {
+test('Rosters exposes the rules for the employing organisation in plain words', () => {
   assert.match(hrPage, /\{ id: 'roster-rules', label: 'Rest & hours rules' \}/);
-  assert.match(hrPage, /tabs: \['shift-templates', 'roster-rules', 'coverage', 'oncall', 'court'\]/);
+  assert.match(hrPage, /\{ id: 'rostering', label: 'Rostering', tabs: \[\.\.\.ROSTERING_HR_TABS\] \}/);
+  assert.match(workforceSections, /ROSTERING_HR_TABS = \['shift-templates', 'roster-rules', 'coverage', 'oncall', 'court'\]/);
   assert.match(hrPage, /<RosterRulesPanel organizationId=\{profile\.employerOrganizationId \?\? profile\.organizationId\}/);
   assert.match(rulesPanel, /supabase\.rpc\('manage_organization_fatigue_rules', \{/);
   assert.match(rulesPanel, /from\('organization_fatigue_rules'\)\.select\(/);
@@ -75,10 +77,10 @@ test('a licence that outlives the shift never blocks rostering; expired or unver
   assert.doesNotMatch(rosterPage, /cannot be assigned until their credential status is clear/);
   // Wording is per credential, not "licence": the branch RPC aggregates every credential type and
   // does not prove a specific licence; the assignment preview names the type.
-  assert.match(rosterPage, /credentials have not been confirmed\. Check People & HR › Credentials before assigning\./);
-  assert.match(rosterPage, /has unverified credentials on file\. Verify them in People & HR › Credentials first\./);
-  assert.match(rosterPage, /has an expired credential\$\{person\.credentialExpiry \? ` \(\$\{dayWords\(person\.credentialExpiry\)\}\)` : ''\}\. Record the renewal in People & HR › Credentials first\./);
-  assert.match(rosterPage, /has a credential expiring \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People & HR › Credentials first\./);
+  assert.match(rosterPage, /credentials have not been confirmed\. Check People › Credentials before assigning\./);
+  assert.match(rosterPage, /has unverified credentials on file\. Verify them in People › Credentials first\./);
+  assert.match(rosterPage, /has an expired credential\$\{person\.credentialExpiry \? ` \(\$\{dayWords\(person\.credentialExpiry\)\}\)` : ''\}\. Record the renewal in People › Credentials first\./);
+  assert.match(rosterPage, /has a credential expiring \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People › Credentials first\./);
   assert.match(rosterPage, /const blocker = credentialBlocker\(person, form\.end\); if \(blocker\)/);
   assert.match(rosterPage, /const blocker = person \? credentialBlocker\(person, form\.end\) : null; if \(blocker\)/);
   assert.match(rosterPage, /\{credentialBadgeWords\(person\)\}<\/i>/);
