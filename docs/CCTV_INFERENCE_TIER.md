@@ -285,6 +285,15 @@ registration; the console's enhancement/zoom gets the located box.
   the host withheld ≥ `VISION_STARVED_STEAL_RATIO` (0.5) of the CPU **defers** the job for
   `VISION_STARVED_DEFER_SECONDS` (1 h, `extractor_starved_deferred`) instead of failing it — the video was
   never the problem. A timeout with the CPU available still fails, as it should.
+* **Release-time claim gate (PR #298 review, 2026-11-01).** The release lane deploys `cctv-vision`
+  (`fcm-inference` + `fcm-vision-watcher`) only after `pause_cctv_inference_claims('release-lane', …)`
+  (migration `20261102170000`) has stopped new claims and the `processing` video queue has drained.
+  `claim_cctv_inference_job` takes a shared advisory lock and returns no job while an unexpired pause
+  exists; the pause takes the lock exclusively, so a claim already in flight commits first and the drain
+  read sees it. Every watcher version, including the laptop worker, honours the gate without a code
+  change. The pause expires after 45 minutes if the lane dies; the lane resumes claims on every exit path,
+  and defers the release if the pause, queue read or drain fails. A failed or unhealthy replacement rolls
+  back to the previous release while claims are still paused.
 * RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:944b93bb…` (commit `6363ae2`), env
   `DETECTOR_MODEL=rf-detr-large-704-coco`; endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU
   types 4090 / RTX 6000 Ada / L40S / A40 (all CUDA 12), network-volume pin removed, idle 30 s, execution

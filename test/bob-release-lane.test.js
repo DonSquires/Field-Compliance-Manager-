@@ -153,7 +153,7 @@ test('release lane skips applied migrations and exclusively owns its live pointe
 test('automatic and legacy control-plane deployment check idle after image build, including rollback', () => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
   const action = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    worker-image)'));
-  assert.match(action, /build -q bob-control-plane \\\n\s*&& require_idle scripts\/bob-runtime-idle\.js \\\n\s*&& DOCKER_GID=999 docker compose/);
+  assert.match(action, /build -q bob-control-plane; then\n[^\n]*image build failed[^\n]*\n\s*else\n\s*require_idle scripts\/bob-runtime-idle\.js\n\s*if DOCKER_GID=999 docker compose [^\n]* up -d/);
   assert.match(lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in')), /if ! node scripts\/bob-runtime-idle\.js/);
   const legacy = fs.readFileSync(path.resolve(__dirname, '../deploy/bob-control-plane/deploy.sh'), 'utf8');
   assert.match(legacy, /build bob-control-plane\nnode "\$app_dir\/scripts\/bob-runtime-idle\.js"\ndocker compose/);
@@ -307,22 +307,41 @@ printf '%s\\n' "\${TARGETS[@]}"
   }
 });
 
-test('a CCTV job that starts during the image build defers the watcher restart without rollback or advancing', () => {
+const cctvHarness = (options = {}) => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
-  const helpers = lane.slice(lane.indexOf('cctv_idle()'), lane.indexOf("if printf '%s\\n' \"${TARGETS[@]:-}\" | grep -qx 'cctv-vision'"));
+  const helpers = lane.slice(lane.indexOf('CCTV_DRAIN_SECONDS='), lane.indexOf('# Healthy = the inference container'));
   const action = lane.slice(lane.indexOf('    cctv-vision)\n      if'), lane.indexOf('    worker-image)'));
-  assert.ok(helpers.includes('require_cctv_idle()') && action.includes('require_cctv_idle'), 'cctv-vision gate not found');
-  const run = (queue) => spawnSync('bash', ['-s'], {
+  assert.ok(helpers.includes('drain_cctv()') && action.includes('drain_cctv'), 'cctv-vision claim gate not found');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-cctv-'));
+  fs.writeFileSync(path.join(dir, 'queue'), `${(options.queue || ['[]']).join('\n')}\n`);
+  return spawnSync('bash', ['-s'], {
     encoding: 'utf8',
+    env: { PATH: process.env.PATH, BOB_RELEASE_CCTV_DRAIN_SECONDS: String(options.drainSeconds ?? 900) },
     input: `set -euo pipefail
 HEAD_SHA=fixture123456; SHA8=fixture1; OK=true; RESULTS=()
 SUPABASE_URL=https://example.invalid; SUPABASE_SERVICE_ROLE_KEY=fixture
-log() { printf '%s\\n' "$*"; }
-curl() { printf '%s' '${queue}'; }
-docker() { if [[ "$*" == *" build "* ]]; then echo build; elif [[ "$*" == *" up "* ]]; then echo up >&2; fi; }
-cctv_vision_healthy() { return 0; }
-fail_note() { echo failure; }
-rollback() { echo rollback; }
+QUEUE=${JSON.stringify(path.join(dir, 'queue'))}
+log() { printf '%s\\n' "$*" >&2; }
+sleep() { :; }
+curl() {
+  local url
+  for url in "$@"; do :; done
+  case "$*" in
+    *rpc/pause_cctv_inference_claims*) echo pause >&2; ${options.pauseFails ? 'return 22' : 'echo "\\"2026-11-01T10:00:00Z\\""'} ;;
+    *rpc/resume_cctv_inference_claims*) echo resume >&2; echo true ;;
+    *inference_jobs*) echo queue >&2; local next; next="$(head -n1 "$QUEUE")"; sed -i 1d "$QUEUE"
+      [[ "$next" == unreadable ]] && return 7; printf '%s' "\${next:-[]}" ;;
+  esac
+}
+docker() {
+  case "$*" in
+    *" build "*) echo build >&2; ${options.buildFails ? 'return 1' : 'return 0'} ;;
+    *" up "*) echo up >&2; ${options.upFails ? 'return 1' : 'return 0'} ;;
+  esac
+}
+cctv_vision_healthy() { echo health >&2; ${options.unhealthy ? 'return 1' : 'return 0'}; }
+fail_note() { echo "note: $1" >&2; }
+rollback() { echo "rollback $1" >&2; }
 ${helpers}
 case cctv-vision in
 ${action}
@@ -330,22 +349,104 @@ esac
 echo advanced-release
 `,
   });
-  const busy = run('[{"id":"00000000-0000-4000-8000-000000000001"}]');
-  assert.equal(busy.status, 0, busy.stderr);
-  assert.match(busy.stdout, /^build\ndeferred fixture1: a CCTV inference job is processing/);
-  assert.doesNotMatch(busy.stdout, /rollback|failure|advanced-release/);
-  assert.doesNotMatch(busy.stderr, /\bup\b/, 'services must not be recreated while a job is processing');
-  const idle = run('[]');
+};
+const events = (result) => result.stderr.trim().split('\n');
+
+test('cctv-vision pauses claims, drains, replaces, validates and only then resumes claims', () => {
+  const idle = cctvHarness();
   assert.equal(idle.status, 0, idle.stderr);
-  assert.match(idle.stdout, /^build\nadvanced-release/);
-  assert.equal(idle.stderr.trim(), 'up');
+  assert.equal(idle.stdout, 'advanced-release\n');
+  assert.deepEqual(events(idle), ['build', 'pause', 'queue', 'up', 'health', 'resume', 'CCTV inference claims resumed']);
+
+  const draining = cctvHarness({ queue: ['[{"id":"a"}]', '[{"id":"a"}]', '[]'] });
+  assert.equal(draining.status, 0, draining.stderr);
+  assert.deepEqual(events(draining), ['build', 'pause', 'queue', 'queue', 'queue', 'up', 'health', 'resume', 'CCTV inference claims resumed']);
 });
 
-test('rollback rebuilds the previous release because service images have fixed tags', () => {
+test('cctv-vision defers with claims resumed when work does not drain, the queue is unreadable or the pause fails', () => {
+  for (const [options, reason] of [
+    [{ queue: ['[{"id":"a"}]'], drainSeconds: 0 }, /a CCTV inference job is still processing after 0s/],
+    [{ queue: ['unreadable'] }, /the CCTV inference queue is unreadable/],
+    [{ queue: ['{"message":"JWT expired"}'] }, /the CCTV inference queue is unreadable/],
+    [{ pauseFails: true }, /CCTV inference claims could not be paused/],
+  ]) {
+    const result = cctvHarness(options);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, reason);
+    assert.doesNotMatch(result.stderr, /^(up|health|rollback .*)$/m, 'nothing is replaced or rolled back');
+    assert.doesNotMatch(result.stdout, /advanced-release/);
+    assert.equal(events(result).at(-2), 'resume', 'the exit trap resumes claims');
+  }
+});
+
+test('a failed or unhealthy cctv-vision replacement rolls back while claims are still paused', () => {
+  for (const [options, note] of [[{ upFails: true }, 'note: cctv-vision replacement failed'], [{ unhealthy: true }, 'note: cctv-vision unhealthy after replacement']]) {
+    const result = cctvHarness(options);
+    assert.equal(result.status, 0, result.stderr);
+    const seen = events(result);
+    assert.ok(seen.includes(note), result.stderr);
+    assert.ok(seen.indexOf('rollback cctv-vision') > seen.indexOf('up'), result.stderr);
+    assert.ok(seen.indexOf('rollback cctv-vision') < seen.indexOf('resume'), 'rollback happens under the claim pause');
+  }
+  const buildFailed = cctvHarness({ buildFails: true });
+  assert.deepEqual(events(buildFailed), ['build', 'note: cctv-vision image build failed; the running services were not touched']);
+});
+
+const rollbackHarness = (target, options = {}) => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
-  const rollback = lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in'));
-  assert.match(rollback, /build -q fcm-inference fcm-vision-watcher \\\n\s*&& docker compose .* up -d --no-deps fcm-inference fcm-vision-watcher/);
-  assert.match(rollback, /control-plane\) \(cd "\$PREVIOUS_RELEASE" && DOCKER_GID=999 docker compose .* build -q bob-control-plane && /);
-  assert.match(rollback, /fcm-api\) \(cd "\$PREVIOUS_RELEASE" && docker compose .* build -q fcm-api && /);
+  const rollback = lane.slice(lane.indexOf('rollback_build()'), lane.indexOf('for target in'));
+  const previous = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-previous-'));
+  return spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `set -euo pipefail
+PREVIOUS_RELEASE=${JSON.stringify(previous)}; DEPLOYED_SHA=previous123456
+docker() { case "$*" in *" build "*) echo build >&2; ${options.buildFails ? 'return 1' : 'return 0'} ;; *" up "*) echo up >&2 ;; esac; }
+node() { echo idle-probe >&2; ${options.busy ? 'return 1' : 'return 0'}; }
+fail_note() { echo "note: $1" >&2; }
+${rollback}
+rollback ${target}
+`,
+  });
+};
+
+test('rollback rebuilds the previous release, then rechecks Bob activity immediately before recreation', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
   assert.equal(bashSyntax(lane).status, 0);
+  for (const target of ['control-plane', 'fcm-api']) {
+    const busy = rollbackHarness(target, { busy: true });
+    assert.equal(busy.status, 0, busy.stderr);
+    assert.deepEqual(events(busy).slice(0, 2), ['build', 'idle-probe']);
+    assert.match(busy.stderr, new RegExp(`note: ${target} rollback deferred: Bob execution became active`));
+    assert.doesNotMatch(busy.stderr, /^up$|rolled back/m);
+    const idle = rollbackHarness(target);
+    assert.deepEqual(events(idle), ['build', 'idle-probe', 'up', `note: ${target} rolled back to previous`]);
+    const unbuilt = rollbackHarness(target, { buildFails: true });
+    assert.deepEqual(events(unbuilt), ['build', `note: ${target} rollback to previous failed: the previous release did not build; the failed release is still running`]);
+  }
+  const cctv = rollbackHarness('cctv-vision', { busy: true });
+  assert.deepEqual(events(cctv), ['build', 'up', 'note: cctv-vision rolled back to previous'], 'CCTV rollback is guarded by the claim pause, not the Bob probe');
+});
+
+test('a failed control-plane or fcm-api recreate is rolled back instead of left half-replaced', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  for (const [target, next] of [['control-plane', '    fcm-api)\n      if'], ['fcm-api', '    cctv-vision)\n      if']]) {
+    const action = lane.slice(lane.indexOf(`    ${target})\n      if`), lane.indexOf(next));
+    const result = spawnSync('bash', ['-s'], {
+      encoding: 'utf8',
+      input: `set -euo pipefail
+HEAD_SHA=fixture123456; SHA8=fixture1; OK=true; RESULTS=(); STATE_DIR=/tmp
+docker() { case "$*" in *" build "*) echo build >&2 ;; *" up "*) echo up >&2; return 1 ;; esac; }
+require_idle() { echo idle >&2; }
+fail_note() { echo "note: $1" >&2; }
+rollback() { echo "rollback $1" >&2; }
+case ${target} in
+${action}
+esac
+echo "ok=$OK"
+`,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(events(result), ['build', 'idle', 'up', `note: ${target} replacement failed`, `rollback ${target}`]);
+    assert.equal(result.stdout, 'ok=false\n');
+  }
 });
