@@ -13,35 +13,136 @@ const migrations = fs.readdirSync(path.join(root, 'supabase/migrations'))
   .sort()
   .map((name) => ({ name, sql: read(`supabase/migrations/${name}`) }));
 
-const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const flat = (text) => text.replace(/\s+/g, ' ');
 
-// A policy without a TO clause applies to PUBLIC, which includes anon.
-const publicPolicies = [...schema.matchAll(/CREATE POLICY "([^"]+)" ON "public"\."([^"]+)"([\s\S]*?);\n/g)]
-  .map(([, name, table, body]) => ({ name, table, body: flat(body) }))
-  .filter(({ body }) => !/ TO "?\w+"?/.test(body.split(/ (?:USING|WITH CHECK) /)[0]));
+const IDENT = '"(?:[^"]|"")+"|[A-Za-z_][\\w$]*';
+const POLICY_STATEMENT = new RegExp(
+  `\\b(CREATE|ALTER|DROP)\\s+POLICY\\s+(?:IF\\s+EXISTS\\s+)?(${IDENT})\\s+ON\\s+(?:(${IDENT})\\s*\\.\\s*)?(${IDENT})([^;]*);`,
+  'gi',
+);
+const unquote = (ident) => (ident.startsWith('"') ? ident.slice(1, -1).replace(/""/g, '"') : ident.toLowerCase());
 
-const admitsAnon = ({ body }) => /(?:USING|WITH CHECK) \(true\)/.test(body) || body.includes('organization_id IS NULL) OR');
-
-function lastStatementFor({ name, table }) {
-  const tableRef = `(?:"?public"?\\.)?"?${escape(table)}"?`;
-  const pattern = new RegExp(`(CREATE|ALTER) POLICY\\s+"${escape(name)}"\\s+ON\\s+${tableRef}([^;]*);`, 'gi');
-  let last = null;
-  for (const { name: file, sql } of migrations) {
-    for (const match of sql.matchAll(pattern)) last = { file, verb: match[1].toUpperCase(), rest: flat(match[2]) };
+function parenthesised(text, opener) {
+  const match = opener.exec(text);
+  if (!match) return null;
+  let depth = 0;
+  let quoted = false;
+  const start = match.index + match[0].length;
+  for (let i = start - 1; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === "'") quoted = !quoted;
+    if (quoted) continue;
+    if (char === '(') depth += 1;
+    if (char === ')' && (depth -= 1) === 0) return text.slice(start, i);
   }
-  return last;
+  return null;
 }
 
-test('no PUBLIC policy with a true or org-null arm survives without a later role retarget', () => {
-  const exposed = publicPolicies.filter(admitsAnon);
-  const unresolved = exposed
-    .filter((policy) => {
-      const last = lastStatementFor(policy);
-      return !(last && last.verb === 'ALTER' && /^\s*TO (authenticated|service_role)\b/.test(last.rest));
-    })
-    .map(({ table, name }) => `${table}.${name}`);
-  assert.deepEqual(unresolved, [], `retarget these PUBLIC policies away from anon: ${unresolved.join(', ')}`);
+// Roles end where USING / WITH CHECK begin. With no TO clause a policy applies to PUBLIC.
+function clauses(rest) {
+  const text = flat(rest).trim();
+  const split = text.search(/\b(?:USING|WITH\s+CHECK)\s*\(/i);
+  const head = split === -1 ? text : text.slice(0, split);
+  const tail = split === -1 ? '' : text.slice(split);
+  const to = head.match(/\bTO\s+(.+?)\s*$/i);
+  return {
+    roles: to ? to[1].split(',').map((role) => unquote(role.trim()).toLowerCase()) : null,
+    using: parenthesised(tail, /\bUSING\s*\(/i),
+    check: parenthesised(tail, /\bWITH\s+CHECK\s*\(/i),
+  };
+}
+
+function applyPolicyStatements(state, sql) {
+  for (const [, verb, rawName, rawSchema, rawTable, rest] of sql.replace(/--[^\n]*/g, '').matchAll(POLICY_STATEMENT)) {
+    if (rawSchema && unquote(rawSchema) !== 'public') continue;
+    const table = unquote(rawTable);
+    const key = `${table}.${unquote(rawName)}`;
+    const command = verb.toUpperCase();
+    if (command === 'DROP') {
+      state.delete(key);
+      continue;
+    }
+    const rename = rest.match(/^\s*RENAME\s+TO\s+(\S+)\s*$/i);
+    if (command === 'ALTER' && rename) {
+      const policy = state.get(key);
+      state.delete(key);
+      if (policy) state.set(`${table}.${unquote(rename[1])}`, { ...policy, name: unquote(rename[1]) });
+      continue;
+    }
+    const parsed = clauses(rest);
+    if (command === 'CREATE') {
+      state.set(key, { table, name: unquote(rawName), roles: parsed.roles ?? ['public'], using: parsed.using, check: parsed.check });
+      continue;
+    }
+    const policy = state.get(key) ?? { table, name: unquote(rawName), roles: ['public'], using: null, check: null };
+    state.set(key, {
+      ...policy,
+      roles: parsed.roles ?? policy.roles,
+      using: parsed.using ?? policy.using,
+      check: parsed.check ?? policy.check,
+    });
+  }
+  return state;
+}
+
+// The snapshot is the live catalog at its applied_migrations header. Only
+// migrations newer than that header are replayed on top of it.
+function effectivePolicies(snapshotSql, migrationFiles) {
+  const header = snapshotSql.match(/^-- applied_migrations: (.*)$/m);
+  assert.ok(header, 'schema snapshot must record its applied_migrations header');
+  const applied = new Set(header[1].split(',').map((version) => version.trim()));
+  const snapshotStatements = [...snapshotSql.matchAll(/^CREATE POLICY [^;]*;/gm)].map(([statement]) => statement).join('\n');
+  const state = applyPolicyStatements(new Map(), snapshotStatements);
+  for (const { name, sql } of migrationFiles) {
+    if (!applied.has(name.split('_')[0])) applyPolicyStatements(state, sql);
+  }
+  return state;
+}
+
+const reachesAnon = ({ roles }) => roles.includes('public') || roles.includes('anon');
+const opensToAnyone = (predicate) => {
+  if (predicate == null) return false;
+  const compact = predicate.toLowerCase().replace(/["\s]/g, '');
+  return /^\(*true\)*$/.test(compact) || /organization_idisnull\)*or/.test(compact);
+};
+const anonExposed = (state) => [...state.values()]
+  .filter((policy) => reachesAnon(policy) && (opensToAnyone(policy.using) || opensToAnyone(policy.check)))
+  .map(({ table, name }) => `${table}.${name}`)
+  .sort();
+
+test('no policy anon can reach has a true or org-null arm after pending migrations', () => {
+  const state = effectivePolicies(schema, migrations);
+  assert.ok(state.size > 900, `expected the full policy catalog, parsed ${state.size}`);
+  const exposed = anonExposed(state);
+  assert.deepEqual(exposed, [], `retarget these policies away from PUBLIC/anon: ${exposed.join(', ')}`);
+});
+
+test('the policy resolver catches later regressions and partial retargets', () => {
+  const snapshot = (body) => `-- applied_migrations: 20990101000000\n${body}\n`;
+  const exposedPublic = 'CREATE POLICY "p" ON "public"."t" FOR SELECT USING (true);';
+  const authenticated = 'CREATE POLICY "p" ON "public"."t" FOR SELECT TO "authenticated" USING (true);';
+  const resolve = (base, ...sql) => anonExposed(effectivePolicies(
+    snapshot(base),
+    sql.map((text, index) => ({ name: `2099010200000${index}_fixture.sql`, sql: text })),
+  ));
+
+  assert.deepEqual(resolve(authenticated, 'alter policy p on t to public;'), ['t.p'], 'unquoted PUBLIC regression');
+  assert.deepEqual(resolve(authenticated, 'ALTER POLICY "p" ON public.t TO authenticated, anon;'), ['t.p'], 'role list keeps anon');
+  assert.deepEqual(resolve(exposedPublic, 'ALTER POLICY "p" ON public.t TO authenticated, PUBLIC USING (true);'), ['t.p']);
+  assert.deepEqual(resolve(exposedPublic, 'alter policy p on public.t to authenticated;'), [], 'unquoted retarget resolves');
+  assert.deepEqual(resolve(exposedPublic, 'ALTER POLICY "p" ON "public"."t" TO "service_role";'), []);
+  assert.deepEqual(resolve(exposedPublic, 'DROP POLICY IF EXISTS "p" ON public.t;'), []);
+  assert.deepEqual(resolve(exposedPublic, 'ALTER POLICY p ON public.t USING (owner_id = (SELECT auth.uid()));'), []);
+  assert.deepEqual(
+    resolve(authenticated, 'DROP POLICY "p" ON public.t;', 'CREATE POLICY p ON public.t FOR SELECT USING ((organization_id IS NULL) OR x);'),
+    ['t.p'],
+    'recreated without a TO clause',
+  );
+  assert.deepEqual(
+    anonExposed(effectivePolicies(snapshot(authenticated), [{ name: '20990101000000_applied.sql', sql: 'ALTER POLICY p ON t TO public;' }])),
+    [],
+    'migrations already in the snapshot header are not replayed',
+  );
 });
 
 test('Atlas, Bob governance, audit, import, and retention policies are authenticated-only', () => {
