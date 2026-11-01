@@ -6095,6 +6095,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         Insert: {
@@ -6135,6 +6136,7 @@ export type Database = {
           source_event_id: string
           species_confidence?: number | null
           thumbnail?: string | null
+          vehicle_appearance_vec?: string | null
           zone_id?: string | null
         }
         Update: {
@@ -6175,6 +6177,7 @@ export type Database = {
           source_event_id?: string
           species_confidence?: number | null
           thumbnail?: string | null
+          vehicle_appearance_vec?: string | null
           zone_id?: string | null
         }
         Relationships: [
@@ -19033,6 +19036,7 @@ export type Database = {
       }
       monthly_report_packs: {
         Row: {
+          activity_lines: Json | null
           created_at: string
           data: Json | null
           delivery_attempt_id: string | null
@@ -19066,6 +19070,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          activity_lines?: Json | null
           created_at?: string
           data?: Json | null
           delivery_attempt_id?: string | null
@@ -19099,6 +19104,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          activity_lines?: Json | null
           created_at?: string
           data?: Json | null
           delivery_attempt_id?: string | null
@@ -36537,6 +36543,15 @@ export type Database = {
         }
         Returns: Json
       }
+      build_agreement_activity_report: {
+        Args: {
+          p_from: string
+          p_max_lines?: number
+          p_service_agreement_id: string
+          p_to: string
+        }
+        Returns: Json
+      }
       build_shift_safety_briefing: {
         Args: { p_shift_id: string; p_stop_id?: string }
         Returns: Json
@@ -39959,6 +39974,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         SetofOptions: {
@@ -40008,6 +40024,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         SetofOptions: {
@@ -43213,6 +43230,10 @@ export type Database = {
         Returns: Json
       }
       get_place_hazard_source: { Args: { p_hazard_id: string }; Returns: Json }
+      get_report_pack_activity_accounting: {
+        Args: { p_pack_id: string }
+        Returns: Json
+      }
       get_roster_attendance_exceptions: {
         Args: {
           p_from?: string
@@ -48611,6 +48632,19 @@ export type Database = {
           skipped_conflict_count: number
         }[]
       }
+      report_activity_category: {
+        Args: {
+          p_activity: string
+          p_equipment: string
+          p_event_type: string
+          p_kind: string
+          p_material: string
+          p_service_line: string
+          p_species: string
+          p_subject: string
+        }
+        Returns: string
+      }
       report_cctv_missed_detection: {
         Args: {
           p_bbox?: Json
@@ -48622,6 +48656,8 @@ export type Database = {
         }
         Returns: string
       }
+      report_code_or_null: { Args: { p_value: string }; Returns: string }
+      report_numeric_or_null: { Args: { p_value: string }; Returns: number }
       report_place_hazard: {
         Args: {
           p_client_request_id: string
@@ -48639,6 +48675,11 @@ export type Database = {
       report_provider_custodian_for_actor: {
         Args: { p_actor_user_id: string; p_target_organization_id: string }
         Returns: boolean
+      }
+      report_service_line: { Args: { p_value: string }; Returns: string }
+      report_text_or_null: {
+        Args: { p_max_length: number; p_value: string }
+        Returns: string
       }
       request_anz_bank_connection: {
         Args: {
@@ -49572,6 +49613,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         SetofOptions: {
@@ -52302,6 +52344,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         SetofOptions: {
@@ -52351,6 +52394,7 @@ export type Database = {
           source_event_id: string
           species_confidence: number | null
           thumbnail: string | null
+          vehicle_appearance_vec: string | null
           zone_id: string | null
         }
         SetofOptions: {
