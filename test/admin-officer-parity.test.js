@@ -122,6 +122,7 @@ test('admin_officer resolves exactly like admin as a real database role', {
         SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND role='grand_master' AND deactivated_at IS NULL) $f$;
       ${catalogFunction('current_user_role')}
       ${catalogFunction('org_access_allowed')}
+      ${catalogFunction('accessible_org_ids')}
       CREATE TABLE public.notifications(id uuid PRIMARY KEY,organization_id uuid,recipient_user_id uuid,recipient_role text,
         read_at timestamptz,dedup_key text);
       CREATE FUNCTION public.enqueue_notification(p_organization_id uuid,p_category text,p_title text,p_body text,
