@@ -24,12 +24,13 @@ const counted = (value: number, one: string, many: string) => `${count(value)} $
 const hours = (value: number) => formatActivityNumber(value, 2);
 const km = (value: number) => formatActivityNumber(value, 1);
 const REGENERATE_HINT = 'Use Generate report drafts for this period to refresh it. The pack returns to draft for review.';
+const REFRESH_HINT = 'This report pack changed since you opened it. Refresh the report list and reopen it before reviewing activity.';
 
 type Column = { label: string; numeric?: boolean };
 type Label = (dim: string, code: string) => string;
 
 type LinesState =
-  | { state: 'idle' | 'loading' | 'missing' }
+  | { state: 'idle' | 'loading' | 'missing' | 'stale' }
   | { state: 'error'; message: string }
   | { state: 'ready'; lines: ActivityLine[]; notItemised: number };
 
@@ -94,7 +95,7 @@ function AccountingResult({ result, status, label }: { result: ActivityAccountin
             <p>
               {freshness.frozenEntries !== null && freshness.frozenEntries !== freshness.liveEntries
                 ? `Live records have changed since this pack was generated: ${counted(freshness.frozenEntries, 'entry', 'entries')} in the pack, ${count(freshness.liveEntries)} now.`
-                : 'Live records have changed since this pack was generated (hours, distance, photos or places differ).'}
+                : 'Live activity details have changed since this pack was generated. Summary statistics or itemised lines differ.'}
             </p>
             <p>{status === 'sent' ? 'This pack has been sent and stays as delivered. Record any correction in next month\u2019s report or a follow-up note.' : REGENERATE_HINT}</p>
           </div>
@@ -160,7 +161,7 @@ function AccountingResult({ result, status, label }: { result: ActivityAccountin
   );
 }
 
-function ActivityReportBody({ packId, report, status, headingId }: { packId: string; report: ActivityReport; status: string; headingId: string }) {
+function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string }) {
   const [lines, setLines] = useState<LinesState>({ state: 'idle' });
   const [accounting, setAccounting] = useState<AccountingState>({ state: 'idle' });
   const [category, setCategory] = useState('all');
@@ -175,14 +176,18 @@ function ActivityReportBody({ packId, report, status, headingId }: { packId: str
     if (linesRequest.current !== 'idle') return;
     linesRequest.current = 'loading';
     setLines({ state: 'loading' });
-    const { data: row, error } = await supabase.from('monthly_report_packs').select('activity_lines').eq('id', packId).maybeSingle();
+    const { data: row, error } = await supabase.from('monthly_report_packs').select('activity_lines,updated_at').eq('id', packId).maybeSingle();
     if (error || !row) {
       linesRequest.current = 'idle';
       setLines({ state: 'error', message: error ? 'Itemised activity could not be loaded. Try again.' : 'This report pack is no longer available. Refresh the report list.' });
       return;
     }
     linesRequest.current = 'done';
-    const parsed = readActivityLines((row as { activity_lines?: unknown }).activity_lines);
+    if (row.updated_at !== updatedAt) {
+      setLines({ state: 'stale' });
+      return;
+    }
+    const parsed = readActivityLines(row.activity_lines);
     setLines(parsed ? { state: 'ready', ...parsed } : { state: 'missing' });
   };
 
@@ -190,6 +195,10 @@ function ActivityReportBody({ packId, report, status, headingId }: { packId: str
     setAccounting({ state: 'loading' });
     const { data: result, error } = await supabase.rpc('get_report_pack_activity_accounting', { p_pack_id: packId });
     const parsed = error ? null : readActivityAccounting(result);
+    if (parsed && parsed.packUpdatedAt !== updatedAt) {
+      setAccounting({ state: 'problem', problem: { kind: 'stale', message: REFRESH_HINT } });
+      return;
+    }
     setAccounting(parsed ? { state: 'ready', result: parsed } : { state: 'problem', problem: activityAccountingProblem(error) });
   };
 
@@ -346,6 +355,7 @@ function ActivityReportBody({ packId, report, status, headingId }: { packId: str
           {lines.state === 'ready' && readyLines.length === 0 && (
             <Empty>{totals.entries > 0 ? 'Itemised lines are not available for this report pack.' : 'No activity was recorded during the period, so there is nothing to itemise.'}</Empty>
           )}
+          {lines.state === 'stale' && <p className="report-review-warning" role="status">{REFRESH_HINT}</p>}
           {lines.state === 'ready' && readyLines.length > 0 && (
             <>
               <div className="report-activity-filter">
@@ -412,11 +422,12 @@ function ActivityReportBody({ packId, report, status, headingId }: { packId: str
 
 interface ReportActivityReviewProps {
   packId: string;
+  updatedAt: string;
   data: Record<string, unknown> | null;
   status: string;
 }
 
-export function ReportActivityReview({ packId, data, status }: ReportActivityReviewProps) {
+export function ReportActivityReview({ packId, updatedAt, data, status }: ReportActivityReviewProps) {
   const report = useMemo(() => readActivityReport(data), [data]);
   const headingId = `report-activity-${packId}`;
   if (!report) {
@@ -430,5 +441,5 @@ export function ReportActivityReview({ packId, data, status }: ReportActivityRev
       </section>
     );
   }
-  return <ActivityReportBody packId={packId} report={report} status={status} headingId={headingId} />;
+  return <ActivityReportBody key={`${packId}:${updatedAt}`} packId={packId} updatedAt={updatedAt} report={report} status={status} headingId={headingId} />;
 }

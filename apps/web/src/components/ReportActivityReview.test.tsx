@@ -13,6 +13,7 @@ const { rpc, maybeSingle, select, eq, from } = vi.hoisted(() => {
 vi.mock('../lib/supabase', () => ({ supabase: { from, rpc } }));
 
 const data = { patrolVisits: 2, activityReport: activityReportFixture };
+const updatedAt = '2026-10-01T00:00:00Z';
 const group = (name: RegExp) => screen.getByText(name, { selector: 'summary' }).closest('details')!;
 // Waits for the browser's own toggle event rather than dispatching a synthetic one.
 const setOpen = async (details: HTMLDetailsElement, open: boolean) => {
@@ -30,15 +31,15 @@ afterEach(() => {
 
 describe('ReportActivityReview', () => {
   it('explains how to add activity to a legacy draft and keeps sent packs unchanged', () => {
-    const { rerender } = render(<ReportActivityReview packId="p1" data={{ patrolVisits: 2 }} status="draft" />);
+    const { rerender } = render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ patrolVisits: 2 }} status="draft" />);
     expect(screen.getByRole('note').textContent).toContain('Use Generate report drafts for this period');
-    rerender(<ReportActivityReview packId="p1" data={{ patrolVisits: 2 }} status="sent" />);
+    rerender(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ patrolVisits: 2 }} status="sent" />);
     expect(screen.getByRole('note').textContent).toContain('kept exactly as delivered');
     expect(from).not.toHaveBeenCalled();
   });
 
   it('shows the reconciled summary, categories and sections without loading lines', () => {
-    render(<ReportActivityReview packId="p1" data={data} status="draft" />);
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     expect(screen.getByText('All 6 entries accounted for')).toBeTruthy();
     const totals = screen.getByRole('group', { name: 'Month-end activity totals' });
     expect(within(totals).getByText('Work hours').nextSibling?.textContent).toBe('3.5');
@@ -61,7 +62,7 @@ describe('ReportActivityReview', () => {
       pestControl: { ...report.pestControl, entries: 1 },
       accountedFor: { ...report.accountedFor, entries: 1, activityEvents: 1, observationsInScope: 0, workOrdersInScope: 0, itemised: 1 },
     };
-    render(<ReportActivityReview packId="p1" data={{ activityReport: single }} status="draft" />);
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: single }} status="draft" />);
     expect(screen.getByText(/^1 entry reported: 1 patrol-log entry, 0 observations and 0 workshop work orders\./)).toBeTruthy();
     expect(group(/^Pest control/).querySelector('summary')?.textContent).toContain('1 entry ·');
     expect(group(/^Itemised activity/).querySelector('summary')?.textContent).toContain('1 line');
@@ -70,7 +71,7 @@ describe('ReportActivityReview', () => {
 
   it('lazy-loads itemised lines once, filters by category and retries after an error', async () => {
     maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'network' } });
-    render(<ReportActivityReview packId="p1" data={data} status="draft" />);
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const itemised = group(/^Itemised activity/);
     await setOpen(itemised, true);
     expect(await within(itemised).findByRole('alert')).toBeTruthy();
@@ -78,6 +79,7 @@ describe('ReportActivityReview', () => {
 
     maybeSingle.mockResolvedValueOnce({
       data: {
+        updated_at: updatedAt,
         activity_lines: {
           version: 1,
           notItemised: 0,
@@ -92,7 +94,7 @@ describe('ReportActivityReview', () => {
     fireEvent.click(within(itemised).getByRole('button', { name: 'Retry' }));
     const table = await within(itemised).findByRole('region', { name: 'Itemised activity lines' });
     expect(from).toHaveBeenCalledWith('monthly_report_packs');
-    expect(select).toHaveBeenCalledWith('activity_lines');
+    expect(select).toHaveBeenCalledWith('activity_lines,updated_at');
     expect(eq).toHaveBeenCalledWith('id', 'p1');
     expect(within(table).getByText('03/09/2026')).toBeTruthy();
     expect(within(table).getByText('WO-1')).toBeTruthy();
@@ -107,10 +109,31 @@ describe('ReportActivityReview', () => {
     expect(within(itemised).getByText('WO-1')).toBeTruthy();
   });
 
+  it('refuses newer itemised lines and reloads them only after the displayed snapshot changes', async () => {
+    const newer = '2026-10-02T00:00:00Z';
+    const response = {
+      data: { updated_at: newer, activity_lines: { version: 1, lines: [{ d: '2026-09-04', p: 'Alpha Reserve', k: 'event', c: 'maintenance', j: 'NEW-REF' }] } },
+      error: null,
+    };
+    maybeSingle.mockResolvedValue(response);
+    const { rerender } = render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    await setOpen(group(/^Itemised activity/), true);
+    expect(await screen.findByText(/This report pack changed since you opened it/)).toBeTruthy();
+    expect(screen.queryByText('NEW-REF')).toBeNull();
+    await setOpen(group(/^Itemised activity/), false);
+    await setOpen(group(/^Itemised activity/), true);
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+    rerender(<ReportActivityReview packId="p1" updatedAt={newer} data={data} status="draft" />);
+    await setOpen(group(/^Itemised activity/), true);
+    expect(await screen.findByText('NEW-REF')).toBeTruthy();
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
+  });
+
   it('runs the provider accounting check and warns when live records changed', async () => {
     rpc.mockResolvedValueOnce({
       data: {
         version: 1,
+        packUpdatedAt: updatedAt,
         checkedAt: '2026-10-01T00:00:00Z',
         freshness: { hasFrozenReport: true, frozenEntries: 6, liveEntries: 7, matchesLive: false, changedCategories: [{ code: 'pest_control', frozen: 3, live: 4 }] },
         provenance: { events: { inScope: 4, withLedger: 3, withoutLedger: 1 }, observations: { inScope: 1, withLedger: 0, withoutLedger: 1 }, sources: [] },
@@ -119,7 +142,7 @@ describe('ReportActivityReview', () => {
       },
       error: null,
     });
-    render(<ReportActivityReview packId="p1" data={data} status="generated" />);
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="generated" />);
     fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
     expect(await screen.findByText(/6 entries in the pack, 7 now/)).toBeTruthy();
     expect(rpc).toHaveBeenCalledWith('get_report_pack_activity_accounting', { p_pack_id: 'p1' });
@@ -130,9 +153,20 @@ describe('ReportActivityReview', () => {
     expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy();
   });
 
+  it('does not certify an older on-screen snapshot using a newer accounting result', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { version: 1, packUpdatedAt: '2026-10-02T00:00:00Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 6 } },
+      error: null,
+    });
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
+    expect(await screen.findByText(/This report pack changed since you opened it/)).toBeTruthy();
+    expect(screen.queryByText(/This pack matches live records/)).toBeNull();
+  });
+
   it('shows a permission state instead of the raw error for non-administrators', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'Provider administrator access required' } });
-    render(<ReportActivityReview packId="p1" data={data} status="draft" />);
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     fireEvent.click(screen.getByRole('button', { name: 'Check against live records' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Only a provider administrator'));
     expect(screen.queryByRole('alert')).toBeNull();

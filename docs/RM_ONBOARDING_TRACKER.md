@@ -3449,3 +3449,30 @@ The `report-pack-review-table` screenshot baselines in that spec were
 captured before the 2026-10-24 dark theme. They have been refreshed: the
 spec is not part of the CI browser lane, so the old baselines had not been
 updated.
+
+Review hardening (PR #312, not yet deployed):
+
+- Workshop orders must belong to the agreement's provider, even at a shared
+  place. Their provider-scoped subject and activity codes survive into the
+  report; only uncoded orders fall back to maintenance/manufacture.
+- The private accounting RPC uses the same report-provider custodian boundary
+  as pack access, not the broader administrator helper. Import receipts are
+  scoped to both provider and client, and batch details to the provider.
+- Original and watermarked versions of an observation's primary image count as
+  one photo, including when registered again as evidence. Additional image
+  paths still count. Observation-trigger mirror events remain excluded.
+- Missing or invalid ammunition quantities remain "Not recorded", not zero.
+  Species totals are recorded cull/sighting entries, not an inferred animal count.
+- Summary and appendix freshness includes species, materials, places, job
+  references and all other reportable line values. A cap-independent digest
+  covers every line, not just the first 2,000. Concurrent regeneration shows a
+  refresh-required state instead of mixing the old summary with new lines or
+  certifying a newer pack on an older review screen.
+- Period boundaries are explicit New Zealand local midnights, including DST
+  changes, even when generation or accounting runs in a UTC session.
+
+Regression checks use synthetic records in disposable PostgreSQL (including
+shared-place providers, foreign catalogue/ledger rows, unknown quantities,
+same-count corrections and UTC/DST boundaries) and desktop/mobile offline
+browser tests for current and stale snapshots. No source records were re-coded,
+re-dated or promoted while making these fixes.

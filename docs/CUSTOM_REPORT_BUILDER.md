@@ -145,6 +145,13 @@ Provider administrators can compare a pack with live records through
 `get_report_pack_activity_accounting`. That result is never persisted to
 client-readable data.
 
+Generation and accounting use explicit Auckland midnight boundaries, independent
+of the database session timezone. Freshness compares every summary section and a
+stable digest of all reportable itemised lines, even beyond the display cap.
+The review panel checks the displayed pack version before showing lazy-loaded
+lines or live accounting; if another administrator regenerated the pack, refresh
+and reopen it rather than combining two snapshots.
+
 `generate-report-pack-pdf`, `send-report-pack` and
 `apps/web/src/lib/reportPackRenderer.ts` must name the same renderer version;
 `test/report-activity-sections.test.js` enforces it. Raising the version makes

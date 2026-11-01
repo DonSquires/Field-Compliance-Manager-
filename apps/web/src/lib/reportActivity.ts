@@ -165,6 +165,7 @@ export function formatNzDate(value: string): string {
 }
 
 export interface ActivityAccounting {
+  packUpdatedAt: string;
   checkedAt: string;
   freshness: { hasFrozenReport: boolean; frozenEntries: number | null; liveEntries: number; matchesLive: boolean; changedCategories: Array<{ code: string; frozen: number; live: number }> };
   provenance: {
@@ -176,7 +177,7 @@ export interface ActivityAccounting {
   exceptions: { futureDated: number; sparseYears: Array<{ year: number; entries: number }>; supersededDuplicates: number };
 }
 
-export type AccountingProblem = { kind: 'permission' | 'unavailable' | 'missing' | 'error'; message: string };
+export type AccountingProblem = { kind: 'permission' | 'unavailable' | 'missing' | 'stale' | 'error'; message: string };
 
 export function activityAccountingProblem(error: { code?: string | null; message?: string | null } | null | undefined): AccountingProblem {
   const message = error?.message ?? '';
@@ -206,6 +207,7 @@ export function readActivityAccounting(value: unknown): ActivityAccounting | nul
   const month = object(result.clientMonth) ?? {};
   const exceptions = object(result.exceptions) ?? {};
   return {
+    packUpdatedAt: str(result.packUpdatedAt),
     checkedAt: str(result.checkedAt),
     freshness: {
       hasFrozenReport: freshness.hasFrozenReport === true,

@@ -160,9 +160,11 @@ event_scope as materialized (
 observation_scope as materialized (
 	select o.id, o.observed_at, o.module_key, o.distance_km,
 		case when jsonb_typeof(o.external_refs -> 'import') = 'object' then o.external_refs -> 'import' else '{}'::jsonb end as imported,
-		(nullif(btrim(coalesce(o.photo_url, '')), '') is not null
-			or nullif(btrim(coalesce(o.original_photo_url, '')), '') is not null
-			or nullif(btrim(coalesce(o.watermarked_photo_url, '')), '') is not null) as has_direct_photo,
+		array_remove(array[
+			nullif(btrim(o.watermarked_photo_url), ''),
+			nullif(btrim(o.original_photo_url), ''),
+			nullif(btrim(o.photo_url), '')
+		], null) as direct_photo_paths,
 		pl.place_name
 	from public.observations o
 	cross join lateral (
@@ -179,8 +181,15 @@ observation_scope as materialized (
 work_order_scope as materialized (
 	select w.id, w.kind, w.status, w.order_number,
 		coalesce(w.completed_at, w.started_at, w.scheduled_for, w.created_at) as at,
+		public.report_code_or_null(subject.code) as subject,
+		public.report_code_or_null(activity.code) as activity,
 		pl.place_name
 	from public.workshop_work_orders w
+	join agreement a on a.provider_organization_id = w.organization_id
+	left join public.reference_codes subject on subject.id = w.work_subject_code_id
+		and subject.organization_id = a.provider_organization_id and subject.code_type = 'work_subject'
+	left join public.reference_codes activity on activity.id = w.work_activity_code_id
+		and activity.organization_id = a.provider_organization_id and activity.code_type = 'work_activity'
 	left join lateral (
 		select k.place_name
 		from links k
@@ -203,7 +212,10 @@ event_photo_counts as (
 	group by i.location_event_id
 ),
 observation_photo_counts as (
-	select u.record_id, count(*) as n
+	select u.record_id, count(distinct case
+		when u.storage_path = any(o.direct_photo_paths) then o.direct_photo_paths[1]
+		else u.storage_path
+	end) as n
 	from (
 		select s.observation_id as record_id, s.storage_path
 		from public.observation_supporting_evidence s
@@ -216,7 +228,12 @@ observation_photo_counts as (
 		join observation_scope o on o.id::text = i.metadata ->> 'observation_id'
 		where i.evidence_kind = 'photo'
 			and i.storage_path is not null
+		union
+		select o.id, o.direct_photo_paths[1]
+		from observation_scope o
+		where cardinality(o.direct_photo_paths) > 0
 	) u
+	join observation_scope o on o.id = u.record_id
 	group by u.record_id
 ),
 acts_base as materialized (
@@ -249,7 +266,7 @@ acts_base as materialized (
 		case when o.imported ->> 'job_number' ~ '^[A-Za-z0-9._/-]{1,24}$' then o.imported ->> 'job_number' end,
 		o.distance_km,
 		public.report_numeric_or_null(o.imported ->> 'job_time_hours'),
-		(case when o.has_direct_photo then 1 else 0 end + coalesce(p.n, 0))::integer,
+		coalesce(p.n, 0)::integer,
 		case when jsonb_typeof(o.imported -> 'materials_used') = 'array' then o.imported -> 'materials_used' else '[]'::jsonb end,
 		null::text
 	from observation_scope o
@@ -258,8 +275,8 @@ acts_base as materialized (
 	select w.id, 'work_order', w.at, w.place_name, 'workshop',
 		null::text,
 		null::text,
-		null::text,
-		case w.kind when 'maintenance' then 'maintenance' when 'fabrication' then 'manufacture' end,
+		w.subject,
+		coalesce(w.activity, case w.kind when 'maintenance' then 'maintenance' when 'fabrication' then 'manufacture' end),
 		null::text,
 		null::text,
 		null::text,
@@ -419,7 +436,7 @@ pest_equipment as (
 	group by 1
 ),
 pest_ammunition as (
-	select coalesce(m.calibre, 'unspecified') as calibre, count(distinct m.record_id) as entries, coalesce(sum(m.quantity), 0) as rounds
+	select coalesce(m.calibre, 'unspecified') as calibre, count(distinct m.record_id) as entries, sum(m.quantity) as rounds
 	from mats m
 	join pest p on p.record_id = m.record_id
 	where m.material_type = 'ammunition'
@@ -450,7 +467,7 @@ numbered as (
 	select row_number() over (order by a.at, a.place_name, a.category, a.record_id) as n, a.*
 	from acts a
 ),
-line_rows as (
+all_line_rows as (
 	select n.n, jsonb_strip_nulls(jsonb_build_object(
 		'd', n.local_date,
 		'p', n.place_name,
@@ -468,7 +485,9 @@ line_rows as (
 		'ws', n.work_order_status
 	)) as line
 	from numbered n
-	where n.n <= (select max_lines from params)
+),
+line_rows as (
+	select * from all_line_rows where n <= (select max_lines from params)
 ),
 scope_counts as (
 	select
@@ -480,6 +499,7 @@ scope_counts as (
 select jsonb_build_object(
 	'report', jsonb_build_object(
 		'version', 1,
+		'itemisedDigest', (select md5(coalesce(string_agg(md5(lr.line::text), '' order by lr.n), '')) from all_line_rows lr),
 		'basis', 'Recorded activity entries: patrol-log lines, observations and committed workshop work orders at the places covered by this agreement. Counts are recorded entries, not animals or devices; hours and distance are as recorded in the source log.',
 		'totals', (select jsonb_build_object(
 			'entries', t.entries,
@@ -654,7 +674,7 @@ begin
 	end if;
 
 	select pack.id, pack.organization_id, pack.service_agreement_id, pack.report_kind,
-		pack.period_start, pack.period_end, pack.status, pack.generated_at,
+		pack.period_start, pack.period_end, pack.status, pack.generated_at, pack.updated_at,
 		pack.data -> 'activityReport' as frozen,
 		agreement.client_organization_id
 	into v_pack
@@ -665,7 +685,7 @@ begin
 	if v_pack.id is null then
 		raise exception 'Report pack not found';
 	end if;
-	if not public.is_admin_for_org(v_pack.organization_id) then
+	if not public.is_report_provider_custodian_for_org(v_pack.organization_id) then
 		raise exception 'Provider administrator access required';
 	end if;
 	if v_pack.report_kind <> 'monthly' then
@@ -673,8 +693,8 @@ begin
 	end if;
 
 	-- Same window as generate_due_report_packs.
-	v_from := v_pack.period_start::timestamptz;
-	v_to := v_pack.period_end::timestamptz + interval '1 day';
+	v_from := v_pack.period_start::timestamp at time zone 'Pacific/Auckland';
+	v_to := (v_pack.period_end + 1)::timestamp at time zone 'Pacific/Auckland';
 	v_live := public.build_agreement_activity_report(v_pack.service_agreement_id, v_from, v_to, 0) -> 'report';
 	v_frozen := case when jsonb_typeof(v_pack.frozen) = 'object' then v_pack.frozen end;
 
@@ -732,6 +752,8 @@ begin
 			where r.record_kind = s.record_kind
 				and r.record_id = s.id
 				and r.is_current
+				and r.provider_organization_id = v_pack.organization_id
+				and r.client_organization_id = v_pack.client_organization_id
 			order by r.version_no desc
 			limit 1
 		) v on true
@@ -770,7 +792,7 @@ begin
 				'observations', s.observations
 			) order by s.events + s.observations desc, s.source_file, s.source_sheet)
 			from (select * from sources order by events + observations desc, source_file, source_sheet limit 50) s
-			left join public.file_import_batches b on b.id = s.batch_id
+			left join public.file_import_batches b on b.id = s.batch_id and b.organization_id = v_pack.organization_id
 		), '[]'::jsonb)
 	into v_provenance, v_sources;
 
@@ -886,6 +908,7 @@ begin
 	return jsonb_build_object(
 		'version', 1,
 		'packId', v_pack.id,
+		'packUpdatedAt', v_pack.updated_at,
 		'status', v_pack.status,
 		'period', jsonb_build_object('start', v_pack.period_start, 'end', v_pack.period_end),
 		'generatedAt', v_pack.generated_at,
@@ -895,8 +918,8 @@ begin
 			'frozenEntries', (v_frozen -> 'totals' ->> 'entries')::integer,
 			'liveEntries', (v_live -> 'totals' ->> 'entries')::integer,
 			'matchesLive', v_frozen is not null
-				and (v_frozen -> 'totals') = (v_live -> 'totals')
-				and jsonb_array_length(v_categories) = 0,
+				and (v_frozen #- '{accountedFor,itemised}' #- '{accountedFor,notItemised}')
+					= (v_live #- '{accountedFor,itemised}' #- '{accountedFor,notItemised}'),
 			'changedCategories', v_categories
 		),
 		'live', jsonb_build_object(
@@ -915,8 +938,8 @@ grant execute on function public.get_report_pack_activity_accounting(uuid) to po
 grant execute on function public.get_report_pack_activity_accounting(uuid) to authenticated;
 
 -- Body copied from the live catalog (supabase/schema.sql); the only changes are
--- the activity report merged into data and the itemised lines written to
--- activity_lines. Sent packs stay immutable.
+-- the activity report merged into data, the itemised lines written to
+-- activity_lines and explicit New Zealand date boundaries. Sent packs stay immutable.
 create or replace function public.generate_due_report_packs(p_period_start date, p_period_end date, p_service_agreement_id uuid)
 returns integer
 language plpgsql
@@ -930,8 +953,8 @@ declare
 	v_count integer := 0;
 	v_written integer;
 	v_data jsonb;
-	v_start_ts timestamptz := p_period_start::timestamptz;
-	v_end_ts timestamptz := p_period_end::timestamptz + interval '1 day';
+	v_start_ts timestamptz := p_period_start::timestamp at time zone 'Pacific/Auckland';
+	v_end_ts timestamptz := (p_period_end + 1)::timestamp at time zone 'Pacific/Auckland';
 	v_sla_met integer;
 	v_sla_breached integer;
 	v_sla_running integer;

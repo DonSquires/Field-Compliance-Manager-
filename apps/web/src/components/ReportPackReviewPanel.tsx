@@ -176,7 +176,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       )}
       {typeof subjectSummary?.clientSummary === 'string' && <p className="report-review-source-note">{subjectSummary.clientSummary}</p>}
       <p className="report-review-source-note">These values come from governed operational records and cannot be edited here.</p>
-      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} data={pack.data} status={pack.status} />}
+      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} updatedAt={pack.updated_at} data={pack.data} status={pack.status} />}
 
       <form className="report-review-form" onSubmit={saveDraft}>
         <label>

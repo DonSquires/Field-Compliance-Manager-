@@ -88,8 +88,7 @@ test('administrator reviews month-end activity, itemised lines and the live acco
   const totals = activity.getByRole('group', { name: 'Month-end activity totals' });
   await expect(totals.getByText('4.25', { exact: true })).toBeVisible();
   await expect(activity.getByRole('region', { name: 'Activity by category' }).getByText('Pest control')).toBeVisible();
-  expect(lineReads.filter((select) => select === 'activity_lines')).toEqual([]);
-  expect(lineReads.every((select) => select === 'activity_lines' || !select.includes('activity_lines'))).toBe(true);
+  expect(lineReads.filter((select) => select.includes('activity_lines'))).toEqual([]);
 
   await activity.locator('summary', { hasText: /^Pest control/ }).click();
   await expect(activity.getByRole('region', { name: 'Pest control by species' }).getByText('Feral goat')).toBeVisible();
@@ -101,7 +100,7 @@ test('administrator reviews month-end activity, itemised lines and the live acco
   await activity.getByLabel('Category', { exact: true }).selectOption('maintenance');
   await expect(activity.getByText('Showing 1 of 1')).toBeVisible();
   await expect(lines.getByText('WO-0042')).toHaveCount(0);
-  expect(lineReads.filter((select) => select === 'activity_lines')).toHaveLength(1);
+  expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
 
   await activity.getByRole('button', { name: 'Check against live records' }).click();
   await expect(activity.getByText(/This pack matches live records: 5 entries/)).toBeVisible();
@@ -112,6 +111,36 @@ test('administrator reviews month-end activity, itemised lines and the live acco
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
   await testInfo.attach('report-month-end-activity', { body: await activity.screenshot(), contentType: 'image/png' });
+});
+
+test('administrator cannot mix activity from a newer report snapshot', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.route('**/rest/v1/monthly_report_packs?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('select') !== 'activity_lines,updated_at') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      updated_at: '2026-08-31T09:30:00.000Z',
+      activity_lines: { version: 1, lines: [{ d: '2026-08-01', p: 'New place', k: 'event', c: 'maintenance', j: 'NEW-SNAPSHOT' }] },
+    }) });
+  });
+  await page.route('**/rest/v1/rpc/get_report_pack_activity_accounting', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ version: 1, packUpdatedAt: '2026-08-31T09:30:00.000Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 5 } }),
+  }));
+  const activity = page.getByRole('region', { name: 'Month-end activity' });
+  await activity.locator('summary', { hasText: 'Itemised activity' }).click();
+  await expect(activity.getByText(/This report pack changed since you opened it/)).toBeVisible();
+  await expect(activity.getByText('NEW-SNAPSHOT')).toHaveCount(0);
+  await activity.getByRole('button', { name: 'Check against live records' }).click();
+  await expect(activity.getByText(/This report pack changed since you opened it/)).toHaveCount(2);
+  await expect(activity.getByText(/This pack matches live records/)).toHaveCount(0);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
 test('administrator builds a mixed-scope custom report and reviews the frozen snapshot', async ({ page }, testInfo) => {

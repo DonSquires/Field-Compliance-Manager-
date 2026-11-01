@@ -67,6 +67,7 @@ describe('activity accounting', () => {
   it('reads the provider accounting result', () => {
     const result = readActivityAccounting({
       version: 1,
+      packUpdatedAt: '2026-09-30T00:00:00Z',
       checkedAt: '2026-10-01T00:00:00Z',
       freshness: { hasFrozenReport: true, frozenEntries: 6, liveEntries: 7, matchesLive: false, changedCategories: [{ code: 'pest_control', frozen: 3, live: 4 }] },
       provenance: { events: { inScope: 4, withLedger: 3, withoutLedger: 1 }, observations: { inScope: 1, withLedger: 0, withoutLedger: 1 }, sources: [{ sourceFile: 'rm.xlsx', sourceSheet: 'Log', batchStatus: 'completed', batchRows: 10, batchDuplicates: 0, batchUnresolved: null, events: 3, observations: 0 }] },
@@ -74,6 +75,7 @@ describe('activity accounting', () => {
       exceptions: { futureDated: 2, sparseYears: [{ year: 2926, entries: 2 }], supersededDuplicates: 1 },
     });
     expect(result?.freshness.matchesLive).toBe(false);
+    expect(result?.packUpdatedAt).toBe('2026-09-30T00:00:00Z');
     expect(result?.provenance.sources[0].batchUnresolved).toBeNull();
     expect(result?.clientMonth.unlinkedPlaces[0].place).toBe('No place recorded');
     expect(result?.exceptions.sparseYears).toEqual([{ year: 2926, entries: 2 }]);
