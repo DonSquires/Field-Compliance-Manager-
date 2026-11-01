@@ -47681,6 +47681,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_identity_person_details: {
+        Args: {
+          p_action: string
+          p_distinct_from: string[]
+          p_fields: Json
+          p_organization_id: string
+          p_person_record_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       record_incident_person_identity: {
         Args: {
           p_display_name?: string
