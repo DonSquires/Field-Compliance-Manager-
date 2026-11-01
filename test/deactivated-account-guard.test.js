@@ -51,9 +51,14 @@ function checksDeactivation(name, stack = new Set()) {
   ));
 }
 
-// Never a sole grant: each policy using it must also pass deactivation-aware helpers.
+// The tenant guard can use the scalar predicate or its set-based RLS equivalent.
+// Never a sole grant: each policy using reveal access must also pass deactivation-aware helpers.
 const CONJOINED_HELPERS = new Map([
-  ['nzta_reveal_active', ['org_access_allowed', 'can_access_vehicle_owner_identity', 'can_access_person_contacts']],
+  ['nzta_reveal_active', [
+    ['org_access_allowed', 'accessible_org_ids'],
+    ['can_access_vehicle_owner_identity'],
+    ['can_access_person_contacts'],
+  ]],
 ]);
 
 test('every table whose policies read user_profiles inline without a deactivation check carries the restrictive guard', () => {
@@ -73,11 +78,14 @@ test('every policy helper keyed on auth.uid() fails closed for a deactivated pro
     .sort();
   assert.deepEqual(unchecked, [], `make these helpers check user_profiles.deactivated_at: ${unchecked.join(', ')}`);
 
-  for (const [helper, required] of CONJOINED_HELPERS) {
+  for (const [helper, requiredAlternatives] of CONJOINED_HELPERS) {
     for (const policy of policies.filter((candidate) => candidate.body.includes(`${helper}(`))) {
-      for (const guard of required) {
-        assert.ok(checksDeactivation(guard), `${guard} must check deactivation`);
-        assert.ok(policy.body.includes(`${guard}(`), `${policy.table}.${policy.name} uses ${helper} without ${guard}`);
+      for (const alternatives of requiredAlternatives) {
+        const present = alternatives.filter((guard) => policy.body.includes(`${guard}(`));
+        assert.ok(present.length > 0, `${policy.table}.${policy.name} uses ${helper} without ${alternatives.join(' or ')}`);
+        for (const guard of present) {
+          assert.ok(checksDeactivation(guard), `${guard} must check deactivation`);
+        }
       }
     }
   }
