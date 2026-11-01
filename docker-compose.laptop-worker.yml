@@ -20,8 +20,8 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
     ports:
-      # Tailscale-only: lets the VPS's own vision watcher route triage work here under local_gpu_first,
-      # instead of paying for RunPod. Never bind 0.0.0.0 — this API key is shared, not internet-safe.
+      # Tailscale-only: lets the VPS's own vision watcher route triage and recognition work here
+      # (gpu_consistent, local_gpu_first). Never bind 0.0.0.0 — this API key is shared, not internet-safe.
       - "100.114.240.13:3000:3000"
     environment:
       DETECTOR_MODEL: rf-detr-large-704-coco
@@ -60,10 +60,10 @@ services:
       INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
       LOCAL_GPU_INFERENCE_URL: http://fcm-inference:3000
       LOCAL_GPU_INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
-      # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer.
-      VISION_INFERENCE_POLICY: vps_first
-      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
-      RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
+      # This instance's own GPU is the only triage machine; an answer from any detector other than the pinned
+      # model, or one that ran on the CPU, leaves the frame unanswered and the job waits (gpu_consistent).
+      VISION_INFERENCE_POLICY: gpu_consistent
+      VISION_PINNED_DETECTOR_MODEL: rf-detr-large-704-coco
       VISION_LOCAL_DETECT_INFERENCE: "true"
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
@@ -75,8 +75,10 @@ services:
       VISION_WATCHER_HEALTH_MAX_AGE_MS: "90000"
       # This machine already runs its own Ollama (native, GPU-capable) for other work - reuse it via Docker
       # Desktop's host gateway instead of adding a second dockerized instance or a Tailscale hop to the VPS.
-      OLLAMA_VISION_URL: "${OLLAMA_VISION_URL:-http://host.docker.internal:11434}"
-      OLLAMA_VISION_MODEL: "${OLLAMA_VISION_MODEL:-moondream}"
+      OLLAMA_VISION_URL: "${CCTV_VLM_URL:-http://host.docker.internal:11434}"
+      OLLAMA_VISION_MODEL: "${CCTV_VLM_MODEL:-qwen3-vl:4b}"
+      OLLAMA_API_TOKEN: ${OLLAMA_API_TOKEN:-}
+      OLLAMA_CLOUD_VISION_MODEL: ${CCTV_CLOUD_VLM_MODEL:-gemma4:31b}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -119,7 +121,9 @@ services:
       DOCUMENT_SOURCE_ROOT: /sources/primary
       SOURCE_SYNC_STATE_PATH: /state/rm-source-sync.json
       SOURCE_SYNC_INTERVAL_MS: "60000"
-      SOURCE_SYNC_INCLUDE_PHOTOS: "true"
+      # Most of the R&M photo library is OneDrive online-only; hashing it would download it all.
+      # Photos are promoted name-first by source-promote.mjs on the host instead.
+      SOURCE_SYNC_INCLUDE_PHOTOS: "false"
     volumes:
       - "${BOB_DOCUMENT_ROOT_PATH:?BOB_DOCUMENT_ROOT_PATH is required}:/sources/primary:ro"
       - fcm_rm_source_sync:/state

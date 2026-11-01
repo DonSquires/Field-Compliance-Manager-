@@ -49,7 +49,8 @@ import { useAuth } from '../context/AuthContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
-import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
+import { canUseModule, officerRouteModuleKey } from '../lib/moduleAccess';
+import { isAdminTierRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
@@ -77,6 +78,7 @@ const OfficerLeavePage = React.lazy(() => import('../pages/OfficerLeavePage'));
 const OfficerTimesheetPage = React.lazy(() => import('../pages/OfficerTimesheetPage'));
 const OfficerCredentialsPage = React.lazy(() => import('../pages/OfficerCredentialsPage'));
 const OfficerVehicleLookupPage = React.lazy(() => import('../pages/OfficerVehicleLookupPage'));
+const OfficerPersonSearchPage = React.lazy(() => import('../pages/OfficerPersonSearchPage'));
 const OfficerWorkshopPage = React.lazy(() => import('../pages/OfficerWorkshopPage'));
 const OfficerNoiseControlPage = React.lazy(() => import('../pages/OfficerNoiseControlPage'));
 const OfficerParkingPage = React.lazy(() => import('../pages/OfficerParkingPage'));
@@ -86,6 +88,7 @@ const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreed
 const OfficerOvernightVerificationPage = React.lazy(() => import('../pages/OfficerOvernightVerificationPage'));
 const ComingSoonPage = React.lazy(() => import('../pages/ComingSoonPage'));
 const OfficerMapPage = React.lazy(() => import('../pages/OfficerMapPage'));
+const OfficerPlacesPage = React.lazy(() => import('../pages/OfficerPlacesPage'));
 const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then((module) => ({ default: module.OfficerHomePage })));
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
@@ -96,8 +99,8 @@ const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'access_control' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
-  | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
-  | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
+  | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'places' | 'dispatch' | 'debrief'
+  | 'vehicle_lookup' | 'person_search' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
@@ -120,14 +123,16 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   overnight_verification: { label: 'Overnight', description: 'Verify overnight activity', icon: Moon },
   checkpoint_scan: { label: 'Checkpoints', description: 'Scan assigned checkpoints', icon: MapPin },
   map: { label: 'Map', description: 'View operational places', icon: Map },
+  places: { label: 'Places', description: 'Add or verify a location with GPS', icon: MapPin },
   dispatch: { label: 'Dispatch', description: 'Live jobs and response', icon: Radio },
   debrief: { label: 'Debrief', description: 'Close the shift and follow up', icon: MessageSquare },
   vehicle_lookup: { label: 'Vehicle', description: 'Search vehicle history', icon: Car },
+  person_search: { label: 'Person search', description: 'Authorized notice and permit checks', icon: UserRound },
   credentials: { label: 'Credentials', description: 'View capability and expiry', icon: BadgeCheck },
   workshop: { label: 'Workshop', description: 'Your builds and maintenance visits', icon: Wrench },
 };
 
-const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map', 'bob']);
+const CORE_OFFICER_MODULES: ReadonlySet<string> = new Set(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'person_search', 'credentials', 'map', 'places', 'bob']);
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
@@ -148,10 +153,9 @@ const OfficerShell: React.FC = () => {
   const location = useLocation();
   const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
-  const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone, setLocationMode } = useServiceRelationships();
   const [activeModule, setActiveModule] = useState<ActiveModule>(null);
-  const moduleContext = useActiveModuleContext(activeModule ?? null);
 
   const getGps = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
@@ -178,7 +182,6 @@ const OfficerShell: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
-  const [grantedModules, setGrantedModules] = useState<string[]>([]);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
@@ -197,12 +200,15 @@ const OfficerShell: React.FC = () => {
     if (!module) return true;
     if (module === 'modules') return true;
     if (CORE_OFFICER_MODULES.has(module)) return true;
-    if (moduleContext.moduleKey === module && moduleContext.policyStatus && moduleContext.policyStatus !== 'needs_resolution') {
-      return moduleContext.enabled;
-    }
-    return grantedModules.includes(module)
-      || (moduleStatus === 'configured' && enabledModules.has(module) && (profile?.moduleAccess ?? []).includes(module));
-  }, [enabledModules, grantedModules, moduleContext.enabled, moduleContext.moduleKey, moduleContext.policyStatus, moduleStatus, profile?.moduleAccess]);
+    return canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled });
+  }, [isModuleEnabled, profile?.moduleAccess, profile?.role]);
+
+  // Directory: admin-tier roles see every organisation-enabled field module; everyone else sees their ticked modules.
+  const grantedModules = useMemo(() => {
+    const candidates = isAdminTierRole(profile?.role) ? Object.keys(MODULE_METADATA) : (profile?.moduleAccess ?? []);
+    return Array.from(new Set(candidates.map(officerRouteModuleKey))).filter((module) => MODULE_METADATA[module]
+      && (CORE_OFFICER_MODULES.has(module) || canUseModule({ moduleKey: module, role: profile?.role, moduleAccess: profile?.moduleAccess, isModuleEnabled })));
+  }, [isModuleEnabled, profile?.moduleAccess, profile?.role]);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
@@ -234,12 +240,6 @@ const OfficerShell: React.FC = () => {
       setOfficerState('standby');
     }
   }, [location.pathname, activeShift, grantedModules, moduleStatus, canAccessOfficerModule, moduleFromUrl, navigate]);
-
-  // Direct module access requires both the officer's grant and the organisation entitlement.
-  useEffect(() => {
-    const directAccess = profile?.moduleAccess ?? [];
-    setGrantedModules(Array.from(enabledModules).filter((module) => directAccess.includes(module)));
-  }, [enabledModules, profile?.moduleAccess]);
 
   useEffect(() => {
     if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
@@ -438,6 +438,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerCredentialsPage />;
       case 'vehicle_lookup':
         return <OfficerVehicleLookupPage />;
+      case 'person_search':
+        return <OfficerPersonSearchPage />;
       case 'workshop':
         return <OfficerWorkshopPage />;
       case 'noise_control':
@@ -462,12 +464,14 @@ const OfficerShell: React.FC = () => {
         return <OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'map':
         return <OfficerMapPage />;
+      case 'places':
+        return <OfficerPlacesPage />;
       case 'modules':
         return (
           <section className="officer-module-directory">
-            <header><span>Field tools</span><h1>Enabled modules</h1><p>Tools available for your organisation and role.</p></header>
+            <header><span>Field tools</span><h1>Tools</h1><p>Tools available for your organisation and role.</p></header>
             {grantedModules.length === 0 ? (
-              <div className="officer-module-empty">No enabled field modules are available.</div>
+              <div className="officer-module-empty">No field tools are available for your role.</div>
             ) : (
               <div className="officer-module-grid">
                 {grantedModules.map((mod) => {
@@ -562,7 +566,7 @@ const OfficerShell: React.FC = () => {
 
       <nav className="officer-action-bar" aria-label="Field actions">
         <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''} aria-current={activeModule === 'modules' ? 'page' : undefined}>
-          <Grid3X3 size={19} aria-hidden="true" /><span>Modules</span>
+          <Grid3X3 size={19} aria-hidden="true" /><span>Tools</span>
         </button>
         <button type="button" onClick={() => navigateToModule('report')} className={activeModule === 'report' ? 'is-active' : ''} aria-current={activeModule === 'report' ? 'page' : undefined}>
           <FilePlus2 size={19} aria-hidden="true" /><span>Report</span>

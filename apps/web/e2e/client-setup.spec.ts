@@ -42,7 +42,7 @@ async function setup(page: Page, resumed = false, schedules: unknown[] = [], rat
   await rpc('manage_operating_branch_rate_rule', { id: 'saved-rate', updated_at: '2026-10-19T00:00:00Z', amount: 24, rate_type: 'per_visit', site_id: SITE, service_type: 'patrol', name: 'Main store · patrol' });
   await rpc('create_patrol_route_from_agreement', [{ route_id: 'route-1', attached_places: 1 }]);
   await rpc('create_operating_roster_work_unit', { id: 'work-unit-1' });
-  await signInAsAdmin(page, `/admin/client-setup${resumed ? `?account=${CLIENT}` : ''}`);
+  await signInAsAdmin(page, `/admin/client-setup?view=delivery${resumed ? `&account=${CLIENT}` : ''}`);
   if (resumed) {
     await expect(page.getByRole('button', { name: /Main store/ })).toBeVisible();
     await page.getByRole('button', { name: /Main store/ }).click();
@@ -74,13 +74,23 @@ async function setupDirectory(page: Page) {
   const primary = { id: 'primary-contact', organization_id: CLIENT, first_name: 'Mere', last_name: 'Test', email: 'test@example.co.nz', phone: '03 555 0100', mobile: null, role_title: 'Manager', is_primary: true, is_emergency: true, notes: 'Preserve existing governed notes', updated_at: '2026-10-18T00:00:00Z', deactivated_at: null };
   await page.route('**/rest/v1/crm_contacts?*', (route) => route.fulfill({ json: [primary] }));
   await prepared.rpc('manage_crm_contact', { ...primary, first_name: 'Reviewed', updated_at: '2026-10-20T00:00:00Z' });
+  await page.route('**/rest/v1/rpc/get_field_place_workspace', route => route.fulfill({ json: {
+    clients: [{ id: CLIENT, name: 'Test client' }], total: 2,
+    places: [{ id: SITE, name: 'Main store', address: '44 Trafalgar Street, Nelson', sites: [site()], zones: [] },
+      { id: SECOND, name: 'Depot', address: null, sites: [site(SECOND, 'Depot')], zones: [] }],
+  } }));
+  await page.route('**/rest/v1/service_agreements?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('client_organization_id') === `eq.${CLIENT}`) {
+      await route.fulfill({ json: [{ id: AGREEMENT, starts_on: null, ends_on: null, invitation_status: 'accepted', external_refs: {} }] });
+    } else await route.fallback();
+  });
   await page.goto(`/admin/crm?account=${CLIENT}`);
   await expect(page.getByRole('heading', { name: 'Client directory', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Selected client', exact: true }).getByRole('heading', { name: 'Test client', exact: true })).toBeVisible();
   return prepared;
 }
 
-test('CRM unifies its directory, inline primary contact and per-site governed matrix', async ({ page, isMobile }) => {
+test('CRM unifies its directory, primary contact and simple location rows', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   const { writes } = await setupDirectory(page);
   const contact = page.getByRole('form', { name: 'Primary contact editor' });
@@ -89,15 +99,10 @@ test('CRM unifies its directory, inline primary contact and per-site governed ma
   await contact.getByRole('button', { name: 'Save contact' }).click();
   await expect(contact.getByRole('status')).toHaveText('Primary contact saved.');
   expect(writes.find((write) => write.fn === 'manage_crm_contact')?.body).toMatchObject({ p_action: 'update', p_account_organization_id: CLIENT, p_contact_id: 'primary-contact', p_expected_updated_at: '2026-10-18T00:00:00Z', p_notes: 'Preserve existing governed notes', p_is_emergency: true });
-  const sites = page.getByRole('region', { name: 'Child sites and inline services' });
-  await sites.getByRole('checkbox', { name: 'Main store Patrol', exact: true }).check();
-  await sites.getByLabel('Billing rate for Main store', { exact: true }).fill('24');
-  await sites.getByLabel('Schedule days for Main store').selectOption('weekdays');
-  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByText('No unsaved service changes')).toBeVisible();
-  expect(writes.find((write) => write.fn === 'manage_crm_agreement_delivery_schedule')?.body).toMatchObject({ p_site_id: SITE, p_active_days: [1, 2, 3, 4, 5] });
-  await expect(sites.getByRole('checkbox', { name: 'Main store CCTV setup unavailable' })).toBeDisabled();
-  await expect(sites.getByRole('checkbox', { name: 'Main store Static setup unavailable' })).toBeDisabled();
+  const sites = page.getByRole('region', { name: 'Client locations' });
+  await expect(sites.getByRole('button', { name: 'Main store', exact: true })).toBeVisible();
+  await expect(sites.getByRole('button', { name: 'Depot', exact: true })).toBeVisible();
+  expect(writes.filter(write => write.fn === 'manage_crm_agreement_delivery_schedule')).toHaveLength(0);
   const ribbon = page.getByRole('region', { name: 'Commercial totals for the last 30 days' });
   expect((await ribbon.boundingBox())?.height).toBe(40);
   if (!isMobile) expect(Math.round((await page.getByRole('complementary', { name: 'Client directory' }).boundingBox())?.width ?? 0)).toBe(340);
@@ -121,18 +126,12 @@ test('CRM filters the merged organization directory without duplicate bottom lis
   await expect(page.getByRole('heading', { name: /^Organizations We Contract With/ })).toHaveCount(0);
 });
 
-test('one delivery workspace saves organization, location, service and scoped rate without a wizard', async ({ page }) => {
+test('existing-client delivery saves location, service and scoped rate without recreating the client', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
-  const { writes } = await setup(page);
+  const { writes } = await setup(page, true);
   await expect(page.getByRole('list', { name: 'Setup steps' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add organization' }).click();
-  await page.getByLabel('Client name', { exact: true }).fill('Test client');
-  await page.getByLabel('Contact first name').fill('Test');
-  await page.getByLabel('Contact last name').fill('Contact');
-  await page.getByLabel('Email', { exact: true }).fill('test@example.co.nz');
-  await page.getByRole('button', { name: 'Save organization and contact' }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page).toHaveURL(new RegExp(`account=${CLIENT}`));
+  await expect(page.getByRole('button', { name: 'Add organization' })).toHaveCount(0);
+  if (isMobile) await page.getByRole('button', { name: /^Locations \(/ }).click();
   await page.getByRole('button', { name: 'Add Location' }).click();
   await page.getByLabel('Place name').fill('Main store');
   await page.getByLabel('Address', { exact: true }).fill('44 Trafalgar Street, Nelson');
@@ -152,6 +151,7 @@ test('one delivery workspace saves organization, location, service and scoped ra
   await page.getByRole('button', { name: 'Build patrol run' }).click();
   await expect(page.getByRole('button', { name: 'Roster the patrol run' })).toBeVisible();
   expect(writes.find((write) => write.fn === 'create_operating_roster_work_unit')?.body).toMatchObject({ p_patrol_route_id: 'route-1' });
+  expect(writes.some(write => write.fn === 'manage_crm_organization')).toBe(false);
   await expect(page.locator('.place-context-banner.is-console')).toHaveCount(1);
   const overflow = await page.evaluate(() => ({ y: document.documentElement.scrollHeight > innerHeight + 1, x: document.documentElement.scrollWidth > innerWidth + 1 }));
   expect(overflow).toEqual({ y: false, x: false });
@@ -270,14 +270,27 @@ test('spatial review and optional invitation remain governed inline actions', as
   expect(writes.find((write) => write.fn === 'prepare_crm_client_invitation')?.body).toMatchObject({ p_account_organization_id: CLIENT });
 });
 
-test('a duplicate client name offers the existing organization rather than another create', async ({ page }) => {
+test('delivery without an account uses simple onboarding and offers existing client matches', async ({ page }) => {
   await setup(page);
   await page.route('**/rest/v1/organizations?*', async (route) => {
     if (route.request().url().includes('ilike')) await route.fulfill({ json: [{ id: CLIENT, name: 'Test client' }] });
     else await route.fallback();
   });
-  await page.getByRole('button', { name: 'Add organization' }).click();
+  await expect(page.getByRole('button', { name: 'Add organization' })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /provider is engaged/ })).toBeVisible();
   await page.getByLabel('Client name', { exact: true }).fill('Test');
-  await expect(page.locator('.client-setup-matches')).toContainText('Already on the books?');
-  await expect(page.locator('.client-setup-matches').getByRole('button', { name: 'Test client' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Test client', exact: true })).toBeVisible();
+});
+
+test('an inaccessible delivery account cannot fall back to legacy organisation creation', async ({ page }) => {
+  const { writes } = await setup(page);
+  await page.route('**/rest/v1/organizations?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('id') === `eq.${CLIENT}`) await route.fulfill({ status: 403, json: { message: 'Client is not accessible' } });
+    else await route.fallback();
+  });
+  await page.goto(`/admin/client-setup?view=delivery&account=${CLIENT}`);
+  await expect(page.getByRole('alert').filter({ hasText: 'Client is not accessible' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add organization' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add Location', exact: true })).toBeDisabled();
+  expect(writes).toHaveLength(0);
 });

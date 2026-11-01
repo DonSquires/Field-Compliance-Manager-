@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "classification_profile": "rm_patrol_log",
+  "max_new_rows_per_sheet": 250,
+  "notes": "Each mapped sheet reuses the client code (external_ref namespace) and client organisation proven by the live R&M patrol import. A wrong code would duplicate history, so the promoter refuses namespaces with no live events. Holds stay visible in every report until a reviewed mapping replaces them.",
+  "workbooks": {
+    "ACTIVE Birdhurst camera and patrol log.xlsx": {
+      "sheets": [{ "sheet": "2025", "header_row": 1, "client_code": "BIRDHURST", "client_organization_id": "1249f7c6-1217-4430-a5dd-9cf438a528ed", "zone_map": "birdhurst-zone-map.json" }]
+    },
+    "ACTIVE CommunityCameras install and maintenance log CCL.xlsx": {
+      "hold": "camera_install_maintenance_workflow",
+      "reason": "Installation and maintenance work belongs to the governed maintenance workflow, not patrol evidence."
+    },
+    "ACTIVE DOC camera and patrol.xlsx": {
+      "hold": "zone_map_not_checked_in",
+      "reason": "The DOC place map used for the original import is not in the repository; add a reviewed map before automatic sync."
+    },
+    "ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx": {
+      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "MR", "client_organization_id": "b991ebca-c9ce-4488-a0fd-58f1be3b4810", "zone_map": "mr-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }]
+    },
+    "ACTIVE MPC log.xlsx": {
+      "hold": "agreement_and_place_map_review",
+      "reason": "Mainland Pest Control work needs an exact agreement and a reviewed place map before automatic sync."
+    },
+    "ACTIVE NelsonCityCouncil patrol NCC.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "NCC", "client_organization_id": "405fc1f7-45e8-4736-a517-885bb3e5ef95", "zone_map": "ncc-zone-map.json", "column_aliases": { "21": { "source_header": "Issue", "alias": "Secondary Issue (U)", "preserve_source": true } } }]
+    },
+    "ACTIVE OneFortyOne camera and patrol OFO.xlsx": {
+      "sheets": [
+        { "sheet": "2025", "header_row": 1, "client_code": "OFO2025", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json", "column_aliases": { "25": { "source_header": "Issue", "alias": "Secondary Issue (Y)", "preserve_source": true } } },
+        { "sheet": "2026", "header_row": 1, "client_code": "OFO2026", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json" }
+      ]
+    },
+    "ACTIVE OperationLizard camera and patrol log DART.xlsx": {
+      "hold": "legacy_source_identity_review",
+      "reason": "Legacy DART events lack source identity; they stay held until the owner decides the correction path."
+    },
+    "ACTIVE OtherPrivate camera and patrol log PVT.xlsx": {
+      "hold": "cross_organisation_split_review",
+      "reason": "Some PVT rows belong to Birdhurst; the split must be reviewed before automatic sync."
+    },
+    "ACTIVE Private - Stringer camera and patrol STRN.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "STRINGER", "client_organization_id": "3d71adf0-d052-42d2-ba32-9cb39e790134", "zone_map": "stringer-zone-map.json" }]
+    },
+    "ACTIVE STAND camera and patrol PFO.xlsx": {
+      "sheets": [{ "sheet": "ACTIVE", "header_row": 1, "client_code": "STAND", "client_organization_id": "2c433420-9fcc-40ba-8b32-3b542aa15e8f", "zone_map": "stand-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true }, "32": { "source_header": "", "alias": "Unused (AF)", "require_empty": true } } }]
+    },
+    "ACTIVE TasmanDistrictCouncil-camera and patrol TDC.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "TDC", "client_organization_id": "54ade19f-0bb7-45ca-a32d-2d87214c4e77", "zone_map": "tdc-zone-map.json", "column_aliases": { "23": { "source_header": "Issue", "alias": "Secondary Issue (W)", "preserve_source": true } } }]
+    },
+    "ACTIVE TasmanPineForest camera and patrol TPFL.xlsx": {
+      "sheets": [
+        { "sheet": "2025", "header_row": 1, "client_code": "TPFL2025", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } },
+        { "sheet": "2026", "header_row": 1, "client_code": "TPFL2026", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }
+      ]
+    },
+    "ACTIVE TaylorsContracting camera and patrol log.xlsx": {
+      "sheets": [{ "sheet": "2025", "header_row": 1, "client_code": "TAYLORS", "client_organization_id": "cb2af45b-8743-4bfb-b57e-18c16503d4ac", "zone_map": "taylors-zone-map.json" }]
+    },
+    "ACTIVE ThomasBros camera and patrol log.xlsx": {
+      "sheets": [{ "sheet": "2025", "header_row": 1, "client_code": "THOMASBROS", "client_organization_id": "ff87e028-9b8e-4138-baf2-7aef54386442", "zone_map": "thomasbros-zone-map.json" }]
+    },
+    "ACTIVE Wrattens Camera and Patrol WRAT.xlsx": {
+      "sheets": [
+        { "sheet": "Wratts ", "header_row": 1, "client_code": "WRATBROO", "client_organization_id": "f1a9fa3b-05f3-4489-be78-7e129a7f1e86", "zone_map": "wrattens-zone-map.json" },
+        { "sheet": "Wrattens", "header_row": 1, "client_code": "WRATMTR", "client_organization_id": "f1a9fa3b-05f3-4489-be78-7e129a7f1e86", "zone_map": "wrattens-zone-map.json" },
+        { "sheet": "2025", "header_row": 1, "client_code": "WRAT2025", "client_organization_id": "f1a9fa3b-05f3-4489-be78-7e129a7f1e86", "zone_map": "wrattens-zone-map.json" }
+      ]
+    },
+    "REMSEC Cycle Trails Patrol Log 2021.xlsx": {
+      "hold": "zone_map_not_checked_in",
+      "reason": "The Cycle Trails place map used for the original import is not in the repository; add a reviewed map before automatic sync."
+    },
+    "REMSEC Digger work 2023.xlsx": {
+      "hold": "maintenance_workflow",
+      "reason": "Digger work is client maintenance work and belongs to the manufacturing and maintenance workflow."
+    },
+    "REMSEC Fulton Hogan Patrol Log 2022.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "FULTONHOGAN", "client_organization_id": "f30aa215-2d22-40c7-8848-b7efb6a66297", "zone_map": "fultonhogan-zone-map.json" }]
+    },
+    "REMSEC OFO Culling Log 2023.xlsx": {
+      "hold": "culling_identity_review",
+      "reason": "OFO culling history came from other source files and needs hunter-versus-staff identity review."
+    },
+    "REMSEC Private - Parks Patrol Log 2022.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "PRIVATEPARKS", "client_organization_id": "ee7e306d-c79f-40b4-adc8-16b5b3d95512", "zone_map": "privateparks-zone-map.json" }]
+    },
+    "REMSEC Private - Redvale - Merc.xlsx": {
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "REDVALEMERC", "client_organization_id": "d4ff3eb2-bd06-4bbe-bf77-0cb23d83c6e9", "zone_map": "redvalemerc-zone-map.json" }]
+    }
+  }
+}

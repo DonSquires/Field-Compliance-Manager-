@@ -104,6 +104,13 @@ the doorstep for disclosure, they do for retention too.
   incident reports, dispatch records, compliance/enforcement evidence — each
   mapped to its live-purpose end-state and any statutory floor. NOT frozen here;
   each period must trace to a known obligation and legal confirmation.
+- **NZTA register information (owner ruling 2026-11-01: report only).** The
+  section 241 terms expect lookup records to be kept for at least 18 months and
+  register-derived personal information not to be kept longer than needed. The
+  annual summary (`get_nzta_s241_summary`) counts NZTA checks, lookups and
+  reveals older than 18 months, 2 years and 5 years so an administrator can
+  decide. Nothing is deleted or de-identified automatically until the schedule
+  above is ratified.
 
 ## History trace
 

@@ -408,6 +408,31 @@ test('product analyst rejects placeholder source_scope paths even without a trac
   assert.doesNotThrow(() => ground({ delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/OrganizationSetupPage.tsx'] }] }, {}));
 });
 
+test('revised analysis consumes confirmed feedback from the freshly locked step without changing the task', async () => {
+  let request;
+  const feedback = 'Revisit the reported current workflow and distinguish map leads from checked facts.';
+  const report = 'The final answer failed after the diary save succeeded.';
+  const constraints = Array.from({ length: 100 }, (_, index) => `Existing constraint ${index}`);
+  const job = { id: 'job', organization_id: 'org', task_description: 'Original immutable request' };
+  await runProductAnalyst({
+    job, step: { id: 'step', builder_mode: 'product_analyst' }, repositoryContext: {},
+    constraints,
+    startAnalysis: async () => ({ success: true, step: { input_context: { specification_revision: { feedback, review_quote: report } } } }),
+    executeModelRun: async input => {
+      request = input.modelRequest;
+      return { ok: true, validated_output: validSpecification(), artifact: { id: 'revised-spec' } };
+    },
+    completeAnalysis: async () => ({ success: true, approval: { id: 'new-approval' } }),
+  });
+  assert.ok(request.request.user_prompt.includes(feedback));
+  assert.ok(request.request.user_prompt.includes('Original immutable request'));
+  assert.deepEqual(JSON.parse(request.request.user_prompt).constraints, constraints);
+  assert.deepEqual(JSON.parse(request.request.user_prompt).specification_revision, { feedback, human_report: report });
+  assert.match(request.request.system_prompt, /Atlas is a map, not evidence/);
+  assert.match(request.request.system_prompt, /file inventory proves existence, not source inspection/);
+  assert.equal(job.task_description, 'Original immutable request');
+});
+
 test('Atlas gap specifications must name a live gap, and live gap names are known capabilities', () => {
   const repositoryContext = { build_map: { tracked_files: ['scripts/atlas-refresh.js'], schema: { tables: ['bob_capability_map'] } }, live_context: { atlas: { gaps: { total: 1, items: [{ entity_type: 'rpc', entity_name: 'compact_cctv_inference_results', gap_kind: 'unwired' }] } } } };
   const task = 'Repair Atlas gaps one by one.';

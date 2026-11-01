@@ -32,7 +32,7 @@ const MEANINGS: Record<string, ApprovalMeaning> = {
     rejectMeans: STOP,
   },
   implementation_review: {
-    question: 'Is the finished code acceptable?',
+    question: 'Does this implementation satisfy the full approved task?',
     approveMeans: 'The code review is recorded as passed and Bob continues to the next governed step.',
     rejectMeans: STOP,
   },
@@ -60,6 +60,28 @@ const text = (value: unknown, max = 400) => (typeof value === 'string' && value.
 const list = (value: unknown, pick: (item: unknown) => string | null = item => text(item), max = 8) =>
   Array.isArray(value) ? value.map(pick).filter((item): item is string => Boolean(item)).slice(0, max) : [];
 const record = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+export interface AcceptanceCoverage {
+  supplied: boolean;
+  blockers: string[];
+}
+
+export function acceptanceCoverage(inputContext: unknown): AcceptanceCoverage {
+  const receipt = record(record(inputContext).implementation_acceptance);
+  const report = record(receipt.report);
+  const requirements = report.requirements;
+  const blockers = Array.isArray(report.blockers) ? report.blockers.filter((item): item is string => typeof item === 'string') : [];
+  const ids = Array.isArray(requirements) ? requirements.map(item => record(item).requirement_id) : [];
+  const exactIds = ids.every(id => typeof id === 'string' && id.trim() !== '' && id.length <= 100)
+    && new Set(ids).size === ids.length;
+  const supplied = report.version === 1 && report.passed === true && Array.isArray(report.blockers)
+    && report.blockers.length === 0 && Array.isArray(requirements) && requirements.length > 0
+    && requirements.length <= 100 && exactIds
+    && requirements.every(item => record(item).status === 'covered');
+  return { supplied, blockers: supplied ? [] : blockers.length ? blockers : [
+    'Whole-job acceptance coverage is missing or incomplete. Run to gate to reconcile the task before approving.'
+  ] };
+}
 
 export function summarizeSpecification(content: string): PlainPlanSummary | null {
   let spec: Record<string, unknown>;

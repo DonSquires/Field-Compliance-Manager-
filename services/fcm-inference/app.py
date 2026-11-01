@@ -616,7 +616,7 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
 
 
 def _health_payload() -> dict[str, Any]:
-    """Which tiers are staged and which execution provider they run on. Shared by /health and the RunPod ping."""
+    """Which tiers are staged and which execution provider they run on, as reported by /health."""
     detector_state = entity_detector.detector_status()
     plate_state = plate_reader.status()
     return {
@@ -1020,8 +1020,8 @@ def _infer_face_if_requested(image: np.ndarray) -> dict[str, Any]:
 
 
 def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
-    """One frame, every requested task. Mirrors runpod_handler.py's per-frame answer shape so this endpoint
-    and RunPod are interchangeable triage sources for the same caller (services/vision/vision_job_watcher.js)."""
+    """One frame, every requested task: the per-frame answer shape the vision watcher reads from /infer/batch
+    (services/vision/vision_job_watcher.js), whichever machine (laptop GPU or VPS CPU) runs this service."""
     result: dict[str, Any] = {"success": True}
     triage = _triage_with_attributes(image) if tasks & {"person", "vehicle", "animal", "detect", "plate"} else None
     coverage = set((triage or {}).get("detector_coverage") or [])
@@ -1141,9 +1141,8 @@ async def infer_batch(
     authorization: Annotated[str | None, Header()] = None,
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    """Local-GPU equivalent of RunPod's `infer_batch` action: one call answers a whole batch of frames, so a
-    Tailscale-reachable tier (e.g. a technician's own GPU) can stand in for RunPod without protocol changes
-    on the caller side beyond the URL and response envelope."""
+    """One call answers a whole batch of frames, so the Tailscale-reachable laptop GPU tier triages and
+    recognises a job's frames with one detector model and few round trips."""
     _authorize(authorization, x_inference_api_key)
     if not payload.frames:
         return {"success": True, "results": []}

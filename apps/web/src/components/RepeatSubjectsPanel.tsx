@@ -97,12 +97,13 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const [expandedEvidenceId, setExpandedEvidenceId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
+  const [identityLinkOrgIds, setIdentityLinkOrgIds] = useState<Set<string>>(() => new Set());
   const historyRequest = useRef(0);
   const patrolIds = useMemo(() => history.filter((item) => item.source === 'patrol').map((item) => item.record_id), [history]);
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(patrolIds);
 
   const providerAgreements = useMemo(() => agreements.filter((agreement) =>
-    agreement.agreement_type === 'operational' && agreement.invitation_status === 'accepted' && agreement.client_organization_id !== profile?.organizationId,
+    agreement.agreement_type === 'operational' && agreement.client_organization_id !== profile?.organizationId,
   ), [agreements, profile?.organizationId]);
 
   const placeNames = useMemo(() => {
@@ -168,6 +169,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
     setIdentifications([]);
     setVehicleDetails(null);
     setExpandedEvidenceId(null);
+    setIdentityLinkOrgIds(new Set());
     setHistoryLoading(true);
     const [historyResult, detailsResult, identityResult] = await Promise.all([
       supabase.rpc('list_vehicle_subject_history_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId || null, p_limit: 200 }),
@@ -181,6 +183,14 @@ export const RepeatSubjectsPanel: React.FC = () => {
     setHistory(list);
     setVehicleDetails(((detailsResult.data ?? [])[0] ?? null) as VehicleDetails | null);
     setIdentifications((identityResult.data ?? []) as PersonIdentification[]);
+    // Person links are enforced per observation organisation, not by the
+    // panel-wide R&M gate, so only offer the control where the server allows it.
+    const linkOrgIds = [...new Set(list.filter((item) => item.source === 'patrol' && item.canonical_vehicle_id).map((item) => item.organization_id))];
+    if (linkOrgIds.length) {
+      const scopes = await Promise.all(linkOrgIds.map((organizationId) => supabase.rpc('can_view_rnm_identity_for_organization', { p_organization_id: organizationId })));
+      if (requestId !== historyRequest.current) return;
+      setIdentityLinkOrgIds(new Set(linkOrgIds.filter((_, index) => scopes[index].data === true)));
+    }
     const wanted = [...new Set(list.map((item) => item.officer_id).filter((id): id is string => Boolean(id)))].filter((id) => !officerNames[id]);
     if (wanted.length) {
       const { data: people } = await supabase.from('user_profiles').select('id,display_name').in('id', wanted);
@@ -320,7 +330,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
                     <RecordUpdatesPanel recordKind="observation" recordId={item.record_id} onChanged={() => void reloadAnnotations()} />
                   </details>}
                   {item.source === 'cctv' && item.evidence_item_id && <CctvEvidenceLink evidenceId={item.evidence_item_id} />}
-                  {item.source === 'patrol' && item.canonical_vehicle_id && <PersonObservationLink item={item} onLinked={() => void open(selected)} />}
+                  {item.source === 'patrol' && item.canonical_vehicle_id && identityLinkOrgIds.has(item.organization_id) && <PersonObservationLink item={item} onLinked={() => void open(selected)} />}
                 </li>
               ))}
             </ol>

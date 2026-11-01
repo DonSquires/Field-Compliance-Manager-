@@ -17,10 +17,12 @@
  * to show a gated feature, and safety-relevant modules fail closed on every
  * state except a positively confirmed "configured" + enabled.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { canonicalModuleKey } from '../lib/moduleAccess';
 import { supabase } from '../lib/supabase';
 
 export type ModuleGateStatus = 'loading' | 'error' | 'unconfigured' | 'configured';
+const EMPTY_MODULES: ReadonlySet<string> = new Set();
 
 export interface EnabledModulesApi {
   status: ModuleGateStatus;
@@ -39,17 +41,22 @@ export interface EnabledModulesApi {
 }
 
 export function useEnabledModules(organizationId: string | null | undefined): EnabledModulesApi {
-  const [status, setStatus] = useState<ModuleGateStatus>('loading');
-  const [enabledModules, setEnabledModules] = useState<Set<string>>(new Set());
+  const [state, setState] = useState<{
+    organizationId: string | null;
+    status: ModuleGateStatus;
+    enabledModules: ReadonlySet<string>;
+  }>({ organizationId: null, status: 'loading', enabledModules: EMPTY_MODULES });
+  const matchesOrganization = Boolean(organizationId && state.organizationId === organizationId);
+  const status = matchesOrganization ? state.status : 'loading';
+  const enabledModules = matchesOrganization ? state.enabledModules : EMPTY_MODULES;
 
   useEffect(() => {
     if (!organizationId) {
-      setStatus('loading');
-      setEnabledModules(new Set());
+      setState({ organizationId: null, status: 'loading', enabledModules: EMPTY_MODULES });
       return;
     }
     let cancelled = false;
-    setStatus('loading');
+    setState({ organizationId, status: 'loading', enabledModules: EMPTY_MODULES });
 
     supabase
       .from('organization_modules')
@@ -58,18 +65,22 @@ export function useEnabledModules(organizationId: string | null | undefined): En
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          setStatus('error');
-          setEnabledModules(new Set());
+          setState({ organizationId, status: 'error', enabledModules: EMPTY_MODULES });
           return;
         }
         const rows = data ?? [];
         if (rows.length === 0) {
-          setStatus('unconfigured');
-          setEnabledModules(new Set());
+          setState({ organizationId, status: 'unconfigured', enabledModules: EMPTY_MODULES });
           return;
         }
-        setEnabledModules(new Set(rows.filter((r) => r.enabled).map((r) => r.module_key)));
-        setStatus('configured');
+        const switches = new Map(rows.map((row) => [row.module_key, row.enabled]));
+        const enabled = new Set<string>();
+        for (const row of rows) {
+          const canonical = canonicalModuleKey(row.module_key);
+          // An explicit canonical switch wins over a historical route alias, including OFF.
+          if (switches.has(canonical) ? switches.get(canonical) : row.enabled) enabled.add(canonical);
+        }
+        setState({ organizationId, status: 'configured', enabledModules: enabled });
       });
 
     return () => {
@@ -77,11 +88,11 @@ export function useEnabledModules(organizationId: string | null | undefined): En
     };
   }, [organizationId]);
 
-  function isModuleEnabled(moduleKey: string, options?: { safetyRelevant?: boolean }): boolean {
-    if (status === 'configured') return enabledModules.has(moduleKey);
+  const isModuleEnabled = useCallback((moduleKey: string, options?: { safetyRelevant?: boolean }): boolean => {
+    if (status === 'configured') return enabledModules.has(canonicalModuleKey(moduleKey));
     if (options?.safetyRelevant) return false; // fail closed: loading, error, and unconfigured all deny
     return status === 'unconfigured'; // non-critical rollout allowance; loading/error still deny
-  }
+  }, [enabledModules, status]);
 
   return { status, enabledModules, isModuleEnabled };
 }

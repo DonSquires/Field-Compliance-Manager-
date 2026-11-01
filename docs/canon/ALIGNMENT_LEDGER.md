@@ -457,6 +457,107 @@ resolutions, and H&S concerns on an observation or patrol visit are appended to
 `record_updates` (append-only, audited, same access as the source record);
 photos use the existing org-scoped record-evidence path.
 
+### 2026-10-26 — Person search, NZTA people and notice expiry (Don Squires)
+
+> "we need to pull person information from R&M and create add them to the
+> canonical person record ... R&M do not have a system that advised when a
+> treaspass notice is about to expire or has expried ... fcm has this system
+> already built and we should be utalising it ... people infromation will come
+> from NZTA screenshots as the primary sauce then followed up by treaspass notice"
+
+Rulings, and how the build honours them:
+
+- **NZTA screenshots are the primary person source.** A screenshot whose OCR
+  reads a consistent plate, name and query date is approved without a second
+  reviewer (2026-10-26); anything unread or inconsistent is held. People are
+  filed under the provider (R&M) and projected to `canonical_people`; the
+  registered-owner edge is written through the governed vehicle-person path, and
+  a document containing conflicting facts on a shared vehicle stays pending
+  behind the existing grand-master review gate rather than being approved with
+  those facts silently omitted. NZTA address, check history and protected
+  owner/driver vehicle relationships are returned only
+  to users holding `can_access_vehicle_owner_identity`.
+- **Notices follow the NZTA person source.** R&M trespass and warning notices
+  are to be associated with canonical people and used with the existing expiry
+  register; notice import and any additional notice types remain subject to
+  source review and confirmed rules before a seed or migration is applied.
+- **Access.** Person search and the notice-expiry register are restricted to
+  active operations roles at both the UI and RPC boundary. Address and NZTA
+  check history remain additionally restricted by
+  `can_access_vehicle_owner_identity`.
+
+### 2026-10-31 — Historical notice expiry and NZTA owner observations
+
+The owner confirmed the existing notice-expiry rules and the interpretation of
+NZTA checks for the historical import:
+
+- **Expiry.** Trespass and warning notices use an explicit register expiry
+  when one is recorded; otherwise they expire two years after issue. Permit
+  refusal and contact request letters remain correspondence and do not create
+  an entry restriction.
+- **Owner history.** NZTA source-check dates establish when an owner was
+  observed, not a legal transfer date. The latest source-time observation is
+  the current registered-owner link; earlier observations remain as previous
+  links. A shared-vehicle conflict may confirm the person evidence while
+  keeping conflicting mechanical vehicle facts pending review.
+- **Evidence boundary.** NZTA identity and owner metadata stay restricted to
+  users with `can_access_vehicle_owner_identity`; ambiguous or unread evidence
+  remains held rather than being promoted into canonical records.
+
+**Owner matching (migration `20261101100000`).** A notice whose plate is on
+file is attributed to the vehicle's registered owner at the notice date only
+when the names agree; a shared family name alone does not attribute a named
+family member's notice to the owner. The notice's family name must be the
+owner's family name (the last word of two or more letters on both sides, titles
+stripped). When the notice also gives a given name, its first given name must
+equal the owner's first given name, be its initial or share a 3+ letter prefix
+with it, or exactly equal one of the owner's middle names; a notice that names
+only a surname (for example "Mr Alder") still resolves to the registered owner
+with that family name. Names carrying a generational suffix (Jr, Sr, II to IV)
+are never matched to the owner. A notice that fails these checks falls through
+to a unique exact-name match, then to a person verified by the notice itself,
+linked to the vehicle as an associated person; genuine spelling duplicates are
+joined with the governed Merge records action.
+
+**Live state (verified read-only 2026-10-27).** Migrations `20261031090000`,
+`20261031100000`, `20261031110000` and `20261101100000` are applied and
+ledgered. The governed NZTA name repair renamed 2,627 people whose display name
+had been read from a screenshot heading, merged 85 resulting duplicates and left
+47 heading-named records for manual review. The historical register import
+read 555 notices and letters: 546 imported (466 warnings, 54 trespass notices,
+14 permit refusals and 12 contact requests) and 9 held for review (3 ambiguous
+people, 6 names too incomplete to create a person). Of the 546, 166 resolved to
+the registered owner at the notice date, 63 to a unique exact name and 317 to a
+person created from the notice; 110 associated-person vehicle links were
+recorded through `record_vehicle_person`, and 169 notices name a plate not yet
+on file. A replay reported all 546 as already present. Across all imported
+notices (including 11 trespass rows imported on 2026-10-11), 42 are in force, 9
+warnings expire within 30 days, 472 have expired, 8 trespass notices are drafts
+and the 26 letters carry no expiry; 50 of 517 people have a notice in force or
+expiring.
+
+**Acceptance correction (owner approved 2026-10-27).** A fresh live read matched
+all 2,627 name repairs and 85 merges to their source plan, including 432 active
+company-owner records with their company names and 196 records labelled
+`Owner withheld by NZTA`. All expected labels and categories agree in the
+organisation records and canonical records. The 546 imported notices persist
+with their source hashes and person links; that batch covers 507 people (the
+517 figure above includes earlier imports).
+
+The signed-in Person search check exposed two unfinished Word templates that
+the importer mistook for named warnings. Their addressee blocks contain
+`name and address`, including one corrupted prefix; neither identifies a person.
+The owner approved quarantine, not deletion or a claim that a real warning was
+withdrawn. Migration `20261027032744` moves only those source-hash- and
+import-key-bound notices to draft, marks their isolated synthetic identity
+records rejected/retired, preserves source provenance and creates audit receipts.
+It refuses changed or reused identities. Existing expiry notifications are
+corrected rather than deleted or silently marked read. The parser now holds
+unfinished addressee fields through the salutation, regardless of date position,
+before any name fallback. A template filename alone does not exclude completed,
+named correspondence. Release and live verification of this correction are required before
+the two entries can be counted as removed from active expiry alerts.
+
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
 > "We should only have 1 person canonical record, 1 vehicle canonical record and
@@ -583,3 +684,169 @@ published/sent packs, never drafts. Portal-delivered packs refuse duplicate
 email delivery; email packs require explicit publication; sent packs remain
 immutable. Reviewed editorial content is used by PDF and email renderers. Truth
 table: `supabase/tests/20260926010000_report_pack_review_and_delivery.sql`.
+
+### 2026-10-27 — Permit holders are people, and one permit card serves every surface (Don Squires)
+
+> "I just added xlsx file you can use to enrich person records and vehicle
+> numberplates."
+
+**Live status (migration `20261101110000`, verified 2026-10-27).** The
+OFO "Permit Extract" workbook is the source of truth for the 112 forest-access
+permits it contains. A new admin-only, audited `import_person_permit` RPC fills
+blank permit, person-contact and vehicle fields from that workbook and inserts
+permits that are not yet recorded. It never replaces a recorded value, never
+changes a permit's holder, and refuses a holder whose email is already used by
+a differently named canonical person. Those rows are held for review, not
+merged. Replays are no-ops.
+
+Permit validity is derived, not typed: `person_permit_validity` reads status
+and the NZ calendar date. A finishing date is inclusive. The states are
+revoked, suspended, expired, not started, dates not recorded, expiring within
+30 days, and valid. `person_permits_fieldwork` exposes it as `validity_state`.
+`search_people` now finds a person by an exact permit number and returns their
+permits with linked vehicles. Firearm licence numbers stay in the locked base
+table and are never returned to field users.
+
+The Person, Vehicle and Officer vehicle lookup pages all render the same
+`PermitAccessCard`. A permit's holder is shown as the permit holder, never as
+the vehicle's owner: NZTA ownership remains the owner record. The TPFL
+workbook supplies permit types, forms and rules, not holder or numberplate
+records. The booking CSV is not imported as FCM login accounts; its password
+and account-control fields are not identity evidence. Truth table:
+`test/permit-holder-person-search-migration.test.js`.
+
+**Source acceptance, 2026-10-27.** All 143 booking CSV permit numbers and all
+112 OFO workbook permit numbers persist: 156 distinct permits for 140 holders,
+with 110 permit-to-vehicle links across 95 canonical vehicles. All 112 workbook
+date pairs match the source. Across the combined set, 105 permits are expired,
+7 expire within 30 days, and 44 have no recorded dates.
+
+The workbook contains 93 vehicle entries in 86 rows. One was initially reported
+as unreadable because its make was in all caps. It contains a standard NZ plate,
+and the booking CSV had already linked that vehicle to the same permit.
+The parser now recognises standard three-letter/three-digit and
+two-letter/four-digit plate boundaries before all-caps makes, without guessing
+where an unseparated personalised plate ends. All 93 source entries are
+accounted for; no duplicate vehicle or permit link is needed.
+
+### 2026-10-27 — A permit holder's name comes from the permit that names them (Don Squires)
+
+Owner decisions, recorded 2026-10-27: complete names the extract proves;
+give each named holder in a merged record their own record; link new permits
+by email and surname to the single matching holder and complete that name;
+never merge family members who have different first names.
+
+**Build status (migration `20261101120000`).** The RAMS booking import keyed
+permit holders by surname and email. It therefore recorded 125 people by
+surname alone and merged different people who share a surname. The OFO
+extract names the holder of each permit and is the source of truth for that
+name.
+
+`attribute_permit_holder` is admin-only and audited. It takes a full name and
+the permits that name it. If those permits are all of the record's permits,
+the given names are added in front of the recorded name. The canonical key
+stays, and the previous name is kept in the person's metadata. Otherwise
+those permits move to a new draft person of their own, and the record keeps
+the rest.
+
+It refuses:
+
+- a name that does not end with the recorded name;
+- permits the person does not hold;
+- renaming a person whom another organisation records;
+- any person not positively recorded by surname alone.
+
+It never deletes a person.
+
+**Surname basis (review ruling, 2026-11-01).** "Recorded by surname alone" is
+a positive marker, not a guess from word count. The migration marks
+`metadata.name_basis = 'surname'` on every person the booking import created
+(an import key and a permit from the RAMS bookings file); live, that is all
+125 holders. A compound surname such as "Te Whare" is still a surname. Only
+a marked person can be completed, separated, or linked by surname, and
+completing a name removes the marker. A person who already carries a full
+name is never renamed and never takes a related name's permit: "Jane Smith"
+is not "Mary Jane Smith", so that permit is held for review rather than
+linked or created.
+
+**Two-way hold (clarification, 2026-10-27).** This came from the Copilot
+pull-request review of #264. Don Squires accepted and delivered it under his
+standing direction for the R&M import, in migration `20261101130000`. It
+narrows the ruling above and does not widen it. The hold applies in both
+directions: "Jane Smith" arriving under the email of an existing
+"Mary Jane Smith" is held too. The only automatic link is a longer full
+name that extends a surname-only record.
+
+Names are compared by whitespace-separated parts
+(`person_name_parts`), so a punctuated or accented single name such as
+O'Neill, Smith-Jones or Müller is one part. It never passes as a full name,
+and Jones never extends Jane Smith-Jones.
+
+`import_person_permit` gains `p_create_holder`, which defaults to off. A new
+permit links to a holder recorded by surname only when:
+
+- the email agrees;
+- the full name ends with that surname;
+- exactly one such holder exists, and no other holder with that email has a
+  related name, whether longer or shorter.
+
+The caller then completes that holder's name. With `p_create_holder` on, a
+named holder who matches no one is created as a new draft person. A
+one-word name never creates a person. Audit metadata carries permit numbers
+and identifiers, never names or emails.
+
+The import still only fills empty fields on a recorded permit. Since
+`20261101130000` it reports how the recorded values differ from the extract
+field by field, through `person_permit_compare_value`:
+
+- lists are compared as sets of entries, so `['North', 'East']` is not
+  `['North East']`;
+- email addresses are compared exactly, ignoring only case and surrounding
+  spaces;
+- telephone numbers are compared by their digits;
+- the firearms licence number is compared by its letters and digits;
+- other text is compared by its words.
+
+Previously every separator was stripped, which hid such differences.
+
+The repair script plans every step from a live snapshot and records the
+expected outcome, the holder it lands on, and that holder's complete permit
+set. A follow-up completion names its permits explicitly and never sweeps in
+other permits that share the email. A new permit is held in the plan if a
+permit with the same email is proven by the extract to belong to someone
+else. The database rolls back and holds any step whose outcome, holder or
+permit set differs from the plan, so the run cannot drift from the reviewed
+plan.
+
+Four extract permits for family members first appeared to share an email
+with a differently named relative. They share it only with an older,
+unnamed permit on the merged record. Once the named relative moves to their
+own record, each family member is linked to that older permit by the
+email-and-surname rule. This keeps the family members separate from the
+relative without leaving a duplicate surname-only record.
+
+Truth table: `test/permit-holder-identity-repair-migration.test.js`.
+
+### 2026-11-01 — NZTA section 241 readiness for R&M (Don Squires)
+
+R&M's section 241 authorisation covers two Motor Vehicle Register purposes:
+trespass by a vehicle without a valid permit on a contracted property, and
+entry or damage seen on CCTV or patrol against posted signage. The owner
+ruled that a name alone is not restricted; the NZTA-sourced person-vehicle
+link is, in both directions, and only `vehicle_owner_identity` holders see it,
+after a purpose-stated, logged, 15-minute reveal. The client the notice was
+issued for and the investigating user may use the data for that notice.
+Retention is report-only. Anonymous reads of `canonical_person_public` are
+removed. Full ruling: `ACCESS_MODEL.md` (owner ruling 2026-11-01); retention:
+`RETENTION_DOCTRINE.md`. Live status: records written only through hardened
+definer RPCs in `20261101160000_nzta_s241_readiness.sql`; direct table reads
+of NZTA owner links and NZTA source documents are closed by RLS; historical checks
+are listed without a purpose rather than back-filled; existing NZTA holders
+show as not ready until training and confidentiality are recorded.
+Review hardening (same migration): NZTA source attachments, evidence rows and
+Storage files are reveal-gated; readiness is enforced by trigger on every grant
+path; reveal windows are timed by the server clock and scoped to the revealing
+organisation; notice follow-up requires an issued notice about the same subject;
+the identity registry masks unrevealed NZTA records; historical checks can be
+linked once to an explaining lookup.
+Truth table: `test/nzta-s241-readiness.test.js`.

@@ -17,6 +17,32 @@ const modelGatewayToken = 'test-model-gateway-token';
 const webhookSecret = 'test-webhook-secret';
 const baseUrl = `http://127.0.0.1:${port}`;
 let serverProcess;
+let serverStartupFailure = null;
+
+test('model-run disconnect cancels upstream work without writing to a closed response', async () => {
+  const { EventEmitter } = require('node:events');
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  const start = source.indexOf("  if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run')");
+  const end = source.indexOf("  // Bob's terminal", start);
+  const route = vm.runInNewContext(`(async function(req,res){${source.slice(start, end)}})`, {
+    AbortController, url: { pathname: '/api/bob/builder/model-run' }, body: {}, modelGatewayConfig: {},
+    modelGatewayAuthorized: () => true,
+    invokeBuilderModel: async ({ signal }) => {
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      return { status: 499, body: { code: 'request_cancelled' } };
+    },
+    json: () => { throw new Error('must not write to disconnected caller'); },
+  });
+  const res = new EventEmitter();
+  res.writableEnded = false;
+  res.destroyed = false;
+  const pending = route({ method: 'POST' }, res);
+  assert.equal(res.listenerCount('close'), 1);
+  res.destroyed = true;
+  res.emit('close');
+  await pending;
+  assert.equal(res.listenerCount('close'), 0);
+});
 
 test('single-step acceptance does not wait for preflight or models and shares the run lock', async () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
@@ -79,10 +105,19 @@ async function request(method, route, body, headers = {}) {
 }
 
 test.before(async () => {
+  const bin = path.join(stateDir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'docker'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === 'container' && args[1] === 'ls') console.log('a'.repeat(64));
+else if (args[0] === 'container' && args[1] === 'inspect') console.log(JSON.stringify({id:'a'.repeat(64),name:'/fixture-api',status:'running',compose_config_files:'/srv/fixture/compose.yml'}));
+else process.exit(2);
+`, { mode: 0o700 });
   serverProcess = spawn(process.execPath, ['bob-control-plane-server.js'], {
     cwd: root,
     env: {
       ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       // Hermetic: the developer's live Supabase env must not leak into the unit server
       // (it made /health read the live laptop registry once the laptop had registered).
       SUPABASE_URL: '',
@@ -108,15 +143,25 @@ test.before(async () => {
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
+  serverProcess.once('exit', (code, signal) => {
+    serverStartupFailure = `process exited (${signal || code})`;
+  });
   await once(serverProcess, 'spawn');
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  let lastHealthError = 'no health response';
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (serverStartupFailure) break;
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) return;
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 50));
+      lastHealthError = `health returned HTTP ${response.status}`;
+    } catch (error) {
+      lastHealthError = error.message;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error('Bob control plane did not start');
+  throw new Error(
+    `Bob control plane did not start after 15 seconds: ${serverStartupFailure || lastHealthError}`
+  );
 });
 
 test.after(() => {
@@ -133,7 +178,7 @@ test('health is public and reports the control plane', async () => {
   // Host disk truth is live (statfs of the state dir) and carries only sizes and a status, never paths.
   assert.ok(['ok', 'warn', 'critical', 'unknown'].includes(storage.status));
   assert.ok(Object.keys(storage).every((key) => ['total_gb', 'available_gb', 'used_pct', 'status', 'last_hygiene'].includes(key)));
-  assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'github', builderSourceConfigured: false, builderApiConfigured: false, builderSshConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, mainHealth: { enabled: false, sourceHost: 'github', latest: null }, runningBuilderJobs: 0 });
+  assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'github', builderSourceConfigured: false, builderApiConfigured: false, builderSshConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, mainHealth: { enabled: false, sourceHost: 'github', latest: null }, runningBuilderJobs: 0, activeHumanTests: 0, productionHumanTest: { enabled: false, route: '/admin/builder', latest: null, observation: null } });
   // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
   assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null, ssh_allowed: null });
   // Provider health names Bob's own compute first and never carries secrets or URLs.
@@ -219,6 +264,21 @@ test('assessment aliases retain the same authentication and read-only contract',
     assert.equal(allowed.response.status, 200);
     assert.equal(allowed.body.sourceRoot, root);
     assert.equal(allowed.body.secretFilesExcluded, true);
+  }
+});
+
+test('Docker diagnostic aliases require admin authority rather than worker or model authority', async () => {
+  for (const route of ['/docker/services', '/api/bob/docker/services', '/api/bob/builder/docker/services']) {
+    for (const token of ['', runnerToken, modelGatewayToken]) {
+      const result = await request('GET', route, undefined, { authorization: `Bearer ${token}` });
+      assert.equal(result.response.status, 401);
+    }
+    const allowed = await request('GET', route, undefined, { authorization: `Bearer ${adminToken}` });
+    assert.equal(allowed.response.status, 200);
+    assert.equal(allowed.body.services[0].name, '/fixture-api');
+    assert.equal(allowed.body.total, 1);
+    assert.equal(allowed.body.evidence.environment, 'host_docker_daemon');
+    assert.equal(allowed.body.evidence.read_only, true);
   }
 });
 

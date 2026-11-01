@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { contractedDaysWords, contractedHoursWords, plainWords, plural, sentenceCase, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from './rosterWords';
+import { contractedDaysWords, contractedHoursWords, plainWords, plural, sentenceCase, shiftStatusLabel, slotStatusLabel, submittedWords, timeRange, workUnitTypeLabel } from './rosterWords';
 
 describe('roster plain words', () => {
+  it('states when a timesheet reached the server in NZ time, or nothing when unknown', () => {
+    // 21:15 UTC on 1 Nov is 10:15 on 2 Nov in New Zealand daylight time.
+    const words = submittedWords('2026-11-01T21:15:00Z');
+    expect(words).toMatch(/^Submitted 2 Nov/);
+    expect(words).toContain('10:15');
+    expect(submittedWords(null)).toBeNull();
+    expect(submittedWords('')).toBeNull();
+    expect(submittedWords('not a date')).toBeNull();
+  });
+
   it('tells the rosterer what each field shift status means on the board', () => {
     expect(shiftStatusLabel('published')).toBe('Waiting for officer');
     expect(shiftStatusLabel('accepted')).toBe('Accepted');
@@ -31,6 +41,7 @@ describe('roster plain words', () => {
     expect(workUnitTypeLabel('patrol')).toBe('Patrol run');
     expect(workUnitTypeLabel('static')).toBe('Static post');
     expect(workUnitTypeLabel('internal')).toBe('Office / internal');
+    expect(workUnitTypeLabel('workshop')).toBe('Manufacturing & maintenance');
     expect(workUnitTypeLabel(undefined)).toBe('Unknown');
   });
 

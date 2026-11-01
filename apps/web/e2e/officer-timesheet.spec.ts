@@ -64,12 +64,14 @@ test('branch shifts reach the timesheet, unpaid breaks come off, and a shift end
 
 test('a period already covered by a sent timesheet cannot be sent twice', async ({ page }) => {
   await page.route('**/rest/v1/timesheets**', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', period_start: '2026-08-24', period_end: '2026-08-30', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, status: 'submitted', review_notes: null, approved_at: null }]) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', period_start: '2026-08-24', period_end: '2026-08-30', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, status: 'submitted', review_notes: null, approved_at: null, submitted_at: '2026-08-30T08:05:00Z' }]) });
   });
   await signInAsOfficer(page, '/officer/timesheet');
   await expect(page.locator('.form-hint[role="note"]')).toContainText('You already sent a timesheet covering Mon, 24 Aug – Sun, 30 Aug (waiting for review). Pick dates outside it.');
   await expect(page.getByRole('button', { name: 'Send for approval' })).toBeDisabled();
   await expect(page.locator('.status-badge').filter({ hasText: 'Waiting for review' })).toBeVisible();
+  // 08:05 UTC on 30 Aug is 8:05 pm the same day in New Zealand standard time.
+  await expect(page.locator('#officer-timesheet-38383838-3838-4838-8838-383838383838')).toContainText(/Submitted 30 Aug.*8:05/);
 });
 
 test('officer resubmits a rejected period after correction', async ({ page }) => {

@@ -59,11 +59,14 @@ def test_per_kind_thresholds_and_tile_fragment_guard():
     assert [item['raw_class'] for item in full] == ['person']  # cat below 0.5 animal floor, train below 0.6
     window = {'x': 0, 'y': 0, 'width': 1200, 'height': 700}
     tile = detector._detections_from_results(
-        [_result('car', 0.9, 10, 10, 900, 400), _result('car', 0.7, 50, 50, 150, 110), _result('car', 0.4, 300, 300, 400, 360)],
+        [_result('car', 0.9, 10, 10, 900, 400), _result('car', 0.7, 50, 50, 250, 170), _result('car', 0.4, 300, 300, 500, 420)],
         window['x'], window['y'], width, height, 'tile', window,
     )
     assert [item['confidence'] for item in tile] == [0.7]  # fragment spanning the tile and a sub-0.45 box are dropped
     assert tile[0]['pass'] == 'tile'
+    # A vehicle box under the 0.35 % area floor (steam-plume scale) is noise, however confident.
+    small = detector._detections_from_results([_result('car', 0.9, 50, 50, 150, 110)], 0, 0, width, height, 'full')
+    assert small == []
 
 
 def test_duplicates_are_suppressed_and_tiles_only_add_uncovered_objects():

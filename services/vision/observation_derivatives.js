@@ -23,10 +23,10 @@ function closestBbox(candidates, reference) {
 }
 
 function bboxForFrame(frame, event, kind) {
-  if (kind === 'vehicle') return closestBbox(frame?.runpod?.vehicles || frame?.detect?.vehicles || [], event.best_bbox);
-  if (kind === 'face') return closestBbox(frame?.face?.faces || frame?.runpod?.faces || [], event.best_bbox);
-  if (kind === 'person') return closestBbox(frame?.people?.people || frame?.runpod?.people || [], event.best_bbox);
-  if (kind === 'animal') return closestBbox(frame?.animals?.animals || frame?.runpod?.animals || [], event.best_bbox);
+  if (kind === 'vehicle') return closestBbox(frame?.triage?.vehicles || frame?.detect?.vehicles || [], event.best_bbox);
+  if (kind === 'face') return closestBbox(frame?.face?.faces || frame?.triage?.faces || [], event.best_bbox);
+  if (kind === 'person') return closestBbox(frame?.people?.people || frame?.triage?.people || [], event.best_bbox);
+  if (kind === 'animal') return closestBbox(frame?.animals?.animals || frame?.triage?.animals || [], event.best_bbox);
   return event.best_bbox || null;
 }
 
@@ -44,7 +44,7 @@ function candidateFramesForEvent(summary, event, kind, maximum = MAX_EVENT_FRAME
       const bbox = bboxForFrame(frame, event, kind);
       const point = center(bbox);
       const sharpness = Number(frame.sharpness_score) || 0;
-      const confidence = Number(frame?.runpod?.vehicle?.detection?.confidence || frame?.inference?.data?.detection?.confidence || 0);
+      const confidence = Number(frame?.triage?.vehicle?.detection?.confidence || frame?.inference?.data?.detection?.confidence || 0);
       return { frame, bbox, score: sharpness + (point?.scale || 0) * 0.1 + confidence * 100 };
     })
     .filter((entry) => entry.bbox)
@@ -78,7 +78,7 @@ function derivativeStoragePaths(evidence, eventId) {
 }
 
 function enhancementProviderOrder() {
-  return ['laptop_gpu', 'runpod_fallback', 'worker_deterministic'];
+  return ['laptop_gpu', 'worker_deterministic'];
 }
 
 function alprCandidate(result) {

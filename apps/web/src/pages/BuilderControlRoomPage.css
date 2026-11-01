@@ -869,6 +869,40 @@
   font-weight: 750;
 }
 
+.builder-recovery {
+  border-color: #6b5b3b;
+  background: #211f17;
+}
+
+.builder-recovery strong {
+  color: #ffe2a6;
+}
+
+.builder-recovery p {
+  margin: 0;
+  color: #c1d0ca;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.builder-recovery code {
+  overflow-wrap: anywhere;
+  color: #f2dfb6;
+}
+
+.builder-recovery__confirm {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #51472f;
+}
+
+.builder-recovery__confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .builder-cancel {
   border-color: #7b4141;
   background: #241719;

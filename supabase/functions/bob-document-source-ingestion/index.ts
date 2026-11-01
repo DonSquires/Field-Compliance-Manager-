@@ -40,7 +40,7 @@ serve(async (req) => {
     if (profileError || !profile?.organization_id) {
       return json({ error: 'An active organization is required' }, 403);
     }
-    if (!['grand_master', 'master', 'admin'].includes(String(profile.role))) {
+    if (!['grand_master', 'master', 'admin', 'admin_officer'].includes(String(profile.role))) {
       return json({ error: 'Admin, master, or grandmaster access is required' }, 403);
     }
 

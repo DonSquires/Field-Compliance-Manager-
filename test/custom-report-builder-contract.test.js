@@ -71,8 +71,9 @@ test('the report hub builds custom drafts and reuses the existing review queue',
   assert.match(builder, /rpc\('get_custom_report_scope_options'/);
   assert.match(builder, /rpc\('generate_custom_report_pack'/);
   assert.match(builder, /Any selected Site or Zone, and any selected Person, and any selected Vehicle/);
-  assert.match(builder, /agreement\.invitation_status === 'accepted' && agreement\.agreement_type === 'operational'/);
-  assert.match(builder, /No accepted operational agreement is available/);
+  assert.match(builder, /agreements\.filter\(\(agreement\) => agreement\.agreement_type === 'operational'\)/);
+  assert.doesNotMatch(builder, /invitation_status/, 'owner ruling 2026-11-01: custom reports do not wait for client portal acceptance');
+  assert.match(builder, /No operational agreement is available for a custom report/);
   assert.match(builder, /private identity attributes are excluded/i);
   assert.match(hub, /<CustomReportBuilder/);
   assert.match(hub, /pack\.report_kind === 'custom'/);
@@ -85,7 +86,7 @@ test('the report hub builds custom drafts and reuses the existing review queue',
 test('PDF and email artifacts carry the frozen custom scope', () => {
   assert.match(pdf, /Frozen report scope/);
   assert.match(pdf, /report_scope/);
-  assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v10/);
+  assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v12/);
   assert.match(pdf, /widthOfTextAtSize/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /provider-private draft for review/);

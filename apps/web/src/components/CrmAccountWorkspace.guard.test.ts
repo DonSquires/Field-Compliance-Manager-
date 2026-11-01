@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
+const rendererSource = readFileSync(resolve(process.cwd(), 'src/lib/reportPackRenderer.ts'), 'utf8');
 
 describe('client portfolio hub', () => {
   it('loads dispatch history through account agreements so Site and Zone jobs are included', () => {
@@ -22,6 +23,24 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Places <strong>{locations.length}</strong>');
     expect(source).toContain('Finance <strong>');
     expect(source).toContain('Location house 360');
+  });
+
+  it('allows a separate account house for a place already linked by another account', () => {
+    expect(source).toMatch(/candidate\.match_reason === 'Exact address match' && candidate\.belongs_to_account/);
+    expect(source).toMatch(/\{\s*!hasExactAddressInAccount\s*&&\s*<button[\s\S]*?>Create location for this account<\/button>\s*\}/);
+    expect(source).toContain('shared canonical place');
+    expect(source).toContain('their house and records stay separate');
+    expect(source).toContain('setLocationCandidates([])');
+  });
+
+  it('ignores location lookup results and errors after the search fields change', () => {
+    const search = source.slice(source.indexOf('const searchLocations'), source.indexOf('const updateLocationForm'));
+    const update = source.slice(source.indexOf('const updateLocationForm'), source.indexOf('const closeLocationLookup'));
+    expect(search).toContain('const requestId = ++locationSearchRequestId.current;');
+    expect(search.match(/if \(requestId !== locationSearchRequestId\.current\) return;/g)).toHaveLength(2);
+    expect(search).toMatch(/finally[\s\S]*if \(requestId === locationSearchRequestId\.current\) setLocationSearchPending\(false\)/);
+    expect(update).toContain('locationSearchRequestId.current += 1;');
+    expect(update).toContain('setLocationSearchPending(false);');
   });
 
   it('keeps schedules in the portfolio while handing staff assignment to roster', () => {
@@ -76,8 +95,10 @@ describe('client portfolio hub', () => {
   });
 
   it('offers only current report-pack PDFs for preview and download', () => {
-    expect(source).toContain('pdf_source_updated_at === pack.updated_at');
-    expect(source).toContain('pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER');
+    expect(source).toContain('return isReportPackPdfCurrent(pack);');
+    expect(source).not.toContain('fcm-report-pack-pdf-lib-a4-');
+    expect(rendererSource).toContain('pack.pdf_source_updated_at === pack.updated_at');
+    expect(rendererSource).toContain('pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER');
     expect(source).toContain('GeneratedArtifactActions bucket="bob-uploads"');
     expect(source).toContain('pdf_path,pdf_renderer_version,pdf_source_updated_at');
   });

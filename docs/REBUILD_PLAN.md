@@ -31,6 +31,475 @@ Vibe attachment context opt-in, owner decision 2026-10-25 (prepared, not deploye
   rejected consent upgrade, owner scope, required request ID and grants.
   These checks do not prove production RLS or actual cloud inference.
 
+Owner-directed single provider and service without client approval, 2026-11-01
+(ruling in `docs/canon/ORG_SERVICE_MODEL.md`):
+
+- **Before:** many provider orgs could subscribe, and provider-side RPCs for
+  field places, CRM management, geography, identity, reports, finance and
+  invoicing required the client to accept the portal invitation (or a provider
+  attestation). Freedom-camping module assignment failed with a 400 for an
+  engaged but uninvited client.
+- **During:** migration `20261102120000_service_without_client_approval.sql`
+  rewrites 32 live function bodies in place, with an exact anchor count per
+  step, so a current operational agreement is enough.
+  `test/service-without-client-approval.test.js` and the PostGIS place
+  workflow fixture hold the rule. UI copy and filters stop asking for client
+  acceptance.
+- **After:** `invitation_status` describes portal access only. Client-side
+  disclosure (`client_reads_provider`, continuity publishing) still requires
+  acceptance. Consolidating all client data under R&M and closing sign-up are
+  the next migration; until then R&M-only is the target, not the live state.
+
+Single-provider consolidation acceptance evidence:
+
+- Re-parent client organisations under R&M without collapsing their identities
+  or client-owned place anchors.
+- Move only approved operational custody records, retaining source organisation,
+  actor, timestamps, evidence and factual content in a private provenance ledger
+  and audit receipts. Keep provider-private commercial and financial records
+  with their originating organisation; archive rather than delete.
+- Build the record-source set from legacy provider trees, Iron Eagle and the
+  provider organisations on the fixed, verified current operational agreements.
+  Agreement-provider membership enables row-level verified transfers only; it
+  does not add a client-anchor identity to the archive set. Manual-review person
+  records remain in place.
+- Preserve client portal access and Oracle-governed report creation through
+  approved invitations, while deactivating current profiles seated outside
+  the active R&M/Iron Eagle organisation trees. A user's employer affiliation
+  does not override the organisation where the account is seated. Retain the
+  profiles and audit trail for reversible recovery; reject public sign-up and
+  new provider/subscriber provisioning, and prevent operational agreements
+  outside the R&M organisation tree.
+- Verify the exact migrated row sets, preserved anchors, archived organisations,
+  deactivated users and agreement boundaries in a live transaction rehearsal
+  before release. Verify that every deactivation and reactivation commits with
+  its audit receipt, that deactivation bans the Auth user and deletes their
+  sessions (reactivation lifts the ban), and that active-token calls from
+  deactivated profiles are rejected: Auth and Edge Functions through the
+  deleted session, PostgREST through the deactivation-aware RLS helpers and the
+  restrictive `deactivated_account_guard` policies. Separately verify
+  that the migration's `set_user_deactivation` RPC is applied before deploying
+  the `deactivate-user` Edge Function that calls it. Also verify
+  that hosted Supabase Auth rejects public signup with both global and email
+  signup disabled, while the server-side invitation flow still works;
+  checked-in local config is not proof that the hosted Auth setting has
+  changed. The local config uses localhost Auth URLs, so do not push the whole
+  file to the hosted project; change only `disable_signup` on the hosted Auth
+  configuration.
+- Rehearsal evidence, 2026-11-02 (live `BEGIN … ROLLBACK`, then an isolated
+  Postgres rehearsal): the first live run failed because
+  `user_management_audit.target_user_id` references `auth.users`, so roster-only
+  profiles are now audited in `audit_log`. A later run showed a deactivated
+  outside-tree master still reading 3,113 observations through task
+  entitlement; `user_has_task_entitlement` and `is_platform_owner` now return
+  false for a deactivated profile. The passing run moved 2,860 verified rows,
+  archived 45 organisations, deactivated 29 accounts (active profiles 61 → 32)
+  and revoked 157 sessions, leaving 0 active accounts outside the retained trees
+  and 0 deactivated accounts with an unbanned Auth user or a session.
+  Deactivated accounts read 0 organisations, locations, agreements,
+  observations, assessments and self-memory rows; the grand master's view was
+  unchanged. Hosted public sign-up was closed and its rejection verified
+  separately. Still to exercise after release: the server-side invitation path.
+
+Post-release helper grant finding, 2026-11-02 (applied; #296):
+
+- The live catalog confirmed that `anon` could directly execute six
+  deactivation-aware `SECURITY DEFINER` policy helpers. Atlas confirms the
+  `user_managed_branch_ids` secured-by edges and the
+  `wf_transition_job_state` → `wf_has_role` call; these nodes are wired, not
+  thereby proven exercised. Ten RLS policies that directly call these helpers
+  were also scoped to `public`, so removing anonymous function access alone
+  would turn those anonymous table requests into permission errors.
+- Migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
+  revokes `PUBLIC`/`anon` execution while preserving authenticated and
+  service-role access, and retargets those ten unchanged policy predicates to
+  `authenticated`. Regression tests assert both changes. Rehearsed in a live
+  rollback transaction, then applied by the release lane (ledger head
+  `20261102160000`). `schema.sql` was regenerated from the live catalog (#299),
+  and Atlas was refreshed for that head. Live checks: all six helpers have anon
+  execute false and authenticated execute true; all ten policies target
+  `authenticated`; anonymous RPC calls to the helpers return 401; and
+  anonymous reads of the affected tables still succeed without errors.
+
+Anonymous RLS exposure finding, 2026-11-01 (migration
+`20261102180000_close_anonymous_rls_exposure.sql`, merged as #301):
+
+- **Before:** a count-only anonymous sweep of the 252 relations `anon` can
+  select from, cross-checked against the live catalog and `schema.sql`, found
+  twenty policies with no `TO` clause (so PUBLIC, including `anon`) whose
+  `true` or `organization_id IS NULL` arm admitted the anon key.
+  - Atlas: 23,023 `bob_app_map_edges`, 4,963 `bob_capability_map` and
+    `app_map_expectations` rows.
+  - Bob governance: `bob_learnings`, `bob_owner_rulings`, `bob_knowledge_cards`.
+  - Org-less `audit_log` rows, including desktop signing-material read audits.
+  - System `access_presets` and `retention_policies`.
+  - The invite rate-limit ledger: full CRUD, because the "Service role" policy
+    applied to PUBLIC.
+  - Writes: anon could also insert org-less audit rows, and SCV import rows
+    were writable. Every signed-in user could likewise forge org-less or
+    other-actor audit rows and clear the invite ledger. The
+    `check_invite_rate_limit` definer RPC trusted any caller id from `anon`.
+- **During:** Atlas and source show no anonymous consumer. The Atlas readers
+  (`bob-query-atlas`, `onspace-ai-chat`, `bob-plan-patrol-import`), every
+  `audit_log` writer, `import-scv-csv`, `invite-org` and `fcm-api` use
+  service-role clients. Every SQL writer of `audit_log` is `SECURITY DEFINER`,
+  and the web pages that read `access_presets` and `user_management_audit` are
+  authenticated.
+- **After (live rollback rehearsal):**
+  - Anonymous reads of all fifteen tables are 0.
+  - Anonymous inserts and the anonymous RPC call are denied (42501).
+  - An officer's own-organisation audit insert succeeds; org-less and
+    other-actor audit inserts are denied.
+  - Only `service_role` can call the rate-limit RPC.
+  - Grand-master and officer row counts are unchanged, except the invite
+    ledger, which is now service-only.
+  - No PUBLIC policy remains on these tables.
+  - Verified after release: the catalog refresh merged as #302, and Atlas
+    refreshed for that head. Live, none of the fifteen tables has a PUBLIC
+    policy, and only `service_role` (and the owner) can execute
+    `check_invite_rate_limit`. A re-run of the anonymous sweep reached only
+    the PostGIS reference tables.
+- **Owner ruling 2026-11-01:** Bob and Atlas are available at every level,
+  because Oracle and Conductor restrict and redact per user level. The
+  Atlas/Bob governance tables therefore stay readable by authenticated
+  accounts, and `bob-query-atlas` plus Bob's `query_atlas` tool now accept any
+  active signed-in rank (admin and admin officer are never blocked; deactivated
+  accounts are refused). Org-less audit rows are platform-only:
+  `20261102190000_platform_only_orgless_audit_rows.sql` limits them to the
+  grand master and a platform owner, while organisation rows keep
+  `org_access_allowed`. In a live rollback rehearsal the grand master, the
+  platform owner and Bob's service identity kept all 31 org-less rows; a
+  master, an admin officer and a non-platform identity dropped to 0; and every
+  actor's organisation-row sample was unchanged. Released as #303 (catalog
+  #305): live `audit_log_select` carries the platform-only arm, and the
+  deployed `bob-query-atlas` was updated after the merge.
+
+Organisation reach evaluated per row, 2026-11-02 (migration
+`20261102200000_org_access_policies_initplan.sql`):
+
+- **Before:** 357 public policies on 257 tables made 410 calls to
+  `org_access_allowed(X)`. Postgres ran that function once for every candidate
+  row. Each call re-read the caller's profile, organisation tree, grants and
+  agreements, so a plain read of a large table was slow even when few rows were
+  visible. Live, an admin officer counting `bob_event_log` took about 20 s,
+  past the 8 s authenticated statement timeout, so the request failed.
+  `bob_messages` took 5.8 s, `observations` 4.3 s, and the anonymous key
+  spent 1.3–4.2 s on the same tables to return no rows.
+- **During:** `accessible_org_ids()` returns the caller's whole reach as one
+  array. It is the same six-clause rule as `org_access_allowed`, and it is
+  empty for anonymous and deactivated callers. Every policy now uses
+  `((SELECT is_grand_master()) OR COALESCE((X) = ANY ((SELECT
+  accessible_org_ids())::uuid[]), false))`. The scalar sub-selects run once
+  per statement as initPlans. COALESCE keeps a NULL target false, as before.
+  The migration was generated from the live catalog after #303, so each policy
+  keeps its other arms, including the platform-only org-less audit arm.
+- **Evidence:**
+  - On live, the function and the template agree for every caller and
+    target.
+  - A row and hash comparison before and after the rewrite matched on every
+    table for a narrow officer, and on the slices that completed for a wide
+    officer and a master.
+  - In a rollback rehearsal, those same reads took 3–29 ms. In the
+    wide-officer sweep, `audit_log` fell from 12.6 s to 44 ms and
+    `bob_event_log` from 22 s to 14 ms. `observations` fell only from 7 s to
+    1.4 s, because other per-row helpers remain (see follow-ups).
+  - `test/org-access-policy-initplan.test.js` adds:
+    - a static guard: no effective policy may call `org_access_allowed`, and
+      every `accessible_org_ids` use must sit inside the guarded template;
+    - a coupling check: a migration that redefines `org_access_allowed` must
+      also redefine `accessible_org_ids`;
+    - a Postgres fixture (`BOB_TEST_POSTGRES=1`) comparing the function and
+      policy forms over a seeded hierarchy with grants, agreements, a
+      deactivated account and anonymous callers. Breaking one clause of
+      `accessible_org_ids` makes the fixture fail.
+  - An apply-only live rehearsal ran in 317 ms and was rolled back. It left 0
+    per-row public policies and 357 initPlan policies, did not touch storage,
+    and confirmed that PUBLIC has no EXECUTE on the new function.
+- **Lesson:** the full live equivalence sweep held each rewrite inside a
+  rollback transaction while it measured. One slice ran past the Management
+  API's 100 s gateway limit, and its server transaction kept the policy locks
+  after the HTTP call failed. Live reads were briefly blocked (most bursts were
+  under 7 s, one was about 45 s) until the sweep was stopped. Rehearsals that
+  alter policies on production must now be apply-and-check only, with a
+  `lock_timeout`. Row comparison belongs in the local fixture. The migration
+  itself sets a 5 s `lock_timeout`, so if a long query holds a table, the
+  migration fails cleanly and the release lane retries it on its next tick.
+- **Follow-ups:** other per-row helpers still dominate a few tables after this
+  rewrite. Each needs its own set form and its own proof:
+  - `location_events`: 39 s for a wide officer, from
+    `has_location_access(client_site_id, zone_id, 'client_reads_provider')` in
+    `location_events_client_select`.
+  - `entity_links`: 4.9 s, from `can_access_vehicle_owner_identity`,
+    `can_access_person_contacts` and `nzta_reveal_active`.
+  - `observations`: 1.4 s, from `user_has_task_entitlement(auth.uid(), id)`,
+    which `observations_task_entitlement_select` calls for every row outside
+    the caller's reach.
+  - `evidence_items`: 4.7 s, from `nzta_evidence_restricted(id)`.
+  - `document_classifications`: 1.9 s. Its FOR ALL write policy calls
+    `is_admin_for_org` for reads too.
+  - Eight `storage.objects` policies (bob_uploads, identity_evidence,
+    notice_artifacts and scans, insert and select) still call
+    `org_access_allowed` on the folder name. `schema.sql` covers `public`
+    only, so they need their own migration and evidence.
+
+Owner-directed client/place simplification, 2026-10-28:
+
+- **Before:** admin navigation exposed five client-workflow destinations and
+  four place-management destinations. Basic entry was coupled to contacts,
+  service schedules/rates and a resolved address. Officer Map showed colleague
+  positions but offered no place-capture action. These are source observations;
+  production opened at sign-in, not an authenticated whole-app walkthrough.
+- **During:** the primary client page becomes a name/engagement form plus
+  searchable location rows. A row opens the editable location profile, with
+  contextual scheduling, activity/reporting and specialist map controls.
+  Core officer Places records raw GPS plus an explicitly confirmed/corrected
+  10 m zone, with loading/error/permission/retry handling. Admin navigation
+  consolidates everyday destinations; old specialist deep links remain valid.
+- **After:** own-rooted client, operational engagement attestation, house/site
+  or area, service-place links and verification/audit receipts persist.
+  Location profiles retain officer history when administrators refine details.
+  Reference zones are excluded from regulatory resolution and cannot promote
+  their small circles to canonical property boundaries. Basic site capture
+  does not authorise inferred financial defaults.
+  Review follow-up also excludes reference markers from delivery links and
+  work-area editing, preserves selected-provider context, requires an explicit
+  site for multi-site scheduling, and version-checks single-area renames.
+  Explicit rule selection also rejects reference markers. Existing unbound
+  sites retain their source provenance and use the selected provider's agreement
+  on field capture; ordinary profile edits do not infer agreements or pricing.
+  Administrators can explicitly confirm their own current pending engagement
+  without accepting a client invitation, and recapture restores inactive markers.
+- **Cross-organisation place reuse finding, 2026-11-02:** Before, CRM search
+  showed an exact-address match owned by another account but hid the create
+  action, directing the operator to arrange access to that account's house.
+  That contradicted the house model: each organisation needs its own house,
+  while the address key links both houses to one canonical place. During, an
+  exact match in the selected account still opens its existing house; a match
+  in another account permits creation of a separate house for the selected
+  account. The existing `manage_crm_location` writer and place-identity trigger
+  create the account-scoped house and reuse the canonical address identity;
+  they do not grant access to the other account's house or records. Editing
+  either search field invalidates the pending lookup generation, clears stale
+  results and errors, and causes any late success or failure response to be
+  ignored. Closing or reopening the lookup also invalidates pending requests.
+  After, the two houses remain separate while their `canonical_place_id` is
+  shared. The CRM workspace guard and browser regressions cover cross-account
+  creation plus stale success/error responses; the place-model convergence
+  database fixture verifies the shared canonical identity. The local Atlas
+  manifest confirms the existing component calls to
+  `find_crm_location_candidates` and `manage_crm_location` and its read of
+  `locations`; no live Atlas write was made because the session has no
+  authorized Atlas credentials. The protected main-branch refresh remains the
+  release path.
+- **Evidence gate:** real disposable PostGIS tests include role isolation,
+  actual constraints and place/agreement/financial triggers, stale fix/version
+  rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
+  synthetic browser tests cover the new journey and retained delivery/rate
+  paths. Release/catalog/Atlas receipts and human use of a real authorised
+  account remain distinct from these local checks.
+- **Remaining review:** source-level shell/task review is not a complete
+  field audit of HR, finance, every specialist module, every role and every
+  viewport. Further consolidation should follow observed tasks, not hide
+  necessary safety, NZTA, client disclosure or commercial decisions.
+
+Owner-directed Workforce consolidation, 2026-11-03 (follows the 2026-10-28
+simplification; owner chose "consolidate to 2" and "leave roster_templates"):
+
+- **Before:** the HR & Rostering workspace had four peer destinations
+  (Schedules & Rosters, People Pay & HR, Work Units & Coverage, People &
+  Access). The HR page also held a Rostering group, so shift setup lived in a
+  different destination from the roster board. Atlas (dry-run refresh, 1,616
+  capabilities / 9,685 edges) showed every HR/roster table reaching a screen
+  except `roster_templates` (FK-only, privileges revoked from app roles, 0 live
+  rows) and `staff_biometrics` (reads tightened separately in #311).
+- **During:** two destinations, **Rosters** and **People**, each with a section
+  strip. Rosters: Roster board (`/admin/roster`), Work units & coverage
+  (`/admin/roster-targets`), Shift setup & open shifts
+  (`/admin/people-hr?section=rostering`). People: Staff, pay & HR
+  (`/admin/people-hr`), Logins & access (`/admin/users`). The HR page shows only
+  its own view's groups (Staff, HR, Pay & Assets, or the rostering tabs).
+  Without the HR module, People opens Logins & access. If Rostering is disabled
+  while HR remains enabled, Rosters falls back to the existing HR-gated setup
+  view; the roster board and work-unit coverage stay behind their Rostering
+  gates. Section navigation preserves the handoff and work-unit context.
+  No route, permission or data path changed; old links and `?tab=` deep links to
+  rostering tabs still land in the right view.
+- **After:** `roster_templates` stays legacy-only (no screen, no writer). Its
+  retirement needs its own migration and evidence.
+- **Evidence gate:** vitest guards and the section helper pass. Desktop/mobile
+  synthetic Playwright runs cover HR administration, credential renewal,
+  HR-only Rosters fallback and mobilisation-context preservation, with win32
+  baselines regenerated. `roster-operations` week-board/publish and
+  `geofence-spine-map` screenshot failures also fail on `main` before this
+  change. No human walkthrough has been done yet.
+
+HR and roster Atlas gap triage, 2026-11-03 (live Atlas at `d9f435e9`, 216
+present-but-unwired entities; live schema and migration ledger match the repo):
+
+- **Before:** the submit RPCs stamp `timesheets.submitted_at` (2 of 2 live
+  rows), but neither the HR timesheet list, the branch review queue
+  (`get_branch_timesheet_queue`) nor the officer timesheet page showed it.
+  Reviewers could not tell a sheet sent that morning from one waiting for a
+  week. The queue function also had EXECUTE for PUBLIC and anon:
+  `20260905005800` dropped and recreated it without restoring the
+  authenticated-only grant from `20260905005500`. Its body still rejects a null
+  `auth.uid()`.
+- **During:** migration `20261103100000` returns `submitted_at` from the queue
+  and restores `REVOKE … FROM PUBLIC, anon` / `GRANT … TO authenticated,
+  service_role`. A rolled-back dry run on the live catalog confirmed the new
+  shape and an ACL limited to postgres, authenticated and service_role. The HR
+  list, the branch queue and the officer page show "Submitted 24 Aug, 9:30 am"
+  in NZ time.
+- **Left as is, with reasons:** `timesheets.payroll_export_batch_id` is written
+  by payroll export and read by `prepare_nz_payday_filing_package`; a batch UUID
+  adds nothing for a person. `external_refs` on shifts, roster assignments and
+  staff profiles is import provenance and is populated on every row.
+  `staff_biometrics` has 0 rows and no caller; it stays dormant by design.
+  `project_historical_patrol_roster` is intentionally disabled; its comment
+  points to `apply_historical_roster_assignment_import`. Person-domain items
+  such as `persons.homeless_status` are not HR.
+- **Evidence gate:** vitest guards, `rosterWords` and the web build pass. Serial
+  synthetic Playwright runs of HR administration and officer timesheets pass
+  apart from `officer-timesheet.spec.ts:22`, which assumes a UTC browser and
+  fails only on an NZ-time machine. No human walkthrough has been done yet.
+
+Connected Bob delivery, owner instruction 2026-10-25: implement the phased
+[connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
+diagnostics/capability discovery, then shared knowledge/evidence, investigation
+quality, Builder/Vibe handoffs, measured routing and UI acceptance. Existing
+approval and credential boundaries stand; the original release-source repair
+remains open until independently investigated and verified by Bob.
+
+Owner direction 2026-10-26 expands prototype engineering scope across Builder
+Chat, Bob Builder, Vibe Builder and their full stack, including measured
+in-house/cloud model changes. First close whole-job acceptance reconciliation:
+lane skips and narrow tests must not hide missing approved outcomes. Retain a
+same-job correction path and distinguish coverage, semantic review and deployed
+human acceptance. See the connected plan and Bob doctrine; consent, tenant
+isolation, audit and protected releases remain in force.
+
+In-app Bob record updates, 2026-10-28:
+
+- Before: given a pasted email about a vehicle and its people, in-app Bob twice
+  said he had no way to update records. The governed RPCs existed; no chat tool
+  reached them.
+- Now: `update_records` (`supabase/functions/_shared/record-updates.mjs`,
+  conductor-inline in `onspace-ai-chat`) previews vehicle details and
+  registration, vehicle-person links, other names, safety warnings and
+  report notes with the caller's own reads. The caller's next-turn yes applies
+  them as the caller through the existing audited RPCs, with per-step receipts.
+  Ambiguous or ungoverned facts are held. Planner guidance:
+  `services/fcm-api/src/bob/planPrompt.js`. Tests:
+  `test/bob-inapp-record-updates.test.js`. Doctrine: `BOB_DOCTRINE.md` §4.
+- Evidence gate: merged, released (edge function and VPS planner), then a
+  dedicated test identity proves preview, yes, receipts and the persisted
+  records in the glass with synthetic data. Each preview is claimed once
+  (conditional update of its transcript row) before it is applied or
+  discarded, so concurrent yeses cannot double-write. Steps resolve
+  person-creating links first, stop at a 90 s apply budget with
+  "not attempted" receipts, and call a warning or note "already present"
+  only when it is an exact duplicate (a follow-up only when it matches the
+  latest follow-up, which sets the open/closed state).
+- Second review round (PR #277): any organisation member can insert
+  `bob_messages` rows, so a pending plan is applied only if it carries the
+  server's HMAC over its exact contents and its plan id is carried by exactly
+  one transcript row (no forged or replayed previews). The confirm path stops
+  at the cancellation boundary before claiming. A planner-supplied person
+  record id must come back from the caller's own person search and is shown
+  with its stored name. Names fold only case and spacing, so "Māia" and "Maia"
+  stay separate unless the register binds them. Previews show every value in
+  full.
+- Data-loss fix found on the way: `manage_identity_vehicle` erased an
+  organisation's vehicle note whenever `p_fields` omitted `notes`, so NZTA owner
+  review (`'{}'`) and a vehicle registered by another administrator mid-confirm
+  silently lost the note. Migration
+  `20261101180000_manage_identity_vehicle_preserve_notes.sql` keeps an omitted
+  note (present-but-empty still clears), proven against disposable PostgreSQL
+  in `test/manage-identity-vehicle-notes-migration.test.js`.
+
+Builder research release follow-up, 2026-10-25:
+
+- PR #213 and generated-catalog PR #214 are merged; governed release
+  `c6fc771cd9f2a6b0979f7211ac72cdb737292ac8` completed with healthy control
+  plane, applied migration, matching live schema and refreshed Atlas.
+- Production UI synthetic thread `c4d91a50-d586-42da-ae9a-101f36468359`
+  completed with Kimi vision, private document extraction and matched official
+  Docker source quotes. Persisted approval and receipt show history withheld,
+  one raw image, no raw documents and three sources. No job was proposed.
+- The subsequent fault-only private investigation failed: Compose rereads and
+  model timeouts, no valid repair plan or job. Larger installed GPU candidates
+  exceed the existing memory guard and were not loaded. A bounded eligible
+  Qwen3 diagnostic still failed; its settings are not promoted.
+- A prepared tool correction refuses invalid search paths instead of silently
+  broadening scope and bounds source reads to 120 lines/8,000 characters.
+  This improves evidence handling, not a claim of autonomous repair completion.
+- Tool correction #216 deployed as `96127f4d123cc776c3e13916681cf1e15437bfa2`
+  with green CI and healthy release. The next UI continuation still looped;
+  a proposal was refused for missing ledger/Atlas evidence, then the model's
+  ordinary reply was incorrectly recorded as a completed answer. No job card
+  was accepted. A follow-up fix recognizes repair-plan requests per clause,
+  distinguishes "do not create" from "do not propose", and keeps a rejected
+  proposal attempt incomplete until a validated proposal actually succeeds.
+
+Builder chat public research, owner decision 2026-10-25 (deployed and live UI verified):
+
+- Before: local chat candidates could consume the entire wall budget before
+  cloud was reached; chat had no image/document/public-web research input.
+- During: add isolated, owner-approved public research with cloud candidates
+  first, live availability/vision checks, owned attachment staging, private
+  document extraction, bounded public search/fetch and source-quote validation.
+  No previous history or repository packet leaves via this mode; normal source
+  investigation remains private. Persist per-message approval and evidence.
+- After gate: runtime, UI, migration authorization and browser tests must pass,
+  then governed migration/release and live synthetic image/document/web checks
+  must prove persisted receipts. This is not yet autonomous repair readiness;
+  the missing API release source still requires Bob's own investigation/plan.
+- Local evidence: runtime suite, web types/build/full unit suite, disposable
+  PostgreSQL role/ownership/consent/replay checks and desktop/mobile synthetic
+  document browser checks passed. A real public Docker-documentation request
+  fell through invalid Kimi output to validated DeepSeek source quotes; a real
+  Kimi vision request correctly read READY and three tasks from an
+  offline-generated synthetic image. These were isolated adapter probes, not
+  persisted production UI turns or proof that a live repair completed.
+
+Builder chat investigation gate, owner correction 2026-10-25 (merged and deployed #212):
+
+- Before: live UI research requests exhausted their model turns and produced
+  actionable proposals copied from the owner's message, despite incomplete
+  source investigation. One such job was created by the supervising engineer;
+  the owner rejected this shortcut and that job was cancelled through the UI.
+- During: remove automatic brief-to-proposal drafting. Require successful
+  source-file, job-ledger and Atlas reads before accepting a model proposal,
+  cite inspected source in the plan, and persist the research receipt. Failed
+  reads, search matches and documentation alone do not satisfy source inspection.
+  Structured JSON carries the same argument contracts as native tools.
+  Repeated tool failures or empty searches advance the configured model chain
+  with the existing evidence; they do not create a replacement job.
+  A live follow-up also reproduced an empty reply rendered as "Done." and
+  `list_dir(".")` rejected as unsafe. Empty replies now fail explicitly;
+  root-directory discovery is allowed without relaxing file/write path guards.
+  Add bounded tracked-path discovery (`find_files`) so chat can locate lifecycle
+  files without confusing literal content search with filename search.
+  Require model-authored source findings with quotes verified against actual
+  reads, concrete repair steps and acceptance checks. Append these to the job
+  description rather than accepting a job whose only plan is to investigate later.
+- After: an incomplete investigation reports a failure and its missing checks,
+  with no Create job card. Runtime guidance teaches literal search, source
+  tracing, argument repair and the live-host access boundary. Synthetic tests
+  must pass before release; successful live UI investigation and a model-authored
+  plan remain required. This does not grant VPS shell access or claim the missing
+  release has been restored.
+- Private-model diagnostic: the changed modules were loaded in a separate VPS
+  process with cloud routing disabled, read-only repository/Atlas/ledger tools
+  and an in-memory chat store. No production modules were replaced and no job
+  was created. The final test switched from qwen2.5-coder:7b to qwen3:8b after
+  repeated reads, but did not complete a valid source-grounded plan. It correctly
+  returned an explicit incomplete-investigation error without a proposal. This
+  proves the refusal boundary, not autonomous repair readiness.
+- Release evidence: merge `6768896ea698612878c3deb752a11f4ccb95084f`
+  deployed through the governed control-plane lane. The subsequent live UI turn
+  refused an incomplete proposal correctly but did not finish the investigation.
+
 GitHub support automation, expanded owner decision 2026-10-24:
 
 - The owner subsequently lifted the GitHub-specific restrictions and
@@ -2030,8 +2499,10 @@ destructive bulk operations).
    118 capabilities are supported by 11,289 invocation observations; static
    refresh preserves rather than invents those claims.
 5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
-6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
-   infrastructure.
+6. ~~Re-create the RunPod QA endpoint~~ — withdrawn by the 2026-11-01 stack
+   ruling (RunPod is not part of the stack). Run `full-page-audit` on Bob's
+   own infrastructure: the VPS QA worker, with the laptop GPU for any visual
+   model work.
 7. Compile every document and media perception path into the shared evidence
    contract in
    [Bob enterprise agent architecture](BOB_ENTERPRISE_AGENT_ARCHITECTURE.md):
@@ -2080,6 +2551,24 @@ attributes. The dedicated attribute review is the only canonical promotion
 path and records corrections without erasing the original candidate. The live
 backfill recorded 190 envelopes from 177 jobs and replayed all 190
 idempotently. Smoke, noise and other vertical-module adapters remain.
+
+Phase C CCTV accuracy engine v2 (owner ruling 2026-11-01): built to make CCTV
+sightings measurably accurate rather than merely plentiful. One pinned GPU
+detector reads every frame of a job (`gpu_consistent`; the VPS small model is
+never mixed in and an unanswered frame defers the job); a one-to-one,
+bounded-gate tracker replaces greedy association; the whole frame budget is
+spent across the clip; Qwen3-VL on the laptop replaces moondream, with Ollama
+Cloud limited to opted-in, person-free, plate-masked, receipted vehicle crops;
+reprocessing carries every human decision forward; parked vehicles that recur
+on a camera share one provisional portfolio; reviewers can report misses; and
+`cctv_accuracy_summary` reports precision with a Wilson lower bound, calibrated
+only at 30 human decisions. The reviewer workspace adds detector boxes,
+provenance, keyboard triage, a Detection quality page and detector coverage on
+job review; there is deliberately no bulk accept. Expected versus present,
+measured baselines and gaps are recorded in
+[CCTV inference tier §9](CCTV_INFERENCE_TIER.md#9-engine-v2-accuracy-owner-ruling-2026-11-01).
+Nothing here is exercised until a reprocessed batch writes engine v2 results
+and reviewers decide them.
 
 Phase C biosecurity-photo slice shipped 2026-10-11: the governed submission
 retains structured classifier details, reasoning, confidence and model receipt,

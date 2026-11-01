@@ -25,7 +25,8 @@ const CORS = {
 const CAN_RESEARCH = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const MAX_FETCH = 6;
 const FETCH_TIMEOUT_MS = 8000;

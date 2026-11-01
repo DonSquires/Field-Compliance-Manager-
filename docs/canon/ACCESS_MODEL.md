@@ -11,6 +11,177 @@
 > Sits BELOW `FOUNDATION.md` and `docs/ACCESS_DOCTRINE.md` (the principle layer)
 > and BELOW them in authority; it is the executable expression of that doctrine.
 
+## Owner ruling 2026-10-27: operational person lookup and private contacts
+
+Field officers may search people to check trespass, warnings and permits only
+after an organisation administrator explicitly authorises them. The
+`person_search` area uses the existing staff grant/preset matrix at the user's
+home organisation; the checkbox grants `view`, defaults off, and requires an
+audited reason for grant or removal. It supplies functional authority, not
+new tenant reach: every result still requires existing organisation access.
+Inherited preset/ancestor grants and role access must be explained, not falsely
+reported as revoked when only a direct checkbox is removed.
+
+This permission is separate from `vehicle_owner_identity` (NZTA). It confers
+neither NZTA rights nor identity editing. An inactive account has no lookup
+authority. Person search in the officer portal is read-only; the bulk notice
+review queue remains an operations-office workflow.
+
+The owner explicitly confirmed that personal addresses and contact details
+remain with **Admin, Admin officer, Master and Grand Master**, within their
+authorised organisations, across **both Person and Vehicle lookup**, even
+when a field officer has NZTA authorisation. This supersedes older rulings
+allowing owner locality/address disclosure to non-administrators. Enforce it
+in RPCs, projections and raw-record access, not just presentation. Permit
+holders and vehicle owners remain distinct identities and relationships.
+
+Vehicle search is a shared operational registry workflow, available to admins
+independently of parking or freedom-camping subscriptions. This is not a grant
+of platform powers or cross-tenant Master access.
+
+## Owner ruling 2026-10-27 (later the same day): admin officer parity and simple module access
+
+**Admin officer = admin.** An `admin_officer` is an admin person who also works
+in the field. They hold exactly an admin's access — the same organisation reach,
+approvals, people/identity management, payroll setup, notifications and admin
+tools — and may additionally use the officer portal. Every database function,
+policy, edge-function gate and web surface that grants something to `admin`
+grants it to `admin_officer` (`20261101150000_admin_officer_parity.sql`,
+`supabase/functions/_shared/auth.ts`, `apps/web/src/lib/roles.ts`). The portal
+chooser only picks which workspace opens; it is not an access boundary.
+An admin officer's authorised private contact fields remain available in the
+field portal as well as the admin portal.
+Inactive identities cannot approve actions or manage identities. A financial
+subscription alone never grants operational approval authority over the
+subscriber. Human entity writes must verify authority over the existing target
+and its parent organisation, not rely on a service-role client to supply it.
+
+**Module access is two switches, nothing else.** A person may open a module when:
+
+1. the organisation has the module switched on (`organization_modules`; a safety
+   module stays off until the organisation configures it, and an organisation
+   with no module configuration yet sees its non-safety modules), and
+2. the person is admin-tier (Grand Master, Master, Admin, Admin officer), or has
+   that module ticked on their profile (`user_profiles.module_access`).
+
+The single implementation is `canUseModule` in `apps/web/src/lib/moduleAccess.ts`;
+module keys and their officer-route aliases (for example `parking_enforcement` /
+`parking`, `static_guarding` / `site_guard`) resolve to the same switch and tick.
+An explicitly configured canonical switch takes precedence over a historical
+alias row, including when it is off. Organisation changes deny module access
+until that organisation's switch state has loaded.
+The directory uses this same decision; it must not hide a module that the
+corresponding route permits. Core officer tools (including searches, schedule,
+reports and the assigned-job inbox) remain reachable independently of specialty
+module ticks; the separate person-search/NZTA authorisations still control
+sensitive lookup data.
+
+**Geofences and place are context, never a gate.** Place resolution, geofence
+position, active place rules (`resolve_active_rules`), shift state and
+assignment never stop a person from opening a module they are entitled to, or
+from running a person or vehicle search they are authorised for. They still
+choose which rules, evidence requirements and billing apply, and they still
+appear as context (for example "outside all geofences"). Sections 0–7 below are
+superseded to the extent they make place, geofence, shift or task state a gate on
+opening a module or running an authorised search; they continue to describe
+record disclosure depth only, and no new record-level gate may be built from
+them without a fresh owner ruling.
+
+**Kept:** the per-person person-search tick and the per-person NZTA
+(`vehicle_owner_identity`) tick, both audited, both default off; personal
+addresses and contact details stay with admin-tier roles; tenant reach
+(`org_access_allowed`) is unchanged.
+
+**Open item:** static guarding arrive/depart (`manage_officer_static_post`)
+still requires the device position inside a verified site boundary. That is an
+attendance evidence and billing rule, not module access, and is left in place
+pending an owner ruling.
+
+## Owner ruling 2026-10-28: core officer place capture
+
+> Place workflow clarification, 2026-10-28: **Places** is a core officer tool,
+> independent of specialty ticks, shift state and geofence position. Its reader
+> and capture RPC require an active provider officer/admin-tier identity and a
+> current accepted or provider-admin-confirmed operational engagement with the
+> selected client (or the provider's own place). Branch authorisation must be
+> current. Only administrators can create client organisations or edit the full
+> site briefing, access, safety and commercial configuration. Field capture can
+> name a place and record a map-confirmed 10 m reference zone; it cannot replace
+> an existing perimeter or supply regulatory rules. Person-search and NZTA
+> permissions are unaffected. See the organisation and place model rulings.
+
+## Owner ruling 2026-11-01: NZTA section 241 readiness (R&M Security and Investigations)
+
+R&M holds a section 241 authorisation (Gazette 2025-au4644) to use Motor
+Vehicle Register information for two purposes only: a **vehicle on a
+contracted property without a valid permit** (trespass) and **entry or damage
+seen on CCTV or patrol against posted signage**. Permit vetting, general
+investigations and marketing are not authorised purposes.
+
+- **What is restricted.** A name on its own is not NZTA information. The
+  NZTA-sourced *link* between a person and a vehicle, in either direction, is.
+  It is shown only to people holding the `vehicle_owner_identity` tick, and only
+  after they state a purpose and reason (`reveal_nzta_registered_person`). A
+  reveal opens a 15-minute window for that user and that vehicle or person, and
+  is written to `nzta_register_access_log`. The window is timed by the server
+  clock (`get_nzta_reveal_seconds_remaining`); screens re-mask when it closes,
+  whatever the device clock says. A reveal opens only the organisation it was
+  made for: Person search shows NZTA links only from organisations with an open
+  person reveal and asks for another reveal for the rest.
+- **Notice follow-up.** A `notice_follow_up` reveal must name an issued
+  trespass or warning notice about the same person or vehicle
+  (`nzta_notice_matches_subject`, listed by `list_nzta_follow_up_notices`).
+  The reveal is recorded against the notice's organisation, and a different
+  organisation is refused.
+- **Every read path is closed.** `entity_links_select` hides NZTA-restricted
+  links without an open reveal; `person_identity_documents_select` never
+  returns `nzta_mvr_record` source documents; `get_vehicle_identity_checks`
+  returns only allow-listed vehicle facts until a reveal. The source file is
+  gated the same way wherever it is stored: `bob_attachments_select`,
+  `evidence_items_select` and the `identity_evidence_select` Storage policy
+  refuse NZTA source attachments, evidence rows and files without an open
+  reveal (`nzta_attachment_restricted`, `nzta_evidence_restricted`,
+  `nzta_storage_object_restricted`). `get_identity_registry` returns an
+  unrevealed NZTA record only as a masked stub (kind, review state, dates, plate
+  and vehicle), so administrators reveal through the vehicle before reviewing.
+- **The notice exception.** The client organisation a notice was issued for,
+  and the investigating user, may use the data for that notice. This is not
+  automatic: the notice still carries its own organisation scope, and the
+  investigator uses a `notice_follow_up` reveal.
+- **Readiness before a new grant.** A new `vehicle_owner_identity` grant
+  requires current NZTA register training and a current confidentiality
+  acceptance (`nzta_access_attestations`, each at most 12 months). This is
+  enforced on every grant path: `set_vehicle_owner_access`, and the
+  `trg_nzta_grant_readiness` trigger on `staff_area_grants`,
+  `preset_assignments` and presets whose grants gain the area. These are
+  personal: they are recorded against the person's home organisation and count
+  wherever that person holds access. An administrator of an organisation the
+  person holds access in may record them (`recorded_via_organization_id` is
+  audited). Existing grants are not revoked; they are shown as not ready until
+  recorded. The holder list mirrors the administrator rule (home, parent,
+  operational-provider and platform administrators) plus direct and preset
+  grants, including grants made at a parent scope.
+- **Records NZTA can ask for.** Every Motochek lookup is entered in
+  `nzta_register_lookups` with the individual Motochek user, purpose,
+  explanation and outcome. Admin-tier roles review holders quarterly
+  (`nzta_access_reviews`) and produce the annual summary with per-zone signage
+  evidence (`get_nzta_s241_summary`). Historical checks imported before the
+  register existed are listed without a purpose, never back-filled; an
+  administrator may link one to the lookup that explains it
+  (`link_nzta_register_lookup_check`, audited), and each check explains at
+  most one lookup. Lists that reach their size cap say so and block export
+  rather than exporting a partial record.
+- **Anonymous access.** `canonical_person_public` is no longer readable by
+  `anon`. `canonical_vehicle_public` and `canonical_scv_public` are unchanged
+  pending a separate ruling.
+- **Wording.** NZTA records show the *registered person at the check date*, not
+  proof of ownership. Current status needs a new lawful check.
+
+Workspace: Admin → Investigations & Evidence → **NZTA register (s241)**
+(`apps/web/src/pages/NztaRegisterPage.tsx`). Migration
+`20261101160000_nzta_s241_readiness.sql`; contract test
+`test/nzta-s241-readiness.test.js`.
+
 ## 0. The re-founding — accountable service, not restriction (READ FIRST)
 
 > Ruled 2026-08-01, owner + Bob. This is a CONSTITUTIONAL CORRECTION to the

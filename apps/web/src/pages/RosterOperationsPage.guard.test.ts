@@ -8,11 +8,12 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("from('shifts')");
     expect(page).toContain("from('roster_slots')");
     expect(page).toContain("from('roster_assignments')");
-    expect(page).toContain('officer:user_profiles!roster_assignments_officer_id_fkey(display_name,email)');
+    expect(page).toContain('officer:user_profiles!roster_assignments_officer_id_fkey(display_name)');
     expect(page).toContain('Array.isArray(assignment.officer)');
-    expect(page).toContain('historicalOfficer?.display_name');
-    expect(page).toContain('Historical source records');
-    expect(page).toContain('roster-history-table-wrap');
+    expect(page).toContain('sourceOfficerName(assignment)');
+    expect(page).toContain('sourceBoardAssignments');
+    expect(page).toContain('assignment.patrol_route_id === unit.patrol_route_id');
+    expect(page).not.toContain('roster-history-table-wrap');
     expect(page).toContain('!slot.linked_shift_id');
     expect(shell).toContain('return <RosterOperationsPage />');
   });
@@ -39,7 +40,7 @@ describe('enterprise roster operations', () => {
   it('creates slots and materializes only field work through governed RPCs', () => {
     expect(page).toContain("supabase.rpc('create_roster_slot'");
     expect(page).toContain("supabase.rpc('materialize_roster_slot'");
-    expect(page).toContain("form.publish && person && unit?.work_unit_type !== 'internal'");
+    expect(page).toContain("unit?.work_unit_type === 'patrol' || unit?.work_unit_type === 'static'");
     expect(page).toContain('Open shift — advertise to available staff');
     expect(page).toContain('required={Boolean(editingSlot)}');
     expect(page).not.toContain(".from('shifts').insert");
@@ -80,7 +81,7 @@ describe('enterprise roster operations', () => {
     expect(page).not.toContain('Import from Deputy');
     expect(page).toContain('workUnits.length > 0 && <>');
     expect(page).toContain("(loading || workUnits.length > 0) && <>");
-    expect(page).toContain("Add rosterable staff in People, Pay & HR as well.");
+    expect(page).toContain("Add rosterable staff in People as well.");
   });
 
   it('uses role-specific planning language without changing the roster job', () => {

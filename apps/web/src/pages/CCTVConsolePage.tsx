@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -9,11 +10,14 @@ import {
   ChevronRight,
   ChevronDown,
   ExternalLink,
+  EyeOff,
   Film,
+  Gauge,
   Grid2x2,
   ImageDown,
   Keyboard,
   Link2,
+  ListChecks,
   Loader2,
   Lock,
   Maximize2,
@@ -126,6 +130,7 @@ type ImportRow = {
 
 type KindFilter = 'all' | EntityKind;
 type BookmarkDraft = { evidenceId: string; atMs: number; title: string; notes: string; severity: 'low' | 'standard' | 'high' | 'critical'; observationId: string | null };
+type MissedDraft = { evidenceId: string; atMs: number; offsetSeconds: number; kind: EntityKind; notes: string };
 type LockDraft = { evidenceId: string; reason: string };
 type CustodyEvent = { at: string; kind: string; actor_user_id: string | null; detail: Record<string, unknown> };
 type BiometricGovernance = { live_face_templates: number; live_templates: number; expired_templates: number; rejected_still_holding_templates: number; oldest_live_template_at: string | null; last_expiry_run_at: string | null; purpose: string; default_retention: string };
@@ -184,7 +189,7 @@ const CCTVConsolePage: React.FC = () => {
   const search = new URLSearchParams(location.search);
   const requestedImportId = search.get('import');
   const popout = search.get('popout') === '1';
-  const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+  const isAdmin = isAdminTierRole(profile?.role);
 
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [importsLoading, setImportsLoading] = useState(true);
@@ -233,6 +238,7 @@ const CCTVConsolePage: React.FC = () => {
   const [showKeys, setShowKeys] = useState(false);
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
+  const [missedDraft, setMissedDraft] = useState<MissedDraft | null>(null);
   const [lockDraft, setLockDraft] = useState<LockDraft | null>(null);
   const [custody, setCustody] = useState<{ evidenceId: string; loading: boolean; record: CustodyRecord | null; error: string | null } | null>(null);
   const [governance, setGovernance] = useState<BiometricGovernance | null>(null);
@@ -668,6 +674,7 @@ const CCTVConsolePage: React.FC = () => {
     const handle = activeTile ? tileRefs.current[activeTile.id] : null;
     const atMs = handle?.currentMs() ?? clockMs ?? clip.startMs;
     const linked = selectedObservationId && visibleObservations.some((o) => o.id === selectedObservationId && o.evidenceId === clip.evidenceId) ? selectedObservationId : null;
+    setMissedDraft(null);
     setBookmarkDraft({ evidenceId: clip.evidenceId, atMs, title: '', notes: '', severity: 'standard', observationId: linked });
   }, [activeClip, activeTile, clockMs, selectedObservationId, visibleObservations]);
 
@@ -690,6 +697,35 @@ const CCTVConsolePage: React.FC = () => {
     const incidentId = (data as { incident_id?: string } | null)?.incident_id;
     setBookmarkDraft(null);
     setEvidenceMessage(`Bookmark recorded as incident ${incidentId ? incidentId.slice(0, 8) : ''} at ${formatClock(bookmarkDraft.atMs, timeZone)}.`);
+  };
+
+  const startMissed = useCallback(() => {
+    const clip = activeClip;
+    if (!clip) { setEvidenceMessage('Pick a tile with footage before reporting a missed sighting.'); return; }
+    const handle = activeTile ? tileRefs.current[activeTile.id] : null;
+    const atMs = handle?.currentMs() ?? clockMs ?? clip.startMs;
+    setBookmarkDraft(null);
+    setMissedDraft({ evidenceId: clip.evidenceId, atMs, offsetSeconds: Math.max(0, (atMs - clip.startMs) / 1000), kind: 'person', notes: '' });
+  }, [activeClip, activeTile, clockMs]);
+
+  // A reviewer's report that the engine missed someone or something is the recall half of accuracy: it is
+  // stored against the engine version that analysed the clip and only counts once an administrator confirms it.
+  const saveMissed = async () => {
+    if (!missedDraft) return;
+    setEvidenceBusy('missed');
+    setEvidenceMessage(null);
+    const { error: missedError } = await supabase.rpc('report_cctv_missed_detection', {
+      p_evidence_item_id: missedDraft.evidenceId,
+      p_entity_kind: missedDraft.kind,
+      p_offset_seconds: Math.round(missedDraft.offsetSeconds * 1000) / 1000,
+      p_observed_at: new Date(missedDraft.atMs).toISOString(),
+      p_bbox: null,
+      p_notes: missedDraft.notes.trim() || null,
+    });
+    setEvidenceBusy(null);
+    if (missedError) { setEvidenceMessage(missedError.message); return; }
+    setMissedDraft(null);
+    setEvidenceMessage(`Missed ${missedDraft.kind} reported at ${formatClock(missedDraft.atMs, timeZone)}. An administrator checks it against the footage; only a confirmed miss counts against detection quality.`);
   };
 
   const saveLock = async () => {
@@ -748,7 +784,7 @@ const CCTVConsolePage: React.FC = () => {
         case 'mute': setMuted((current) => !current); break;
         case 'bookmark': startBookmark(); break;
         case 'snapshot': void captureSnapshot(); break;
-        case 'escape': setSelectedObservationId(null); setBookmarkDraft(null); setLockDraft(null); break;
+        case 'escape': setSelectedObservationId(null); setBookmarkDraft(null); setMissedDraft(null); setLockDraft(null); break;
       }
     };
     window.addEventListener('keydown', handler);
@@ -952,6 +988,8 @@ const CCTVConsolePage: React.FC = () => {
           <button type="button" className="page-action" onClick={openPopout} title="Open cameras and entity review in their own window"><ExternalLink size={16} aria-hidden="true" /> Pop out wall</button>
           <button type="button" className="page-action" onClick={() => void reviewPaneRef.current?.requestFullscreen?.()} title="Full-screen video review (f)"><Maximize2 size={16} aria-hidden="true" /> Full screen</button>
           <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')}><Plus size={16} aria-hidden="true" /> Import footage</button>
+          <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-triage')}><ListChecks size={16} aria-hidden="true" /> Review queue</button>
+          <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-quality')}><Gauge size={16} aria-hidden="true" /> Detection quality</button>
           <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-review')}>Job queue &amp; exports</button>
         </div> : null}
       </header>
@@ -1113,6 +1151,7 @@ const CCTVConsolePage: React.FC = () => {
             <div className="cctv-console__evidence-controls" role="group" aria-label="Evidence actions">
               <button type="button" className="cctv-console__ctl" onClick={startBookmark} disabled={!activeClip} aria-label="Bookmark this moment" title="Bookmark this moment as an incident (b)"><Bookmark size={16} aria-hidden="true" /> Bookmark</button>
               <button type="button" className="cctv-console__ctl" onClick={() => void captureSnapshot()} disabled={!activeClip} aria-label="Save a still" title="Save a still of the active tile (s)"><ImageDown size={16} aria-hidden="true" /> Still</button>
+              <button type="button" className={`cctv-console__ctl${missedDraft ? ' is-on' : ''}`} onClick={startMissed} disabled={!activeClip} aria-label="Report a missed sighting" title="The engine missed a person, vehicle or animal at this moment"><EyeOff size={16} aria-hidden="true" /> Missed</button>
               {isAdmin ? <button type="button" className={`cctv-console__ctl${activeClip?.lockedAt ? ' is-locked' : ''}`} onClick={() => activeClip && !activeClip.lockedAt && setLockDraft({ evidenceId: activeClip.evidenceId, reason: '' })} disabled={!activeClip || Boolean(activeClip.lockedAt) || !activeClip.sha256} aria-label={activeClip?.lockedAt ? 'Recording is locked' : 'Lock this recording'} title={activeClip?.lockedAt ? `Locked ${formatDate(parseMs(activeClip.lockedAt) ?? 0, timeZone)}` : activeClip && !activeClip.sha256 ? 'Locking needs the integrity hash the analysis records' : 'Evidence lock: retention cannot purge this recording'}><Lock size={16} aria-hidden="true" /> {activeClip?.lockedAt ? 'Locked' : 'Lock'}</button> : null}
               <button type="button" className={`cctv-console__ctl${activeClip?.integrity?.state === 'mismatch' ? ' is-mismatch' : ''}${custody && activeClip && custody.evidenceId === activeClip.evidenceId ? ' is-on' : ''}`} onClick={() => activeClip && (custody?.evidenceId === activeClip.evidenceId ? setCustody(null) : void openCustody(activeClip.evidenceId))} disabled={!activeClip} aria-pressed={Boolean(custody && activeClip && custody.evidenceId === activeClip.evidenceId)} aria-label="Custody record" title={activeClip ? custodyBadge(activeClip).detail : 'Custody record: hash, seal, integrity checks and the audit trail'}><ShieldCheck size={16} aria-hidden="true" /> Custody</button>
             </div>
@@ -1154,6 +1193,22 @@ const CCTVConsolePage: React.FC = () => {
               <div className="cctv-entity__actions">
                 <button type="submit" className="page-action is-primary" disabled={evidenceBusy !== null || !bookmarkDraft.title.trim()}><Check size={14} aria-hidden="true" /> Record bookmark</button>
                 <button type="button" className="page-action" onClick={() => setBookmarkDraft(null)}>Cancel</button>
+              </div>
+            </form>
+          ) : null}
+
+          {missedDraft ? (
+            <form className="cctv-console__evidence-form" onSubmit={(event) => { event.preventDefault(); void saveMissed(); }} aria-label="Report a missed sighting">
+              <div className="cctv-console__evidence-form-head"><EyeOff size={15} aria-hidden="true" /><strong>Missed sighting at {formatClock(missedDraft.atMs, timeZone)}</strong><small>{clipsById.get(missedDraft.evidenceId)?.fileName} · {missedDraft.offsetSeconds.toFixed(1)} s into the clip</small></div>
+              <label className="cctv-entity__field">What did the engine miss?
+                <select value={missedDraft.kind} onChange={(event) => setMissedDraft({ ...missedDraft, kind: event.target.value as EntityKind })} autoFocus>
+                  <option value="person">A person</option><option value="vehicle">A vehicle</option><option value="animal">An animal</option>
+                </select>
+              </label>
+              <label className="cctv-entity__field">Where in the picture, and anything else <textarea value={missedDraft.notes} onChange={(event) => setMissedDraft({ ...missedDraft, notes: event.target.value })} rows={2} maxLength={2000} placeholder="e.g. person walking left to right behind the gate, partly in shadow" /></label>
+              <div className="cctv-entity__actions">
+                <button type="submit" className="page-action is-primary" disabled={evidenceBusy !== null}><Check size={14} aria-hidden="true" /> Record missed sighting</button>
+                <button type="button" className="page-action" onClick={() => setMissedDraft(null)}>Cancel</button>
               </div>
             </form>
           ) : null}

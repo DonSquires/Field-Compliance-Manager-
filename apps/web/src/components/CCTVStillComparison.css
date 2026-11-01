@@ -14,6 +14,7 @@
 .cctv-still-compare figcaption strong { color: var(--cc-text); font-size: 12px; }
 .cctv-still-compare figcaption span { color: var(--cc-text-3); font-size: 10px; }
 .cctv-still-compare__error { align-items: center; background: rgba(3,8,12,.88); color: #ffb4ad; display: flex; font-size: 11px; gap: 6px; inset: 0; justify-content: center; padding: 12px; position: absolute; text-align: center; }
+.cctv-still-compare__box { border: 2px solid #ffd23f; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.75), inset 0 0 0 1px rgba(0,0,0,.55); box-sizing: border-box; min-height: 6px; min-width: 6px; pointer-events: none; position: absolute; }
 .cctv-still-compare__recognition { background: var(--cc-surface); border-left: 3px solid var(--cc-brand); color: var(--cc-text-2); display: grid; font-size: 11px; gap: 3px; line-height: 1.4; padding: 7px 9px; }
 .cctv-still-compare__recognition strong { color: var(--cc-text); font-size: 12px; }
 .cctv-still-compare__recognition b { color: var(--cc-text); }

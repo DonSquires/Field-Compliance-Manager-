@@ -48,10 +48,16 @@ test('source corrections update only when the linked FCM baseline remains unchan
   assert.equal(conflict.actions[0].reason, 'fcm_record_changed_since_last_sync');
 });
 
-test('initial differences, unkeyed rows, changed source identity, and duplicate keys are held', async () => {
+test('unversioned same-source differences go to governed correction; unkeyed rows, changed source identity, and duplicate keys are held', async () => {
   const { buildReconciliationPlan, sourcePlan, existing } = await fixture();
   sourcePlan.events[0].payload.comments = 'different';
-  assert.equal(buildReconciliationPlan({ sourcePlan, existing }).actions[0].reason, 'initial_difference_requires_review');
+  const corrected = buildReconciliationPlan({ sourcePlan, existing }).actions[0];
+  assert.equal(corrected.operation, 'legacy_correct');
+  assert.equal(corrected.record_id, 'existing-id');
+  const observationPlan = { ...sourcePlan, events: [], observations: [{ ...sourcePlan.events[0], plate: 'ABC123' }] };
+  const observationExisting = [{ ...existing[0], kind: 'observation' }];
+  assert.equal(buildReconciliationPlan({ sourcePlan: observationPlan, existing: observationExisting }).actions[0].operation,
+    'legacy_correct');
   sourcePlan.events[0].payload.job_number = null;
   assert.equal(buildReconciliationPlan({ sourcePlan, existing }).actions[0].reason, 'stable_source_job_required');
   sourcePlan.events[0].payload.job_number = '42';

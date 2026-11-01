@@ -77,6 +77,69 @@ checkpoint scans + GPS. Identical mechanism for static (one long stop) and patro
 serviced" reporting. Presence records carry `client_org_id` (same tenancy substrate
 as compliance observations).
 
+### Owner direction 2026-10-25: roster placement and Workshop labour
+
+- Imported forestry assignments belong in the ordinary staff/work-unit roster
+  calendar, not a separate historical-area table. Existing source assignments
+  retain their recorded dates, officer and route. Their time ranges are evidence,
+  not payable durations or verified attendance. Posted patrol-log labour slots
+  take precedence for the same staff/day, with recorded-hours provenance and
+  an explicit approximate-start warning.
+- Create work unit must offer **Manufacturing & maintenance**, for client
+  jobs linked to the existing Workshop work order. This is a
+  distinct roster category, not a relabelled Office / internal unit.
+- Owner clarification: this category requires a client-backed order (lock or
+  gate repairs/installations, signs, digger work and similar maintenance).
+  Generic internal fabrication remains available in Workshop, not in this
+  client roster category. Description-based classification is an explicit,
+  reviewable suggestion using the active organisation catalogue; it cannot
+  determine commercial entitlement, rates or attendance. Digger and excavator
+  work uses the catalogue subject **Earthworks (digger / excavator)**
+  (`earthworks`, added 2026-10-29); an organisation without it must choose a
+  subject manually.
+- Pete Crawford is R&M's usual worker for these jobs. Each organisation's usual
+  job lead is stored in `workshop_settings.default_job_lead_user_id` (written
+  only by the audited `set_workshop_default_job_lead`; R&M is seeded with Pete).
+  The form offers that person as an explicit one-click choice only when they
+  are an active member of the operating organisation; never silently assign a
+  lead or infer who performed historical work. Each actual
+  worker and their hours belongs in a separate roster slot.
+- One work-order-backed unit can roster several people in separate slots. Its
+  service type is derived from the order's `fabrication`/`maintenance` kind.
+  A provider workplace is the roster base; an on-site maintenance job retains
+  its actual client place/zone/asset on the work order.
+- The roster plans labour and applies the existing staff eligibility, overlap,
+  availability and fatigue gates. The work order must be approved/open before
+  labour is rostered. Creating or staffing the unit does not silently reassign
+  the order's job lead or manufacture a patrol/static field shift.
+- Workshop remains the owner of job start/completion, materials, stock and
+  client invoice lines. The roster may estimate wages but must not generate a
+  second client charge or a made-up margin for that time. Internal orders remain
+  internal because they have no client, not because client jobs were classified
+  as internal roster work.
+
+### Owner direction 2026-10-26: patrol routes and seeded source truth
+
+- Seeded patrol-log labour belongs on the Blenheim or Nelson patrol route, not
+  in per-client holding units. Dave Porter is the usual Blenheim officer; Dan
+  Douglas is the usual Nelson officer. `patrol_routes.primary_staff_id`
+  (admin-only, audited `set_patrol_route_primary_officer`) records each
+  route's usual officer; other staff may still cover the route.
+- Each place belongs to the route whose usual officer attends it most. Places
+  neither usual officer attends go to the nearest route working area, then to
+  a single existing route zone list. A shift follows the majority of its
+  places, then the officer's dated route assignment, then the officer's usual
+  route. Each slot keeps its client and the basis for its routing. Routing changes
+  the roster calendar and route coverage list only, not pay, payroll, invoices
+  or future patrol stops.
+- Every job seeded from R&M's spreadsheets is already verified truth. Those
+  sheets are R&M's source of record for reporting and billing until R&M
+  operate in FCM. Seeded jobs have no geofence requirement. They are billed by
+  their source and are not billing, quote or geofence exceptions. Roster
+  readiness reports them as `source_verified`. Seeded sources are an explicit list
+  (`roster_slot_is_source_truth`). Other tagged slots, such as Bob's tentative
+  blocks, are not source truth. New FCM-operated work keeps every normal gate.
+
 ### Owner direction 2026-10-20: as-attended patrols and recorded travel
 
 - R&M source-backed places completed by Dave Porter belong on Blenheim Forestry
@@ -243,4 +306,4 @@ Reactive path (needs more research before build):
 | Presence | `patrol_checkpoint_visits`, `officer_gps_log`, `shift_stops.actual_arrived_at` | Present. |
 | Base toolkit | `officer_field_reports` (incident / H&S / maintenance), suspicious vehicle/person via `entity_flags`/canonical links, checkpoint QR visits, `evidence_items`. | Present; governed by `submit_officer_field_report` and `process-officer-scan`. |
 | Specialty verdict spine | `observations` (3,128 rows), `breach_alerts`, `notices`, `infringement_notices`, `enforcement_cases`, `vehicle_overnight_sessions`. | Present. `observations` is the access-doctrine keystone (see `ALIGNMENT_LEDGER.md`). |
-| Unified event stream | `location_events` exists with site/zone/checkpoint anchors and `module_key` — **0 rows**. | Dormant: nothing writes it. Treat as an unbuilt seam, not a live spine. |
+| Unified event stream (reverified 2026-10-25) | `location_events` has populated patrol-import records with site/zone/checkpoint anchors and `module_key`. The schema contains the governed `stage_patrol_import_chunk_unlocked` writer and source-sync RPCs. | Present and wired: Atlas records real read/write edges, including Operational Continuity reads. Read-only inspection and rollback-only correction tests provide invocation evidence for the inspected paths, not proof that every module writes the stream. This replaces the 2026-09-14 dormant assessment. |

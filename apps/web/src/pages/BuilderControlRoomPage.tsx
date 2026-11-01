@@ -5,6 +5,7 @@ import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
 import { builderRequestError } from '../lib/builderRequestError';
+import { acceptanceCoverage } from '../lib/builderApprovalSummary';
 import { BuilderLiveActivity, builderSuccessorId, deriveLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -63,6 +64,7 @@ interface BuilderStep {
   status: string;
   attempt_count: number;
   result_summary: string | null;
+  input_context?: unknown;
   error: string | null;
   retryable: boolean;
   started_at?: string | null;
@@ -84,6 +86,7 @@ interface BuilderWorkerRun {
   profile: string;
   status: string;
   target_sha: string | null;
+  patch_artifact_id?: string | null;
   exit_code: number | null;
   started_at?: string | null;
   completed_at?: string | null;
@@ -127,6 +130,11 @@ const isActionableIssue = (job: BuilderJob) => !NON_ACTIONABLE_ISSUE_STATUSES.ha
   && (String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error));
 const asRecord = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const asText = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null;
+function builderOperationError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  const message = asRecord(error)?.message;
+  return typeof message === 'string' && message ? message : fallback;
+}
 
 function builderDeliveryTruth(job: BuilderJob) {
   const report = asRecord(job.autopilot_report);
@@ -168,6 +176,46 @@ function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   return 'Run to the next governed gate and review the resulting files, tests, and findings.';
 }
 
+export function failedFrontendPatchRetryCandidate(snapshot: BuilderSnapshot | null, currentUserId: string | null) {
+  const job = snapshot?.job;
+  if (!job || job.status !== 'failed' || !currentUserId || job.autopilot_requested_by !== currentUserId || job.code_review_mode !== 'human'
+    || !job.frontend_required || !/^[a-f0-9]{40}$/.test(job.target_sha || '')
+    || !job.updated_at || job.workspace_published_at || job.workspace_published_head_sha
+    || job.workspace_pull_request_url || job.workspace_pull_request_head_sha
+    || snapshot.approvals.some(approval => approval.status === 'pending')
+    || snapshot.workerRuns.some(run => ['pending', 'running'].includes(run.status))
+    || snapshot.modelRuns?.some(run => run.status === 'pending' || run.status === 'running')) return null;
+
+  const failed = snapshot.steps.filter(step => step.status === 'failed');
+  if (failed.length !== 1) return null;
+  const step = failed[0];
+  if (step.step_id !== 'frontend_implementation' || step.builder_mode !== 'frontend_engineer'
+    || step.retryable || !step.error?.startsWith('Verifier recovery paused after two infrastructure or attribution failures; patch preserved;')) return null;
+  const input = asRecord(step.input_context);
+  const patchId = input?.patch_artifact_id;
+  if (typeof patchId !== 'string' || input?.target_sha !== job.target_sha) return null;
+  const patch = snapshot.artifacts.find(artifact => artifact.id === patchId && artifact.step_id === step.id
+    && artifact.artifact_type === 'code_implementation' && artifact.status === 'final'
+    && /^[a-f0-9]{64}$/.test(artifact.checksum || ''));
+  if (!patch) return null;
+  const latestRun = snapshot.workerRuns.filter(run => run.step_id === step.id).at(-1);
+  if (!latestRun || !['failed', 'timeout'].includes(latestRun.status) || latestRun.profile !== 'frontend-verify'
+    || latestRun.target_sha !== job.target_sha || latestRun.patch_artifact_id !== patch.id
+    || (latestRun.status === 'failed' && (latestRun.exit_code === null || latestRun.exit_code === 0))
+    || (latestRun.status === 'timeout' && latestRun.exit_code === 0)) return null;
+  if (!snapshot.steps.some(item => item.step_id === 'product_analysis' && item.status === 'completed')
+    || !snapshot.steps.some(item => item.step_id === 'ui_design' && item.status === 'completed')
+    || ['test_suite', 'security_review', 'code_review', 'release_prep'].some(stepId =>
+      !snapshot.steps.some(item => item.step_id === stepId && item.status === 'pending' && !item.started_at && !item.completed_at))) return null;
+  const backend = snapshot.steps.find(item => item.step_id === 'backend_implementation');
+  if ((job.backend_required && !backend)
+    || (backend && !(
+      (backend.status === 'pending' && !backend.started_at && !backend.completed_at)
+      || (!job.backend_required && backend.status === 'skipped' && !backend.started_at)
+    ))) return null;
+  return { job, step, patch };
+}
+
 const PROMPT_TEMPLATES = [
   {
     label: '🚀 New Feature',
@@ -203,6 +251,8 @@ const TEMPLATE_PLACEHOLDER = /\[[^\]\n]{3,}\]/;
 const hasTemplatePlaceholders = (value: string) => TEMPLATE_PLACEHOLDER.test(String(value || ''));
 
 const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; onOpenVibe?: () => void }> = ({ onOpenBob, onOpenVibe }) => {
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -223,6 +273,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [followupTask, setFollowupTask] = useState('');
   const [cancellationReason, setCancellationReason] = useState('');
+  const [confirmSavedPatchRetry, setConfirmSavedPatchRetry] = useState(false);
   const [activeTab, setActiveTab] = useState<JobFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
@@ -247,6 +298,26 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     }
     if (data?.error) throw new Error(typeof data.detail === 'string' && data.detail ? `${data.error}: ${data.detail}` : data.error);
     return data;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getUser().then(({ data, error: authError }) => {
+      if (!active) return;
+      if (authError) {
+        setCurrentUserId(null);
+        setIdentityError(`Saved-patch retry identity could not be verified: ${authError.message}`);
+      } else {
+        setCurrentUserId(data.user?.id ?? null);
+        setIdentityError(null);
+      }
+    }).catch(() => {
+      if (active) {
+        setCurrentUserId(null);
+        setIdentityError('Saved-patch retry identity could not be verified. Refresh before retrying.');
+      }
+    });
+    return () => { active = false; };
   }, []);
 
   const loadList = useCallback(async () => {
@@ -299,7 +370,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   }, [invoke]);
 
   useEffect(() => { void loadList(); }, [loadList]);
-  useEffect(() => { setCancellationReason(''); }, [selectedId]);
+  useEffect(() => { setCancellationReason(''); setConfirmSavedPatchRetry(false); }, [selectedId]);
   useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
 
   const liveSnapshot = snapshot?.job?.id === selectedId ? snapshot : null;
@@ -512,6 +583,53 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     }
   };
 
+  const retrySavedFrontendPatch = async () => {
+    const candidate = failedFrontendPatchRetryCandidate(liveSnapshot, currentUserId);
+    if (!candidate || !selectedId) return;
+    setBusy('saved-patch-retry');
+    setError(null);
+    setNotice(null);
+    let operationError: string | null = null;
+    try {
+      const { data: receipt, error: retryError } = await supabase.rpc('builder_retry_failed_frontend_patch', {
+        p_job_id: candidate.job.id,
+        p_step_id: candidate.step.id,
+        p_patch_artifact_id: candidate.patch.id,
+        p_target_sha: candidate.job.target_sha,
+        p_job_updated_at: candidate.job.updated_at,
+      });
+      if (retryError) throw retryError;
+      if (typeof receipt !== 'string' || !receipt) throw new Error('The saved-patch handoff was not recorded; refresh before retrying.');
+      setConfirmSavedPatchRetry(false);
+      let runNotice = 'The handoff is recorded. Bob remains queued; use Run to gate if the scheduler does not resume it.';
+      try {
+        const started = await invoke({ action: 'run', job_id: selectedId, max_actions: 8 });
+        if (started?.accepted) {
+          runNotice = started.already_running
+            ? 'Bob was already running this same job; no duplicate run was started.'
+            : 'Bob accepted the same-job verification run and will stop at the next governed gate.';
+        }
+      } catch (startError) {
+        const detail = builderOperationError(startError, 'Builder run failed');
+        runNotice = `Bob could not start (${detail}); use Run to gate to continue.`;
+        operationError = `Handoff receipt ${receipt} was recorded, but Bob could not start: ${detail}. Use Run to gate to continue.`;
+      }
+      setNotice(`Saved-patch handoff recorded (${receipt}). ${runNotice} Verification, security review, and fresh human approval remain required; nothing is approved or published.`);
+      const [jobs, snapshotLoaded] = await Promise.all([loadList(), loadSnapshot(selectedId)]);
+      if (operationError) {
+        const refreshFailure = jobs === null || (!snapshotLoaded && selectedIdRef.current === selectedId);
+        setError(`${operationError}${refreshFailure ? ' Refresh also failed; use Refresh to reload the current Builder state.' : ''}`);
+      }
+    } catch (retryError) {
+      operationError = builderOperationError(retryError, 'Saved-patch handoff could not be recorded.');
+      const [jobs, snapshotLoaded] = await Promise.all([loadList(), loadSnapshot(selectedId)]);
+      const refreshFailure = jobs === null || (!snapshotLoaded && selectedIdRef.current === selectedId);
+      setError(`${operationError}${refreshFailure ? ' Refresh also failed; use Refresh to reload the current Builder state.' : ''}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const createWorkspace = async () => {
     if (!selectedId) return;
     setBusy('workspace');
@@ -656,6 +774,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const cancelled = selectedJob?.status === 'cancelled';
   const deliveryTruth = selectedJob ? builderDeliveryTruth(selectedJob) : null;
   const nextSafeAction = selectedJob && snapshot ? builderNextAction(selectedJob, snapshot) : 'Select a job or describe new work to Bob Builder.';
+  const savedPatchRetry = failedFrontendPatchRetryCandidate(liveSnapshot, currentUserId);
   const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
   const failedStepCount = snapshot?.steps.filter(step => step.status === 'failed' || step.status === 'blocked').length ?? 0;
 
@@ -680,6 +799,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
       </section>
 
       {error && <div className="builder-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={15} /></button></div>}
+      {identityError && <div className="builder-message is-error" role="alert"><AlertTriangle size={17} /><span>{identityError}</span></div>}
       {notice && <div className="builder-message" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={15} /></button></div>}
 
       <nav className="builder-mobile-switcher" aria-label="Builder workspace panels">
@@ -877,13 +997,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
             {snapshot.approvals.filter(approval => !successorId && !cancelled && approval.status === 'pending').map(approval => {
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
               const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
+              const coverage = ['implementation_review', 'release_approval'].includes(approval.approval_type)
+                ? acceptanceCoverage(snapshot.steps.find(step => step.step_id === 'test_suite')?.input_context) : undefined;
               return (
               <section className="builder-approval" key={approval.id}>
                 <div><span>Human approval required</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}.</small></div>
-                <BuilderApprovalBrief jobId={selectedJob.id} approvalType={approval.approval_type} artifacts={[...reviewedArtifacts, ...snapshot.artifacts.filter(artifact => artifact.status === 'final')]} readArtifact={readArtifactContent} />
+                <BuilderApprovalBrief jobId={selectedJob.id} approvalType={approval.approval_type} artifacts={[...reviewedArtifacts, ...snapshot.artifacts.filter(artifact => artifact.status === 'final')]} readArtifact={readArtifactContent} acceptance={coverage} />
                 <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}{!evidenceComplete && <li className="is-incomplete"><strong>Evidence unavailable</strong><span>Refresh before deciding</span></li>}</ul>
                 <label>Note for Bob <small>(optional to approve; required to reject: say what should change)</small><textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} /></label>
-                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy)}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy) || coverage?.supplied === false}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
               </section>
               );
             })}
@@ -895,6 +1017,17 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>}
+            {!successorId && !cancelled && savedPatchRetry && <section className="builder-followup builder-recovery" aria-label="Owner-confirmed saved-patch handoff">
+              <div><strong>Saved patch · owner handoff</strong><p>Bob can re-run the frontend verifier on this exact patch and pinned target. If verification finds a patch-caused failure, the evidence returns to Bob for repair. Existing attempts and downstream gates stay intact.</p></div>
+              <p>Patch SHA-256: <code>{savedPatchRetry.patch.checksum?.slice(0, 16)}</code> · target: <code>{savedPatchRetry.job.target_sha.slice(0, 12)}</code></p>
+              {!confirmSavedPatchRetry
+                ? <button type="button" onClick={() => setConfirmSavedPatchRetry(true)} disabled={Boolean(busy)}><RefreshCw size={15} /> Review same-job retry</button>
+                : <div className="builder-recovery__confirm" role="group" aria-label="Confirm saved-patch retry">
+                    <p>This does not rewrite or approve the patch. The verifier also checks that pinned regression-test titles remain; inspect test changes and reject any later approval if that evidence is incomplete. No pull request, merge, or deployment is created.</p>
+                    <div><button type="button" onClick={() => setConfirmSavedPatchRetry(false)} disabled={Boolean(busy)}>Cancel</button>
+                      <button type="button" className="is-primary" onClick={() => void retrySavedFrontendPatch()} disabled={Boolean(busy)}>{busy === 'saved-patch-retry' ? 'Recording handoff…' : 'Confirm handoff and retry verification'}</button></div>
+                  </div>}
+            </section>}
             {!successorId && !cancelled && selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
             {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}

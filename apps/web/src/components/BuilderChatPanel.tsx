@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Lock, MessageSquarePlus, Send, Wrench, X } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Lock, MessageSquarePlus, Wrench, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './BuilderChatPanel.css';
+import { BuilderResearchComposer } from './BuilderResearchComposer';
 
 export interface BuilderChatProposal {
   title: string;
@@ -9,6 +10,8 @@ export interface BuilderChatProposal {
   frontend_required: boolean;
   backend_required: boolean;
   rationale?: string;
+  handoff_kind?: 'investigation';
+  source_message_id?: string;
 }
 
 export interface BuilderChatMessage {
@@ -38,9 +41,9 @@ type ThreadItem = { type: 'message'; message: BuilderChatMessage } | { type: 'st
 
 const MESSAGE_FIELDS = 'id, seq, thread_id, role, kind, content, payload, status, created_at';
 const STARTERS = [
-  'What is waiting on me across Builder jobs?',
-  'Explain why the selected job is blocked',
-  'Propose a job to move the CCTV review page onto the shared dark tokens',
+  'How should we investigate an issue before handing it to a builder?',
+  'Help me assess the reported blocker in my evidence summary.',
+  'Send this reported issue to Bob Builder for investigation and a fix.',
 ];
 
 function errorText(error: unknown): string {
@@ -50,6 +53,24 @@ function errorText(error: unknown): string {
 
 function requestId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function ResearchReceipt({ value }: { value: unknown }) {
+  if (!value || typeof value !== 'object' || !('provider' in value) || value.provider !== 'ollama_cloud' || !('sources' in value) || !Array.isArray(value.sources)) return null;
+  return <details className="bchat-research-receipt">
+    <summary>Research sources and transfer receipt</summary>
+    {'purpose' in value && typeof value.purpose === 'string' && <p>Purpose: {value.purpose} · Model: {'model' in value && typeof value.model === 'string' ? value.model : 'not recorded'} · No automatic fallback</p>}
+    <p>Only the approved current question/files were eligible. Images use cloud vision; documents use bounded extracted text, never raw document files. Research is advisory, not approval to change the system.</p>
+    <ul>{value.sources.map((source: unknown, index: number) => {
+      if (!source || typeof source !== 'object') return null;
+      const title = 'title' in source && typeof source.title === 'string' ? source.title : `Source ${index + 1}`;
+      const url = 'url' in source && typeof source.url === 'string' && /^https:\/\/[^/@?#]+\/[^?#]*$/.test(source.url) ? source.url : null;
+      return <li key={index}>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{title}</a> : title}
+        {'retrieved_at' in source && typeof source.retrieved_at === 'string' && <small> · Retrieved {source.retrieved_at}</small>}
+        {'sha256' in source && typeof source.sha256 === 'string' && <small> · SHA-256 {source.sha256}</small>}
+      </li>;
+    })}</ul>
+  </details>;
 }
 
 /** Only short scalar page context travels with a message (the lane caps it at 4 KB). */
@@ -65,7 +86,10 @@ export function chatContext(context: Record<string, unknown>): Record<string, st
 export function proposalFrom(message: BuilderChatMessage): BuilderChatProposal | null {
   const raw = message.payload.proposal as Partial<BuilderChatProposal> | undefined;
   if (!raw || typeof raw.title !== 'string' || typeof raw.task_description !== 'string') return null;
-  return { title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined };
+  return {
+    title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined,
+    ...(raw.handoff_kind === 'investigation' ? { handoff_kind: raw.handoff_kind, source_message_id: typeof raw.source_message_id === 'string' ? raw.source_message_id : undefined } : {}),
+  };
 }
 
 /**
@@ -103,11 +127,41 @@ function Steps({ steps }: { steps: BuilderChatMessage[] }) {
     <div className="bchat-steps">
       <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<Wrench size={13} />
-        <span>{steps.length} read-only step{steps.length === 1 ? '' : 's'}</span>
+        <span>{steps.length} step{steps.length === 1 ? '' : 's'}</span>
       </button>
       {open && <ol>{steps.map(step => <li key={step.id} className={step.payload.ok === false ? 'is-failed' : undefined}>{step.content}</li>)}</ol>}
     </div>
   );
+}
+
+function RevisionCard({ message, busy, sourceStatus, onRequest, onOpenJob }: {
+  message: BuilderChatMessage; busy: boolean; sourceStatus?: BuilderChatMessage['status']; onRequest: () => void; onOpenJob?: (jobId: string) => void;
+}) {
+  const revision = message.payload.revision;
+  if (!revision || typeof revision !== 'object' || !('job_id' in revision) || typeof revision.job_id !== 'string'
+      || !('feedback' in revision) || typeof revision.feedback !== 'string') return null;
+  const jobId = revision.job_id;
+  const implementation = 'kind' in revision && revision.kind === 'implementation';
+  const recovery = 'kind' in revision && revision.kind === 'recovery';
+  const sourceComplete = sourceStatus === 'done';
+  const receipt = typeof message.payload.revision_receipt === 'string' ? message.payload.revision_receipt : null;
+  return <article className="bchat-proposal" aria-label={`${recovery ? 'Implementation recovery' : implementation ? 'Implementation corrections' : 'Specification revision'} for job ${jobId}`}>
+    <header><span>Review feedback · existing Bob Builder job</span><h3>{recovery ? 'Recover failed implementation on the same job' : implementation ? 'Correct implementation before a fresh human review' : 'Revise specification before implementation'}</h3></header>
+    <p>Job: {jobId}</p>
+    <p className="bchat-proposal__task">{revision.feedback}</p>
+    {'review_quote' in revision && typeof revision.review_quote === 'string' && <details><summary>Original human review report</summary><p>{revision.review_quote}</p></details>}
+    <p>{recovery
+      ? 'Confirmation resumes this same failed correction job before verification. The job, target, specification, seeds, attempt counts and history are preserved. Verification, security and fresh human review remain required. Nothing is approved or deployed.'
+      : implementation
+      ? 'No duplicate job or specification rewind. Confirmation cancels the old code review and returns this same job to implementation. Prior evidence is retained; verification and security run again before fresh human review. Nothing is approved or deployed.'
+      : 'No duplicate job. Confirmation supersedes the current specification review and returns this same job to analysis. No implementation is approved.'}</p>
+    {receipt
+      ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Revision requested · Receipt: {receipt}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
+      : <><button type="button" disabled={busy || !sourceComplete} onClick={onRequest}>{busy ? 'Recording revision…' : recovery ? 'Resume failed implementation' : implementation ? 'Request implementation changes' : 'Request specification revision'}</button>
+        {!sourceComplete && <p role="status">{sourceStatus === 'failed'
+          ? 'The originating PM turn failed. Ask Bob for a fresh revision card before confirming.'
+          : 'Waiting for the originating PM turn to complete before confirmation.'}</p>}</>}
+  </article>;
 }
 
 function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingElsewhere }: { message: BuilderChatMessage; onCreate: () => void; onOpenJob?: (jobId: string) => void; busy: boolean; settings?: string; creatingElsewhere: boolean }) {
@@ -117,11 +171,12 @@ function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingEl
   const scope = [proposal.frontend_required && 'Frontend', proposal.backend_required && 'Backend'].filter(Boolean).join(' + ');
   return (
     <article className="bchat-proposal" aria-label={`Proposed Builder job: ${proposal.title}`}>
-      <header><span>Proposed job · {scope}</span><h3>{proposal.title}</h3></header>
+      <header><span>{proposal.handoff_kind === 'investigation' ? 'Investigation handoff · Bob Builder' : 'Proposed job'} · {scope}</span><h3>{proposal.title}</h3></header>
+      {proposal.handoff_kind === 'investigation' && <p>Reported issue, not a verified repair plan. Builder must investigate and pass normal gates before implementing a fix.</p>}
       <p className="bchat-proposal__task">{proposal.task_description}</p>
       {proposal.rationale && <p className="bchat-proposal__why">{proposal.rationale}</p>}
       {jobId
-        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /> Job created{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
+        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Job created</span><span>Receipt: {jobId}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
         : <div className="bchat-proposal__actions"><span>{settings ? `Creates with: ${settings}. ` : ''}Nothing runs until you create it.</span><button type="button" onClick={onCreate} disabled={busy || creatingElsewhere} title={creatingElsewhere ? 'This job is being created from another tab or window' : undefined}>{busy || creatingElsewhere ? <Loader2 size={14} className="bchat-spin" /> : <Bot size={14} />} {creatingElsewhere ? 'Creating…' : 'Create job'}</button></div>}
     </article>
   );
@@ -218,22 +273,6 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
 
   useEffect(() => { threadEnd.current?.scrollIntoView?.({ block: 'end' }); }, [messages.length]);
 
-  const send = async (text: string) => {
-    const content = text.trim();
-    if (!content || !threadId || busy) return;
-    setBusy('send');
-    setError(null);
-    try {
-      const { error: sendError } = await supabase.rpc('builder_chat_send', { p_thread_id: threadId, p_content: content, p_client_request_id: requestId(), p_context: chatContext(context) });
-      if (sendError) throw sendError;
-      setDraft('');
-    } catch (sendError) {
-      setError(errorText(sendError));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const newChat = async () => {
     if (busy) return;
     setBusy('new');
@@ -278,6 +317,25 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
     }
   };
 
+  const requestRevision = async (message: BuilderChatMessage) => {
+    if (busy) return;
+    setBusy(`revision:${message.id}`);
+    setError(null);
+    try {
+      const revision = message.payload.revision;
+      const implementation = revision && typeof revision === 'object' && 'kind' in revision && revision.kind === 'implementation';
+      const recovery = revision && typeof revision === 'object' && 'kind' in revision && revision.kind === 'recovery';
+      const { data, error: revisionError } = await supabase.rpc(recovery ? 'builder_chat_recover_implementation' : implementation ? 'builder_chat_request_code_changes' : 'builder_chat_request_spec_revision', { p_message_id: message.id });
+      if (revisionError) throw revisionError;
+      if (typeof data !== 'string' || !data) throw new Error('Review feedback was not confirmed; refresh before retrying.');
+      setMessages(current => current.map(row => row.id === message.id ? { ...row, payload: { ...row.payload, revision_receipt: data } } : row));
+    } catch (revisionError) {
+      setError(errorText(revisionError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <section className="bchat" aria-label="Bob Builder chat">
       <header className="bchat__head">
@@ -299,31 +357,36 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
             {(access === 'checking' || loading) && <div className="bchat__state" role="status"><Loader2 size={16} className="bchat-spin" /> Loading Builder chat…</div>}
             {!loading && access === 'allowed' && items.length === 0 && (
               <div className="bchat__empty">
-                <p>Ask about jobs, gates, code or the canon. Bob reads the build and can propose a job; you create it.</p>
+                <p>Bob is your technical PM and QA lead. He can assess your report and prepare a Bob Builder investigation handoff for you to confirm here. Builder investigates and implements through its normal gates; Vibe dispatch and automatic private collection are not connected here. Private history and selected-job context are not sent to cloud.</p>
                 <ul>{STARTERS.map(starter => <li key={starter}><button type="button" onClick={() => setDraft(starter)}>{starter}</button></li>)}</ul>
               </div>
             )}
             {items.map(item => item.type === 'steps'
               ? <Steps key={item.key} steps={item.steps} />
+              : item.message.kind === 'proposal' && item.message.payload.revision
+                ? <RevisionCard key={item.message.id} message={item.message} busy={Boolean(busy)}
+                  sourceStatus={messages.find(row => row.id === item.message.payload.message_id && row.role === 'owner')?.status}
+                  onRequest={() => void requestRevision(item.message)} onOpenJob={onOpenJob} />
               : item.message.kind === 'proposal'
                 ? <ProposalCard key={item.message.id} message={item.message} settings={jobSettings} busy={busy === `proposal:${item.message.id}`}
                   creatingElsewhere={typeof item.message.payload.creating_token === 'string' && item.message.payload.creating_token !== reservations.current.get(item.message.id) && Date.now() - Date.parse(String(item.message.payload.creating_at ?? '')) < 5 * 60_000} onCreate={() => void createFromProposal(item.message)} onOpenJob={onOpenJob} />
                 : <div key={item.message.id} className={`bchat-msg bchat-msg--${item.message.role}${item.message.kind === 'error' ? ' is-error' : ''}${item.message.kind === 'status' ? ' is-status' : ''}`}>
                     <p>{item.message.content}</p>
+                    {item.message.payload.research_mode === 'public_cloud' && <small>Owner-approved public cloud research · previous chat excluded</small>}
+                    <ResearchReceipt value={item.message.payload.research} />
                     {item.message.role === 'owner' && item.message.status === 'failed' && <span className="bchat-msg__meta">Not answered</span>}
                   </div>)}
             {working && <div className="bchat__state" role="status"><Loader2 size={15} className="bchat-spin" /> Bob Builder is working…</div>}
             <div ref={threadEnd} />
           </div>
           {error && <p className="bchat__error" role="alert">{error}</p>}
-          <p className="bchat__context">{typeof context.job_title === 'string' && context.job_title ? <>Looking at job: <strong>{context.job_title}</strong></> : 'No job selected · Bob sees the whole Builder queue'}</p>
-          <form className="bchat__composer" onSubmit={event => { event.preventDefault(); void send(draft); }}>
+          <p className="bchat__context">{typeof context.job_title === 'string' && context.job_title ? <>Selected job (not transferred): <strong>{context.job_title}</strong></> : 'No job selected · cloud PM receives only your approved packet'}</p>
+          <form className="bchat__composer" onSubmit={event => event.preventDefault()}>
             <label htmlFor="bchat-input" className="bchat__sr">Message Bob Builder</label>
-            <textarea id="bchat-input" value={draft} onChange={event => setDraft(event.target.value)} rows={3} maxLength={20000} placeholder="Ask Bob Builder about a job, or describe what to build"
-              disabled={access !== 'allowed' || !threadId}
-              onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(draft); } }} />
-            <span className="bchat__hint">Enter to send · Shift+Enter for a new line</span>
-            <button type="submit" disabled={access !== 'allowed' || !threadId || !draft.trim() || Boolean(busy)} aria-label="Send to Bob Builder">{busy === 'send' ? <Loader2 size={15} className="bchat-spin" /> : <Send size={15} />}</button>
+            <textarea id="bchat-input" value={draft} onChange={event => setDraft(event.target.value)} rows={3} maxLength={2000} placeholder="Ask your PM a question, or describe the issue to investigate"
+              disabled={access !== 'allowed' || !threadId || Boolean(busy)} />
+            {threadId && <BuilderResearchComposer key={threadId} pmMode threadId={threadId} question={draft} disabled={access !== 'allowed' || Boolean(busy) || working} onSent={() => setDraft('')} onError={message => setError(message || null)} onBusy={value => setBusy(value ? 'research' : null)} />}
+            <span className="bchat__hint">Review the packet and approve cloud transfer before sending · Enter adds a new line</span>
           </form>
         </>
       )}

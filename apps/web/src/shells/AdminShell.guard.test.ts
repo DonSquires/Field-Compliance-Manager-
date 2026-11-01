@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // Without normalising, git's CRLF checkout on Windows would make that pattern never match
 // regardless of whether the bad code is genuinely absent - a silent false pass, not a real check.
 const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8').replace(/\r\n/g, '\n');
+const shellStyles = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.css'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('AdminShell access and routing boundaries', () => {
   it('never redirects a page to itself, which trapped users on Reports in a replace loop', () => {
@@ -30,19 +31,20 @@ describe('AdminShell access and routing boundaries', () => {
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
-    expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
-    expect(source).toContain('items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area)))');
+    expect(source).toContain("if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals' || page === 'nzta-register') && !isAdminTierRole(role)) return false;");
+    expect(source).toContain('(isPageEnabled(item.id) || (item.id === \'roster\' && rosterSetupFallback))');
+    expect(source).toContain('items: enabledNavItems(items)');
+    expect(source).toContain('{enabledNavItems(items).map((item) => {');
   });
 
-  it('shows approvals only to roles that can make governed decisions', () => {
-    expect(source).toContain("const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin'])");
-    expect(source).toContain("if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;");
+  it('shows approvals and roster planning to every admin-tier role, including admin_officer', () => {
+    expect(source).toContain("import { isAdminTierRole } from '../lib/roles';");
+    expect(source).not.toContain('APPROVAL_DECISION_ROLES');
+    expect(source).not.toContain('ROSTER_MANAGEMENT_ROLES');
   });
 
   it('shows roster planning only to workforce-management roles', () => {
-    expect(source).toContain("const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer'])");
     expect(source).toContain("const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets'])");
-    expect(source).toContain('if (ROSTER_MANAGEMENT_PAGES.has(page) && (!role || !ROSTER_MANAGEMENT_ROLES.has(role))) return false;');
   });
 
   it('gates platform module pages (crm, rostering, hr, finance) by organisation subscription', () => {
@@ -106,9 +108,11 @@ describe('AdminShell access and routing boundaries', () => {
   });
 
   it('uses the same module entitlement for direct routes, desktop and mobile navigation, and shortcuts', () => {
-    expect(source).toContain('canAccessFieldOpsArea(requestedArea, moduleCheck)');
+    expect(source).toContain('canAccessFieldOpsArea(requestedArea, moduleCheck, profile?.role)');
     expect(source).toContain('(!item.area || isFieldOpsAreaEnabled(item.area))');
     expect(source).toContain("isFieldOpsAreaEnabled('vehicle-search')");
+    expect(source).toContain("isFieldOpsAreaEnabled('person-search')");
+    expect(source).toContain("case 'person-search':");
     expect(source).toContain('.filter((tab) => isPageEnabled(tab.id as AdminPage))');
   });
 
@@ -127,34 +131,55 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('Retry page');
   });
 
-  it('keeps people and HR accessible until the local roster workspace is consolidated', () => {
-    expect(source).toContain("{ id: 'people-hr', label: 'People, Pay & HR'");
-    expect(source).toContain("new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage />");
+  it('consolidates Workforce into Rosters and People with section strips, keeping old routes', () => {
+    expect(source).toContain("{ id: 'roster', label: 'Rosters', icon: Route, also: ['roster-targets'] }");
+    expect(source).toContain("{ id: 'people-hr', label: 'People', icon: Users, also: ['users'] }");
+    expect(source).toContain('...Object.values(NAVIGATION_MAP).flatMap((items) => items.flatMap((item) => item.also ?? []))');
+    expect(source).toContain("item.id === 'people-hr' && !isPageEnabled('people-hr') ? { ...item, id: 'users' as AdminPage, also: [] } : item");
+    expect(source).toContain("aria-label={workforceSection?.startsWith('roster-') ? 'Roster sections' : 'People sections'}");
+    expect(source).not.toContain("label: 'Schedules & Rosters'");
+    expect(source).not.toContain("label: 'Work Units & Coverage'");
+    expect(source).toContain("new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage key={isRosteringHrView(location.search) ? 'rostering' : 'people'} />");
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
+  });
+
+  it('preserves HR-gated roster setup without bypassing roster role access or losing workflow context', () => {
+    expect(source).toContain('shouldShowRosterSetupFallback(');
+    expect(source).toContain("canAccessAdminPage('roster', profile?.role, () => true)");
+    expect(source).toContain("else if (item.id === 'roster' && rosterSetupFallback) openRosterSetup()");
+    expect(source).toContain("const contextQuery = workflowContextQuery(workflowContext)");
+    expect(source).toContain("`${ROSTER_SETUP_PATH}${contextQuery ? `&${contextQuery.slice(1)}` : ''}`");
+  });
+
+  it('uses the semantic primary foreground for selected Workforce sections', () => {
+    const selectedSectionRule = shellStyles.slice(
+      shellStyles.indexOf(".admin-workforce-sections button[aria-current='page']"),
+      shellStyles.indexOf('.admin-workforce-sections button:focus-visible'),
+    );
+    expect(selectedSectionRule).toContain('color: var(--color-primary-text);');
   });
 
   it('keeps specialist routes visible until their container pages exist locally', () => {
     expect(source).toContain("'Clients & Delivery': [");
     expect(source).toContain('Finance: [');
-    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
+    expect(source).toContain("{ id: 'crm', label: 'Clients'");
     expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
     expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
     expect(source).toContain("{ id: 'finance-money', label: 'Business money check'");
     expect(source).toContain("'Field Operations': [");
-    expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
     expect(source).toContain("'Reports & Analytics': [");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).toContain("{ id: 'client-setup', label: 'Set up a new client'");
-    expect(source).toContain("{ id: 'onboarding', label: 'Clients being set up'");
-    expect(source).toContain("{ id: 'handoffs', label: 'Start delivery'");
+    expect(source).toContain("'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites'");
+    expect(source).toContain("{ id: 'locations', label: 'Locations'");
+    expect(source).not.toContain("label: 'Location Houses'");
   });
 
   it('consolidates duplicate admin menu entries and landing shortcuts', () => {
-    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios', icon: DollarSign }");
+    expect(source).toContain("{ id: 'crm', label: 'Clients', icon: Building2 }");
     expect(source).not.toContain("{ id: 'relationships', label: 'Client Portfolios', icon: Network }");
-    expect(source).toContain("label: 'People & Access'");
+    expect(source).not.toContain("label: 'People & Access'");
     expect(source).not.toContain("label: 'Client Portfolios', icon: Network");
   });
 
@@ -185,11 +210,13 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('className="admin-shell-page"');
   });
 
-  it('lets the CRM matrix replace rather than duplicate shell workflow controls', () => {
-    expect(source).toContain("const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage)");
+  it('keeps one workspace navigation layer without a cross-workspace step rail', () => {
+    expect(source).toContain("const showWorkspaceNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage)");
     expect(source).toContain("['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)");
-    expect(source.match(/activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
-    expect(source.match(/showWorkflowNavigation && <WorkflowRail/g)).toHaveLength(2);
+    expect(source.match(/activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
+    expect(source).not.toContain('WorkflowRail');
+    expect(source).toContain("label: 'Activation checklist'");
+    expect(source).toContain("label: 'Service handoffs'");
   });
 
   it('contains the HR workbench without locking ordinary staff-profile pages', () => {

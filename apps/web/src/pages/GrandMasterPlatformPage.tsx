@@ -223,10 +223,11 @@ const GrandMasterPlatformPage: React.FC = () => {
               <div key={idx} className="contact-card">
                 <div className="contact-header">
                   <h3>{h.service || `Check ${idx + 1}`}</h3>
-                  <span className={`status-badge status-${h.status === 'ok' ? 'active' : 'inactive'}`}>
-                    {h.status}
+                  <span className={`status-badge status-${h.status === 'ok' || h.status === 'online' ? 'active' : 'inactive'}`}>
+                    {h.status.replace(/_/g, ' ')}
                   </span>
                 </div>
+                {typeof h.detail === 'string' && <p>{h.detail}</p>}
               </div>
             ))}
           </div>

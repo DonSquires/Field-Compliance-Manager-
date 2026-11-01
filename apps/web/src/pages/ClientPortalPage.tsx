@@ -23,6 +23,7 @@ import { getClientPortalPages } from '../lib/clientPortalAccess';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { asDeliverySummary, deliveryPeriodBounds, deliveryWords, hoursOnPost, responseWords, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
 import { supabase } from '../lib/supabase';
+import { isReportPackPdfCurrent } from '../lib/reportPackRenderer';
 import './ClientPortalPage.css';
 
 interface ClientObservation {
@@ -440,11 +441,7 @@ function LocationGrid({ sites, zones }: { sites: Array<{ id: string; name: strin
 }
 
 function ReportRow({ report }: { report: MonthlyReportPack }) {
-  const pdfIsCurrent = Boolean(
-    report.pdf_path
-      && report.pdf_source_updated_at === report.updated_at
-      && (report.status === 'sent' || report.pdf_renderer_version === 'fcm-report-pack-pdf-lib-a4-v9'),
-  );
+  const pdfIsCurrent = isReportPackPdfCurrent(report);
   const title = report.editorial?.title ?? `${report.template_code.replaceAll('_', ' ')} report`;
   const periodStartLabel = new Date(report.period_start + 'T00:00:00').toLocaleDateString('en-NZ');
   const periodEndLabel = new Date(report.period_end + 'T00:00:00').toLocaleDateString('en-NZ');

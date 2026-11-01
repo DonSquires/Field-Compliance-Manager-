@@ -41,6 +41,14 @@ describe('CCTV inference review', () => {
     expect(source).not.toMatch(/from\('cctv_inference_budgets'\)/);
   });
 
+  it('shows which frames the detector examined from the worker plan and never implies coverage it lacks', () => {
+    expect(source).toContain('const coverage = useMemo(() => inferenceCoverage(selected?.result?.result), [selected?.result?.result]);');
+    expect(source).toContain('aria-label="Detector coverage"');
+    expect(source).toContain('Treat {coverage.framesUnanswered === 1 ? \'it\' : \'them\'} as a gap, not as nothing seen.');
+    expect(source).toContain('Not recorded for this result.');
+    expect(styles).toContain('.cctv-coverage-panel.is-warning');
+  });
+
   it('issues the receipt before opening a preview and offers print, download, and verification actions', () => {
     const issueIndex = source.indexOf("supabase.rpc('issue_cctv_report_receipt'");
     const buildIndex = source.indexOf('const report = buildCCTVPrintableReport({');

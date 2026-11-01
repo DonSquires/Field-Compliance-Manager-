@@ -34,6 +34,7 @@ describe('governed monthly report pack generation', () => {
     expect(reviewPanel).toContain("rpc('review_monthly_report_pack'");
     expect(reviewPanel).toContain("p_action: action");
     expect(reviewPanel).toContain('Publish reviewed report');
+    expect(reviewPanel).toContain("{pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`}");
     expect(page).toContain("supabase.functions.invoke('send-report-pack'");
     expect(page).toContain('pack_id: pack.id');
     expect(page).toContain('Send reviewed report');

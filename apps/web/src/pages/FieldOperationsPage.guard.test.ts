@@ -23,7 +23,7 @@ describe('field operations command surface', () => {
   });
 
   it('provides interactive routes for each implemented operational workflow', () => {
-    for (const area of ['dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search', 'field-reports']) {
+    for (const area of ['dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search', 'person-search', 'field-reports']) {
       expect(page).toContain(`area: '${area}'`);
     }
     expect(page).toContain('onClick={() => onNavigate(area)}');
@@ -46,8 +46,8 @@ describe('field operations command surface', () => {
   it('uses role-specific language for operational administrators', () => {
     expect(page).toContain("admin_officer: { eyebrow: 'Operations control', title: 'Operations workspace'");
     expect(page).toContain("const dispatchEnabled = isModuleEnabled('dispatch')");
-    expect(page).toContain("const dispatchContext = useActiveModuleContext('dispatch')");
-    expect(page).toContain('const dispatchAvailable = dispatchEnabled && dispatchContext.enabled');
+    expect(page).toContain('const dispatchAvailable = dispatchEnabled;');
+    expect(page).not.toContain('useActiveModuleContext');
   });
 
   it('uses independent live count queries with explicit unavailable state', () => {

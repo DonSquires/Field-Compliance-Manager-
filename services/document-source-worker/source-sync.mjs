@@ -119,13 +119,28 @@ export function acknowledgeSourceVersion(state, relativePath, receipt) {
     || receipt.source_sha256 !== file.observed.sha256) {
     throw new Error('A matching applied import receipt is required');
   }
+  const { hold: _resolvedHold, ...current } = file;
   return {
     ...state,
     files: {
       ...state.files,
-      [relativePath]: { ...file, pending: false, acknowledged_sha256: receipt.source_sha256, receipt_id: receipt.receipt_id },
+      [relativePath]: { ...current, pending: false, acknowledged_sha256: receipt.source_sha256, receipt_id: receipt.receipt_id },
     },
   };
+}
+
+// Records why a version could not be promoted. The version stays pending (never acknowledged),
+// so the hold remains visible and is re-evaluated when the file or its targets change.
+export function holdSourceVersion(state, relativePath, { sha256, reason, at = new Date().toISOString() }) {
+  const file = state.files[relativePath];
+  if (!file?.pending || file.observed?.sha256 !== sha256 || !/^[a-z0-9_:.-]{1,120}$/i.test(reason ?? '')) {
+    throw new Error('A hold must name the current pending version and a reason code');
+  }
+  return { ...state, files: { ...state.files, [relativePath]: { ...file, hold: { sha256, reason, at } } } };
+}
+
+export function isHeldVersion(file) {
+  return Boolean(file?.hold && file.hold.sha256 === file.observed?.sha256);
 }
 
 export async function photoSourcePaths(root) {

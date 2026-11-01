@@ -14,10 +14,15 @@
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { usePersonSearchAccess } from '../hooks/usePersonSearchAccess';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
+import { PermitAccessCard } from '../components/PermitAccessCard';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
+import type { PermitSummary } from '../lib/permits';
+import { loadVehiclePermits } from '../lib/vehiclePermits';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -77,21 +82,11 @@ interface VehicleBreach {
   zone_name: string | null;
 }
 
-interface PermitRecord {
-  id: string;
-  holder_name: string | null;
-  permit_number: string;
-  permit_type: string | null;
-  forest_areas: string[] | null;
-  date_from: string | null;
-  date_to: string | null;
-  status: string;
-  firearm_licence_valid: boolean | null;
-  conditions: string | null;
-  vehicle_plates: string[] | null;
-}
-
 const OfficerVehicleLookupPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const routedPlate = normalizePlateNumber(searchParams.get('plate') ?? '');
+  const personAccess = usePersonSearchAccess();
   const { selectedAgreementZones } = useServiceRelationships();
   const [plate, setPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -99,16 +94,13 @@ const OfficerVehicleLookupPage: React.FC = () => {
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
-  const [permits, setPermits] = useState<PermitRecord[]>([]);
+  const [permits, setPermits] = useState<PermitSummary[]>([]);
+  const [searchedPlate, setSearchedPlate] = useState('');
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanPlate = normalizePlateNumber(plate);
-    if (!cleanPlate) return;
-
+  const runSearch = useCallback(async (cleanPlate: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -119,6 +111,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
       setObservations([]);
       setBreaches([]);
       setPermits([]);
+      setSearchedPlate(cleanPlate);
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
       // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
@@ -137,11 +130,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
-        supabase
-          .from('person_permits_fieldwork')
-          .select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions, vehicle_plates')
-          .contains('vehicle_plates', [cleanPlate])
-          .order('date_to', { ascending: false }),
+        loadVehiclePermits(cleanPlate),
       ]);
       const canonicalVehicleId = (vehRes.data as Vehicle | null)?.id ?? null;
       const historyFilter = vehicleHistoryOrFilter(cleanPlate, canonicalVehicleId);
@@ -181,7 +170,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
       const vehData = vehRes.data as Vehicle | null;
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
-      setPermits((permitRes.data as PermitRecord[]) || []);
+      setPermits(permitRes.data);
 
       setObservations(
         ((obsRes.data as any[]) || []).map((row) => ({
@@ -228,6 +217,19 @@ const OfficerVehicleLookupPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  }, [selectedAgreementZones]);
+
+  useEffect(() => {
+    if (!routedPlate) return;
+    setPlate(routedPlate);
+    void runSearch(routedPlate);
+  }, [routedPlate, runSearch]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPlate = normalizePlateNumber(plate);
+    if (!cleanPlate) { setError('Enter a vehicle registration to search.'); return; }
+    void runSearch(cleanPlate);
   };
 
   return (
@@ -267,6 +269,10 @@ const OfficerVehicleLookupPage: React.FC = () => {
           {loading ? 'Searching…' : 'Search Plate'}
         </button>
       </form>
+      {!personAccess.allowed && <p role={personAccess.error ? 'alert' : 'status'}>
+        {personAccess.loading ? 'Checking access to permit-holder information...' : personAccess.error ?? 'Person-search authorization is required to see permit holders and their records. Vehicle registry and compliance checks remain available.'}
+        {!personAccess.loading && <button type="button" className="btn btn-sm btn-secondary" onClick={personAccess.retry}>Check person access again</button>}
+      </p>}
 
       {searched && !loading && !error && (
         <div style={{ marginTop: '20px' }}>
@@ -407,49 +413,23 @@ const OfficerVehicleLookupPage: React.FC = () => {
               </div>
 
               {/* Forest / Site Access Permits */}
-              {permits.length > 0 && (
-                <div className="contact-card">
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Forest / Site Access Permits ({permits.length})</h3>
-                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
-                    {permits.map((p) => (
-                      <div
-                        key={p.id}
-                        style={{
-                          background: 'var(--color-bg-primary)',
-                          border: p.status === 'active' ? '1px solid var(--color-success)' : '1px solid var(--color-border)',
-                          padding: '10px 14px',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
-                          <div>
-                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
-                              Permit #{p.permit_number} {p.permit_type ? `· ${p.permit_type}` : ''}
-                            </div>
-                            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                              {p.holder_name || 'Holder not recorded'}
-                              {p.forest_areas && p.forest_areas.length > 0 ? ` · ${p.forest_areas.join(', ')}` : ''}
-                            </div>
-                            {(p.date_from || p.date_to) && (
-                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                                Valid {p.date_from ? new Date(p.date_from).toLocaleDateString() : '?'} – {p.date_to ? new Date(p.date_to).toLocaleDateString() : 'no end date'}
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            <span className={`badge ${p.status === 'active' ? 'badge-success' : p.status === 'expired' ? 'badge-warning' : 'badge-danger'}`}>
-                              {p.status.toUpperCase()}
-                            </span>
-                            {p.firearm_licence_valid === false && <span className="badge badge-danger">NO VALID FIREARMS LICENCE</span>}
-                          </div>
-                        </div>
-                        {p.conditions && (
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px', whiteSpace: 'pre-wrap' }}>{p.conditions}</div>
-                        )}
-                      </div>
+              {personAccess.allowed && permits.length > 0 && (
+                <section className="contact-card" aria-labelledby="officer-vehicle-permits-title">
+                  <h3 id="officer-vehicle-permits-title" style={{ margin: '0 0 4px 0', fontSize: '15px' }}>Forest and site access permits ({permits.length})</h3>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                    The holder is the person named on the permit, which is not evidence of who owns this vehicle.
+                  </p>
+                  <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                    {permits.map((permit) => (
+                      <PermitAccessCard key={permit.id} permit={permit} showHolder currentPlate={searchedPlate}
+                        onOpenPerson={(holderPermit) => {
+                          if (holderPermit.canonical_person_id && holderPermit.holder_name) {
+                            navigate(`/officer/person_search?person=${encodeURIComponent(holderPermit.canonical_person_id)}`, { state: { personQuery: holderPermit.holder_name } });
+                          }
+                        }} />
                     ))}
                   </div>
-                </div>
+                </section>
               )}
 
               {/* Recent Observations Timeline */}

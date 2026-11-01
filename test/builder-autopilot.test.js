@@ -56,6 +56,18 @@ function actionsRecorder(overrides = {}) {
   };
 }
 
+test('incomplete acceptance parks without terminally failing the job or creating another job', async () => {
+  const job = { id: 'acceptance-job', status: 'security_review', autopilot_state: 'driving' };
+  const actions = actionsRecorder({ run: { paused: true, reason: 'acceptance_incomplete', detail: 'DR-1: workflow not proven' } });
+  actions.createJob = async () => assert.fail('must preserve the same job');
+  const result = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+  assert.equal(result[0].outcome, 'acceptance_incomplete');
+  assert.ok(!actions.calls.some(([name]) => name === 'fail'));
+  const receipt = actions.calls.find(([name]) => name === 'record');
+  assert.equal(receipt[2], 'blocked');
+  assert.match(receipt[3].text, /DR-1/);
+});
+
 test('autopilot prioritizes release reconciliation ahead of long model work', () => {
   const jobs = [
     { id: 'analysis', status: 'analysis_pending' },

@@ -16,6 +16,139 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## NEXT: RECORD/PHOTO AUTOMATION, THEN OFFICE CLIENT WORK (2026-10-26)
+
+- Owner priority: finish importing new and changed records and photos before
+  building the office time-entry surface. The existing laptop source scanner
+  detects workbook/photo versions but still reports `promotion: not_connected`.
+  Versioned record reconciliation and photo matching/attachment exist separately;
+  their presence is not proof of an unattended end-to-end import.
+- Preserve the approved add/update policy: retain source path, workbook
+  sheet/row, content hash, prior versions and audited receipts; never delete
+  business records merely because a source row/file disappears. Acknowledge a
+  queued file version only after its exact path/hash has an applied receipt.
+  Ambiguous photo links, unmapped places and conflicting FCM/source edits must
+  remain visible holds, not guessed matches or successful imports.
+- Built (branch `feat/rm-source-promotion`): `services/document-source-worker/
+  source-promote.mjs` connects the scanner to the versioned writer and photo
+  importer, using the reviewed map `rm-patrol-source-map.json` (14 workbooks
+  mapped, 8 held; duplicate "Issue" headers carry reviewed per-sheet
+  `column_aliases`, following NCC's approved `Secondary Issue (U)` precedent).
+  Workbook rows are exported with narratives and synced evidence-only, so no
+  Workshop proposals are created. Default mode is a dry run; `--commit` writes.
+  A governed RPC refusal becomes a visible hold; a transport failure stays
+  pending for retry. A single lock file prevents overlapping runs.
+- Live workbook dry run (2026-10-26), nothing written: about 788 new rows
+  (MR 27, OFO2025 65, OFO2026 350, STAND 12, TDC 198, TPFL2026 135, TAYLORS 1).
+  OFO2026's 350 rows exceed the 250-row change-volume guard and are held for
+  review. About 9,000 legacy rows would gain source provenance; this adopts
+  provenance and adds no new data. Rows linked to finance costs stay held by
+  the server. NCC is refused because some new rows are at places outside the
+  contracted patrol coverage, which needs review. Rows with an unexplained
+  difference from source (notably about 9,600 across the OFO workbooks) remain
+  untouched holds.
+- **Legacy importer artifact correction (2026-10-30, migration
+  20261030140000):** about 21,000 imported rows had no source version and were
+  held as `initial_difference_requires_review`. Profiling showed known
+  legacy-importer artifacts: `occurred_at` stored exactly 1h late in NZDT months
+  (a fixed +12 offset; the sheet parser uses Pacific/Auckland), float noise in
+  `job_time_hours`, and payloads missing provenance/classification keys. Owner
+  ruling: the spreadsheets are source truth and history is preserved.
+  `correct_legacy_patrol_source_records` now corrects events and observations
+  from the same workbook/sheet, writing version 1 `legacy_correction` and an
+  audited `patrol_legacy_source_corrected` entry. It also moves an observation's
+  `observation_trigger` context event to the corrected time. Uninvoiced finance
+  cost rows no longer block a correction that keeps the record's local service
+  date (the cost row's date and amounts stay true). An invoiced record, or one
+  whose local date would move, stays held. Live run (attempt 2): **18,902
+  corrected** (including 1,944 observations, with 1,944 context events moved)
+  and **2,018 held** for genuine content differences: status, zone, officer,
+  `event_type`, payload values or a time gap that is not the offset artifact.
+  Those stay visible holds for reviewed adoption; possible key collisions (for
+  example, two STAND rows) must not be adopted automatically. A post-run check found no
+  finance service date moved by the correction (34 pre-existing date
+  mismatches, unchanged). Review fixes (migration 20261030150000): a stored
+  object key that the sheet lacks is now a payload-difference hold, and an
+  observation's context event must have no continuity, incident, evidence or
+  access link before it moves. A retro check showed neither case occurred in
+  the live run. An event photo whose hash already belongs to another record is
+  a visible hold, not an applied receipt.
+- **Photo download hazard:** 72,543 of 76,156 R&M photos (424.7 GB) are
+  OneDrive online-only placeholders. Hashing them downloads them. The laptop
+  scanner container's `SOURCE_SYNC_INCLUDE_PHOTOS` is now `"false"`, and photo
+  promotion is name-first: listing, metadata and filename matching never read
+  file bytes. Only a photo that uniquely matches one record is read and
+  attached. Its receipt is keyed by size and modified time, so it is not re-read.
+- Live photo dry run (2026-10-26, before event fallback), no bytes read and the local footprint is
+  unchanged at 3,613 files: 396 unique matches, 19 ambiguous, 11,151 unstructured
+  filenames, and 47,029 with no exact record match. The low match rate is a
+  matching-rule question for review, not a reason to guess links.
+- Owner photo rules (2026-10-26): a photo whose structured filename date/minute
+  matches a record is attached to it; a structured photo with no match should
+  become a new observation (phase 2, needs a reviewed folder-to-place map for
+  the 440 "Place - Area - Client" folders and a governed creation path, not yet
+  built); photos without the structured `YYMMDD HHMM[SS] [rego]` name are
+  ignored (`status: ignored`, not holds). Matching now also falls back to R&M
+  patrol `location_events` when no observation matches.
+- Photo attachment runs as the `rm_patrol_log` source profile's configured
+  import identity (the same governed actor as the record writer) via
+  `attach_external_photo_to_record`; no importer password is needed. File
+  metadata goes into the source note as provenance (for example, "no camera
+  EXIF, consistent with a CCTV screenshot or export"). Rollback check: the
+  import identity passes `org_access_allowed` for every R&M client org; the one
+  refusal is Downer/LINZ, outside R&M's operational agreements, so any match
+  there is refused, not forced.
+- NCC coverage: four NCC zones (Branford Park, Neale Park, Peppertree Park and
+  Queens Garden) were linked to the R&M NCC operational agreement through
+  `manage_crm_agreement_zone_coverage` (audited `crm_agreement_link_zone`), so
+  rows at those places can be written.
+- NZTA photos stay on the existing governed MVR workflow: OCR proposes person and
+  vehicle facts, and an org admin approves each one in Identity Records before
+  canonical people and vehicles change.
+- Scheduling: `scripts/run-rm-source-promotion.ps1` runs the promoter with
+  `--commit --photos`, fetching the service key from the linked CLI at runtime
+  (never stored) and logging each run to the state directory. Windows task
+  "FCM R&M source promotion" runs it daily at 7pm (owner choice), with
+  `-PhotoLimit 200`, `StartWhenAvailable`, a 3h limit and state in
+  `%LOCALAPPDATA%\FCM\rm-promote`. Two unattended-run defects were fixed and
+  verified with a triggered run (`LastTaskResult 0`): Windows PowerShell 5 had
+  treated the CLI's stderr update notice as fatal, and outside an agent session
+  `supabase db query` returns a bare row array instead of the
+  `{ boundary, rows }` envelope (`cliQuery`, `import-patrol-log` and the labour
+  preview now accept both).
+- Photo phase 1 (2026-10-26), name-first matching with event fallback: 847
+  unique matches, 31 ambiguous, 46,566 with no exact match, 11,151 unstructured.
+  Of 320 committed so far, 17 were new governed attachments
+  (`external_photo_attached` by the import identity, not court-ready), 301 were
+  already attached on 2026-10-11 and reused idempotently, and 2 were held because
+  their hash already belongs to another record. 527 matches remain and drain at
+  200 per nightly run.
+- Owner decision (2026-10-26): the 2,018 held source content differences from
+  the legacy correction are adopted from the sheet, audited with history kept.
+  Invoiced rows, suspected key collisions and finance-linked rows whose local
+  service date would move stay held. This needs a governed adoption path (not yet
+  built).
+- Seeded spreadsheet jobs remain accepted reporting/billing source truth until
+  R&M operates in FCM, with no retrospective geofence requirement. This does not
+  invent geometry, GPS attendance, a worker identity or a photo-to-job link.
+- Deferred owner requirement: Sally performs CCTV review; she and other office
+  staff need roster-backed work units and entries identifying the worker,
+  client, time, relevant location and purpose. Ash's Habitat app-building work
+  is another example. Keep client work distinct from internal office work and
+  preserve each client's own billing terms.
+- Implementation recommendation, not yet built: reuse shared office/internal
+  work-unit and labour/time-entry paths rather than creating a permanent unit
+  per named employee or forcing office work into patrol/Workshop execution.
+  Distinguish where the employee worked from the client's place being reviewed.
+  Recording time must not automatically create a client invoice or field shift.
+- Owner classification clue: no kilometres travelled is a useful indicator of
+  office-based work for the client, including CCTV review. Interpret explicit
+  recorded zero kilometres as supporting evidence alongside the description,
+  activity and source performer. Blank, missing or invalid kilometres are
+  unknown, not zero. Zero kilometres alone does not prove office work: static
+  duty and on-site repairs can also involve no travel. Do not assign all such
+  work to Sally or reclassify already seeded records without source evidence.
+
 ## R&M GROUP CHARGE CODES (2026-10-25) - APPLIED, PR STACKED ON #190
 
 Owner decisions: OneFortyOne numbers are the group standard; Mainland Pest
@@ -67,7 +200,9 @@ material recorded with its calibre.
 
 Owner decisions: build all five steps in order (A codes, B legacy correction
 and supersede, C animal outcomes, D stations, E finance), each as a reviewed
-PR. The 2025 sheet is canonical for the 681 overlapping visits. Sites 1-11 are
+PR. Later owner clarification keeps the 2025 and 2026 records separate; do not
+supersede one year with the other. Only uniquely matched `Update 251215` copies
+may update and archive against the 2025 canonical records. Sites 1-11 are
 mixed traps and cameras. Bait quantities are not recorded yet, so none are
 inferred.
 
@@ -87,6 +222,217 @@ inferred.
   now carry species.
 - Existing events are unchanged. Step B reclassifies them through a governed
   correction with versions and audit.
+
+### Step B - source corrections and paired Update rows: applied; resync verified
+
+- Owner-approved Update scope: 304 one-to-one copies update their canonical
+  2025 event and archive the copy atomically. Twelve copies colliding across
+  three canonical targets and seven unmatched copies remain untouched. The
+  official matcher was checked against the private source plans: 304 distinct
+  canonical targets, 12 ambiguous holds, seven unmatched holds.
+- Migration/test
+  `20261029110000_patrol_legacy_correction_and_supersede.sql` passed the linked
+  SQL behavioral truth table inside a rolled-back transaction. Coverage includes
+  provenance, canonical job/cost/hour preservation, archive/replay, mismatched
+  status holds, dependent-record holds, and no consequential proposal, finance,
+  roster, timesheet or payroll records for the test organisations.
+- Official rollback-only 2025 run: 681 legacy corrections, including the
+  canonical correction for each of the 304 paired Update actions; 304
+  `updated_and_superseded` results; 19 planner holds. No inserts or proposals.
+- Official rollback-only 2026 run: 1,105 legacy corrections, no supersedes,
+  inserts or proposals. The source-faithful reparse retains narratives and
+  status; it has the same workbook and derivative hashes as the earlier plan.
+  Jobs 793, 982 and 1068 correct to 43, 43 and 48 km with the original erroneous
+  formula values and Start-row provenance retained.
+- `reconcile-plan.mjs --apply ... --evidence-only` explicitly suppresses
+  consequential proposals without suppressing source narratives/status. Use it
+  for standalone correction runs as well as the paired Update run (which
+  already suppresses proposals). `--apply` without `--commit` rolls back;
+  `--preview-migration` is prohibited with `--commit`. Do not use
+  `--canonical-plan` to collapse the separate year sheets.
+- PR #215 review fixes (2026-10-29): the canonical's new version keeps its own
+  2025 source identity and records the Update row separately as
+  `overlay_source` plus a post-overlay `record_fingerprint`, so a later resync
+  reads `unchanged` (or holds a changed source as
+  `update_overlay_review_required`) instead of mismatching file/sheet. Copy
+  time shifts are accepted only when zero or +1h during NZ daylight time.
+  The generic supersede now holds year-sheet records
+  (`source_year_records_remain_separate`), Update-sheet copies
+  (`update_copy_requires_paired_path`) and cross-workbook copies. Repeated
+  pairings are rejected both across planner chunks and server-side
+  (`ambiguous_update_pairing`, `ambiguous_update_copy_group`). Blank Update
+  values never erase canonical values. Both staging batches are finalised in
+  one transaction, and a committed re-run recovers an open receipt.
+- Re-verified after the fixes: SQL truth table passes in a rolled-back
+  transaction; 2025 dry run 681 corrections / 304 `updated_and_superseded` /
+  19 planner holds / 0 proposals; 2026 dry run 1,105 corrections / 0 holds /
+  0 proposals.
+- Owner approved the bounded release and committed corrections. PR #215 merged
+  as `4e59ec0c`; the VPS release lane applied migration `20261029110000`.
+  Generated catalog PR #218 merged as `647251ef`, and the next lane tick
+  completed with matching schema and its Atlas refresh. No direct main push
+  or local production migration writer was used.
+- Committed batches (all finalised as `needs_review`, the import receipt state):
+  - 2025 `e54ccb0e-926a-46cb-81e8-98458c11ad0e`: 681 corrections;
+  - Update `7b8417db-5752-4c2b-bd35-4e27e474f8f9`: 304 paired updates/archives;
+  - 2026 `613f25be-ddb8-4c66-80c3-0ba2575a45b5`: 1,105 corrections.
+  Read-only verification found 1,786 correction audit entries, 304 paired
+  audit entries and 304 archived copies. All three receipts record zero
+  direct finance/workshop writes and have zero staged proposals.
+- Post-commit replay exposed two planner bugs, not changes to the saved
+  canonical records: an Update-only `charge_code_unresolved` key polluted
+  every 2025 comparison, and floating-point distance artifacts differed from
+  stored numeric precision on four rows in each year. The fix uses the same
+  canonical field set on both sides and compares the complete current record
+  to the version's `state_after`, exactly as the server update RPC does.
+  Source fingerprints/history remain unchanged; genuine FCM edits still hold.
+  Read-only preview now honors the same Update/copy inputs as the sync runner,
+  and runner reports include planner hold reasons rather than presenting a
+  held-only run as `no_source_changes`.
+- Verified against live records with the resync fix: 2025 has 681 unchanged
+  canonical records plus the original 12 ambiguous / seven unmatched holds;
+  2026 has 1,105 unchanged records and no holds. Both runner checks request
+  zero writes. Every current canonical version exactly matches its saved
+  `state_after`. Focused importer/reconciliation tests: 45/45 passing.
+  The resync fix was released in PR #219 (`6f87dbf8`). Main verification
+  `40181416033`, protected GitHub Atlas refresh `40181809581` and Vercel
+  deployment all succeeded. The earlier catalog-head runtime failure is not
+  the release status of this fix.
+- Rostering follows source reconciliation, not this correction transaction:
+  forestry patrol pay is $32/hour; historical hours sum `job_time_hours` per
+  officer/day. Unattributed jobs use the approved Relief Officer (No Name)
+  identity. Engineer pay is $55/hour, distinct from the $79.50 client charge;
+  digger hours/travel are equipment use, not labour. The $166.60 service amount
+  includes time, travel and ammunition, not a per-person pay rate.
+
+### Phase B - labour seeded and routed to patrol routes (2026-10-26)
+
+- The labour seed is live: 3,520 completed slots, 8,610.4707 hours,
+  $275,534.94 estimated pay at FORESTRY-PATROL $32/hour. It was released in PR #223.
+  Historical slots are pay-only, with no second billable amount.
+- Owner ruling: shifts belong on the Blenheim (Dave Porter) or Nelson (Dan
+  Douglas) patrol route. Migration `20261030120000` records each route's usual
+  officer and routes the seeded labour. Rollback result: 680 Blenheim and 2,840
+  Nelson, none unrouted. By basis: 3,317 by place, 64 by dated route assignment
+  and 139 by the officer's usual route. 49 coverage zones were added and the 14
+  per-client holding units closed. A fresh import and a live replay give the
+  same split. The import script now routes once, after every batch.
+- Owner ruling: seeded spreadsheet jobs are verified source truth with no
+  geofence requirement. Rollback: the 22 seeded slots in the current 62-day
+  readiness window change from three `pending_materialization` exceptions to
+  `source_verified`. The wage rule is unchanged.
+- Atlas and schema check: routing reaches the roster calendar and the route
+  coverage list only. Payroll exports read timesheets, and patrol billing reads
+  the patrol log, so neither moves. No function that builds future patrol stops
+  reads `patrol_route_zones`.
+- Data anomaly, not corrected: the Bartletts (OFO) place is geocoded at
+  longitude 177.87, which is outside the patrol region. The geocode needs a
+  review.
+
+### Phase B - historical labour readiness, not posted
+
+2026-10-25 continuation (local implementation; not deployed):
+
+- Removed the separate forestry-history table. Source assignments are projected
+  into the normal calendar by exact work date/officer and patrol-route/work-unit
+  link. Source time ranges are explicitly not payable hours. Canonical completed
+  labour slots show provenance in the same staff/work-unit calendars and replace
+  source cards for the same roster staff/day.
+- Planner v2 holds missing/invalid-hour and over-24-hour days as evidence,
+  resolves supported name variants/staff accounts, and uses the approved
+  non-login Relief Officer placeholder for unnamed labour. Latest rollback:
+  3,520 planned/inserted slots, 8,610.4707 hours, $275,534.94 estimated pay,
+  no second billable amount. All writes rolled back; no labour seed is live.
+  240 held groups and 3,062 evidence-only groups are not posted.
+- Owner requested Manufacturing & maintenance in Create work unit and clarified
+  that these jobs must belong to a client, linked to Workshop work orders. Added the
+  distinct `workshop` roster category, governed organisation-scoped order link,
+  provider workplace/team/cost centre, and open-order prerequisite. Order kind
+  supplies the service code; roster staffing does not change the job lead.
+  Work-order execution/invoicing stays in Workshop, not a duplicate patrol or
+  roster billing flow. The new migration is pending the governed release lane.
+- Client-only roster choices now match the RPC requirement. The empty state
+  opens client-job creation; generic internal fabrication remains available
+  separately in Workshop. Keyword classification is explicitly applied by the
+  user and resolves only active catalogue codes (digger work maps to the new
+  `earthworks` subject; orgs without it must choose manually). The usual job
+  lead comes from `workshop_settings` (seeded with Pete Crawford for R&M,
+  changed only through audited `set_workshop_default_job_lead`) and is offered
+  as an explicit choice only when that person is active in the operating
+  organisation; no automatic historical assignment, attendance or payroll is created.
+  These are local changes, not a migration/deployment or seed receipt.
+- Latest continuation verification: 32/32 fixture browser checks passed on
+  desktop/mobile (including officer Workshop, client-backed work-unit creation,
+  source-calendar placement, classification/manual overrides, missing catalogue
+  codes and unique/ambiguous/cross-organisation lead suggestions). App and
+  browser-test typechecks, 44 focused roster/classification tests and 28
+  historical-labour planner tests passed. A scoped aggregate live read found
+  exactly one non-deactivated Pete Crawford profile in R&M. The migration ledger
+  contains neither `20261029120000` nor `20261029130000`; production application,
+  labour seeding, schema regeneration and Atlas refresh are still pending.
+- Database rollback acceptance passed for creation/audit, duplicate and
+  unknown-order/workplace denial, publish/cancel without a field shift,
+  no duplicate billable amount, draft/closed-order blocking, anonymous grants
+  and unauthenticated denial. This is rollback evidence, not a live deployment
+  or an exercised-production claim. Schema regeneration and Atlas refresh follow
+  application through the production migration lane, not hand edits here.
+- Browser acceptance: 12/12 desktop/mobile checks pass for manufacturing and
+  maintenance creation, missing-order guidance, explicit RPC errors, normal
+  source-calendar placement and suppression of duplicate posted-labour cards.
+  Fixed the mobile category label to wrap rather than overflow the dialog.
+  Typecheck, 30 focused roster tests and 28 labour-planner tests pass. Browser
+  checks use synthetic fixtures, not production invocation evidence.
+
+- Added the read-only `scripts/preview-rm-patrol-labour.mjs` and its behavioural
+  planner tests. Run with `--from YYYY-MM-DD --to YYYY-MM-DD --output <private
+  JSON outside the repository>`. There is deliberately no `--apply`. The
+  linked query runs in `BEGIN READ ONLY` / `ROLLBACK`, scopes clients through
+  R&M's provider agreements, uses Auckland work dates, and checks current
+  source versions for FCM edits. Output stdout is aggregate-only; the private
+  report retains record IDs, source references, available file/hash/row/version
+  provenance, daily groups and deterministic fingerprints.
+- Live readiness window 1900-01-01 through the database's current Auckland
+  date, 2026-10-25: 33,318 source records; 5,779 officer/date evidence groups
+  (including unattributed groups); 2,472 candidate groups, 794 evidence-only
+  groups and 2,513 held groups after the owner's explicit-zero ruling.
+  Four future-dated records are outside the window, including a year-2926
+  anomaly; none were corrected or imported by this check. No earlier records
+  were omitted. Full-source replay reproduced the same report/fingerprints.
+- The planner sums source job hours exactly, never first-to-last elapsed
+  windows. $32/hour is an owner-approved preview policy, not a resolved live
+  pay rule. The `FORESTRY-PATROL` pay code does not exist live yet. The existing
+  3,055 historical assignments have no pay-code metadata; the existing
+  `get_roster_labour_cost` reads scheduled slots, not these historical
+  assignments. Do not claim that historical pay is already wired.
+- Holds overlap: 1,595 groups contain missing/invalid hours;
+  978 need officer-identity review; 36 exceed
+  24 recorded hours without clipping; 45 have conflicting source identities;
+  40 have possible same-job/day overlap across year sheets; five need source
+  reconciliation review. Conservative narrative markers additionally flag
+  57 groups for engineering and 116 for equipment review, plus one crew
+  attribution review. Those markers are review prompts, not proven job
+  classifications or authority to apply an engineer rate.
+- Owner confirmed explicit-zero policy: zero contributes zero to the daily
+  sum, and all-zero days remain evidence only with no pay-code assignment or
+  pay estimate. Blank/invalid hours still hold the entire day, not a partial
+  payable total. Of the 3,357 groups containing zeros, 1,536 mix zero and
+  positive entries; 1,498 contain only explicit zeros. Other holds still apply:
+  not every all-zero group is clean evidence-only. The approved policy removes
+  1,886 zero-only holds: 1,092 become candidates and 794 become evidence-only.
+- Matching event/observation manifestations of one source identity are counted
+  once while both record IDs remain in provenance. Conflicting manifestations
+  hold; year sheets remain separate records and possible payment overlaps
+  hold rather than being silently collapsed. No anonymous group is payable:
+  the approved Relief Officer (No Name) identity still needs a governed
+  representation, not a fabricated login.
+- Atlas upstream flow reach for `roster_assignments` found four component and
+  two RPC nodes at depth two. Eleven direct FK-reference edges are separate
+  structural evidence, not extra proven flow. No schema, Atlas, roster,
+  timesheet, pay-code, payroll, invoice or notification writes were made.
+- Next: resolve the retained holds and historical
+  labour storage/reporting path; then build and rollback-test a governed seed
+  with exact insert/update/hold counts for bounded owner approval. This
+  readiness report is not that seed or an authorization to post payroll.
 
 ## PATROL SOURCE ROW SYNC (2026-10-25) - APPLIED (PR #189), LEGACY CORRECTION IS STEP B
 
@@ -138,14 +484,14 @@ fcm as well so we need to know if a row was updated."
   - `occurred_at`: 1,362 events one hour late, all in NZDT months; NZST months
     match. The legacy importer applied a fixed +12 offset.
   - `distance_km`: never populated by the legacy importer.
-  - `status`: legacy stored the activity label in `status`; the current
-    importer classifies it as a work activity code and leaves status empty.
+  - `status`: narrative-disabled preview plans leave status empty. A
+    source-faithful correction must opt into narratives/status and suppress
+    proposals separately; the fresh Step B preview above verifies this.
   - 20 current payload keys (provenance, classification, cost) are absent.
-- All 681 `DART2025` visits also appear identically in the `2026` sheet, so
-  FCM holds them twice (`DART2025` and `DART2026` refs). Reports and invoices
-  covering Oct 2025 - Jan 2026 may double count.
-- Nothing is applied until the owner decides how legacy rows are re-baselined
-  and which sheet owns the overlapping visits.
+- Earlier comparison identified 681 matching visits across `DART2025` and
+  `DART2026` references. Matching is not authority to supersede: the later owner
+  ruling keeps both year sheets distinct. The Update-copy scope and fresh
+  correction evidence above replace the earlier cross-year supersede proposal.
 
 ## IMPORT AUTOMATION RESUMPTION (2026-10-25) - RECONCILIATION GATE OPEN
 
@@ -869,6 +1215,83 @@ node services\document-source-worker\reconcile-plan.mjs `
 - 141 real forest-access permits imported from OFO's live RAMS export (92
   vehicle links, 125 canonical people), surfaced in `OfficerVehicleLookupPage`
   and `VehicleSearchPage`.
+- **OFO permit workbook enrichment** (2026-10-27, migration
+  `20261101110000`; live, applied by hand with its ledger row because the
+  release lane's database token was rejected at the time). The OFO
+  "Permit Extract" workbook has 112 permits, all with start and finish dates;
+  86 list 93 vehicles. `scripts/enrich-ofo-permits.mjs` sends each permit
+  through the audited, fill-only `import_person_permit` RPC: blanks are
+  filled, recorded values are kept, holders are never changed, and a holder
+  whose email belongs to a differently named person is held for review.
+  Standard NZ plates followed by all-caps makes are recognised too; the one
+  formerly unparsed vehicle was already linked by the booking CSV.
+  "Keys issued" is recorded as yes/no. Firearm licence
+  numbers go only to the locked base table. Permits that exist only in the
+  earlier RAMS CSV have no dates, so they show "Dates not recorded". The TPFL
+  workbook contains permit types, forms and rules, not person or vehicle records.
+  Person search now finds permit holders, including by exact permit number,
+  and shows their permits; the Person, Vehicle and Officer lookup pages share
+  one permit card. A permit holder is never shown as a vehicle's owner.
+  Initial pass: 99 permits enriched, 2 vehicles newly linked and 74 already
+  linked. Validity across R&M's 143 permits: 92 expired, 7 expiring within 30
+  days, 44 with no recorded dates. 13 permits not yet on file were held
+  because their holders were recorded by surname alone. A replay changes
+  nothing.
+- **Permit holder identity repair** (2026-10-27, migration
+  `20261101120000`). The RAMS booking import recorded 125 permit holders by
+  surname alone and merged different people who share a surname. The OFO
+  extract names the holder of each permit, so
+  `scripts/enrich-ofo-permits.mjs --repair-holders` groups each record's
+  permits by that full name and calls the audited, admin-only
+  `attribute_permit_holder` RPC. When every permit on a record is accounted for,
+  the given names are added in front of the recorded surname. Otherwise each
+  named holder moves to a person of their own. A name must end with the
+  recorded name, and a person another organisation records is never renamed.
+  Only a person positively marked as recorded by surname alone
+  (`metadata.name_basis = 'surname'`, set by the migration on all 125 booking
+  import holders, compound surnames included) is repaired or linked by
+  surname. A related name, longer or shorter, on any other holder is held,
+  never linked or duplicated. The shorter-name direction was added in
+  `20261101130000`. Names compare by whitespace parts, so O'Neill or
+  Smith-Jones is one part.
+  The extract's 13 permits not yet on file then come in through
+  `import_person_permit`. It now links a holder recorded by surname when the
+  email agrees and only one such holder exists, then completes that name, or
+  creates the named holder. Every step carries its planned outcome, holder and
+  complete permit set. Follow-ups name their permits explicitly. The database
+  rolls back and holds any step that departs from the plan. Planned against
+  the live snapshot: 80 names completed, 14 holders separated, 13 permits
+  linked (12 completing a name, 1 separating a holder). After that run, 29
+  surname-only holders have no full-name evidence in the extract, and 4 have
+  an extract name that does not extend the recorded one. One of those 4 has
+  a bracketed second name in the extract written without a space. Committed exactly as
+  planned:
+  - 92 names completed (80 by repair, 12 by a new permit);
+  - 15 holders separated (14 by repair, 1 by a new permit);
+  - 13 permits added;
+  - permit holders went from 125 to 140, and permits from 143 to 156;
+  - 33 holders remain recorded by surname alone, for review.
+
+  A replay plans nothing. A follow-up (`20261101130000`) reports permit field
+  differences field by field: lists as sets of entries, email addresses
+  exactly, telephone numbers by their digits. Truth table:
+  `test/permit-holder-identity-repair-migration.test.js`.
+- **Combined source acceptance** (2026-10-27). Every one of the 143 booking CSV
+  permit numbers and 112 OFO workbook permit numbers is present in the live
+  set of 156 permits for 140 holders. All 112 workbook date pairs agree.
+  Validity: 105 expired, 7 expiring within 30 days, 44 with dates not recorded.
+  There are 110 permit-to-vehicle links across 95 canonical vehicles; all
+  93 vehicle entries parsed from the workbook have their exact permit link.
+  The uppercase-make parser correction changes only one source row and no
+  non-vehicle fields. Replays need no new permits, people or links.
+  Recorded values are preserved: 99 applicant-type differences (booking
+  groups versus workbook categories), 2 email differences and 1 phone
+  difference remain visible in the import report. Four holder-name
+  differences remain for human review, not speculative matching.
+  All three permit migrations are ledgered. Release `ee260eb8` completed
+  with refreshed Atlas, matching regenerated schema/types, and passing CI
+  and Vercel deployment. The earlier release-lane token failure is not the
+  current release state.
 - Dispatch-job vehicle travel cost bridged into `finance_service_costs` (was
   previously fully disconnected from the P&L pipeline) + a "compare contract
   price to actual cost" action in `FinanceControlPanel`.
@@ -2931,3 +3354,193 @@ passes live. 23 client rules, each audited with its workbook, all excl. GST:
 **Still to confirm or build.** GL codes and financial year from the
 statements; the 28 TYPE/code conflicts; crew (per-person) billing lines; the
 $166.60 rate; site addresses for the private camera clients.
+
+## Month-end activity report (2026-11-02, migration 20261102210000)
+
+The owner asked that everything imported from the R&M spreadsheets is
+accounted for in a proper end-of-month report with a summary and itemised
+activity, including pest control with statistics, maintenance and
+manufacture. Not applied live yet: it ships through a pull request.
+
+- **Before:** monthly report packs showed only SLA, patrol-visit, camera and
+  vehicle counts. Pest-control, maintenance and manufacture work was already
+  stored as coded `location_events` (from the patrol-log importer), observations,
+  workshop work orders and incidents, but no report used those codes. No new
+  observation tables were needed.
+- **During:** `build_agreement_activity_report` puts every entry at an
+  agreement's places in the period into one category: incidents and
+  investigations, pest control, manufacture, maintenance, installation and
+  removal, securing, inspection, travel and administration, observations, CCTV
+  and camera activity, other site work, patrols, then "Other site activity"
+  for entries with no work code. Automatic patrol-log copies
+  of observations (`source = 'observation_trigger'`) are left out so nothing
+  is counted twice. Dates use New Zealand time. Code labels come only from the
+  provider's own reference codes; another organisation's labels are never
+  used.
+- **After:** `generate_due_report_packs` stores the summary in
+  `data.activityReport` (version 2) and up to 2,000 itemised lines in the
+  separate `activity_lines` column. List screens never load that column. Each
+  pack shows:
+  - totals, by type of activity and by location;
+  - incidents and investigations by severity and status, each with its
+    description, investigation reference and status, and photos;
+  - pest control by species (culls, sightings, other), activity, traps and
+    equipment, and ammunition calibre with rounds;
+  - maintenance and manufacture by item worked on, with work-order status;
+  - observations and photos by type;
+  - a site log of every entry by location, with its comments, action notes
+    and photos;
+  - a provider-only "accounted for" check: patrol-log entries + observations +
+    work orders + incidents must equal the reported total plus the withheld
+    travel/administration and shift-marker records, and the category and
+    location totals must agree.
+- **Review screen:** the Reports review panel previews the client report (see
+  "Client-facing site activity report" below). It loads the itemised lines
+  only when needed. A provider administrator can run "Check against live records"
+  (`get_report_pack_activity_accounting`). The check shows whether the pack
+  still matches live data and how many entries trace back to an import file
+  and sheet. It also shows the client's records at this agreement's places,
+  at other agreements' places and at unlinked places, plus date and duplicate
+  exceptions. The check is never stored or shown to the client.
+- **PDF and email:** renderer `fcm-report-pack-pdf-lib-a4-v12` adds the
+  client site activity sections, the site log and photos. Older packs keep
+  their earlier layout. The email adds a short activity summary. The PDF,
+  send function and web app share one renderer version, and a test keeps them
+  equal.
+- **PDF text fix (all PDFs):** pdf-lib drew the "fi" ligature with the wrong
+  width, so words like "classified" showed a gap and copied as "classifi ed".
+  Ligatures are now turned off in `_shared/pdf-noto-fonts.ts`. Letter widths
+  are unchanged.
+- **Portal and CRM fix:** both still checked for the v9 renderer, so a
+  published PDF made by v10 never showed there. Both now use the shared check
+  in `apps/web/src/lib/reportPackRenderer.ts`.
+
+**Data caveats the report makes visible (not fixed by this change):**
+
+- About 10,857 older imported entries have no work-type code, so they show as
+  "Other site activity" until they are re-coded.
+- Dates that look wrong for a client: 16 entries in 2016, 2 in 2028 and 2 in
+  2926.
+- About 2,119 entries and 384 observations have no import-ledger record. They
+  were captured in the app or imported before the ledger existed.
+- Freedom-camping observations have no automatic patrol-log copy, so nothing
+  is excluded for them.
+
+**Deployment order (owner action):**
+
+1. Apply the migration. The v12 PDF function reads `activity_lines`, so it
+   fails if deployed before the column exists.
+2. Deploy `generate-report-pack-pdf` and `send-report-pack` together.
+3. Merge the web change.
+4. Regenerate the PDF for any published but unsent pack. The OneFortyOne
+   September pack (email, v10 PDF) can't be sent until its PDF is regenerated
+   on v12. Only the PDF needs regenerating, not the draft: an older pack keeps
+   its layout and its review. To add the activity sections, regenerate the
+   draft for that period. The pack then goes back to draft and must be
+   reviewed again. Sent packs never change.
+
+Validation: PostgreSQL behaviour test `test/rm-monthly-activity-report.test.js`
+(runs in CI with `BOB_TEST_POSTGRES=1`), report section and renderer tests,
+web unit and component tests, and a local PDF render checked by eye. The
+Reports Hub browser test (`apps/web/e2e/reports-hub.spec.ts`, desktop and
+mobile) covers the review screen end to end:
+- the client preview shows no hours, kilometres or travel;
+- incident photos are signed in one batch and open in the photo viewer, with
+  keyboard navigation and focus returned on close;
+- the itemised lines are read exactly once, whether opened from the incidents
+  or the site log;
+- the site log location, type, search and photo filters work;
+- the completeness check shows the withheld records, the import provenance
+  and the unlinked places;
+- the page does not scroll sideways on a phone;
+- screenshot baselines for the "Report at a glance" tiles and the incidents
+  section.
+
+Text uses "1 entry", not "1 entries", in the PDF, the email and on screen.
+The `report-pack-review-table` screenshot baselines in that spec were
+captured before the 2026-10-24 dark theme. They have been refreshed: the
+spec is not part of the CI browser lane, so the old baselines had not been
+updated.
+
+Review hardening (PR #312, not yet deployed):
+
+- Workshop orders must belong to the agreement's provider, even at a shared
+  place. Their provider-scoped subject and activity codes survive into the
+  report; only uncoded orders fall back to maintenance/manufacture.
+- The private accounting RPC uses the same report-provider custodian boundary
+  as pack access, not the broader administrator helper. Import receipts are
+  scoped to both provider and client, and batch details to the provider.
+- Original and watermarked versions of an observation's primary image count as
+  one photo, including when registered again as evidence. Additional image
+  paths still count. Observation-trigger mirror events remain excluded.
+- Missing or invalid ammunition quantities remain "Not recorded", not zero.
+  Species totals are recorded cull/sighting entries, not an inferred animal count.
+- Summary and appendix freshness includes species, materials, places, job
+  references and all other reportable line values. A cap-independent digest
+  covers every line, not just the first 2,000. Concurrent regeneration shows a
+  refresh-required state instead of mixing the old summary with new lines or
+  certifying a newer pack on an older review screen.
+- Period boundaries are explicit New Zealand local midnights, including DST
+  changes, even when generation or accounting runs in a UTC session.
+
+Regression checks use synthetic records in disposable PostgreSQL (including
+shared-place providers, foreign catalogue/ledger rows, unknown quantities,
+same-count corrections and UTC/DST boundaries) and desktop/mobile offline
+browser tests for current and stale snapshots. No source records were re-coded,
+re-dated or promoted while making these fixes.
+
+### Client-facing site activity report (owner ruling, 2026-11-02)
+
+The owner ruled that the month-end report is for the client: a summary of what
+happened at its locations, then the itemised activity. It must not explain the
+app or how records were matched to imported data, and it must leave out travel,
+start and finish times, hours, kilometres and other operational information.
+It should carry the observations and the comments on events at each location,
+with photos where they belong to a CCTV, patrol, incident or investigation
+entry. This section reworks the unreleased PR #312 design to meet that ruling.
+
+- **Before:** the v1 snapshot and v11 PDF showed the import accounting
+  statement, an itemised appendix with source detail, and patrol travel
+  kilometres in the review tiles.
+- **During:** the v2 snapshot (`data.activityReport.version = 2`) withholds
+  travel and administration entries and start/finish/home shift markers from
+  the client report, but counts them in the provider accounting. Photos do not
+  override those exclusions, nor does a pest-control classification override
+  an explicit travel or administration activity. Incidents at the agreement's places are
+  included with type, severity, status, description and any linked
+  investigation's reference and status. Investigation titles, summaries and
+  resolution notes are never copied, and staff-sensitive incidents are left
+  out. Each line carries
+  references to the photos recorded with it (observation photos, event
+  evidence and incident attachments), never public URLs.
+- **After (PDF v12 and email):** At a Glance, Activity Overview, Incidents and
+  Investigations, Activity by Location, Pest Control, Maintenance,
+  Manufacture, Observations and a Site Log by location in date order. Routine
+  patrols with nothing to report are folded into one line per location. The PDF
+  embeds up to 3 photos per entry and 60 per report. It converts stored PNGs to
+  small JPEGs within a fixed CPU budget; any photo not embedded is "held on
+  file". Pack, snapshot and renderer provenance moves into the PDF's document
+  properties instead of the page text. The email headline reads "N entries
+  recorded across N locations, including …" with entries by type of activity.
+- **After (review screen):** the panel opens with a "Client report preview":
+  - eight tiles "at a glance", with incidents highlighted;
+  - the activity overview, then incidents and investigations with severity and
+    status chips, descriptions and photos;
+  - collapsible pest-control, maintenance, manufacture, observation and
+    location breakdowns;
+  - a site log with location, type, comment-search and photos-only filters;
+  - a photo viewer with previous/next, keyboard and focus return, plus visible
+    loading/error states and a retry that renews only the unavailable photo.
+
+  The provider-only "Completeness check" (withheld records, import provenance
+  and the live accounting comparison) stays collapsed below the preview. The
+  patrol travel kilometres tile is gone. Patrol, camera and vehicle source
+  tiles are hidden for v2 packs, and SLA tiles show only when one is non-zero.
+- **Unchanged:** the provider must still review every draft before it is
+  published, and sent packs never change. The migration is still not applied
+  live.
+- **Verification:** the photo-exclusion follow-up passes the isolated
+  PostgreSQL report/renderer checks, web unit/guard tests, type checks and build,
+  and six offline desktop/mobile browser cases including image failure and
+  recovery. Atlas was regenerated locally only. Live schema inspection still
+  finds no `activity_lines` column; no pack or source record was changed.

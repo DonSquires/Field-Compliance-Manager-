@@ -1,14 +1,16 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { relayVpsRead } from '../_shared/vps-relay.mjs';
 
 const FN = 'bob-vps-view';
-const BASE = Deno.env.get('STACK_RELAY_BASE_URL') ?? Deno.env.get('BOB_CONTROL_PLANE_URL');
-const TOKEN = Deno.env.get('STACK_RELAY_TOKEN') ?? Deno.env.get('BOB_ADMIN_TOKEN');
+const STACK_BASE = Deno.env.get('STACK_RELAY_BASE_URL');
+const STACK_TOKEN = Deno.env.get('STACK_RELAY_TOKEN');
+const CONTROL_BASE = Deno.env.get('BOB_CONTROL_PLANE_URL');
+const CONTROL_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const RAW = Deno.env.get('SUPABASE_SECRET_KEYS');
-if (!BASE) throw new Error('STACK_RELAY_BASE_URL is required');
-if (!TOKEN) throw new Error('STACK_RELAY_TOKEN is required');
+if (!(STACK_BASE && STACK_TOKEN) && !(CONTROL_BASE && CONTROL_TOKEN)) throw new Error('A complete VPS relay URL/token pair is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL is required');
 if (!RAW) throw new Error('SUPABASE_SECRET_KEYS is required');
 const SB = JSON.parse(RAW).default;
@@ -78,16 +80,7 @@ async function audit(req, ep, res) {
   }).catch(()=>{});
 }
 async function relay(path) {
-  const normalizedBase = BASE.replace(/\/+$/, '').replace(/\/api(?:\/bob)?(?:\/builder)?$/, '');
-  const urls = [`${normalizedBase}${path}`, `${normalizedBase}/api/bob${path}`, `${normalizedBase}/api/bob/builder${path}`];
-  for (const url of urls) {
-    const r = await fetch(url, { headers: { authorization: `Bearer ${TOKEN}` } });
-    const t = await r.text();
-    let b = {};
-    try { b = t ? JSON.parse(t) : {}; } catch { b = {}; }
-    if (r.status !== 404 || url === urls[urls.length - 1]) return { ok: r.ok, status: r.status, body: b };
-  }
-  return { ok: false, status: 502, body: {} };
+  return relayVpsRead({ path, stackBase: STACK_BASE, stackToken: STACK_TOKEN, controlBase: CONTROL_BASE, controlToken: CONTROL_TOKEN });
 }
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
@@ -113,9 +106,14 @@ Deno.serve(async (req)=>{
     if (ep === '/docker/services') {
       const x = await relay('/docker/services');
       await audit(req, ep, x.ok ? 'ok' : 'error');
+      if (!x.ok) return json(x.status, { ok: false, code: x.body.code ?? 'RELAY_FAILED' });
+      const services = Array.isArray(x.body) ? x.body : x.body.services;
+      if (!Array.isArray(services)) return json(502, { ok: false, code: 'RELAY_INVALID_RESPONSE' });
       return json(x.status, {
         ok: x.ok,
-        data: (x.body?.services ?? x.body).slice ? x.body.services.slice(0, 30) : x.body
+        data: services.slice(0, 30),
+        evidence: x.body.evidence,
+        ...(typeof x.body.total === 'number' ? { total: x.body.total, truncated: x.body.truncated } : {}),
       });
     }
     if (ep === '/system') {
@@ -134,6 +132,7 @@ Deno.serve(async (req)=>{
     if (ep === '/assessment') {
       const x = await relay('/assessment');
       await audit(req, ep, x.ok ? 'ok' : 'error');
+      if (!x.ok) return json(x.status, { ok: false, code: x.body.code ?? 'RELAY_FAILED' });
       return json(x.status, {
         ok: x.ok,
         data: {

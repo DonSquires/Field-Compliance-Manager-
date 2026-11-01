@@ -35,7 +35,19 @@ describe("identity person-of-interest workflow", () => {
     expect(workspace).toContain("Open linked person");
     expect(workspace).toContain("Open private NZTA source");
     expect(workspace).toContain(
-      "Historical source-time association; current",
+      "This is not proof of ownership; current",
+    );
+  });
+
+  it("never prefills the NZTA page heading as the reviewed owner's name", () => {
+    expect(workspace).toContain(
+      "const NZTA_HEADING_NAME = /^\\s*details\\s*\\(\\s*\\d+\\s+registered\\s+persons?\\s*\\)\\s*$/i;",
+    );
+    expect(workspace).toContain(
+      'if (NZTA_HEADING_NAME.test(String(values.display_name ?? "")))\n    delete values.display_name;',
+    );
+    expect(workspace).toContain(
+      'if (NZTA_HEADING_NAME.test(form.display_name ?? "")) form.display_name = "";',
     );
   });
 

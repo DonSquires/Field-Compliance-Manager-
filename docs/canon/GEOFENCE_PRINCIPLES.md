@@ -21,6 +21,16 @@ correctness *is* enforcement legality. Modules are attributes layered on the
 boundary as data, never a fork of the geometry
 (`docs/canon/PLATFORM_ENGINES_AND_MODULE_PROFILE.md`).
 
+> Owner ruling 2026-10-27: geofences are **context only**. A boundary decides
+> which rules, evidence requirements and billing apply where work happens; it
+> never decides whether a person may open a module or run a person or vehicle
+> search. "Reveals which modules apply" means which module rules govern this
+> place, not which modules the person can use — module access is the
+> organisation switch plus the personal tick (`docs/canon/ACCESS_MODEL.md`,
+> same date). Static guarding arrive/depart still requires the device inside a
+> verified site boundary as attendance evidence; that rule is pending an owner
+> ruling.
+
 ## P1 — Load-bearing, no silent fallbacks
 
 > Owner ruling (MR !1051): the entire build depends on the geofence being present
@@ -44,6 +54,17 @@ Callers (scan pipeline, dispatch, billing tier, enforcement) must branch on this
 status. A `false`/`NULL` is never an answer.
 
 ## P2 — Visual verification gate
+
+Owner ruling 2026-10-28: the officer portal may capture a named 10 m
+verification zone for a new or existing place, without a street address.
+An existing perimeter is preserved; the point zone is separate, on the same
+house. Its confirmation does not certify the entire perimeter or change the
+place's regulatory rules. P2 is satisfied by the officer previewing and
+explicitly confirming the point on the map. If the device reports accuracy
+worse than 10 m, show that warning and permit manual map correction and
+confirmation. Store both the raw fix/accuracy/time and the confirmed point;
+the radius is not a claim about GPS accuracy. Admins may refine the place
+afterwards without erasing the officer's verification history.
 
 > Owner ruling (MR !1051, confirmed across Q3 and Q6): all geofence settings must
 > be verified by the user visually on the actual map.
@@ -151,3 +172,5 @@ camping overnight, parking daytime). Zones (area + rules) and checkpoints (point
 5. Blast-radius check (Atlas + `supabase/schema.sql`) before touching
    `resolve_context`, the boundary columns, or their writers — they carry billing
    and enforcement.
+6. Never use a boundary, place resolution or active place rules to hide or block a
+   module or a search (owner ruling 2026-10-27). Show the place as context instead.

@@ -46,6 +46,11 @@ radius of any change. Screens are the last thing built, not the first.
   `pg_cron` schedule declarations. A later explicit unschedule removes that
   scheduler caller from the generated terrain. Static evidence is recorded as
   `live-code` or `live-schema`; it never sets `exercised=true`.
+- SQL views record `reads` edges to tables/views and `calls` edges to
+  set-returning RPCs. For example, `person_permits_fieldwork` calls
+  `read_person_permits_fieldwork`; it no longer directly reads the underlying
+  permit/vehicle tables. Follow the RPC's edges rather than inventing a direct
+  read across a privacy projection.
 - `scripts/atlas-exercise-evidence.mjs` may promote a scheduled RPC only when
   the current active cron job has a successful `cron.job_run_details` receipt.
   It uses the read-only Management API path when a management token is
@@ -66,6 +71,13 @@ radius of any change. Screens are the last thing built, not the first.
   the safe bridge while that reconciliation is reviewed.
 - The Gitea main-branch workflow refreshes Atlas only after calibration and all
   tests pass, and skips safely when its Supabase secrets are absent.
+- GitHub `main` has the same gate: `.github/workflows/atlas-refresh.yml` runs
+  `atlas-refresh.js --apply` after "PR verification" succeeds for a push to
+  `main`, or on manual dispatch from `main`. The job is bound to the
+  `atlas-refresh` environment (deployments from `main` only), which holds its
+  own `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. It refuses any revision
+  that is no longer the current `main` head, so a rerun cannot overwrite newer
+  Atlas evidence, and it never passes `--allow-large-retirement`.
 
 ## Phase 1 — Canonical schema audit
 

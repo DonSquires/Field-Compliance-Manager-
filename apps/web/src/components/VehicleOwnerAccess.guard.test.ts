@@ -9,6 +9,7 @@ const profile = read('src/components/VehicleProfile.tsx');
 const repeat = read('src/components/RepeatSubjectsPanel.tsx');
 const migration = read('../../supabase/migrations/20261020180000_vehicle_owner_access_area_locality.sql');
 const people = read('../../supabase/migrations/20261020190000_vehicle_people_tiered_visibility.sql');
+const privacy = read('../../supabase/migrations/20261101140000_officer_person_search_access.sql');
 const search = read('src/pages/VehicleSearchPage.tsx');
 const thumbnails = read('src/lib/observationThumbnails.ts');
 const investigation = read('src/components/SendToInvestigationPanel.tsx');
@@ -25,7 +26,8 @@ describe('vehicle owner details for authorised users', () => {
   it('lets only an organisation administrator switch the area, with a reason and audit row', () => {
     expect(migration).toMatch(/set_vehicle_owner_access[\s\S]*is_admin_for_org\(v_target\.organization_id\)/);
     expect(migration).toContain("'vehicle_owner_access_granted'");
-    expect(workspace).toContain("supabase.rpc('set_vehicle_owner_access'");
+    expect(workspace).toContain("'set_vehicle_owner_access'");
+    expect(workspace).toContain('supabase.rpc(writeRpc');
     expect(workspace).toContain('!reason.trim()');
   });
 
@@ -36,12 +38,13 @@ describe('vehicle owner details for authorised users', () => {
     expect(repeat).not.toContain('isHomeAdmin');
   });
 
-  it('tiers person details: full details for authorised users, locality only for everyone else', () => {
-    expect(people).toContain('v_full := public.can_access_vehicle_owner_identity(p_organization_id);');
-    expect(people).toContain("CASE WHEN v_full THEN p.metadata->'profile_details'->>'address' END");
-    expect(people).toContain("CASE WHEN v_full THEN coalesce(p.display_name, cp.display_name) END");
-    expect(people).toContain("public.vehicle_owner_locality(p.metadata->'profile_details')");
-    expect(people).toContain('NOT public.org_access_allowed(p_organization_id)');
+  it('separates NZTA identity authorization from administrator-only contacts and locality', () => {
+    expect(privacy).toContain('v_full := public.can_access_vehicle_owner_identity(p_organization_id);');
+    expect(privacy).toContain('v_contacts := v_full AND public.can_access_person_contacts(p_organization_id);');
+    expect(privacy).toContain("CASE WHEN v_contacts THEN person_record.metadata->'profile_details'->>'address' END");
+    expect(privacy).toContain("CASE WHEN v_full THEN coalesce(person_record.display_name, canonical_person.display_name) END");
+    expect(privacy).toContain("CASE WHEN v_contacts THEN public.vehicle_owner_locality(person_record.metadata->'profile_details') END");
+    expect(privacy).toContain('NOT public.org_access_allowed(p_organization_id)');
     expect(panel).toContain('link.details_visible ?');
     expect(panel).toMatch(/identified/);
   });

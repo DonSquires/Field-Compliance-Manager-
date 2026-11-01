@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, FileArchive, FileInput, FileText, FolderPlus, Image, RefreshCw, Search, ShieldCheck, Upload, Video, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -253,7 +254,7 @@ const FileSystemPage: React.FC = () => {
   const [outputStatus, setOutputStatus] = useState<OutputStatusFilter>('all');
   const [outputFormat, setOutputFormat] = useState<OutputFormatFilter>('all');
   const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
-  const canManageFolders = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '');
+  const canManageFolders = isAdminTierRole(profile?.role);
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;

@@ -72,7 +72,7 @@ test('registration wildcards show selectable identities before history or flag a
     const id = url.searchParams.get('id');
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(id ? vehicles[1] : vehicles) });
   });
-  for (const table of ['canonical_scv_public', 'person_permits_fieldwork', 'observations', 'breach_alerts', 'entity_flags']) {
+  for (const table of ['canonical_scv_public', 'person_permits_fieldwork', 'rpc/read_person_permits_fieldwork', 'observations', 'breach_alerts', 'entity_flags']) {
     await page.route(`**/rest/v1/${table}**`, async route => {
       if (table === 'observations') {
         const params = new URL(route.request().url()).searchParams;

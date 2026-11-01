@@ -12,6 +12,128 @@ Do not ask for blanket permission, infer it from an upload, or claim that a
 cloud coding model directly viewed a screenshot described by local vision.
 See [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md).
 
+## Builder research before a job proposal
+
+PM investigation delegation, 2026-10-25: the cloud PM can prepare an explicitly
+labelled investigation handoff for owner confirmation through the existing
+Builder job UI. This is not the researched repair proposal described below.
+The handoff quotes the approved user report and labels cause unknown; Builder
+must do the source/schema/Atlas/ledger investigation and satisfy its normal
+specification gates before implementation. A prose brief is not dispatched
+work, an unconfirmed card is not a job, and a job receipt is not a completed fix.
+The source-inspected repair-plan requirement remains unchanged.
+
+Owner correction, 2026-10-25: Builder chat must investigate and author the plan;
+the supervising engineer must not supply the solution and accept an echoed
+brief as evidence of Bob's capability. Read owning code/configuration, check
+the job ledger for existing work and inspect Atlas. Trace relevant writers
+and callers; search matches are leads, not source inspection. Cite actual
+source paths, separate observations from hypotheses, and state missing live
+evidence explicitly. A model/tool failure is not permission to manufacture a
+fallback proposal. Report incomplete research without an actionable job card.
+
+These lessons are loaded by `builder-chat-session.js` itself, not merely
+stored in a knowledge card. Its structured JSON and native tools must expose
+the same required arguments. Repeated empty literal searches need a different
+discovery method; repeated invalid arguments need correction or a candidate
+handoff with the existing evidence. Neither counts as progress or completion.
+
+### Atlas guides research, not just proposal validation
+
+Owner direction, 2026-10-25: use Atlas to navigate the build and understand
+blast radius and the butterfly effect. Chat, Builder and Vibe carry the same
+runtime guidance; the platform card `builder_atlas_research_navigation`
+provides retrievable training.
+
+Owner clarification: **Atlas is a map, not evidence.** It shows where to go
+and look. Research those areas to get the facts; do not upgrade an Atlas edge,
+flag or reach result into a factual claim. Read the mapped source/schema and
+verify relevant behavior with authorized observations or focused tests.
+Separate map leads, independently verified facts and unknowns. Source inspection
+establishes implementation, not live execution; fixture tests do not establish
+production success. If the mapped area cannot be checked, it remains unverified.
+
+- Start from the current request, not an unrelated selected or cancelled job.
+  Discover exact entity names/types with `capability_map`, then use
+  `terrain_edges` and returned `source_file` values to choose owning source,
+  callers, writers and access-control checks.
+- Use `blast_radius` in the relevant directions: downstream follows stored
+  source-to-target edges and upstream reverses them. For `component reads table`,
+  the table is downstream and the reader is upstream of the table; neither
+  direction alone establishes business impact. Inspect `secured_by` controls. Keep
+  `reads`/`writes`/`calls`/`invokes` flow, weak `references` and structural
+  `fk_reach` separate. A mapped edge does not prove an invocation succeeded.
+- Cross-check current source and actual schema function/trigger/policy bodies.
+  Report stale/empty map results or contradictions. Choose the smallest check
+  that could disconfirm the current hypothesis, not every related file or FK.
+- Before: establish role, records, revision and dependencies. During: trace
+  controls, requests, policy checks, writes, audit and errors. After: verify
+  persisted results and downstream screens/reports/next actors. Select focused
+  regressions from that affected path without expanding the requested work.
+- This is adaptive guidance, not a mandatory call sequence for every message.
+  A guidance-only question can be answered from relevant cards/receipts. Stop
+  when the request is answered; historical evidence remains historical.
+
+The last reasoning turn's structured schema must expose only `reply`, plus
+`propose_job` when that mode's actual source/ledger/Atlas prerequisites are
+satisfied. Removing native tool definitions alone does not prevent a model from
+requesting more tools through its structured output. Tool-result packets retain
+the current owner request so retrieved evidence does not silently become a new
+task. Bound that reminder separately (at most 1,000 source characters or a
+quarter of the packet cap) so a long request cannot displace tool evidence;
+the full request stays in the opening task. These protocol protections do not prove that a small private model has
+followed the method or authored an adequate plan; measure the actual answer.
+
+Private investigation follow-up, 2026-10-25: repository search must refuse host
+paths rather than normalize them into an unscoped search. Use its documented
+`path` argument, not `paths`. Read source in at most 120-line ranges with the
+returned next-line cursor. Search the relevant symbol before reading generated
+schema; its migration-ledger header is not evidence about the affected entity.
+The private Qwen3 diagnostic progressed faster with a bounded output budget but
+still failed to author a valid repair plan. Do not promote a diagnostic setting
+as an established fix. Installed larger GPU models also failed the existing
+memory-budget preflight and were not loaded; installation is not safe capacity.
+
+Planning completion follow-up: "propose your own repair plan" is a planning
+request even when a separate sentence says not to create a job or implement
+anything. Never treat that safety boundary as cancelling the proposal request.
+Once a proposal attempt is rejected for missing research, the turn cannot end
+as a successfully answered ordinary conversation: complete a valid proposal
+or report incomplete investigation with failed status and no job card.
+
+Rejected-call intent correction: a model's unsolicited `propose_job` attempt
+must not convert an ordinary question into a mandatory planning task. Invalid
+arguments or missing source/ledger/Atlas checks return tool errors, not new owner
+intent. The model may recover by answering the original question; a requested
+proposal still requires a valid proposal or explicit incomplete status. A
+successfully accepted proposal retains the existing confirmation flow.
+
+Input-classification follow-up: negative lists can span multiple actions.
+"Do not investigate or change any particular feature, create a job, or read
+business records" is not a proposal request. Do not inject mandatory planning
+because the negation is more than a short fixed character distance from
+"create". A separate positive instruction ("do not weaken guards; propose a
+repair plan") still requests planning. Validate the actual model packet,
+not only the classification helper or eventual JSON shape.
+
+### Public research, visual and document evidence
+
+Use Builder chat's explicit public-cloud mode for an owner-reviewed public
+question, screenshots or documents. Request fresh approval after changing the
+question, sources or attachments. Cloud-first research is not permission to
+forward repository context, previous conversations, credentials or tenant data.
+Explain which files were actually read: images require advertised vision;
+documents currently provide at most 12,000 extracted characters, and XLSX uses
+one selected populated sheet. Do not claim OCR, all pages/sheets or native raw
+document understanding when those capabilities have not run.
+
+For web facts, quote retrieved primary evidence or corroborating sources from
+three different publishers; expose unverified claims rather than presenting
+them as established facts. Source quotes, URL, retrieval time, digest and model
+belong in the retained receipt. An image observation is model interpretation,
+not an independent verification. A research answer is not a Builder job:
+return to private source/Atlas/ledger investigation before proposing changes.
+
 ## Product context
 
 FCM is a New Zealand field-operations and compliance operating system for security providers, councils, agencies, and commercial clients. It is not a collection of disconnected module screens.

@@ -5,6 +5,10 @@ import { describe, expect, it } from 'vitest';
 const loginSource = readFileSync(resolve(process.cwd(), 'src/pages/LoginPage.tsx'), 'utf8');
 const authSource = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
 const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+const supabaseConfig = readFileSync(resolve(process.cwd(), '../../supabase/config.toml'), 'utf8');
+const inviteSource = readFileSync(resolve(process.cwd(), '../../supabase/functions/invite-org/index.ts'), 'utf8');
+const authSection = supabaseConfig.match(/^\[auth\]\r?\n([\s\S]*?)(?=^\[)/m)?.[1] ?? '';
+const emailAuthSection = supabaseConfig.match(/^\[auth\.email\]\r?\n([\s\S]*?)(?=^\[)/m)?.[1] ?? '';
 
 describe('authentication entry flow', () => {
   it('supports sign-in and standard Supabase password recovery', () => {
@@ -22,6 +26,20 @@ describe('authentication entry flow', () => {
   it('does not offer unsupported self-registration', () => {
     expect(loginSource).not.toContain('signUp');
     expect(loginSource).toContain('Access is restricted to invited users.');
+  });
+
+  it('disables public signup while retaining the server-side invitation flow', () => {
+    expect(authSection).toMatch(/^\s*enable_signup\s*=\s*false\s*$/m);
+    expect(emailAuthSection).toMatch(/^\s*enable_signup\s*=\s*false\s*$/m);
+    expect(inviteSource).toContain('admin.inviteUserByEmail');
+  });
+
+  it('blocks deactivated profiles from the app and closes their global auth session', () => {
+    expect(authSource).toContain('deactivated_at');
+    expect(authSource).toContain("signOut({ scope: 'global' })");
+    expect(authSource).toContain('This account has been deactivated.');
+    expect(appSource).toContain('return <RoleRouter />;');
+    expect(appSource).not.toContain('if (!profile)');
   });
 
   it('identifies Iron Eagle as the builder and excludes the retired attribution', () => {

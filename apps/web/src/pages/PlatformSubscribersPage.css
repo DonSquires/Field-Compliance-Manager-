@@ -1,13 +1,5 @@
-/* Owner console: subscribers list, provisioning form, and confirm dialogs. */
+/* Owner console: provider subscription and confirm dialogs. */
 .platform-subscribers { display: grid; gap: var(--space-lg, 20px); }
-.platform-provision-form { display: grid; gap: 12px; }
-.platform-provision-form h2 { margin: 0; }
-.platform-module-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); min-width: 0; }
-.platform-module-picks legend { padding: 0 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 700; }
-.platform-module-picks label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.platform-module-picks input { width: auto; margin: 0; }
-.platform-form-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-.platform-form-actions small { color: var(--color-text-muted); font-size: 12px; max-width: 60ch; }
 
 .platform-subscriber-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .platform-subscriber { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-success); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }

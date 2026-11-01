@@ -30,6 +30,9 @@ Production migrations remain single-writer in the governed VPS release lane.
 Before implementing any credentialed support job, define approved environments,
 reviewer/branch protection, exact caller/data scope, idempotency and audit
 receipts; do not give untrusted PRs or fork code production secrets.
+The first such job is `.github/workflows/atlas-refresh.yml`: it writes only
+Atlas tables, runs only for the verified current `main` head, and reads its
+service-role key from the `atlas-refresh` environment, restricted to `main`.
 Existing GitHub Production environments had no approval protection when
 inspected. `BOB_GITHUB_ACCESS_TOKEN` need not be added to verification: the
 job-scoped read-only GitHub token is sufficient. A future project-reference
@@ -41,6 +44,97 @@ change therefore requires a control-plane redeploy as well as the worker-image
 rebuild; an image rebuild alone does not update the running launcher.
 
 ## Private repository code and Vibe Builder
+
+### Builder Chat cloud PM/QA (owner decision, 2026-10-25)
+
+New PM turns use purpose-assigned Ollama Cloud models directly, without private
+inference attempts. The owner selected human-approved non-sensitive summaries,
+not raw private evidence. The server must bind purpose and summary to the same
+message's approval and retry identity. Neither earlier conversation nor selected
+job/page context is implicitly transferred. The current slice accepts a summary
+pasted by the reviewer after redaction. Future governed private collection may
+prepare a candidate for review, but cannot automatically approve its external
+transfer or introduce a private inference ladder for Chat. Sensitive source,
+credentials and tenant/HR/legal data
+remain excluded. Exact text matching proves only what a reviewed summary said,
+not that its underlying assertions were independently observed.
+
+Capability metadata must match the selected purpose's inputs. Unavailable,
+invalid or non-vision models fail explicitly; no automatic model ladder or
+private fallback. Independent QA is a deliberate purpose, not an automatic
+second model on every PM answer. Existing explicit public-research mode remains
+isolated. Model receipts disclose purpose, model and the actual transfer shape.
+
+Bob's own diary is not tenant operational memory. The cloud PM may choose
+`write_self_memory` to append a bounded non-sensitive reflection or Builder
+note to existing `bob_self_memory`, via a service-only, retry-safe RPC bound to
+the originating owner PM turn. No memory approval or growth score is created.
+The model receives the saved ID, not private earlier entries. Optional recall
+uses the existing authenticated `bob-self-memory-read` endpoint to preview
+entries privately in the owner UI. Selecting an excerpt copies it to the
+reviewed summary and invalidates packet approval; nothing is automatically
+sent to cloud, promoted to knowledge or copied from tenant conversation.
+
+PM specification-revision follow-up (2026-10-26): the cloud model supplies
+only a job UUID from the approved packet and bounded feedback. A server-side
+read verifies the accepted handoff in the same thread and pins its pending
+specification approval/target; no private specification or job history is
+returned to cloud. The original approved human message is attached verbatim.
+An authenticated owner confirms the card via
+`builder_chat_request_spec_revision`; service-role and anonymous execution
+are not granted. That transaction records a replay-safe audit receipt,
+supersedes the reviewed artifact, cancels the old pending approval and
+returns the same idle job to analysis. It cannot approve implementation,
+change the immutable task/target, reset attempt counts or create a new job.
+
+Code-review correction extension (owner choice, 2026-10-26): the same approved
+packet boundary applies to `request_builder_code_changes`. Server-only
+same-thread pending approval lookup never returns private job evidence to
+cloud. `builder_chat_request_code_changes` is authenticated-owner execution
+only, with existing organization/reviewer checks. Confirmation cancels the
+old human review and records the original human message plus PM feedback
+against the existing job. Retained superseded patches may be read only as
+explicitly bound, checksum-verified lane seeds, never as fresh review evidence.
+No new credential, impersonation, automatic history transfer, merge or release
+authority is introduced.
+
+Failed implementation-correction recovery (owner choice, 2026-10-26) uses the
+same approved packet and authenticated-owner confirmation boundary. The
+service-side preparation reads only the linked failed job/version and failed
+step metadata, never returning private diagnostics to cloud.
+`builder_chat_recover_implementation` rechecks organization/reviewer authority,
+same-thread completed PM consent, idle unpublished correction state and an
+author failure without a patch before downstream checks. It records a
+replay-safe receipt, preserves attempts and seeds, and invalidates the saved
+author checkpoint. It cannot recover worker/test/security failures, change
+target/specification, approve, merge or deploy.
+
+### Builder chat public research (owner decision, 2026-10-25)
+
+Builder chat's explicit public-research mode uses only server-side Ollama Cloud
+credentials and the fixed official API origin. It requires both the configured
+cloud flag and immutable per-message owner approval. The private chat/planning
+lane does not escalate repository/history packets to cloud. Approval is a human
+non-sensitive-content attestation, not an automated classification guarantee.
+Never attach secrets, tenant records, private source or confidential documents.
+
+The research RPC binds the question, URLs and file manifest to the authenticated
+thread owner and request ID. Changed input cannot reuse that ID to upgrade
+consent. Attachments are private `bob-uploads` objects under
+`desktop/{user_id}/builder-chat/{thread_id}/{attachment_id}-{safe_name}`;
+the RPC checks storage ownership and the worker verifies scope, byte size and
+SHA-256. Images require explicit raw-image approval and live vision capability.
+Documents send up to 12,000 extracted characters, never the raw original through
+the current adapter. XLSX extraction uses the existing extractor's selected
+largest populated sheet, not every sheet. Empty/scanned PDFs fail pending OCR.
+Question/files do not include prior chat or repository tools.
+
+Web search and fetch use the same fixed Ollama origin, not arbitrary server-side
+URL requests. Source URLs exclude credentials, query strings, fragments,
+custom ports, IP literals and local/reserved names. Pages/files are untrusted
+evidence. Receipts distinguish checked publisher/quote provenance from semantic
+verification; unmatched quotes fail, under-corroborated claims remain unverified.
+Neither approval nor research grants deployment or job-creation authority.
 
 Vibe Builder runs against the private `DonSquires/Field-Compliance-Manager-`
 repository. Its model context can contain owner messages, source code, diffs,
@@ -162,8 +256,8 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 | `GITEA_TOKEN` | `bob-gitea-maintainer` server-side function | Governed issue/PR/file operations on the allowlisted Gitea repository | Browser, Supabase, arbitrary repositories |
 | `BOB_GITHUB_ACCESS_TOKEN` (owner ruling 2026-10-21: Bob's single GitHub API credential) | VPS control plane (`/var/lib/bob/control-plane.env`) and Codespaces | Every Bob GitHub API action: branches, pull requests, verified merges, issues, reviews, main-health status | Browser, Bob prompts, logs, issue text; a second GitHub token must not be added beside it (the stale `GITHUB_TOKEN` was removed) |
 | Bob GitHub deploy key (`BOB_GITHUB_SSH_KEY_FILE` / `BOB_FCM_MAIN`) | Control plane and release lane, git transport only | Fetch `main`, push `bob/job-*` and `bob/vibe-*` branches | API calls, any other repository |
-| Role test identities (`GRANDMASTER_`, `MASTER_`, `OFFICER_`, `NMDHB_TEST_EMAIL`/`_PASSWORD`) | Dr Bob human-test workers and live e2e specs | Dedicated test accounts for role-specific glass checks | Real users' sessions; never printed or stored in receipts |
-| `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling | Inspect approved Vercel deployment state | Supabase, database migrations, browser |
+| Role test identities (`GRANDMASTER_`, `MASTER_`, `OFFICER_`, `NMDHB_TEST_EMAIL`/`_PASSWORD`) | Dr Bob human-test workers and live e2e specs; `GRANDMASTER_TEST_*` also powers Bob's automatic post-production Dr Bob suite and, in the control plane only, files that suite's redacted live findings through the user-JWT `bob-triage-report` path, then signs out (owner ruling 2026-10-27) | Dedicated test accounts for role-specific glass checks, including service-owned read-only production verification without a person requesting each run; reporting Bob's own observed runtime friction | Real users' sessions; never printed or stored in receipts or `triage_intake`; never used for business-record writes, approvals or impersonation |
+| `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling; the control plane's production-deployment resolver, which checks the serving SHA before and after every live Dr Bob walk | Inspect approved Vercel deployment state and the SHA serving the production alias | Supabase, database migrations, browser contexts, Dr Bob worker containers (they receive only the verified SHA), unmerged branch commits, Dr Bob receipts |
 | VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
 | `OLLAMA_API_TOKEN` (Ollama Cloud key; also accepted as `OLLAMA_API_KEY`) | VPS control-plane model gateway only (`/var/lib/bob/control-plane.env`), sent as a Bearer header to `https://ollama.com` | Bob Builder's subscription model tier for unrestricted work, after the laptop GPU and VPS Ollama and before paid OpenAI | Restricted/local-only work (the router strips it), local Ollama hosts, browser, Bob prompts, logs, health output, issue text |
 | Bob laptop SSH key (`/var/lib/bob/laptop/id_ed25519`, VPS only) | `bob-laptop-shell.js` in the control plane, over Tailscale, to the owner's laptop only, while the owner's `laptop-tailscale.ps1 -Allow` switch is on | Owner-confirmed PowerShell commands (read files, check the GPU link, setup the owner asked for) | Any other host, unattended or unconfirmed commands, destructive/privilege/credential/firewall changes (refused by the deny list), copying the key anywhere |

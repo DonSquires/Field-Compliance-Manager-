@@ -4,7 +4,6 @@ openvino>=2026.0,<2027.0
 opencv-python-headless>=4.10,<5.0
 pytesseract>=0.3.13,<1.0
 python-multipart>=0.0.20,<1.0
-runpod>=1.7,<2.0
 uvicorn[standard]>=0.30,<1.0
 # Detector (RF-DETR ONNX, Apache-2.0 weights) and plate detector (YOLOv9 plate, MIT weights) wrappers.
 open-image-models>=0.6,<1.0

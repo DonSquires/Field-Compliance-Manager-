@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { dockerArguments, ensureWorkerNetwork, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
+const { dockerArguments, ensureWorkerNetwork, humanTestDeploymentPreflight, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 function writeNpmStub(binDir, source) {
@@ -62,6 +62,12 @@ test('frontend verification runs Playwright serially after build and unit checks
     assert.deepEqual(cmd.slice(5, 5 + E2E_SMOKE_SPECS.length + 2), [...E2E_SMOKE_SPECS, 'e2e/builder-control-room.spec.ts', 'e2e/reports-hub.spec.ts'], 'a smoke spec is not listed twice');
     assert.deepEqual(targetedE2eSpecs(['apps/web/src/lib/tiny.ts'], webDir), [], 'short stems do not match everything');
     assert.deepEqual(targetedE2eSpecs(['supabase/functions/x/index.ts'], webDir), []);
+    // Job 402bfd7e: a patch that edits only a spec must run that spec, first, even without a component stem.
+    assert.deepEqual(targetedE2eSpecs(['apps/web/e2e/officer-leave.spec.ts'], webDir), ['e2e/officer-leave.spec.ts']);
+    assert.deepEqual(targetedE2eSpecs(['apps/web/e2e/officer-leave.spec.ts', ...changed], webDir), ['e2e/officer-leave.spec.ts', 'e2e/admin-hub-dispatch.spec.ts', 'e2e/builder-control-room.spec.ts', 'e2e/reports-hub.spec.ts']);
+    assert.deepEqual(targetedE2eSpecs(['apps/web/e2e/deleted.spec.ts', 'apps/web/e2e/fixtures.ts'], webDir), [], 'a deleted spec or a non-spec helper is not passed to Playwright');
+    const specOnly = frontendVerificationCommands({ changedFiles: ['apps/web/e2e/officer-leave.spec.ts'], webDir }).at(-1);
+    assert.ok(specOnly.includes('e2e/officer-leave.spec.ts'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -143,6 +149,16 @@ test('fresh health checkouts get real directories for nested mounts before Docke
   assert.throws(() => prepareWorkerMounts(sourceDir, 'main-health'), /must be a directory/);
 });
 
+test('Dr Bob browser profiles get the nested node_modules mountpoint in their pinned snapshot', t => {
+  for (const profile of ['human-qa', 'human-qa-live']) {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), `bob-${profile}-mounts-`));
+    t.after(() => fs.rmSync(sourceDir, { recursive: true, force: true }));
+    prepareWorkerMounts(sourceDir, profile);
+    assert.ok(fs.lstatSync(path.join(sourceDir, 'apps/web/node_modules')).isDirectory());
+    assert.equal(fs.existsSync(path.join(sourceDir, '.bob')), false);
+  }
+});
+
 test('main health runs every check after a root failure and returns an aggregate failure', t => {
   const { spawnSync } = require('node:child_process');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-steps-'));
@@ -178,15 +194,19 @@ test('human QA forwards only named environment variables without putting values 
       HUMAN_TEST_EXPECTED_SHA: 'a'.repeat(40),
       HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
       HUMAN_TEST_ADMIN_ROUTE: '/admin/builder',
+      HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA: 'a'.repeat(40),
       GRANDMASTER_TEST_PASSWORD: 'not-in-argv',
+      VERCEL_TOKEN: 'not-forwarded',
       VERCEL_PROJECT_ID: 'project-id',
+      VERCEL_TEAM_ID: 'team-id',
     }
   });
   assert.deepEqual(args.filter((value, index) => args[index - 1] === '--env'), [
     'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA',
     'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE',
-    'GRANDMASTER_TEST_PASSWORD', 'VERCEL_PROJECT_ID'
+    'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA', 'GRANDMASTER_TEST_PASSWORD'
   ]);
+  assert.equal(args.some(value => /VERCEL_/.test(value)), false, 'Vercel deployment credentials stay in the control plane');
   assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv') || value.includes('project-id')), false);
   assert.ok(args.includes('--network=bob-workers'));
 });
@@ -215,6 +235,15 @@ test('human QA summary uses Playwright totals instead of request diagnostics', (
     '  35 passed (18.1m)'
   ].join('\n');
   assert.deepEqual(summarizeHumanTest({ stdout, stderr: '' }), { passed: 35, failed: 5, skipped: 2 });
+});
+
+test('live deployment preflight verdict: the worst check stands, and no line means unknown', () => {
+  const line = (result) => `[HUMAN DEPLOYMENT PREFLIGHT] result=${result}`;
+  assert.equal(humanTestDeploymentPreflight({ stdout: `${line('matched')}\n  3 passed`, stderr: '' }), 'matched');
+  assert.equal(humanTestDeploymentPreflight({ stdout: `${line('matched')}\n${line('unavailable')} reason=deployment lookup returned HTTP 503`, stderr: '' }), 'unavailable');
+  assert.equal(humanTestDeploymentPreflight({ stdout: line('matched'), stderr: line('stale') }), 'stale');
+  assert.equal(humanTestDeploymentPreflight({ stdout: '[HUMAN DEPLOYMENT PREFLIGHT] target=www.example.test state=READY', stderr: '' }), null);
+  assert.equal(humanTestDeploymentPreflight(null), null);
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {
@@ -448,23 +477,35 @@ test('frontend worker still parks a red build on the pinned commit as not the pa
   }
 });
 
-test('worker compares structured browser evidence: identical failures block as baseline, different failures stay unresolved', () => {
-  for (const different of [false, true]) {
+test('worker compares structured browser evidence: identical failures block as baseline, a changed signature stays unresolved, a patch-only failing test goes to the author', () => {
+  const cases = {
+    same: { title: "'same failure'", message: "'expected visible; received hidden'" },
+    signature: { title: "'same failure'", message: "patched ? 'expected visible; received detached' : 'expected visible; received hidden'" },
+    // Job 402bfd7e: the patch's new test failed while the worker's baseline was red for other tests.
+    added: { title: "patched ? 'new failure' : 'other baseline failure'", message: "'expected visible; received hidden'" }
+  };
+  for (const [mode, { title, message }] of Object.entries(cases)) {
     const fixture = redBaselineFixture([
       "if (process.argv.includes('test:e2e')) {",
-      `const title = ${different ? "patched ? 'new failure' : 'other baseline failure'" : "'same failure'"};`,
-      "fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_NAME, JSON.stringify({ errors: [], suites: [{ title: 'flow', specs: [{ file: 'e2e/example.spec.ts', title, tests: [{ projectName: 'desktop-chromium', status: 'unexpected', results: [{ errors: [{ message: 'expected visible; received hidden' }] }] }] }] }] }));",
+      `const title = ${title};`,
+      `const message = ${message};`,
+      "fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_NAME, JSON.stringify({ errors: [], suites: [{ title: 'flow', specs: [{ file: 'e2e/example.spec.ts', title, tests: [{ projectName: 'desktop-chromium', status: 'unexpected', results: [{ errors: [{ message }] }] }] }] }] }));",
       "console.error('one browser assertion failed'); process.exit(1); }"
     ]);
     try {
       const result = fixture.runPatch();
       assert.equal(result.succeeded, false);
-      assert.equal(result.baseline_failure, !different);
+      assert.equal(result.baseline_failure, mode === 'same', mode);
       const evidence = fixture.evidence();
       assert.equal(evidence.commands.at(-1).test_failures.complete, true);
       const classification = require('../builder-verification-outcome').classifyVerificationFailure(evidence);
-      assert.equal(classification.baseline, !different);
-      if (different) assert.equal(classification.unresolved, true);
+      assert.equal(classification.baseline, mode === 'same', mode);
+      assert.equal(classification.unresolved === true, mode === 'signature', mode);
+      assert.equal(classification.infrastructure, false, mode);
+      if (mode === 'added') {
+        assert.deepEqual(evidence.baseline.new_failures, ['e2e/example.spec.ts::desktop-chromium::new failure']);
+        assert.match(evidence.baseline.reason, /fail only with this patch/);
+      } else assert.equal(evidence.baseline.new_failures, undefined, mode);
       assert.equal(fs.existsSync(path.join(fixture.root, 'work/.bob-playwright-result.json')), false);
     } finally {
       fixture.cleanup();

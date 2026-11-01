@@ -21,6 +21,8 @@ async function checkRuntimeIdle({ url, key, healthUrl = 'http://172.16.0.1:8091/
     if (vibeRows.length) return { idle: false, reason: 'vibe turn in flight' };
     if (chatRows.length) return { idle: false, reason: 'Builder chat turn in flight' };
     if (runtime.runningBuilderJobs) return { idle: false, reason: 'runtime execution in flight' };
+    // Older control planes do not report Dr Bob runs; a missing field means none are tracked.
+    if (Number.isInteger(runtime.activeHumanTests) && runtime.activeHumanTests > 0) return { idle: false, reason: 'Dr Bob human test in flight' };
     return { idle: true, reason: 'no recorded worker, model or runtime execution in flight' };
   } catch {
     return { idle: false, reason: 'activity check failed' };

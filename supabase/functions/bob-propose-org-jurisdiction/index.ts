@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const BOB_SYSTEM_USER_ID = '00000000-0000-0000-0000-00000000b0b0';
-const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin']);
+const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',

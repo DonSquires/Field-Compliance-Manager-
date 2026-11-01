@@ -8,12 +8,14 @@ const { startOptionalCodeReview } = require('./supabase/functions/_shared/builde
 const { runIndependentCodeReview } = require('./supabase/functions/_shared/builder-independent-code-review');
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
 const { runAgenticEngineer } = require('./builder-agentic-engineer');
+const { loadCodeReviewSeed } = require('./builder-artifact-read');
 const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 const { laneFor, normalizeRepoPath } = require('./builder-path-policy');
+const { checkImplementationAcceptance } = require('./builder-implementation-acceptance');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -39,11 +41,25 @@ function artifactsFor(snapshot, stepId, artifactType) {
 function implementationRuns(snapshot) {
   const modes = new Set(['frontend_engineer', 'backend_engineer']);
   const stepIds = new Set(snapshot.steps.filter(step => modes.has(step.builder_mode) && step.status === 'completed').map(step => step.id));
-  return snapshot.workerRuns.filter(run => stepIds.has(run.step_id) && run.status === 'completed' && ['frontend-verify', 'backend-verify'].includes(run.profile));
+  const superseded = new Set(snapshot.artifacts.filter(artifact => artifact.status === 'superseded').map(artifact => artifact.id));
+  return snapshot.workerRuns.filter(run => stepIds.has(run.step_id) && run.status === 'completed'
+    && !superseded.has(run.patch_artifact_id) && ['frontend-verify', 'backend-verify'].includes(run.profile));
 }
 
 function attemptCeilingReached(step) {
   return step?.status === 'failed' && Number(step.attempt_count) >= MAX_STEP_ATTEMPTS;
+}
+
+function ownerConfirmedVerifierRetryAtCeiling(snapshot, step) {
+  const context = step?.input_context;
+  const attempt = Number(context?.owner_patch_retry_attempt_count);
+  return step?.step_id === 'frontend_implementation' && step.status === 'failed' && step.retryable === true
+    && String(step.error || '').startsWith('Verifier recovery pending: owner-confirmed saved patch verification')
+    && typeof context?.owner_patch_retry_receipt === 'string'
+    && Number.isInteger(attempt) && attempt === Number(step.attempt_count)
+    && typeof context?.patch_artifact_id === 'string' && context.target_sha === snapshot?.job?.target_sha
+    && snapshot.artifacts.some(artifact => artifact.id === context.patch_artifact_id
+      && artifact.step_id === step.id && artifact.artifact_type === 'code_implementation' && artifact.status === 'final');
 }
 
 function stepIsRunnable(step) {
@@ -90,6 +106,7 @@ function planBuilderAction(snapshot) {
   }
   if (job.status === 'implementation_pending') {
     const frontend = byStep(snapshot, 'frontend_implementation');
+    if (ownerConfirmedVerifierRetryAtCeiling(snapshot, frontend)) return { type: 'run_frontend', step: frontend };
     if (stepIsRunnable(frontend)) return { type: 'run_frontend', step: frontend };
     if (attemptCeilingReached(frontend)) return attemptCeilingBlock(job, frontend);
     if (parkedStep(frontend)) return parkedStepBlock(job, frontend);
@@ -186,7 +203,10 @@ function agenticGenerator(lane, context, extra = {}) {
   return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext,
     failureArtifact = extra.failureArtifact, failedPatchArtifact = extra.failedPatchArtifact, startAfterProvider = null }) => {
     const [specification, uxPlan, previousFailure, seedPatch] = await Promise.all([
-      productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
+      productArtifact ? (async () => {
+        const { bytes } = await downloadVerifiedArtifact(supabase, productArtifact.id, job.id, 'product_specification');
+        return JSON.parse(bytes.toString('utf8'));
+      })() : Promise.resolve(extra.specification ?? null),
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
       failureArtifact ? (async () => {
         const downloaded = await downloadVerifiedArtifact(supabase, failureArtifact.id, job.id, 'build_logs');
@@ -199,7 +219,9 @@ function agenticGenerator(lane, context, extra = {}) {
           if (!patch?.trim()) throw new Error('Repair source patch is empty');
           return { text: patch, from_job: job.id, artifact_id: failedPatchArtifact.id };
         })()
-        : (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
+        : job.code_review_revision
+          ? loadCodeReviewSeed(supabase, job, step)
+          : (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.
@@ -234,7 +256,7 @@ function agenticGenerator(lane, context, extra = {}) {
         if (third.ok && third.patch_artifact?.id) return { ...third, attempts: 3, escalated_after_in_house_budget: true, first_attempt: generation.first_attempt };
         return { ...third, attempts: 3, no_change: true, error: `two in-house attempts ran out of turns without an edit; escalated attempt (${third.routing?.provider || 'outsourced'}): ${String(third.error || '').slice(0, 600)}` };
       }
-      if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
+      if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `Two author attempts produced no patch; second attempt: ${String(second.error || '').slice(0, 600)}` };
     }
     return generation;
   };
@@ -337,6 +359,13 @@ async function runBackendImplementation(input) {
 }
 
 async function executeBuilderAction({ snapshot, action, supabase, gateway, context, handlers = {} }) {
+  let acceptance = null;
+  if (['start_optional_review', 'run_independent_review', 'run_release'].includes(action.type)) {
+    acceptance = await (handlers.acceptance || checkImplementationAcceptance)({ supabase, snapshot });
+    if (!acceptance.passed && !(action.type === 'start_optional_review' && snapshot.job.code_review_mode === 'human')) {
+      return { success: false, phase: 'acceptance', error: `Whole-job acceptance incomplete: ${acceptance.blockers.join(' ').slice(0, 3000)}`, acceptance };
+    }
+  }
   const run = {
     product: handlers.product || runProductAnalyst,
     ux: handlers.ux || runUxDesigner,
@@ -407,7 +436,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     const generator = agentic ? agenticGenerator('frontend', context, failedImplementationEvidence(snapshot, action.step)) : undefined;
     const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
     const siblingCompleted = byStep(snapshot, 'backend_implementation')?.status === 'completed';
-    return run.frontend({ ...common, siblingCompleted, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
+    return run.frontend({ ...common, siblingCompleted, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
   }
   if (action.type === 'run_backend') return run.backend({ ...common, context, priorFailure: failedImplementationEvidence(snapshot, action.step), siblingCompleted: byStep(snapshot, 'frontend_implementation')?.status === 'completed', productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
   const implementation = implementationArtifacts(snapshot);
@@ -415,7 +444,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
   if (action.type === 'run_security_review') return run.security({ ...common, securityStep: action.step, implementationWorkerRunIds: runs.map(item => item.id), sourceDir: context.sourceDir, workerImage: context.workerImage, runnerId: context.runnerId });
   if (action.type === 'start_optional_review') return run.optionalReview(supabase, { jobId: snapshot.job.id, stepId: action.step.id, artifactIds: [...implementation.patch, ...implementation.manifest, ...implementation.buildLogs, securityArtifact].filter(Boolean).map(item => item.id), requestedFromUsers: context.requestedFromUsers });
-  if (action.type === 'run_independent_review') return run.independentReview({ ...common, artifacts: { ...implementation, security: securityArtifact }, reviewerModelName: context.reviewerModelName });
+  if (action.type === 'run_independent_review') return run.independentReview({ ...common, artifacts: { ...implementation, security: securityArtifact }, reviewerModelName: context.reviewerModelName, acceptance });
   if (action.type === 'run_release') return run.release({ ...common, artifacts: { ...implementation, securityReview: securityArtifact, codeReview: artifactsFor(snapshot, 'code_review', 'code_review').at(-1) }, securityWorkerRunId: snapshot.workerRuns.filter(item => item.profile === 'security-review' && item.status === 'completed').at(-1)?.id, requestedFromUsers: context.requestedFromUsers });
   return action;
 }
@@ -423,8 +452,34 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
 async function advanceBuilderJob({ supabase, gateway, jobId, context, handlers, loadSnapshot = loadBuilderRuntimeSnapshot }) {
   await recoverExpiredWorkerRuns(supabase);
   await accountVerifierRecoveries(supabase, jobId);
-  const snapshot = await loadSnapshot(supabase, jobId);
+  let snapshot = await loadSnapshot(supabase, jobId);
+  const correction = snapshot.job.code_review_revision;
+  const requiredSkippedIds = snapshot.steps.filter(step =>
+    step.status === 'skipped' && (
+      (step.step_id === 'frontend_implementation' && snapshot.job.frontend_required === true)
+      || (step.step_id === 'backend_implementation' && snapshot.job.backend_required === true)
+    )).map(step => step.step_id);
+  if (snapshot.job.status === 'implementation_pending' && correction?.approval_id
+    && !Array.isArray(correction.reopened_required_lanes) && requiredSkippedIds.length) {
+    if (!supabase || typeof supabase.rpc !== 'function') {
+      throw new Error('Required implementation lanes cannot be recovered without the Builder service client');
+    }
+    const { error } = await supabase.rpc('builder_reopen_required_implementation_lanes', { _job_id: jobId });
+    if (error) throw new Error(`Required implementation lanes could not be reopened: ${error.message}`);
+    const reopenedSnapshot = await loadSnapshot(supabase, jobId);
+    const stillSkipped = requiredSkippedIds.filter(stepId =>
+      reopenedSnapshot.steps.find(step => step.step_id === stepId)?.status !== 'pending');
+    if (stillSkipped.length) {
+      throw new Error(`Required implementation lane recovery was not persisted: ${stillSkipped.join(', ')}`);
+    }
+    snapshot = reopenedSnapshot;
+  }
   const action = planBuilderAction(snapshot);
+  if (snapshot.job.status === 'security_review' && byStep(snapshot, 'code_review')?.status === 'blocked') {
+    const report = await (handlers?.acceptance || checkImplementationAcceptance)({ supabase, snapshot });
+    if (!report.passed) return { advanced: false, action: { type: 'blocked', reason: 'acceptance_incomplete',
+      detail: `Whole-job acceptance incomplete: ${report.blockers.join(' ').slice(0, 3000)}` }, snapshot };
+  }
   if (['terminal', 'waiting_for_human', 'waiting_for_worker', 'blocked'].includes(action.type)) return { advanced: false, action, snapshot };
   const result = await executeBuilderAction({ snapshot, action, supabase, gateway, context, handlers });
   return { advanced: true, action, result };
@@ -446,6 +501,9 @@ async function runBuilderUntilPause({
     history.push({ action: outcome.action, advanced: outcome.advanced });
     if (!outcome.advanced) return { paused: true, reason: outcome.action.reason || outcome.action.type, detail: outcome.action.detail, history, snapshot: outcome.snapshot };
     if (outcome.result?.ok === false || outcome.result?.success === false) {
+      if (outcome.result.phase === 'acceptance') {
+        return { paused: true, reason: 'acceptance_incomplete', detail: outcome.result.error, history, result: outcome.result };
+      }
       return { paused: true, reason: 'action_failed', history, result: outcome.result };
     }
   }

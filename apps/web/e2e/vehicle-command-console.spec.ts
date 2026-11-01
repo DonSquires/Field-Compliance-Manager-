@@ -23,6 +23,7 @@ async function fixtures(page: Page) {
   });
   await page.route('**/rest/v1/canonical_scv_public**', route => route.fulfill(json(null)));
   await page.route('**/rest/v1/person_permits_fieldwork**', route => route.fulfill(json([])));
+  await page.route('**/rest/v1/rpc/read_person_permits_fieldwork**', route => route.fulfill(json([])));
   await page.route('**/rest/v1/breach_alerts**', route => route.fulfill(json([])));
   await page.route('**/rest/v1/observations**', route => route.fulfill(json([{ id: 'efefefef-efef-4fef-8fef-efefefefefef', observed_at: '2026-08-29T08:20:00Z', is_compliant: null, compliance_reason: 'Recorded observation evidence', nights_this_zone: 0, zone: { name: 'Fixture Zone' } }])));
   await page.route('**/rest/v1/rpc/get_safety_warnings**', route => route.fulfill(json([])));

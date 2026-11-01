@@ -2,16 +2,28 @@
 
 # Organisation and Service Model — Model A (Own-Rooted)
 
-> **Ratified 2026-07-21.** This document describes Model A: every org is
-> own-rooted, role is contextual per service_agreement. The machine-readable
+> **Ratified 2026-07-21.** Model A is the historical baseline: every org was
+> own-rooted, with role contextual per `service_agreement`. The owner ruling
+> dated 2026-11-01 below supersedes own-rooted onboarding for client
+> organisations and limits provider operations to R&M. The machine-readable
 > summary Bob uses is `knowledge_base/corpus/org-model.md`.
 >
 > **Supersedes** the old tree-parented client model (clients hanging under
 > branches via `parent_organization_id`). See
 > `docs/design/ONBOARDING_AND_ENTITLEMENT_EXPERIENCE.md` for the full design.
 > Migration 0271 implements the access-layer fix. Issue #214, Epic #213.
+>
+> **Owner ruling 2026-11-01 — one service provider; client approval is not a
+> condition of service.** R & M Security and Investigations is the only
+> service provider; Iron Eagle is the platform owner for billing and app
+> management only; no other organisation may sign up. A provider's current
+> operational agreement is enough to deliver its service without client
+> approval. Where the text below describes many subscribing providers or
+> client acceptance as a gate,
+> [that ruling](#owner-ruling-2026-11-01--one-service-provider-client-approval-is-not-a-condition-of-service)
+> governs.
 
-## Model A: every org is its own entity
+## Model A (historical baseline): every org is its own entity
 
 Every organisation is **own-rooted** (`parent_organization_id = NULL`). Role
 (client vs provider) is **contextual per `service_agreement`**, not baked into
@@ -43,6 +55,32 @@ any specific relationship.
 
 ## How organisations link: service_agreements
 
+### Owner ruling 2026-10-28: provider-confirmed practical onboarding
+
+The primary client setup form needs a name and an attributable provider-admin
+confirmation that the provider is engaged. It creates an own-rooted organisation
+and a current operational agreement, recording the confirmation in
+`external_refs.engagement_confirmation`. It does not forge client invitation
+acceptance, approve a price, enable a module, or issue an invoice.
+
+Admin and admin-officer CRM writers recognise that dated provider confirmation
+for managing the client's profile and places. Officers receive the narrow
+place-capture path, not CRM administration. Expired/future or unconfirmed
+agreements do not qualify for this new path. Existing accepted-agreement
+authority is preserved.
+
+New site drafts explicitly use the confirmed provider agreement rather than
+the legacy trigger's inferred latest agreement. They do not seed default
+hourly billing, minimum hours or tax assumptions. Those decisions remain in
+the commercial workspace. Multiple current agreements require an explicit
+administrative review; the simple path never silently picks one.
+
+**Superseded in part by the owner ruling 2026-11-01** (end of this document):
+a current operational agreement qualifies whether or not it carries this
+confirmation, and accepted agreements no longer have separate authority. The
+confirmation is kept as provenance. Expired and future agreements still do
+not qualify.
+
 The `service_agreements` table is the canonical inter-org link:
 
 | Column | Meaning |
@@ -59,7 +97,9 @@ An org can be a provider in one agreement and a client in another.
 The `parent_organization_id` tree still works for orgs created under the old
 model (branches under a service provider, clients under a branch). The access
 layer supports **both** paths — tree-based and agreement-based (migration 0271).
-New orgs are own-rooted.
+This is the historical Model A rule. Since the 2026-11-01 owner ruling, new
+client organisations are parented under R&M and other provider onboarding is
+closed.
 
 ## Access layer
 
@@ -74,6 +114,22 @@ Gates SELECT on ~60 tables. Passes if ANY of these is true:
 5. **Access grants** — `provider_client_access_grants` row exists.
 6. **Agreement-based (0271)** — user's org (or employer org) is a party on
    an active `service_agreement` with the target org. **Bidirectional.**
+
+**Policy form (2026-11-02).** Row-level security policies do not call
+`org_access_allowed(X)`, because Postgres would run it once per candidate row.
+They use the initPlan form, which computes the caller's reach once per
+statement:
+
+```sql
+((SELECT public.is_grand_master())
+  OR COALESCE((X) = ANY ((SELECT public.accessible_org_ids())::uuid[]), false))
+```
+
+`accessible_org_ids()` is the set form of clauses 2–6. It is empty for
+anonymous and deactivated callers. `org_access_allowed` remains the check for
+function bodies and single-row decisions. The two must stay equivalent, so a
+change to one is a change to both, proven again by
+`test/org-access-policy-initplan.test.js` (run with `BOB_TEST_POSTGRES=1`).
 
 ### Write gates
 
@@ -106,11 +162,12 @@ Gates SELECT on ~60 tables. Passes if ANY of these is true:
   branch picker).
 - **grand_master**: whole-tree view, optional branch filter.
 
-## Onboarding (Model A)
+## Onboarding (Model A — historical)
 
-Iron Eagle (grand_master) creates each org as own-rooted, provisions a first
-user as `master`, and creates a Layer-1 service agreement. The org's master
-then manages their own data.
+Under the historical Model A, Iron Eagle (grand_master) created each org as
+own-rooted, provisioned a first user as `master`, and created a Layer-1 service
+agreement. The 2026-11-01 ruling below replaces this for new provider and
+client onboarding.
 
 ## Two-layer billing (issue #2, migration 0253)
 
@@ -127,6 +184,10 @@ columns correctly. For own-rooted org users: `organization_id` =
 convention.
 
 ## Platform-owner boundary (owner ruling, Don Squires, 2026-09-15)
+
+> **2026-11-01:** R & M is now the only provider and no other organisation may
+> subscribe. Iron Eagle's boundary below still holds; see the owner ruling
+> 2026-11-01 at the end of this document.
 
 Iron Eagle Security is the **platform owner**, not a co-operator of its
 subscribers. Every provider (R & M Security and Investigation is the first)
@@ -243,6 +304,10 @@ required. Delivery schedules may be written directly
 (`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
 both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.
 
+**Superseded in part 2026-11-01:** any current operational agreement can be
+configured whatever its `invitation_status`; a declined or expired invitation
+no longer blocks the provider.
+
 ## Ruling 2026-10-25 — Mainland Pest Control under R&M; group charge catalog
 
 Owner choice `mainland_parent=true`: Mainland Pest Control, an R&M
@@ -250,8 +315,9 @@ subsidiary, has `parent_organization_id` = R&M (migration
 `20261024235708_rm_group_charge_scope.sql`). This uses the legacy tree path
 that R&M already uses for its client organisations. R&M masters and admins
 reach Mainland by tree descent. Mainland's users gain no upward access to R&M,
-and Mainland's own clients stay own-rooted. Other new organisations remain
-own-rooted under Model A.
+and Mainland's own clients stayed own-rooted under the then-current Model A.
+The 2026-11-01 owner ruling below supersedes that client-parenting rule; new
+client organisations are now grouped beneath R&M.
 
 Owner choice `scope=rm_group`: the R&M group charge-code catalog (OneFortyOne
 numbering) is owned by R&M and copied to R&M's tree (including Mainland) and
@@ -480,3 +546,124 @@ How the build holds this:
   `20261028090000_monthly_fee_drawdown.sql`, audited. It is the only R&M
   fixed-price agreement; the others without a fee were pay as you use and
   were switched to `pay_as_you_go` (migration `20261029100000`).
+
+## Owner ruling 2026-11-01 — one service provider; client approval is not a condition of service
+
+Owner direction (Don Squires, 2026-11-01): the app is now only for R&M, with
+Iron Eagle as the only separate login for billing and app management; other
+organisations cannot sign up; and "we will also not require the client org to
+approve anything for service to be given."
+
+**One service provider.**
+
+- R & M Security and Investigations is the only service provider. Every
+  client organisation, with its places, observations, vehicles and people, is
+  served under R&M. Client organisations remain distinct identities and are
+  grouped under R&M for the single-provider operating model; this does not
+  transfer ownership of a client's accountability or the place of harm.
+- Iron Eagle Security remains the platform owner for billing and app
+  management only. The platform-owner boundary above still applies to it.
+- No other organisation may sign up as a provider or subscriber; the
+  subscriber provisioning path closes.
+- Client organisations still sign in to the client portal, and client reports
+  are still created and released under Oracle governance.
+- Operational records from prior providers move into R&M's operating custody
+  with an auditable provenance ledger. The migration preserves client and place
+  anchors, original authorship, timestamps, evidence and factual content; it
+  does not recast R&M as the owner of the underlying accountability. Provider-
+  private financial and commercial records remain with their originating
+  organisation. Other provider organisations and test records are archived,
+  never deleted.
+- Locations remain canonical places. A transfer changes only the organisation
+  responsible for the house or work record where the source data proves that
+  change is needed; proximity is not a basis to merge or replace a place.
+- The database rejects new provider/owner organisations and new operational
+  agreements outside the R&M tree. New client organisations are placed under
+  R&M. Existing client portal access and Oracle-governed report creation remain
+  available only through the governed invitation path. The initial account
+  boundary deactivates existing profiles seated outside the active R&M and
+  Iron Eagle organisation trees, including client seats that have not been
+  formally invited; employer affiliation does not override the seated
+  organisation. Profiles are retained for audit and reversible recovery.
+- Status: the service-without-client-approval rule is live in migration
+  `20261102120000_service_without_client_approval.sql`. Repository Auth
+  defaults disable global and email public sign-up, and the hosted Auth
+  setting is closed (verified 2026-11-02: the public settings endpoint reports
+  `disable_signup: true` and a public sign-up request is rejected with
+  `signup_disabled`). The consolidation is a separate release; until it ships,
+  R&M-only is the target, not the complete live state.
+  The account-boundary migration fails closed if any Auth user lacks a profile
+  or any active profile remains outside the retained organisation trees.
+  Deactivated profiles are not hydrated into the app, the enforcement-operator
+  predicate rejects them, and individual user-management changes use one
+  transactional update-and-audit RPC. Deactivation also bans the Auth user
+  (sign-in and refresh fail) and deletes their Auth sessions, so Auth and every
+  Edge Function that validates with `getUser()` reject access tokens already
+  issued. PostgREST trusts an unexpired JWT by signature alone, so every RLS
+  role helper checks `deactivated_at`, helpers that policies hand `auth.uid()`
+  as an argument (task entitlement for observations and assessments, the
+  platform-owner check for Bob's self-memory) return false for a deactivated
+  profile, and tables whose policies read `user_profiles` inline carry the
+  restrictive `deactivated_account_guard` policy
+  (`test/deactivated-account-guard.test.js` holds these rules against
+  `supabase/schema.sql`). Roster-only profiles with no Auth account are audited
+  in `audit_log`, because the user-management audit is keyed to Auth users.
+  Follow-up migration `20261102160000_revoke_anon_execute_from_deactivation_helpers.sql`
+  revokes direct `PUBLIC`/`anon` execution on the six policy helpers and changes
+  their ten helper-backed policies from `public` to `authenticated`; it keeps
+  authenticated and service-role helper access intact. Applied 2026-11-02
+  (#296); the live catalog shows all six helpers closed to `anon` and open to
+  `authenticated`, and anonymous calls to them are rejected.
+  A follow-on sweep found twenty more policies with no `TO` clause whose `true`
+  or `organization_id IS NULL` arm admitted the anonymous key. Through them,
+  anonymous clients could read Atlas, Bob governance, org-less audit and
+  system-default rows, forge org-less audit rows, and read or erase the
+  invite rate-limit ledger. Migration
+  `20261102180000_close_anonymous_rls_exposure.sql` moves them to
+  `authenticated`, or to `service_role` where the policy was named for it. It
+  limits direct audit inserts to the caller's own action in an organisation it
+  can access, and makes the invite rate-limit RPC callable by the service role
+  only. `test/anonymous-rls-exposure.test.js` fails if any such PUBLIC policy
+  returns. Owner ruling 2026-11-01: org-less audit rows are platform records,
+  so `20261102190000_platform_only_orgless_audit_rows.sql` lets only the grand
+  master and a platform owner read them; organisation rows keep
+  `org_access_allowed`.
+  The remaining exposure, until the access token expires (at most one hour),
+  is a deactivated user's own self-row data and any definer RPC that reads
+  `user_profiles` directly instead of using the deactivation-aware helpers.
+  Recorded finding (2026-11-02): the hosted project's Auth settings reported
+  `disable_signup: false` although no app path calls public sign-up; the
+  invite-only ruling requires the hosted setting itself to be closed, and
+  administrative invitation and user creation are unaffected by it. Resolved
+  the same day by changing only that hosted setting.
+
+**Client approval is not a condition of service.**
+
+- A provider's current operational agreement (inside its `starts_on` /
+  `ends_on` window) is enough to configure, deliver, record, report on and
+  invoice its service. Neither client acceptance nor a provider attestation
+  is required.
+- `service_agreements.invitation_status` records the client-portal invitation
+  lifecycle only. `external_refs.engagement_confirmation` is provenance (who
+  confirmed the engagement, and when). Neither grants nor withholds provider
+  authority.
+- Accepting a quote records the commercial acceptance on the quote and makes
+  its agreement operational. It no longer marks the portal invitation
+  accepted; the agreement keeps whatever invitation status it already had.
+- Invoicing no longer waits for client approval or a finance-share invite.
+  Finance, reporting, obligations, schedules, zone coverage and module
+  assignment can be configured on any operational agreement.
+- Client-side disclosure keeps acceptance. A client reads the provider's
+  evidence (`has_location_access(..., 'client_reads_provider')`) and
+  cross-organisation continuity is published
+  (`publish_location_event_continuity`) only on an accepted portal agreement.
+  Accepting the invitation is how a client opts in to seeing the provider's
+  records.
+- Expired and future agreements still do not authorise managing a client's
+  account and places or field capture. Historical reports, identity history
+  and finance posting stay reachable for agreements the provider held,
+  because the custodian keeps the record.
+- Several current agreements for one client still need an explicit
+  administrative choice; no path silently picks one.
+- Migration `20261102120000_service_without_client_approval.sql` implements
+  this part; `test/service-without-client-approval.test.js` holds it.

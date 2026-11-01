@@ -71,6 +71,38 @@ test('backend handoff claims, verifies, registers evidence, and finishes in orde
   }
 });
 
+test('backend handoff records its failing stage without replacing the original error', async () => {
+  const repo = fixture();
+  const summaries = [];
+  const registrationError = Object.assign(new Error('private storage detail'), { code: 'E_UPLOAD' });
+  try {
+    await assert.rejects(runBackendHandoff({
+      supabase: {},
+      job: { id: 'job-1', organization_id: 'org-1', target_sha: repo.sha },
+      step: { id: 'step-4', builder_mode: 'backend_engineer' },
+      patchArtifact: { id: 'patch-1' }, sourceDir: repo.root,
+      workerImage: 'worker:test', runnerId: 'runner-1',
+      loadPatch: async () => ({ bytes: Buffer.from(proposal) }),
+      claim: async () => ({ run_id: 'run-1', lease_token: 'lease', organization_id: 'org-1', job_id: 'job-1' }),
+      resetRetry: async () => {},
+      execute: async options => {
+        fs.writeFileSync(path.join(options.artifactDir, 'backend-verification.json'), JSON.stringify({ succeeded: false }));
+        return { status: 'failed', exitCode: 1 };
+      },
+      registerOutput: async () => { throw registrationError; },
+      finish: async (_client, _lease, _succeeded, _exitCode, summary) => {
+        summaries.push(summary);
+        return { status: 'failed' };
+      }
+    }), error => error === registrationError);
+
+    assert.deepEqual(summaries, ['Backend worker handoff failed during registering build-log evidence (Error code=E_UPLOAD)']);
+    assert.doesNotMatch(summaries[0], /private storage detail/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('a verifier container that never ran (docker exit 125, no evidence) is an infrastructure failure, not the patch\'s (live job a0379a3d: image pruned)', async () => {
   const repo = fixture();
   const finishes = [];

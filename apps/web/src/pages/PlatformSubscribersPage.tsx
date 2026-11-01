@@ -1,16 +1,16 @@
 /**
  * PlatformSubscribersPage.tsx (nav id: platform-subscribers) — the owner console.
  *
- * Iron Eagle manages each subscriber's platform subscription here: provision,
- * invite or recover the master user, suspend / reinstate / cancel, and watch
+ * Iron Eagle manages the R&M platform subscription here: invite or recover
+ * the master user, suspend / reinstate / cancel, and watch
  * aggregate activity. It reads platform_list_subscribers() (counts and last
- * sign-in only) and writes only through platform_provision_subscriber,
- * platform_set_subscriber_status, and the invite-org edge function. It never
- * reads a subscriber's operational or financial records (owner ruling
- * 2026-09-15, docs/canon/ORG_SERVICE_MODEL.md § Platform-owner boundary).
+ * sign-in only) and writes only through platform_set_subscriber_status and
+ * the invite-org edge function. Provider provisioning is migration-only. It never
+ * reads a subscriber's operational or financial records (owner rulings
+ * 2026-09-15 and 2026-11-01, docs/canon/ORG_SERVICE_MODEL.md).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, KeyRound, Mail, PauseCircle, PlayCircle, Plus, RefreshCw, XCircle } from 'lucide-react';
+import { Building2, KeyRound, Mail, PauseCircle, PlayCircle, RefreshCw, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { PLATFORM_MODULE_MANIFEST } from '../config/platformModuleManifest';
@@ -24,9 +24,6 @@ interface SubscriberRow {
   user_count: number; active_user_count: number; master_count: number; last_sign_in_at: string | null;
   shifts_30d: number; jobs_30d: number; sites: number; branches: number;
 }
-interface CatalogModule { module_key: string; active: boolean; }
-
-const DEFAULT_MODULES = ['patrol', 'rostering', 'finance', 'invoicing', 'noise_control', 'client_reporting', 'crm', 'hr', 'dispatch', 'cctv'];
 
 function moduleLabel(key: string): string {
   return PLATFORM_MODULE_MANIFEST.find((module) => module.key === key)?.label ?? key.split('_').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -40,14 +37,10 @@ function relative(iso: string | null): string {
 const PlatformSubscribersPage: React.FC = () => {
   const { profile } = useAuth();
   const [rows, setRows] = useState<SubscriberRow[]>([]);
-  const [catalog, setCatalog] = useState<CatalogModule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showProvision, setShowProvision] = useState(false);
-  const [provisionForm, setProvisionForm] = useState({ name: '', modules: DEFAULT_MODULES });
-  const [provisionRequestId, setProvisionRequestId] = useState(() => crypto.randomUUID());
   const [inviteFor, setInviteFor] = useState<SubscriberRow | null>(null);
   const [inviteForm, setInviteForm] = useState({ email: '', displayName: '' });
   const [statusFor, setStatusFor] = useState<{ row: SubscriberRow; next: 'suspended' | 'cancelled' } | null>(null);
@@ -55,39 +48,18 @@ const PlatformSubscribersPage: React.FC = () => {
 
   const isGrandMaster = profile?.role === 'grand_master';
 
-  // ATLAS READS: platform_list_subscribers (rpc), module_catalog
+  // ATLAS READS: platform_list_subscribers (rpc)
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    const [listRes, catalogRes] = await Promise.all([
-      supabase.rpc('platform_list_subscribers'),
-      supabase.from('module_catalog').select('module_key,active').eq('active', true).order('module_key'),
-    ]);
-    if (listRes.error || catalogRes.error) setError(listRes.error?.message ?? catalogRes.error?.message ?? 'Subscribers could not be loaded.');
-    else { setRows((listRes.data as SubscriberRow[]) ?? []); setCatalog((catalogRes.data as CatalogModule[]) ?? []); }
+    const listRes = await supabase.rpc('platform_list_subscribers');
+    if (listRes.error) setError(listRes.error.message);
+    else setRows((listRes.data as SubscriberRow[]) ?? []);
     setLoading(false);
   }, []);
   useEffect(() => { if (isGrandMaster) void load(); else setLoading(false); }, [isGrandMaster, load]);
 
   const live = useMemo(() => rows.filter((row) => row.status !== 'archived'), [rows]);
   const archived = useMemo(() => rows.filter((row) => row.status === 'archived'), [rows]);
-
-  const provision = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!provisionForm.name.trim() || provisionForm.modules.length === 0) return;
-    setSaving(true); setError(null); setNotice(null);
-    const { data, error: rpcError } = await supabase.rpc('platform_provision_subscriber', { p_client_request_id: provisionRequestId, p_organization_id: null, p_name: provisionForm.name.trim(), p_module_keys: provisionForm.modules, p_starts_on: new Date().toISOString().slice(0, 10) });
-    if (rpcError || !data) setError(rpcError?.message ?? 'Provisioning was not confirmed.');
-    else {
-      const receipt = data as { organization_id: string; name: string; module_keys: string[] };
-      setNotice(`${receipt.name} is set up with ${receipt.module_keys.length} modules. Next: invite its first master user.`);
-      setShowProvision(false); setProvisionForm({ name: '', modules: DEFAULT_MODULES }); setProvisionRequestId(crypto.randomUUID());
-      await load();
-      const created = (await supabase.rpc('platform_list_subscribers')).data as SubscriberRow[] | null;
-      const row = created?.find((candidate) => candidate.organization_id === receipt.organization_id);
-      if (row) { setInviteFor(row); setInviteForm({ email: '', displayName: '' }); }
-    }
-    setSaving(false);
-  };
 
   const invite = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -120,22 +92,13 @@ const PlatformSubscribersPage: React.FC = () => {
   if (loading) return <div className="page-container"><div className="loading-state"><div className="spinner" /><p>Loading subscribers</p></div></div>;
 
   return <div className="page-container platform-subscribers">
-    <header className="page-header"><div><h1>Subscribers</h1><p className="subtitle">Organisations that subscribe to the platform. You manage their subscription and their master login here; their operational and financial records are theirs alone.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} aria-label="Refresh subscribers"><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowProvision((value) => !value)}><Plus size={16} />{showProvision ? 'Cancel' : 'New subscriber'}</button></div></header>
+    <header className="page-header"><div><h1>Service provider</h1><p className="subtitle">R&amp;M is the only service provider. Iron Eagle manages its platform subscription and master login here; client organisations and their operational records remain separate.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} aria-label="Refresh service provider"><RefreshCw size={16} /></button></div></header>
     {error && <div className="alert alert-error" role="alert"><button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">×</button>{error}</div>}
     {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
-    {showProvision && <form className="assessment-form platform-provision-form" onSubmit={provision} aria-label="New subscriber">
-      <h2>New subscriber</h2>
-      <label><span>Organisation name</span><input required maxLength={200} value={provisionForm.name} onChange={(event) => setProvisionForm({ ...provisionForm, name: event.target.value })} placeholder="e.g. Harbour Security Ltd" /></label>
-      <fieldset className="platform-module-picks"><legend>Modules in the subscription</legend>
-        {catalog.map((module) => <label key={module.module_key}><input type="checkbox" checked={provisionForm.modules.includes(module.module_key)} onChange={(event) => setProvisionForm({ ...provisionForm, modules: event.target.checked ? [...provisionForm.modules, module.module_key] : provisionForm.modules.filter((key) => key !== module.module_key) })} /> {moduleLabel(module.module_key)}</label>)}
-      </fieldset>
-      <div className="platform-form-actions"><small>Creates the organisation and its platform agreement, turns the modules on, then asks you for the first master's email.</small><button type="submit" className="btn btn-primary" disabled={saving || !provisionForm.name.trim() || provisionForm.modules.length === 0}>{saving ? 'Setting up' : 'Set up subscriber'}</button></div>
-    </form>}
-
     <section className="reports-section" aria-labelledby="live-subscribers-title">
       <h2 id="live-subscribers-title">Active and suspended ({live.length})</h2>
-      {live.length === 0 ? <div className="empty-state"><p>No subscribers yet. Set one up above.</p></div> : <ul className="platform-subscriber-list" aria-label="Subscribers">
+      {live.length === 0 ? <div className="empty-state"><p>No active service-provider subscription is listed. Provider onboarding is closed.</p></div> : <ul className="platform-subscriber-list" aria-label="Service provider">
         {live.map((row) => <li key={row.organization_id} className={`platform-subscriber ${row.status}`}>
           <div className="platform-subscriber-head"><Building2 size={18} /><div><h3>{row.name}</h3><small>{row.contact_email ?? 'No contact email'} · since {row.agreement_starts_on ?? new Date(row.created_at).toISOString().slice(0, 10)}{row.branches ? ` · ${row.branches} branch${row.branches === 1 ? '' : 'es'}` : ''}</small></div><span className={`status-badge status-${row.status === 'active' ? 'active' : 'suspended'}`}>{row.status}</span></div>
           <dl className="platform-subscriber-stats">

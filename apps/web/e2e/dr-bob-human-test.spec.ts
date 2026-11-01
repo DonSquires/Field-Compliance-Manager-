@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { installClientPortalFixtures, installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsClient, signInAsOfficer } from './fixtures';
 import { HumanTestSession } from './human-test-runner';
+import { isWriteOrDestructiveAction } from '../src/lib/humanTestActionPolicy';
 
 const liveMode = process.env.HUMAN_TEST_LIVE === 'true';
 const liveBaseUrl = process.env.HUMAN_TEST_BASE_URL || 'https://www.fcmanager.co.nz';
@@ -9,6 +10,8 @@ const officerEmail = liveMode ? (process.env.GRANDMASTER_TEST_EMAIL || '') : 'an
 const password = liveMode ? (process.env.GRANDMASTER_TEST_PASSWORD || '') : 'playwright-password';
 const liveOperatingOrganizationId = process.env.HUMAN_TEST_OPERATING_ORG_ID || '';
 const liveAdminRoute = process.env.HUMAN_TEST_ADMIN_ROUTE || '';
+// The live phase walks production as a person reads it; interactive walks stay in the fixture phase.
+const FIXTURE_ONLY = 'Fixture-backed walk: the fixture phase covers it; the live phase only observes production.';
 
 function contrastRatio(foreground: string, background: string): number {
   const channels = (color: string) => {
@@ -106,7 +109,7 @@ test.describe("Dr. Bob's human browser test", () => {
     if (liveMode) await session.verifyDeployment(liveBaseUrl);
     await signInAsHuman(page, session);
     await session.step('explore the visible admin navigation', () => session.walkVisibleAdminNavigation());
-    await session.step('open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());
+    await session.step(liveMode ? 'open safe tabs (live read-only: no field entry or submit)' : 'open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());
     await session.observe('final rendered state');
     await session.finish();
   });
@@ -171,7 +174,8 @@ test.describe("Dr. Bob's human browser test", () => {
     }
     // Whole words on enabled controls: "Start unscheduled shift" is a disabled write action, not a module.
     const safeModule = page.locator('button:enabled, a').filter({ hasText: /\b(?:schedule|dispatch|map|report|patrol)\b/i }).first();
-    if (await safeModule.isVisible({ timeout: 1500 }).catch(() => false)) {
+    const safeModuleLabel = (await safeModule.textContent({ timeout: 1000 }).catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
+    if (await safeModule.isVisible({ timeout: 1500 }).catch(() => false) && !isWriteOrDestructiveAction(safeModuleLabel)) {
       await safeModule.click();
       await page.waitForTimeout(300);
       await session.observe('first field module selected');
@@ -180,6 +184,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
+    test.skip(liveMode, FIXTURE_ONLY);
     test.setTimeout(300_000);
     const session = new HumanTestSession(page, testInfo);
     const enabledModules = ['dispatch', 'patrol', 'static_guarding', 'site_guard', 'welfare', 'freedom_camping', 'parking_enforcement', 'parking', 'noise_control', 'biosecurity', 'smoke_complaints', 'smoke_control', 'access_control', 'workshop', 'ems', 'overnight_verification', 'checkpoint_scan'];
@@ -213,6 +218,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('observes every admin route family without executing writes', async ({ page }, testInfo) => {
+    test.skip(liveMode, FIXTURE_ONLY);
     test.setTimeout(300_000);
     const session = new HumanTestSession(page, testInfo);
     await installSupabaseFixtures(page);
@@ -237,6 +243,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('keeps the app usable after handling the optional desktop companion prompt', async ({ page }, testInfo) => {
+    test.skip(liveMode, FIXTURE_ONLY);
     const session = new HumanTestSession(page, testInfo);
     await signInAsAdmin(page, '/admin');
     await expect(page.locator('.desktop-download-overlay [role="dialog"]')).toBeHidden();
@@ -248,7 +255,7 @@ test.describe("Dr. Bob's human browser test", () => {
     { name: 'Mission Control', routes: ['/admin/hub', '/admin/approvals'] },
     { name: 'Field Operations core', routes: ['/admin/field-ops', '/admin/field-ops?area=dispatch', '/admin/field-ops?area=patrol', '/admin/field-ops?area=live-map', '/admin/field-ops?area=field-reports', '/admin/field-ops?area=officer-activity', '/admin/field-ops?area=welfare-alerts', '/admin/field-ops?area=breach-review', '/admin/field-ops?area=vehicle-search', '/admin/field-ops?area=observation-search', '/admin/field-ops?area=debrief-followup'] },
     { name: 'Field specialties', routes: ['/admin/field-ops?area=parking', '/admin/field-ops?area=noise-control', '/admin/field-ops?area=biosecurity', '/admin/field-ops?area=smoke-control'] },
-    { name: 'Video evidence', routes: ['/admin/field-ops?area=cctv-console', '/admin/field-ops?area=cctv-triage', '/admin/field-ops?area=cctv-review', '/admin/field-ops?area=cctv-library', '/admin/field-ops?area=cctv-import'] },
+    { name: 'Video evidence', routes: ['/admin/field-ops?area=cctv-console', '/admin/field-ops?area=cctv-triage', '/admin/field-ops?area=cctv-quality', '/admin/field-ops?area=cctv-review', '/admin/field-ops?area=cctv-library', '/admin/field-ops?area=cctv-import'] },
     { name: 'Site and location workspaces', routes: ['/admin/site-360', '/admin/locations', '/admin/zones'] },
     { name: 'Geofence and Workshop', routes: ['/admin/sites', '/admin/workshop'] },
     { name: 'Clients and workforce', routes: ['/admin/crm', '/admin/relationships', '/admin/client-setup', '/admin/onboarding', '/admin/handoffs', '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/users'] },
@@ -274,6 +281,7 @@ test.describe("Dr. Bob's human browser test", () => {
   ];
   for (const group of officerControlGroups) {
     test(`follows safe Officer controls: ${group.name}`, async ({ page }, testInfo) => {
+      test.skip(liveMode, FIXTURE_ONLY);
       test.setTimeout(420_000);
       await installSupabaseFixtures(page, { officerModules: officerAuditModules });
       await page.route('**/rest/v1/user_profiles*', async (route) => {
@@ -289,6 +297,7 @@ test.describe("Dr. Bob's human browser test", () => {
   }
 
   test('follows safe client controls across full-module agreement pages', async ({ page }, testInfo) => {
+    test.skip(liveMode, FIXTURE_ONLY);
     test.setTimeout(900_000);
     const session = new HumanTestSession(page, testInfo);
     await installClientPortalFixtures(page, { mode: 'full_modules', reportsEnabled: true, financeEnabled: true, role: 'client_admin' });
@@ -300,6 +309,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('follows safe client controls for a scan-only agreement', async ({ page }, testInfo) => {
+    test.skip(liveMode, FIXTURE_ONLY);
     test.setTimeout(120_000);
     const session = new HumanTestSession(page, testInfo);
     await installClientPortalFixtures(page, { mode: 'scan_only', role: 'client_viewer' });

@@ -35,7 +35,7 @@ type AssetCondition = 'good' | 'minor_issue' | 'major_issue' | 'unserviceable';
 type AssetFuelLevel = '' | 'full' | 'three_quarter' | 'half' | 'quarter' | 'empty';interface OvertimeOffer { id: string; roster_slot_id: string; seniority_position: number; status: string; expires_at: string; }
 
 interface RosterSlot { id: string; work_unit_id: string; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
-interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; }
+interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; }
 
 interface CoverageRequest {
   id: string;

@@ -123,7 +123,7 @@ test('agentic author records a durable session and per-turn heartbeat before fin
   assert.deepEqual(writes[2].value.usage_metadata, { output_tokens: 40, phase: 'authored', turns: 3 });
 });
 
-test('required source scope and admitted partial handoffs fail closed', () => {
+test('required source scope and admitted partial handoffs fail closed', async t => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const { createBranchWorkspace } = require('../builder-branch-workspace');
@@ -140,7 +140,7 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     args: { summary: 'Implemented the first structural slice but did not complete the required layout.', tests: [], follow_ups: ['Complete layout.css'] }
   });
 
-  test('approved delivery requirements require changed-file acceptance evidence', () => {
+  await t.test('approved delivery requirements require changed-file acceptance evidence', () => {
     const specification = {
       delivery_requirements: [
         { id: 'DR-1', outcome: 'Responsive workspace', evidence: 'Mobile check', source_scope: ['apps/web/src/layout.css'] },
@@ -231,7 +231,7 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css provides the layout' },
     { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx provides the updated application' }
   ]);
-  fs.rmSync(repo.root, { recursive: true, force: true });
+  fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 function makeRepo() {
@@ -308,6 +308,32 @@ test('a process interruption resumes completed edits and tool context from disk 
   }
 });
 
+test('confirmed code-review feedback invalidates a completed checkpoint even when task, target and input artifacts are unchanged', async () => {
+  const repo = makeRepo();
+  const input = {
+    supabase: null, gateway: {}, job: { id: 'correction000001', organization_id: 'org', target_sha: repo.sha, task_description: 'Fix sum' },
+    step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+    repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+  };
+  try {
+    const { callModel } = fakeModel([
+      { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'Correct addition and verify the result with its regression test.', tests: ['node --test test/sum.test.js'] } },
+    ]);
+    const first = await runAgenticEngineer({ ...input, callModel });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    const correction = { approval_id: 'new-review', feedback: 'Check the reported boundary behavior.' };
+    await assert.rejects(runAgenticEngineer({ ...input, job: { ...input.job, code_review_revision: correction }, callModel: async ({ modelRequest }) => {
+      const packet = JSON.parse(modelRequest.request.messages[1].content);
+      assert.deepEqual(packet.confirmed_code_review_corrections, correction);
+      throw new Error('fresh correction reached model');
+    } }), /fresh correction reached model/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('an invalid repair seed stops before any model call instead of silently starting again', async () => {
   const repo = makeRepo();
   try {
@@ -319,6 +345,63 @@ test('an invalid repair seed stops before any model call instead of silently sta
     }), /continuation could not restore/);
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('owner-confirmed recovery invalidates a failed checkpoint and preserves structured sibling-lane routing', async () => {
+  const repo = makeRepo();
+  const input = {
+    supabase: null, gateway: {}, job: { id: 'lanerecovery001', organization_id: 'org', target_sha: repo.sha,
+      task_description: 'Fix the backend sum', code_review_revision: { approval_id: 'review' } },
+    step: { id: 's' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+    repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+  };
+  try {
+    const first = fakeModel([{ tool: 'finish', args: { no_change_reason: 'No changes: the backend owns lib/sum.js.',
+      no_change_lane: 'backend', no_change_file: 'lib/sum.js' } }]);
+    const result = await runAgenticEngineer({ ...input, callModel: first.callModel });
+    assert.equal(result.no_change, true);
+    assert.equal(result.no_change_lane, 'backend');
+    assert.equal(result.no_change_file, 'lib/sum.js');
+    const recovery = { ...input.job.code_review_revision, recovery_id: 'confirmed-recovery', recovery_feedback: 'Let the backend implement its fix.' };
+    await assert.rejects(runAgenticEngineer({ ...input, job: { ...input.job, code_review_revision: recovery },
+      callModel: async ({ modelRequest }) => {
+        const packet = JSON.parse(modelRequest.request.messages[1].content);
+        assert.deepEqual(packet.confirmed_code_review_corrections, recovery);
+        assert.doesNotMatch(JSON.stringify(modelRequest.request.messages), /Resumed from a durable checkpoint/);
+        throw new Error('fresh recovered author reached model');
+      } }), /fresh recovered author reached model/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test('recovered seeded lane retains its unchanged patch for fresh verification instead of skipping or claiming acceptance', async () => {
+  const repo = makeRepo();
+  const seed = 'diff --git a/apps/web/src/app.tsx b/apps/web/src/app.tsx\n--- a/apps/web/src/app.tsx\n+++ b/apps/web/src/app.tsx\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n';
+  try {
+    const model = fakeModel([{ tool: 'finish', args: {
+      no_change_reason: 'No additional frontend changes: the remaining repair belongs in lib/sum.js.',
+      no_change_lane: 'backend', no_change_file: 'lib/sum.js',
+    } }]);
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'seedrecovery001', organization_id: 'org', target_sha: repo.sha,
+        task_description: 'Fix the reported late failure', code_review_revision: { approval_id: 'review', recovery_id: 'recovery' } },
+      step: { id: 'step' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+      seedPatch: { text: seed, artifact_id: 'reviewed-seed' }, callModel: model.callModel,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(model.seen.length, 1);
+    assert.match(result.proposal.patch, /\+export const a = 2/);
+    assert.equal(result.proposal.retained_seed_artifact_id, 'reviewed-seed');
+    assert.deepEqual(result.proposal.changed_files, ['apps/web/src/app.tsx']);
+    assert.deepEqual(result.proposal.acceptance_evidence, []);
+    assert.deepEqual(result.proposal.verified_runs, []);
+    assert.match(result.proposal.tests_not_run_reason, /must freshly verify/);
+    assert.equal(result.no_change, false, 'retained patch goes to the normal worker, not the skip path');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
 
@@ -560,6 +643,15 @@ test('outline indexes the declarations of a big file with line numbers; search c
   const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'ab1eab1eab1eab1eab1eab1e', targetSha: repo.sha });
   const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
   const outline = tools.outline({ path: 'test/sum.test.js' });
+  for (const args of [{}, { path: '.' }, { path: './' }, { path: '' }]) {
+    const listed = tools.list_dir(args);
+    assert.equal(listed.path, '.');
+    assert.ok(listed.entries.includes('lib/'));
+    assert.ok(listed.entries.includes('test/'));
+    assert.ok(!listed.entries.includes('.git'));
+  }
+  assert.throws(() => tools.list_dir({ path: '../' }), /unsafe path|escapes/);
+  assert.throws(() => tools.read_file({ path: '.' }), /unsafe path/);
   assert.equal(outline.total_lines, 5);
   assert.match(outline.entries.join('\n'), /^1: const test = require/m);
   assert.match(tools.outline({ path: 'lib/sum.js', pattern: '[' }).error, /not a valid regular expression/);
@@ -687,6 +779,138 @@ test('web test commands override a production worker environment with NODE_ENV=t
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted command (job 402bfd7e) and names exact forms when refusing', async () => {
+  const { normalizeRunCommand } = require('../builder-agentic-engineer');
+  assert.equal(normalizeRunCommand('cd apps/web && npm test -- --run src/components/BuilderChatPanel.test.tsx'), 'npm test --prefix apps/web -- src/components/BuilderChatPanel.test.tsx');
+  assert.equal(normalizeRunCommand('npm test -- apps/web/src/a.test.tsx'), 'npm test --prefix apps/web -- src/a.test.tsx');
+  assert.equal(normalizeRunCommand('node --test apps/web/src/components/BuilderChatPanel.test.tsx'), 'npm test --prefix apps/web -- src/components/BuilderChatPanel.test.tsx');
+  assert.equal(normalizeRunCommand('npm run test --prefix apps/web -- --run src/a.test.tsx'), 'npm run test --prefix apps/web -- --run src/a.test.tsx', 'an already-allowlisted form is untouched');
+  assert.equal(normalizeRunCommand('cd apps/web && npm run lint'), 'npm run lint --prefix apps/web');
+  assert.equal(normalizeRunCommand('cd apps/web && npx tsc --noEmit'), 'npm run lint --prefix apps/web');
+  assert.equal(normalizeRunCommand('node --test test/sum.test.js'), 'node --test test/sum.test.js');
+  assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'cd apps/web && npm test', 'an unbounded run is not invented into a bounded one');
+  assert.equal(normalizeRunCommand('cd apps/web && npm run lint && rm -rf src'), 'cd apps/web && npm run lint && rm -rf src', 'a cd chain with any disallowed part is left for refusal');
+  assert.equal(normalizeRunCommand('cd apps/web && git diff src/App.tsx'), 'cd apps/web && git diff src/App.tsx', 'dropping the cd would move a relative git path to the repository root');
+  assert.equal(normalizeRunCommand('cd apps/web && npm run lint && git checkout -- src'), 'cd apps/web && npm run lint && git checkout -- src', 'no part of a cd chain runs unless every part is allowlisted');
+  assert.equal(normalizeRunCommand('npx vitest run src/a.test.tsx'), 'npx vitest run src/a.test.tsx', 'a bare path is only treated as web when it exists under apps/web');
+
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web-fixture', scripts: { test: 'node print-args.cjs' } }));
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'print-args.cjs'), "process.stdout.write(`args:${process.argv.slice(2).join(',')}`);\n");
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'src', 'app.test.tsx'), "it('renders', () => {});\n");
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'web fixture']);
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: '402bfd7e402bfd7e402bfd7e', targetSha: repo.git(['rev-parse', 'HEAD']) });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  try {
+    assert.equal(normalizeRunCommand('npx vitest run src/app.test.tsx', ws.workspacePath), 'npm test --prefix apps/web -- src/app.test.tsx');
+    const ran = await tools.run({ command: 'cd apps/web && npm test -- --run src/app.test.tsx' });
+    assert.equal(ran.exit_code, 0, JSON.stringify(ran));
+    assert.equal(ran.command, 'npm test --prefix apps/web -- src/app.test.tsx');
+    assert.equal(ran.normalized_from, 'cd apps/web && npm test -- --run src/app.test.tsx');
+    assert.match(ran.stdout, /args:src\/app\.test\.tsx/);
+    const refused = await tools.run({ command: 'cd apps/web && npm install' });
+    assert.match(refused.error, /command not allowed; use exactly one of: .*npm test --prefix apps\/web -- src\/<path>\.test\.tsx/);
+    assert.match(refused.error, /Playwright specs that only the independent verifier runs/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('author tools refuse every edit that drops a pinned regression test; the author\'s own new tests stay editable (job 402bfd7e)', () => {
+  const repo = makeRepo();
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: '7e5770007e5770007e577000', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const testPath = path.join(ws.workspacePath, 'test', 'sum.test.js');
+  const pinned = fs.readFileSync(testPath, 'utf8');
+  const header = "const test = require('node:test');\nconst assert = require('node:assert/strict');\nconst { sum } = require('../lib/sum');\n";
+  try {
+    const overwrite = tools.write_file({ path: 'test/sum.test.js', content: `${header}test('sum adds negatives', () => assert.equal(sum(-1, -2), -3));\n` });
+    assert.match(overwrite.error, /test\/sum\.test\.js would remove existing regression tests \("sum adds"\)/);
+    assert.match(overwrite.error, /git show HEAD:<file>/);
+    assert.equal(fs.readFileSync(testPath, 'utf8'), pinned, 'a refused write leaves the file untouched');
+
+    const extended = tools.replace_in_file({ path: 'test/sum.test.js', old_text: "test('sum adds', () => assert.equal(sum(2, 3), 5));\n", new_text: "test('sum adds', () => assert.equal(sum(2, 3), 5));\ntest('sum adds zero', () => assert.equal(sum(2, 0), 2));\n" });
+    assert.ok(!extended.error, JSON.stringify(extended));
+    const ownRemoved = tools.replace_in_file({ path: 'test/sum.test.js', old_text: "test('sum adds zero', () => assert.equal(sum(2, 0), 2));\n", new_text: '' });
+    assert.ok(!ownRemoved.error, 'a test the author added this job may be removed again');
+    const assertionEdited = tools.replace_in_file({ path: 'test/sum.test.js', old_text: 'sum(2, 3), 5', new_text: 'sum(3, 3), 6' });
+    assert.ok(!assertionEdited.error, 'an assertion may change in place under the same title');
+
+    assert.match(tools.replace_in_file({ path: 'test/sum.test.js', old_text: "test('sum adds'", new_text: "test('sum totals'" }).error, /would remove existing regression tests \("sum adds"\)/, 'a rename drops the pinned title');
+    assert.match(tools.delete_file({ path: 'test/sum.test.js' }).error, /would remove existing regression tests/);
+    assert.ok(fs.existsSync(testPath));
+
+    const current = fs.readFileSync(testPath, 'utf8');
+    const envelope = ['*** Begin Patch', '*** Delete File: test/sum.test.js', '*** End Patch'].join('\n');
+    assert.match(tools.apply_patch({ diff: envelope }).error, /^patch refused: test\/sum\.test\.js would remove/);
+    const diff = [
+      'diff --git a/lib/sum.js b/lib/sum.js', '--- a/lib/sum.js', '+++ b/lib/sum.js', '@@ -1,2 +1,2 @@', " 'use strict';", '-module.exports = { sum: (a, b) => a - b };', '+module.exports = { sum: (a, b) => a + b };',
+      'diff --git a/test/sum.test.js b/test/sum.test.js', '--- a/test/sum.test.js', '+++ b/test/sum.test.js', '@@ -4 +4 @@', "-test('sum adds', () => assert.equal(sum(3, 3), 6));", "+test('sum totals', () => assert.equal(sum(3, 3), 6));", '',
+    ].join('\n');
+    const patched = tools.apply_patch({ diff });
+    assert.match(patched.error, /^patch refused: test\/sum\.test\.js would remove existing regression tests \("sum adds"\).*the whole patch was reverted/);
+    assert.equal(fs.readFileSync(testPath, 'utf8'), current);
+    assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib', 'sum.js'), 'utf8'), /a - b/, 'the non-test half of the refused patch is reverted too');
+    const newFile = tools.write_file({ path: 'test/double.test.js', content: "const test = require('node:test');\ntest('doubles', () => {});\n" });
+    assert.ok(!newFile.error, 'new test files are unaffected');
+
+    // Git's own parse finds renames and non-a/b prefixes that header regexes miss; the full patch is restored.
+    const disable = ['diff --git a/test/sum.test.js b/test/sum.test.js.disabled', 'similarity index 100%', 'rename from test/sum.test.js', 'rename to test/sum.test.js.disabled', ''].join('\n');
+    assert.match(tools.apply_patch({ diff: disable }).error, /^patch refused: test\/sum\.test\.js would remove existing regression tests/);
+    assert.equal(fs.readFileSync(testPath, 'utf8'), current);
+    assert.equal(fs.existsSync(`${testPath}.disabled`), false);
+    const prefixed = [
+      'diff --git i/lib/sum.js w/lib/total.js', 'similarity index 100%', 'rename from lib/sum.js', 'rename to lib/total.js',
+      'diff --git i/test/sum.test.js w/test/sum.test.js', '--- i/test/sum.test.js', '+++ w/test/sum.test.js', '@@ -4 +4 @@', "-test('sum adds', () => assert.equal(sum(3, 3), 6));", "+test('sum totals', () => assert.equal(sum(3, 3), 6));", '',
+    ].join('\n');
+    assert.match(tools.apply_patch({ diff: prefixed }).error, /^patch refused: test\/sum\.test\.js would remove.*the whole patch was reverted/);
+    assert.equal(fs.readFileSync(testPath, 'utf8'), current);
+    assert.ok(fs.existsSync(path.join(ws.workspacePath, 'lib', 'sum.js')), 'the rename in the refused patch is undone');
+    assert.equal(fs.existsSync(path.join(ws.workspacePath, 'lib', 'total.js')), false);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('finish is refused while a pinned test is missing (a seeded patch may have dropped it); web Vitest runs count as test evidence', async () => {
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web-fixture', scripts: { test: 'node -e ""' } }));
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'web fixture']);
+  const sha = repo.git(['rev-parse', 'HEAD']);
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  try {
+    const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'f1e1d0f1e1d0f1e1d0f1e1d0', targetSha: sha });
+    const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+    fs.writeFileSync(path.join(ws.workspacePath, 'test', 'sum.test.js'), "const test = require('node:test');\ntest('placeholder', () => {});\n");
+    await tools.run({ command: 'node --test test/sum.test.js' });
+    const refused = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args: { summary: 'Replace the sum test; verified with node --test.', tests: ['node --test test/sum.test.js'] } });
+    assert.match(refused.error, /^finish refused: test\/sum\.test\.js would remove existing regression tests \("sum adds"\)/);
+    // A rename (for example through a run command) is checked under the pinned path, not the new name.
+    fs.writeFileSync(path.join(ws.workspacePath, 'test', 'sum.test.js'), fs.readFileSync(path.join(repo.source, 'test', 'sum.test.js')));
+    fs.renameSync(path.join(ws.workspacePath, 'test', 'sum.test.js'), path.join(ws.workspacePath, 'test', 'sum.test.js.disabled'));
+    fs.writeFileSync(path.join(ws.workspacePath, 'lib', 'sum.js'), "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n");
+    const renamed = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args: { summary: 'Fix sum and park the old test; verified by reading.', tests: [] } });
+    assert.match(renamed.error, /^finish refused: test\/sum\.test\.js would remove existing regression tests \("sum adds"\)/);
+
+    const webWs = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces-web'), jobId: 'b0b0b0b0b0b0b0b0b0b0b0b0', targetSha: sha });
+    const webTools = createTools({ workspacePath: webWs.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+    fs.writeFileSync(path.join(webWs.workspacePath, 'apps', 'web', 'src', 'app.test.tsx'), "it('renders', () => {});\n");
+    const args = { summary: 'Add an app render test; verified with the web test runner.', tests: ['npm test --prefix apps/web -- src/app.test.tsx'] };
+    assert.match(buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: webTools, args }).error, /touches tests but no `node --test …` run passed.*npm test --prefix apps\/web -- src\/<path>\.test\.tsx/);
+    const ran = await webTools.run({ command: 'npm test --prefix apps/web -- src/app.test.tsx' });
+    assert.equal(ran.exit_code, 0, JSON.stringify(ran));
+    const ok = buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: webTools, args });
+    assert.ok(ok.proposal, JSON.stringify(ok));
+    assert.deepEqual(ok.proposal.verified_runs.map(r => [r.command, r.exit_code]), [['npm test --prefix apps/web -- src/app.test.tsx', 0]]);
+  } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }
 });
@@ -1380,7 +1604,10 @@ test('atlas and live_count give Bob live terrain and aggregate checks without te
   assert.deepEqual(gaps.rows, [{ node_name: 'bob_atlas_gap_report' }]);
   const reach = await tools.atlas({ action: 'blast_radius', name: 'vehicles', type: 'table' });
   assert.ok(Array.isArray(reach.flow_reach) && Array.isArray(reach.fk_reach));
-  assert.match(reach.note, /fk_reach is structural/);
+  assert.match(reach.note, /fk_reach maps structural/);
+  assert.match(reach.note, /Atlas is a map, not evidence/);
+  assert.match(reach.note, /Investigate the mapped source\/schema and verify execution separately/);
+  assert.doesNotMatch(reach.note, /proven data flow/i);
   assert.match((await tools.atlas({ action: 'capability_map' })).error, /name is required/);
   assert.match((await tools.atlas({ action: 'drop_table', name: 'x' })).error, /action must be/);
 

@@ -47,7 +47,7 @@ test('invite-org takes authority and role from resolve_org_invitation, run as th
   assert.match(inviteOrg, /p_role: role,/);
   assert.match(inviteOrg, /employer_organization_id: targetOrgId,/);
   assert.doesNotMatch(inviteOrg, /\.from\('service_agreements'\)\.select\('id, ends_on'\)/);
-  assert.match(inviteOrg, /const CAN_INVITE_ORG = \[\s*'grand_master',\s*'master',\s*'admin'\s*\];/);
+  assert.match(inviteOrg, /const CAN_INVITE_ORG = \[\s*'grand_master',\s*'master',\s*'admin',\s*'admin_officer'\s*\];/);
   // recovery stays owner-only
   assert.match(inviteOrg, /if \(callerProfile\.role !== 'grand_master'\) \{[\s\S]{0,600}'org_recovery_denied'/);
 });
@@ -91,6 +91,7 @@ test("the client's administrator manages their own people from the client portal
   const panel = read('apps/web/src/components/ClientPeoplePanel.tsx');
   const access = read('apps/web/src/lib/clientPortalAccess.ts');
   const deactivate = read('supabase/functions/deactivate-user/index.ts');
+  const deactivation = read('supabase/migrations/20261102140000_rm_verified_only_operational_custody_consolidation.sql');
   assert.match(access, /if \(role === 'client_admin'\) pages\.add\('people'\);/);
   assert.match(panel, /\.eq\('organization_id', organizationId\)\.like\('role', 'client_%'\)/);
   assert.match(panel, /functions\.invoke\('create-user', \{ body: \{ email: form\.email\.trim\(\), display_name: form\.name\.trim\(\), role: form\.role, organization_id: organizationId \} \}\)/);
@@ -98,8 +99,11 @@ test("the client's administrator manages their own people from the client portal
   assert.match(panel, /Your service provider's staff never have accounts at your organisation; they see your places through the service agreement\./);
   // the administrator cannot remove their own access from here
   assert.match(panel, /const me = person\.id === currentUserId;/);
-  assert.match(deactivate, /'admin',\s*'client_admin'\s*\];/);
-  assert.match(deactivate, /if \(currentProfile\.role === 'client_admin' && !String\(targetUser\.role\)\.startsWith\('client_'\)\)/);
+  // deactivation authority lives in the audited RPC; the Edge Function only relays the caller's request
+  assert.match(deactivate, /userClient\.rpc\('set_user_deactivation'/);
+  assert.match(deactivation, /v_actor\.role NOT IN \('grand_master', 'master', 'admin', 'admin_officer', 'client_admin'\)/);
+  assert.match(deactivation, /IF v_actor\.role = 'client_admin' AND left\(v_target\.role, 7\) <> 'client_' THEN/);
+  assert.match(deactivation, /IF v_actor\.role <> 'grand_master' AND v_target\.organization_id IS DISTINCT FROM v_actor\.organization_id THEN/);
 });
 
 test('when the client accepts, the person who invited them is told and the notification opens that Client Portfolio', () => {

@@ -37,7 +37,8 @@ const CORS = {
 const CAN_SEND = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 type Invoice = {
   id: string;

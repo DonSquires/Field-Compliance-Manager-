@@ -6,6 +6,7 @@
  * inventing ownership. Contacts and delivery use their existing governed writers.
  */
 
+import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -16,7 +17,7 @@ import { describeDrawdown, drawdownAdjustment, monthBounds, overrunJustification
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, CrmPrimaryContactEditor, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
-import ClientSetupPage from './ClientSetupPage';
+import { ServiceClientWorkspace } from '../components/ServiceClientWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import { PriceListPicker } from '../components/PriceListPicker';
@@ -131,7 +132,7 @@ interface InvoiceRow {
 interface InvoiceReadiness {
   accountName: string;
   agreementName: string;
-  source: 'accepted_quote' | 'commercial_rate' | 'client_approval_required' | 'missing';
+  source: 'accepted_quote' | 'commercial_rate' | 'missing';
   detail: string;
   billingCycle: string | null;
   paymentTerms: string | null;
@@ -204,6 +205,13 @@ interface CrmState {
   loading: boolean;
   error: string | null;
 }
+
+// The workspace toolbar is hidden on the directory, so optional follow-up work is linked here.
+const FOLLOW_UP_LINKS = [
+  { page: 'relationships', label: 'Agreements & services' },
+  { page: 'onboarding', label: 'Activation checklist' },
+  { page: 'handoffs', label: 'Service handoffs' },
+] as const;
 
 const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
   const location = useLocation();
@@ -821,8 +829,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       setInvoiceReadiness({
         accountName: agreement.counterparty_name,
         agreementName: agreement.name,
-        source: agreement.invitation_status !== 'accepted' ? 'client_approval_required' : quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
-        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)} excl. GST.` : 'No accepted quote lines or commercial base rate are configured.',
+        source: quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
+        detail: quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)} excl. GST.` : 'No accepted quote lines or commercial base rate are configured.',
         billingCycle: settings?.billing_cycle ?? null,
         paymentTerms: settings ? describePaymentTerms(settings) : null,
         commercialModel: settings?.commercial_model ?? null,
@@ -1538,6 +1546,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           <button type="button" className="btn btn-secondary" onClick={() => setOrganizationDialog('create')} title="Add a provider, council or other organisation without the guided setup">Add other organisation</button>
         </div>
       </header>
+      <nav className="crm-follow-up-links" aria-label="Client follow-up work">
+        <span>Follow-up work</span>
+        {FOLLOW_UP_LINKS.map((link) => <button type="button" className="btn btn-sm btn-secondary" key={link.page} onClick={() => { if ((directoryDirty.contact || directoryDirty.matrix) && !window.confirm('Discard unsaved client drafts and leave the directory?')) return; onNavigate(link.page); }}>{link.label}</button>)}
+      </nav>
 
       {state.error && (
         <div className="alert alert-error" role="alert">
@@ -1583,16 +1595,16 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </aside>
         <section className="crm-selected-client" aria-label="Selected client">
           {selectedEntry ? <><header><div><h2>{selectedEntry.name}</h2><small>{selectedEntry.type.replaceAll('_', ' ')} · identity is not owned by the provider</small></div><button type="button" onClick={() => setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status })}>Full account workspace</button></header>
-            <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={Boolean(profile && ['admin', 'master', 'grand_master'].includes(profile.role))} onDirtyChange={contactDirty} />
-            {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ClientSetupPage key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenCoverage={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
+            <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={isAdminTierRole(profile?.role)} onDirtyChange={contactDirty} />
+            {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ServiceClientWorkspace key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenDetails={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
           </> : <p>Select or create a client organization to configure its contacts and sites.</p>}
         </section>
       </div>
       {showCommercial && <div className="crm-commercial-drawer-backdrop"><section className="reports-section crm-finance-section crm-commercial-drawer" role="dialog" aria-modal="true" aria-label="Receivables and commercial detail">
         <button type="button" autoFocus onClick={() => setShowCommercial(false)}>Close commercial detail</button>
         <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setShowCommercial(false); setShowGenerateInvoice(true); }}>Generate from agreement</button></div></div>
-        {state.invoices.length === 0 ? <div className="empty-state"><p>No invoices exist yet. Generate a draft from accepted agreement pricing or completed operational work.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <><button type="button" onClick={() => { setShowCommercial(false); setInvoiceLineInvoice(invoice); }}>Review lines</button><button type="button" onClick={() => { setShowCommercial(false); setInvoiceAction({ invoice, action: 'send' }); }}>Send</button></>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => { setShowCommercial(false); setPaymentForm({ amount: String(invoice.total_amount), date: new Date().toISOString().slice(0, 10), method: 'bank_transfer', reference: '' }); setInvoiceAction({ invoice, action: 'mark_paid' }); }}>Record payment</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setShowCommercial(false); setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
-        <h3>Group commercial oversight · last 30 days</h3>{state.consolidatedCommercial.map((row) => <p key={row.source_organization_id}>{row.source_organization_name}: NZ${Number(row.open_receivables).toFixed(2)} open · NZ${Number(row.service_cost_total).toFixed(2)} internal costs · {row.accepted_agreement_count} agreements · {row.report_pack_count} report packs</p>)}
+        {state.invoices.length === 0 ? <div className="empty-state"><p>No invoices exist yet. Generate a draft from agreement pricing or completed operational work.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <><button type="button" onClick={() => { setShowCommercial(false); setInvoiceLineInvoice(invoice); }}>Review lines</button><button type="button" onClick={() => { setShowCommercial(false); setInvoiceAction({ invoice, action: 'send' }); }}>Send</button></>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => { setShowCommercial(false); setPaymentForm({ amount: String(invoice.total_amount), date: new Date().toISOString().slice(0, 10), method: 'bank_transfer', reference: '' }); setInvoiceAction({ invoice, action: 'mark_paid' }); }}>Record payment</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setShowCommercial(false); setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
+        <h3>Group commercial oversight · last 30 days</h3>{state.consolidatedCommercial.map((row) => <p key={row.source_organization_id}>{row.source_organization_name}: NZ${Number(row.open_receivables).toFixed(2)} open · NZ${Number(row.service_cost_total).toFixed(2)} internal costs · {row.accepted_agreement_count} agreements in force · {row.report_pack_count} report packs</p>)}
       </section></div>}
       {quoteClient && (
         <div className="crm-quote-backdrop">
@@ -1646,7 +1658,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                     <select value={quoteVariationAgreementId} onChange={(event) => setQuoteVariationAgreementId(event.target.value)} aria-label="Agreement being varied">
                       {quoteAgreements.map((agreement) => (
                         <option key={agreement.id} value={agreement.id}>
-                          {agreement.name}{agreement.starts_on ? ` · in force since ${new Date(`${agreement.starts_on}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}{agreement.invitation_status !== 'accepted' ? ' · not yet accepted by client' : ''}
+                          {agreement.name}{agreement.starts_on ? ` · in force since ${new Date(`${agreement.starts_on}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
                         </option>
                       ))}
                     </select>
@@ -1779,12 +1791,12 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <div><span>Accounts receivable</span><h2 id="crm-gen-inv-title">Generate invoice from agreement</h2></div>
               <button type="button" onClick={() => setShowGenerateInvoice(false)} aria-label="Close invoice generator">×</button>
             </header>
-            <p>Draft invoice will be populated with line items directly from accepted service agreement quotes or commercial rates.</p>
+            <p>Draft invoice will be populated with line items from the agreement's accepted quotes or commercial rates.</p>
             <label>
               <span>Service agreement</span>
               <select required value={selectedAgreementId} onChange={(e) => setSelectedAgreementId(e.target.value)}>
                 <option value="">Select an agreement...</option>
-                {state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId) && agreement.invitation_status === 'accepted').map((ag) => (
+                {state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId)).map((ag) => (
                   <option key={ag.id} value={ag.id}>{ag.counterparty_name} — {ag.name}</option>
                 ))}
               </select>
@@ -1821,7 +1833,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             </section>}
             <footer>
               <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || invoiceReadiness?.source === 'client_approval_required' || drawdownBlocksInvoice}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
+              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || drawdownBlocksInvoice}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
             </footer>
           </form>
         </div>

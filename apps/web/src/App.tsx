@@ -19,7 +19,7 @@ function RuntimeFrictionMonitor() {
 }
 
 function AuthGate() {
-  const { profile, hasSession, recoveryMode, loading } = useAuth();
+  const { hasSession, recoveryMode, loading } = useAuth();
 
   if (loading) {
     return (
@@ -30,14 +30,6 @@ function AuthGate() {
   }
 
   if (!hasSession || recoveryMode) return <LoginPage />;
-
-  if (!profile) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--color-text-secondary)', textAlign: 'center', padding: '24px' }}>
-        Signed in, but no matching user profile was found for this account. Contact an administrator.
-      </div>
-    );
-  }
 
   return <RoleRouter />;
 }

@@ -8,7 +8,10 @@ WORKDIR /opt/bob
 # Every module reachable from the worker entrypoints must be copied here;
 # test/worker-image-manifest.test.js fails when this list falls behind.
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
+COPY builder-artifact-read.js /opt/bob/builder-artifact-read.js
+COPY builder-generation-failure.js /opt/bob/builder-generation-failure.js
 COPY builder-path-policy.js /opt/bob/builder-path-policy.js
+COPY builder-test-preservation.js /opt/bob/builder-test-preservation.js
 COPY builder-verification-outcome.js /opt/bob/builder-verification-outcome.js
 COPY builder-data-path-gate.js /opt/bob/builder-data-path-gate.js
 COPY builder-ts-delta-gate.js /opt/bob/builder-ts-delta-gate.js
@@ -19,6 +22,7 @@ COPY backend-worker.js /opt/bob/backend-worker.js
 COPY security-worker.js /opt/bob/security-worker.js
 COPY supabase/functions/_shared/builder-backend-engineer.js /opt/bob/supabase/functions/_shared/builder-backend-engineer.js
 COPY supabase/functions/_shared/builder-model-adapter.js /opt/bob/supabase/functions/_shared/builder-model-adapter.js
+COPY supabase/functions/_shared/builder-patch-envelope.js /opt/bob/supabase/functions/_shared/builder-patch-envelope.js
 COPY supabase/functions/_shared/builder-repository-context.js /opt/bob/supabase/functions/_shared/builder-repository-context.js
 COPY apps/web/package.json apps/web/package-lock.json /opt/bob/web-package/
 RUN cd /opt/bob/web-package \

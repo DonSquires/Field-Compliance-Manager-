@@ -96,7 +96,7 @@ const describeAssignment = (assignment: ModuleAssignment | undefined) => {
 interface WorkUnit {
   id: string;
   name: string;
-  work_unit_type: 'patrol' | 'static' | 'internal';
+  work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop';
   service_type: string;
   active: boolean;
   patrol_route_id: string | null;
@@ -642,7 +642,7 @@ export function CrmOperationalWorkPanel({
         {form.type === 'static' ? <>
           <label><span>Covered place</span><select aria-label="Covered place" value={form.locationId} onChange={(event) => setForm({ ...form, locationId: event.target.value })}>{locations.map((location) => <option key={location.id} value={location.id}>{placeName(location)}</option>)}</select></label>
           <label><span>Agreement module</span><select aria-label="Agreement module" value={selectedStaticModule?.id ?? ''} onChange={(event) => setForm({ ...form, moduleId: event.target.value })}>{staticModules.length === 0 ? <option value="">Enable static guarding in Configure agreement</option> : staticModules.map((module) => <option key={module.id} value={module.id}>{module.module_key.replaceAll('_', ' ')}</option>)}</select></label>
-          {staticModules.length === 0 && <p className="crm-workspace-subtle">Static coverage requires the Static Guarding module on this accepted agreement.</p>}
+          {staticModules.length === 0 && <p className="crm-workspace-subtle">Static coverage requires the Static Guarding module on this agreement.</p>}
         </> : <>
           <label><span>Patrol route</span><select aria-label="Patrol route" value={form.routeId} onChange={(event) => setForm({ ...form, routeId: event.target.value })}>{routes.length === 0 ? <option value="">No active patrol route in this operating branch</option> : routes.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}</select></label>
           {routes.length === 0 && <p className="crm-workspace-subtle">No patrol run exists yet. Build one from the agreement places above.</p>}

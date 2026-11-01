@@ -40,6 +40,15 @@ describe('CCTV observation triage', () => {
     expect(page).not.toContain("from('person_records')");
   });
 
+  it('keeps decision shortcuts deliberate: switchable, repeat-safe and the decided sighting held when not advancing', () => {
+    expect(page).toContain("const SHORTCUTS_KEY = 'fcm.cctvTriage.characterShortcuts';");
+    expect(page).toContain('single-key shortcuts');
+    expect(page).toContain('repeat: event.repeat, characterShortcuts });');
+    expect(page).toContain("aria-keyshortcuts={characterShortcuts ? 'A' : undefined}");
+    expect(page).toContain('setHeldId(observation.id);');
+    expect(page).toContain('heldId !== null && heldId === selectedId ? observations.find((observation) => observation.id === heldId)');
+  });
+
   it('lets a reviewer record a person category and a persistent vehicle note beyond just a name', () => {
     expect(page).toContain('Category');
     expect(page).toContain('Person of interest');
