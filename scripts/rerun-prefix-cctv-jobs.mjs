@@ -2,7 +2,7 @@
 //   prefix      — completed before the clock-keyed extractor was deployed (worker restart 2026-09-19T08:51:12Z)
 //   unexamined  — completed while some sampled frames were never examined by any detector (before commit 6f3c6085
 //                 the RunPod circuit breaker skipped whole batches and the job still completed as "no sightings")
-//   engine-v2   — completed jobs whose latest result was not produced by cctv-engine-v2 (owner ruling 2026-11-01);
+//   engine-v2   — completed video jobs whose latest result was not produced by cctv-engine-v2 (owner ruling 2026-11-01);
 //                 run in batches with --limit, newest first. Human decisions are kept and carried forward by
 //                 reconcile_cctv_reviewed_observations when the job re-runs.
 // Removes exactly what those jobs wrote — inference_results, entity observations, inference-sourced device events,
@@ -60,12 +60,14 @@ const UNEXAMINED_SCOPE = `rerun AS (
      AND coalesce((r.result->'classification_plan'->'coverage'->>'frames_untriaged')::int,
                   coalesce((r.result->'classification_plan'->>'sampled_frames')::int, 0) - coalesce((r.result->'classification_plan'->'usage'->>'frames_sent')::int, 0)) > 0)`;
 // engine-v2: the latest result's model manifest does not name cctv-engine-v2. Newest first, one batch at a time,
-// so the GPU tier is never flooded and each batch can be checked before the next.
+// so the GPU tier is never flooded and each batch can be checked before the next. Photos are excluded: engine v2
+// changed the video path only, and a photo result has no classification plan, so it would be re-selected forever.
 const ENGINE_V2_SCOPE = `rerun AS (
   SELECT j.id, j.evidence_item_id, j.organization_id
     FROM public.inference_jobs j
     JOIN LATERAL (SELECT result FROM public.inference_results r WHERE r.inference_job_id = j.id ORDER BY created_at DESC LIMIT 1) r ON true
    WHERE j.domain = 'video_motion' AND j.status = 'complete'
+     AND coalesce(r.result->>'media_kind', 'video') <> 'photo'
      AND (r.result #>> '{classification_plan,model_manifest,engine_version}') IS DISTINCT FROM 'cctv-engine-v2'
    ORDER BY j.created_at DESC, j.id
    ${LIMIT === undefined ? '' : `LIMIT ${LIMIT}`})`;

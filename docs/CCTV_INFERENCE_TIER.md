@@ -300,8 +300,8 @@ registration; the console's enhancement/zoom gets the located box.
   reader is proven with fake sessions (`test_inference_tier.py`) and on real frames for location only.
 * Species accuracy on NZ night-IR footage is unmeasured (no labelled NZ corpus in the repo); the first real
   possum/stoat clips should be kept as a regression set with the reviewer's verdicts.
-* RunPod idle timeout is 30 s; each cold start costs ~15–35 s (`delayTime`) — raise `workersMin` to 1 if
-  batch latency matters more than idle cost.
+* RunPod was retired from the stack by the owner ruling of 2026-11-01 (§9); its cold-start tuning no longer
+  applies.
 
 ## 9. Engine v2 accuracy (owner ruling 2026-11-01)
 
@@ -392,8 +392,10 @@ measurement, reviewer workspace, local VLM); reprocessing of completed jobs keep
   panel shows detector coverage: frames examined against motion frames, unanswered frames as gaps, which
   machines read them, and a warning when different detector models read one clip.
 * **Reprocessing**: `node scripts/rerun-prefix-cctv-jobs.mjs --scope engine-v2 --limit 25` lists completed
-  jobs whose latest result was not produced by engine v2; `--apply` re-queues one batch (audited
+  video jobs whose latest result was not produced by engine v2; `--apply` re-queues one batch (audited
   `cctv_inference_rerun`). The migration must be live before the watcher is redeployed, and before any batch.
+  Photos are out of scope: engine v2 changed the video path only, and a photo result has no classification
+  plan, so the first live canary (2026-11-01, two photos) would otherwise have been re-selected every batch.
 
 ### 9.3 Present state and honest gaps
 

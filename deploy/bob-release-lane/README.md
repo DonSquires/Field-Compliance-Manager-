@@ -10,7 +10,8 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
    bootstrapped from the newest `/srv/fcm/releases/<sha>` worktree),
 3. classifies the changed paths into targets — new `supabase/migrations/*.sql`, changed edge
    functions (a `_shared` change fans out to every function that imports it), control plane,
-   `fcm-api`, worker image; `apps/web` is left to Vercel,
+   `fcm-api`, worker image, `cctv-vision` (`services/vision` or `services/fcm-inference`: the
+   VPS `fcm-inference` and `fcm-vision-watcher` containers); `apps/web` is left to Vercel,
 4. **dry-run** (default): writes the plan to `plan.json` and the log, once per new head;
    **live**: applies migrations (refusing destructive SQL), deploys edge functions, rebuilds and
    restarts services with a health check, rolling a failed service back to the previous release,
@@ -43,7 +44,13 @@ that reviewed revision for the next timer tick without rewriting its own in-flig
 Switch to live with `BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run
 plans have been read.
 
-Service replacement and rollback use the shared `bob-runtime-idle.js` probe.
+Control-plane and `fcm-api` replacement and rollback use the shared `bob-runtime-idle.js` probe.
+`cctv-vision` instead waits until no `inference_jobs` row is `processing` (checked before and after
+the image build; an unreadable queue defers), is healthy when `fcm-inference` passes its own
+healthcheck and the watcher heartbeat is fresh, and rolls back by rebuilding the previous release.
+Every rollback rebuilds the previous release first: service images have fixed tags, so `up` alone
+would restart the image that just failed. The laptop worker's watcher is not reached by the lane;
+`deploy/laptop-worker/update-watcher.ps1` updates it on the laptop.
 It reads only the server activity credentials, queries running/queued model
 and verification receipts, and checks in-process Builder execution. Missing
 configuration, failed requests or malformed health responses defer the release.
