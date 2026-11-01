@@ -66,7 +66,6 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { reportMonitoredError } from '../lib/bobFrictionMonitor';
 import { BobPanel } from '../components/BobPanel';
-import { WorkflowRail } from '../components/WorkflowRail';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
@@ -306,6 +305,8 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   'Clients & Delivery': [
     { id: 'crm', label: 'Clients', icon: Building2 },
     { id: 'relationships', label: 'Agreements & services', icon: Handshake },
+    { id: 'onboarding', label: 'Activation checklist', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Service handoffs', icon: Handshake },
   ],
   Finance: [
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
@@ -886,7 +887,7 @@ const AdminShell: React.FC = () => {
   const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
     || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
     || (activePage === 'field-ops' && fieldOpsSubArea === 'landing');
-  const showWorkflowNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage);
+  const showWorkspaceNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage);
   const countScope = telemetryZoneIds.length ? 'Agreement zones' : 'Organisation-wide';
   const telemetryPills = <div className="admin-console-telemetry" role="group" aria-label={`Operational counts · ${countScope}`}>
     {([
@@ -985,12 +986,11 @@ const AdminShell: React.FC = () => {
           </header>
 
           <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
-          {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+          {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
           <div className="bob-page-layout">
           <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-            {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
             <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
               <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
             </LazyPageRecovery></div>
@@ -1035,7 +1035,7 @@ const AdminShell: React.FC = () => {
         </div>
       </header>
       <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
-      {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
 
       {mobileMenuOpen && (
         <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
@@ -1061,7 +1061,6 @@ const AdminShell: React.FC = () => {
       <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-        {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
         <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
           <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
         </LazyPageRecovery></div>

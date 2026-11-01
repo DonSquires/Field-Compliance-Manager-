@@ -186,11 +186,13 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('className="admin-shell-page"');
   });
 
-  it('lets the CRM matrix replace rather than duplicate shell workflow controls', () => {
-    expect(source).toContain("const showWorkflowNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage)");
+  it('keeps one workspace navigation layer without a cross-workspace step rail', () => {
+    expect(source).toContain("const showWorkspaceNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage)");
     expect(source).toContain("['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)");
-    expect(source.match(/activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
-    expect(source.match(/showWorkflowNavigation && <WorkflowRail/g)).toHaveLength(2);
+    expect(source.match(/activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
+    expect(source).not.toContain('WorkflowRail');
+    expect(source).toContain("label: 'Activation checklist'");
+    expect(source).toContain("label: 'Service handoffs'");
   });
 
   it('contains the HR workbench without locking ordinary staff-profile pages', () => {

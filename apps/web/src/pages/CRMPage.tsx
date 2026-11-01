@@ -206,6 +206,13 @@ interface CrmState {
   error: string | null;
 }
 
+// The workspace toolbar is hidden on the directory, so optional follow-up work is linked here.
+const FOLLOW_UP_LINKS = [
+  { page: 'relationships', label: 'Agreements & services' },
+  { page: 'onboarding', label: 'Activation checklist' },
+  { page: 'handoffs', label: 'Service handoffs' },
+] as const;
+
 const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
   const location = useLocation();
   const requestedAccountId = readWorkflowContext(location.search).accountId;
@@ -1539,6 +1546,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           <button type="button" className="btn btn-secondary" onClick={() => setOrganizationDialog('create')} title="Add a provider, council or other organisation without the guided setup">Add other organisation</button>
         </div>
       </header>
+      <nav className="crm-follow-up-links" aria-label="Client follow-up work">
+        <span>Follow-up work</span>
+        {FOLLOW_UP_LINKS.map((link) => <button type="button" className="btn btn-sm btn-secondary" key={link.page} onClick={() => { if ((directoryDirty.contact || directoryDirty.matrix) && !window.confirm('Discard unsaved client drafts and leave the directory?')) return; onNavigate(link.page); }}>{link.label}</button>)}
+      </nav>
 
       {state.error && (
         <div className="alert alert-error" role="alert">

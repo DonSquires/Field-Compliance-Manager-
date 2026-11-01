@@ -7,8 +7,8 @@ test('officer module directory requires both a direct grant and organisation ent
   await installSupabaseFixtures(page);
   await signInAsOfficer(page, '/officer/modules');
 
-  await expect(page.getByRole('heading', { name: 'Enabled modules' })).toBeVisible();
-  await expect(page.getByText('No enabled field modules are available.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tools' })).toBeVisible();
+  await expect(page.getByText('No field tools are available for your role.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Welfare' })).toHaveCount(0);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
@@ -158,5 +158,5 @@ test('an organisation-enabled module without the personal tick stays closed', as
   await signInAsOfficer(page, '/officer/workshop');
   await expect(page).toHaveURL(/\/officer$/);
   await page.goto('/officer/modules');
-  await expect(page.getByText('No enabled field modules are available.')).toBeVisible();
+  await expect(page.getByText('No field tools are available for your role.')).toBeVisible();
 });

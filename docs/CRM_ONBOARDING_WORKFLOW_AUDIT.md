@@ -61,16 +61,22 @@ used here as a workflow hypothesis, not as evidence about the current UI.
   tasks are version-checked, note-backed, and audited.
 7. Named ownership, stage-note history, and post-activation handoff are live.
 
-## Target Workflow
+## Historical target workflow (superseded 2026-10-28)
 
-The target is a separate **Account Onboarding** workspace, not a long modal and
-not an extension of provider Organization Setup.
+At the time of this audit, the target was a separate **Account Onboarding**
+workspace, not a long modal or an extension of provider Organization Setup.
 
-The active administrator surfaces share an **Account flow** rail: Account,
-Agreement, Onboarding, Places, Roster, and Handoff. Navigation carries explicit
-account, agreement, ledger, location, site, zone, work-unit, and handoff IDs in
-the URL so owner links and browser history reopen the intended record rather
-than whichever record happens to be selected globally.
+**Disposition — owner ruling 2026-10-28:** The numbered cross-workspace
+**Account flow** rail described by this audit is retired. The Clients & Delivery
+workspace exposes Clients, Agreements & services, Activation checklist, and
+Service handoffs as direct optional destinations; these are not sequential
+onboarding stages. The task-first client and place pages remain the basic
+onboarding path. Explicit account, agreement, ledger, location, site, zone,
+work-unit, and handoff IDs continue to travel in URLs so owner links and browser
+history reopen the intended record rather than whichever record happens to be
+selected globally. The findings below remain historical evidence where they
+describe the earlier target; current implementation and access must be checked
+in source before relying on them.
 
 ### Qualify
 

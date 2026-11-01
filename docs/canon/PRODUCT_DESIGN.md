@@ -42,6 +42,18 @@ actions, historical evidence, contract/pricing authority or audit receipts.
 Review the three portals and their navigation against these tasks; a source
 review or a mocked browser test is not a completed live application audit.
 
+### Owner ruling 2026-10-28: task-first navigation across all portals
+
+Keep the Admin, Officer and Client portals distinct, but make navigation
+task-first and avoid cross-workspace numbered rails that imply a mandatory
+sequence. Optional activation, agreement and handoff work must remain directly
+reachable without becoming prerequisites for basic client or place setup.
+Keep the Client portal's direct, permission-filtered destinations visible in
+one layer; do not add navigation steps or weaken its page allowlist. In the
+Officer portal, use "Tools" rather than "Modules" for the field user's
+destination directory. Preserve every route, tenant boundary, role check,
+agreement gate and specialist workflow while simplifying labels and paths.
+
 This is a **tactical operations platform**, not a consumer app. Three distinct operating contexts drive every design decision:
 
 | Context | Who | Environment | Priority |
