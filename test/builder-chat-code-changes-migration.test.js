@@ -599,7 +599,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
         input: fixture + migration + skipFunction + recoveryMigration + requiredLaneMigration + reviewFunctions + checks + requiredLaneChecks + recoveryChecks + cycleFixture
-          + originalClaimFunctions + cycleMigration + cycleChecks + preRetryClaimFunctions + cycleChecks + savedPatchRetrySchema + savedPatchRetryMigration + savedPatchRetryChecks,
+          + originalClaimFunctions + cycleMigration + cycleChecks + preRetryClaimFunctions + cycleChecks + savedPatchRetrySchema + savedPatchRetryMigration + cycleChecks + savedPatchRetryChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) { throw new Error(`PostgreSQL correction checks failed: ${error.stderr || error.message}`); }
