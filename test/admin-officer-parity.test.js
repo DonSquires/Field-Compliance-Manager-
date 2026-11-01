@@ -7,6 +7,7 @@ const { randomUUID } = require('node:crypto');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101150000_admin_officer_parity.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
+const consolidationMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261102140000_rm_verified_only_operational_custody_consolidation.sql'), 'utf8');
 const catalogFunction = name => {
   const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${name}"(`);
   assert.ok(start >= 0, name);
@@ -60,10 +61,20 @@ test('every admin grant in the parity migration also names admin_officer', () =>
 });
 
 test('identity-management handlers require an active caller before granting authority', () => {
-  for (const name of ['create-user', 'deactivate-user', 'invite-org', 'resend-invite']) {
+  for (const name of ['create-user', 'invite-org', 'resend-invite']) {
     const source = fs.readFileSync(path.join(__dirname, `../supabase/functions/${name}/index.ts`), 'utf8');
     assert.match(source, /const \{ data: (?:callerProfile|currentProfile)[^\n]*\.eq\('id', (?:caller|user)\.id\)\.is\('deactivated_at', null\)\.single\(\)/, name);
   }
+
+  const deactivateSource = fs.readFileSync(path.join(__dirname, '../supabase/functions/deactivate-user/index.ts'), 'utf8');
+  const deactivationStart = consolidationMigration.indexOf('CREATE OR REPLACE FUNCTION public.set_user_deactivation(');
+  const deactivationFunction = consolidationMigration.slice(
+    deactivationStart,
+    consolidationMigration.indexOf('$function$;', deactivationStart),
+  );
+  assert.match(deactivateSource, /rpc\('set_user_deactivation'/);
+  assert.match(deactivationFunction, /p\.deactivated_at IS NULL/);
+  assert.match(deactivationFunction, /public\.log_user_management_action/);
 });
 
 test('admin_officer resolves exactly like admin as a real database role', {

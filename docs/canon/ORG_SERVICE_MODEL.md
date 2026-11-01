@@ -2,8 +2,10 @@
 
 # Organisation and Service Model — Model A (Own-Rooted)
 
-> **Ratified 2026-07-21.** This document describes Model A: every org is
-> own-rooted, role is contextual per service_agreement. The machine-readable
+> **Ratified 2026-07-21.** Model A is the historical baseline: every org was
+> own-rooted, with role contextual per `service_agreement`. The owner ruling
+> dated 2026-11-01 below supersedes own-rooted onboarding for client
+> organisations and limits provider operations to R&M. The machine-readable
 > summary Bob uses is `knowledge_base/corpus/org-model.md`.
 >
 > **Supersedes** the old tree-parented client model (clients hanging under
@@ -21,7 +23,7 @@
 > [that ruling](#owner-ruling-2026-11-01--one-service-provider-client-approval-is-not-a-condition-of-service)
 > governs.
 
-## Model A: every org is its own entity
+## Model A (historical baseline): every org is its own entity
 
 Every organisation is **own-rooted** (`parent_organization_id = NULL`). Role
 (client vs provider) is **contextual per `service_agreement`**, not baked into
@@ -95,7 +97,9 @@ An org can be a provider in one agreement and a client in another.
 The `parent_organization_id` tree still works for orgs created under the old
 model (branches under a service provider, clients under a branch). The access
 layer supports **both** paths — tree-based and agreement-based (migration 0271).
-New orgs are own-rooted.
+This is the historical Model A rule. Since the 2026-11-01 owner ruling, new
+client organisations are parented under R&M and other provider onboarding is
+closed.
 
 ## Access layer
 
@@ -142,11 +146,12 @@ Gates SELECT on ~60 tables. Passes if ANY of these is true:
   branch picker).
 - **grand_master**: whole-tree view, optional branch filter.
 
-## Onboarding (Model A)
+## Onboarding (Model A — historical)
 
-Iron Eagle (grand_master) creates each org as own-rooted, provisions a first
-user as `master`, and creates a Layer-1 service agreement. The org's master
-then manages their own data.
+Under the historical Model A, Iron Eagle (grand_master) created each org as
+own-rooted, provisioned a first user as `master`, and created a Layer-1 service
+agreement. The 2026-11-01 ruling below replaces this for new provider and
+client onboarding.
 
 ## Two-layer billing (issue #2, migration 0253)
 
@@ -294,8 +299,9 @@ subsidiary, has `parent_organization_id` = R&M (migration
 `20261024235708_rm_group_charge_scope.sql`). This uses the legacy tree path
 that R&M already uses for its client organisations. R&M masters and admins
 reach Mainland by tree descent. Mainland's users gain no upward access to R&M,
-and Mainland's own clients stay own-rooted. Other new organisations remain
-own-rooted under Model A.
+and Mainland's own clients stayed own-rooted under the then-current Model A.
+The 2026-11-01 owner ruling below supersedes that client-parenting rule; new
+client organisations are now grouped beneath R&M.
 
 Owner choice `scope=rm_group`: the R&M group charge-code catalog (OneFortyOne
 numbering) is owned by R&M and copied to R&M's tree (including Mainland) and
@@ -536,17 +542,64 @@ approve anything for service to be given."
 
 - R & M Security and Investigations is the only service provider. Every
   client organisation, with its places, observations, vehicles and people, is
-  served under R&M.
+  served under R&M. Client organisations remain distinct identities and are
+  grouped under R&M for the single-provider operating model; this does not
+  transfer ownership of a client's accountability or the place of harm.
 - Iron Eagle Security remains the platform owner for billing and app
   management only. The platform-owner boundary above still applies to it.
 - No other organisation may sign up as a provider or subscriber; the
   subscriber provisioning path closes.
 - Client organisations still sign in to the client portal, and client reports
   are still created and released under Oracle governance.
-- Other providers' records move under R&M with a provenance ledger, or are
-  archived. Nothing is deleted.
-- Status: the consolidation and the sign-up lock are a separate migration.
-  Until it ships, this part of the ruling is the target, not the live state.
+- Operational records from prior providers move into R&M's operating custody
+  with an auditable provenance ledger. The migration preserves client and place
+  anchors, original authorship, timestamps, evidence and factual content; it
+  does not recast R&M as the owner of the underlying accountability. Provider-
+  private financial and commercial records remain with their originating
+  organisation. Other provider organisations and test records are archived,
+  never deleted.
+- Locations remain canonical places. A transfer changes only the organisation
+  responsible for the house or work record where the source data proves that
+  change is needed; proximity is not a basis to merge or replace a place.
+- The database rejects new provider/owner organisations and new operational
+  agreements outside the R&M tree. New client organisations are placed under
+  R&M. Existing client portal access and Oracle-governed report creation remain
+  available only through the governed invitation path. The initial account
+  boundary deactivates existing profiles seated outside the active R&M and
+  Iron Eagle organisation trees, including client seats that have not been
+  formally invited; employer affiliation does not override the seated
+  organisation. Profiles are retained for audit and reversible recovery.
+- Status: the service-without-client-approval rule is live in migration
+  `20261102120000_service_without_client_approval.sql`. Repository Auth
+  defaults disable global and email public sign-up, and the hosted Auth
+  setting is closed (verified 2026-11-02: the public settings endpoint reports
+  `disable_signup: true` and a public sign-up request is rejected with
+  `signup_disabled`). The consolidation is a separate release; until it ships,
+  R&M-only is the target, not the complete live state.
+  The account-boundary migration fails closed if any Auth user lacks a profile
+  or any active profile remains outside the retained organisation trees.
+  Deactivated profiles are not hydrated into the app, the enforcement-operator
+  predicate rejects them, and individual user-management changes use one
+  transactional update-and-audit RPC. Deactivation also bans the Auth user
+  (sign-in and refresh fail) and deletes their Auth sessions, so Auth and every
+  Edge Function that validates with `getUser()` reject access tokens already
+  issued. PostgREST trusts an unexpired JWT by signature alone, so every RLS
+  role helper checks `deactivated_at`, helpers that policies hand `auth.uid()`
+  as an argument (task entitlement for observations and assessments, the
+  platform-owner check for Bob's self-memory) return false for a deactivated
+  profile, and tables whose policies read `user_profiles` inline carry the
+  restrictive `deactivated_account_guard` policy
+  (`test/deactivated-account-guard.test.js` holds these rules against
+  `supabase/schema.sql`). Roster-only profiles with no Auth account are audited
+  in `audit_log`, because the user-management audit is keyed to Auth users.
+  The remaining exposure, until the access token expires (at most one hour),
+  is a deactivated user's own self-row data and any definer RPC that reads
+  `user_profiles` directly instead of using the deactivation-aware helpers.
+  Recorded finding (2026-11-02): the hosted project's Auth settings reported
+  `disable_signup: false` although no app path calls public sign-up; the
+  invite-only ruling requires the hosted setting itself to be closed, and
+  administrative invitation and user creation are unaffected by it. Resolved
+  the same day by changing only that hosted setting.
 
 **Client approval is not a condition of service.**
 

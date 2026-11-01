@@ -27,6 +27,57 @@ Owner-directed single provider and service without client approval, 2026-11-01
   acceptance. Consolidating all client data under R&M and closing sign-up are
   the next migration; until then R&M-only is the target, not the live state.
 
+Single-provider consolidation acceptance evidence:
+
+- Re-parent client organisations under R&M without collapsing their identities
+  or client-owned place anchors.
+- Move only approved operational custody records, retaining source organisation,
+  actor, timestamps, evidence and factual content in a private provenance ledger
+  and audit receipts. Keep provider-private commercial and financial records
+  with their originating organisation; archive rather than delete.
+- Build the record-source set from legacy provider trees, Iron Eagle and the
+  provider organisations on the fixed, verified current operational agreements.
+  Agreement-provider membership enables row-level verified transfers only; it
+  does not add a client-anchor identity to the archive set. Manual-review person
+  records remain in place.
+- Preserve client portal access and Oracle-governed report creation through
+  approved invitations, while deactivating current profiles seated outside
+  the active R&M/Iron Eagle organisation trees. A user's employer affiliation
+  does not override the organisation where the account is seated. Retain the
+  profiles and audit trail for reversible recovery; reject public sign-up and
+  new provider/subscriber provisioning, and prevent operational agreements
+  outside the R&M organisation tree.
+- Verify the exact migrated row sets, preserved anchors, archived organisations,
+  deactivated users and agreement boundaries in a live transaction rehearsal
+  before release. Verify that every deactivation and reactivation commits with
+  its audit receipt, that deactivation bans the Auth user and deletes their
+  sessions (reactivation lifts the ban), and that active-token calls from
+  deactivated profiles are rejected: Auth and Edge Functions through the
+  deleted session, PostgREST through the deactivation-aware RLS helpers and the
+  restrictive `deactivated_account_guard` policies. Separately verify
+  that the migration's `set_user_deactivation` RPC is applied before deploying
+  the `deactivate-user` Edge Function that calls it. Also verify
+  that hosted Supabase Auth rejects public signup with both global and email
+  signup disabled, while the server-side invitation flow still works;
+  checked-in local config is not proof that the hosted Auth setting has
+  changed. The local config uses localhost Auth URLs, so do not push the whole
+  file to the hosted project; change only `disable_signup` on the hosted Auth
+  configuration.
+- Rehearsal evidence, 2026-11-02 (live `BEGIN … ROLLBACK`, then an isolated
+  Postgres rehearsal): the first live run failed because
+  `user_management_audit.target_user_id` references `auth.users`, so roster-only
+  profiles are now audited in `audit_log`. A later run showed a deactivated
+  outside-tree master still reading 3,113 observations through task
+  entitlement; `user_has_task_entitlement` and `is_platform_owner` now return
+  false for a deactivated profile. The passing run moved 2,860 verified rows,
+  archived 45 organisations, deactivated 29 accounts (active profiles 61 → 32)
+  and revoked 157 sessions, leaving 0 active accounts outside the retained trees
+  and 0 deactivated accounts with an unbanned Auth user or a session.
+  Deactivated accounts read 0 organisations, locations, agreements,
+  observations, assessments and self-memory rows; the grand master's view was
+  unchanged. Hosted public sign-up was closed and its rejection verified
+  separately. Still to exercise after release: the server-side invitation path.
+
 Owner-directed client/place simplification, 2026-10-28:
 
 - **Before:** admin navigation exposed five client-workflow destinations and
