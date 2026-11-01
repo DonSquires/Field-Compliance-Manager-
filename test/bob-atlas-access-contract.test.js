@@ -8,13 +8,14 @@ const caddie = readFileSync(resolve(__dirname, '../supabase/functions/onspace-ai
 const conductor = readFileSync(resolve(__dirname, '../supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
 
 test('Atlas inspection is available to every active signed-in account (owner ruling 2026-11-01)', () => {
-  assert.match(atlas, /import \{ OWNER_EMAILS \} from '\.\.\/_shared\/auth\.ts'/);
+  // No email exemption: an owner with a missing or deactivated profile is refused too.
+  assert.doesNotMatch(atlas, /OWNER_EMAILS|isOwner/);
   assert.doesNotMatch(atlas, /CAN_SQL/);
   assert.doesNotMatch(atlas, /admin diagnostic role/);
   assert.match(atlas, /const \{ data: \{ user \}, error: authErr \} = await caller\.auth\.getUser\(\)/);
   assert.match(atlas, /if \(authErr \|\| !user\) return json\(\{\s*error: 'Unauthorized'/);
   assert.match(atlas, /select\('deactivated_at'\)\.eq\('id', user\.id\)\.maybeSingle\(\)/);
-  assert.match(atlas, /if \(!isOwner && \(!profile \|\| profile\.deactivated_at\)\) return json\(/);
+  assert.match(atlas, /if \(!profile \|\| profile\.deactivated_at\) return json\(\{\s*error: 'Forbidden: Atlas inspection requires an active account'/);
 });
 
 test('Bob offers Atlas at every rank, including admin and admin officer', () => {

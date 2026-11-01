@@ -508,7 +508,8 @@ Owner ruling 2026-11-01: Bob and Atlas are available at every level. Oracle and
 Conductor exist to restrict and redact per user level, so Atlas is not gated by
 rank: any active signed-in account (admiral through ensign and guest) may have
 Bob inspect Atlas, and admin and admin officer are never blocked. A deactivated
-account is refused. Conductor egress redaction, the welfare hold on diagnostic
+account, or one with no profile, is refused; there is no owner-email exemption.
+Conductor egress redaction, the welfare hold on diagnostic
 substrate actions, and every business-data, effect, and approval boundary still
 apply. In the same ruling, org-less `audit_log` rows (no `organization_id`) are
 platform-only: only the grand master and the platform owner may read them;

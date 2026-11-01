@@ -216,21 +216,86 @@ test('only the service role can run the invite rate-limit gate', () => {
   assert.match(inviteOrg, /adminClient\.rpc\('check_invite_rate_limit'/);
 });
 
-// Owner ruling 2026-11-01: org-less audit rows are platform records. Normalising
-// away quoting, schema prefixes, aliases and parentheses lets the same pin hold
-// for the migration text and for the pg_dump form after the catalog refresh.
+// Owner ruling 2026-11-01: org-less audit rows are platform records. The
+// effective USING clause is parsed into a Boolean tree over named atoms and
+// checked against the intended truth table, so a regrouped OR/AND fails even
+// when the same atoms appear. Quoting, schema prefixes, aliases and redundant
+// parentheses are normalised so the migration text and the pg_dump form match.
+const AUDIT_ATOMS = [
+  [/\(\s*select\s+is_platform_owner\(\s*\(\s*select\s+auth\.uid\(\)\s*\)\s*\)\s*\)/g, ' po '],
+  [/is_platform_owner\(\s*(?:\(\s*select\s+auth\.uid\(\)\s*\)|auth\.uid\(\))\s*\)/g, ' po '],
+  [/\(\s*select\s+is_grand_master\(\)\s*\)/g, ' gm '],
+  [/is_grand_master\(\)/g, ' gm '],
+  [/org_access_allowed\(\s*organization_id\s*\)/g, ' oa '],
+  [/coalesce\(\s*\(*\s*organization_id\s*\)*\s*=\s*any\s*\(\s*\(\s*select\s+accessible_org_ids\(\)\s*\)\s*\)\s*\)*\s*,\s*false\s*\)/g, ' inset '],
+  [/organization_id\s+is\s+not\s+null/g, ' nn '],
+  [/organization_id\s+is\s+null/g, ' isnull '],
+];
+
+function auditPredicate(sql) {
+  let text = sql.replace(/"/g, '').replace(/\s+AS\s+\w+/gi, '').replace(/::uuid\[\]/gi, '')
+    .replace(/\bpublic\./gi, '')
+    .toLowerCase().replace(/\s+/g, ' ');
+  for (const [pattern, atom] of AUDIT_ATOMS) text = text.replace(pattern, atom);
+  const tokens = text.match(/[()]|[a-z_]+|\S/g) ?? [];
+  let at = 0;
+  const peek = () => tokens[at];
+  const take = (expected) => {
+    const token = tokens[at++];
+    if (expected && token !== expected) throw new Error(`expected ${expected}, found ${token} in ${text}`);
+    return token;
+  };
+  const atoms = new Set(['po', 'gm', 'oa', 'inset', 'nn', 'isnull']);
+  const factor = () => {
+    if (peek() === 'not') { take(); const inner = factor(); return (env) => !inner(env); }
+    if (peek() === '(') { take(); const inner = disjunction(); take(')'); return inner; }
+    const token = take();
+    if (!atoms.has(token)) throw new Error(`unrecognised token ${token} in ${text}`);
+    return (env) => env[token];
+  };
+  const conjunction = () => {
+    const parts = [factor()];
+    while (peek() === 'and') { take(); parts.push(factor()); }
+    return (env) => parts.every((part) => part(env));
+  };
+  const disjunction = () => {
+    const parts = [conjunction()];
+    while (peek() === 'or') { take(); parts.push(conjunction()); }
+    return (env) => parts.some((part) => part(env));
+  };
+  const predicate = disjunction();
+  assert.equal(at, tokens.length, `trailing tokens in ${text}`);
+  return predicate;
+}
+
+function auditTruthTableMismatches(sql) {
+  const predicate = auditPredicate(sql);
+  const mismatches = [];
+  for (let bits = 0; bits < 16; bits += 1) {
+    const [isNull, gm, po, inReach] = [1, 2, 4, 8].map((bit) => Boolean(bits & bit));
+    const env = {
+      nn: !isNull,
+      isnull: isNull,
+      gm,
+      po,
+      oa: gm || (!isNull && inReach),
+      inset: !isNull && inReach,
+    };
+    const expected = isNull ? gm || po : gm || inReach;
+    if (predicate(env) !== expected) mismatches.push({ isNull, gm, po, inReach, expected });
+  }
+  return mismatches;
+}
+
 test('org-less audit rows are readable only by the grand master or a platform owner', () => {
   const policy = effectivePolicies(schema, migrations).get('audit_log.audit_log_select');
   assert.ok(policy, 'audit_log_select must exist');
   assert.deepEqual(policy.roles, ['authenticated']);
-  const normalised = policy.using
-    .replace(/\s+AS\s+"?\w+"?/gi, '')
-    .replace(/["()\s]/g, '')
-    .replace(/public\./gi, '')
-    .toLowerCase();
-  assert.equal(
-    normalised,
-    'organization_idisnotnullandorg_access_allowedorganization_id'
-      + 'ororganization_idisnullandselectis_grand_masterorselectis_platform_ownerselectauth.uid',
-  );
+  assert.deepEqual(auditTruthTableMismatches(policy.using), []);
+
+  // The truth table holds for the pg_dump form and rejects a regrouped platform-owner arm.
+  const dumped = '((("organization_id" IS NOT NULL) AND "public"."org_access_allowed"("organization_id")) OR (("organization_id" IS NULL) AND (( SELECT "public"."is_grand_master"() AS "is_grand_master") OR ( SELECT "public"."is_platform_owner"(( SELECT "auth"."uid"() AS "uid")) AS "is_platform_owner"))))';
+  assert.deepEqual(auditTruthTableMismatches(dumped), []);
+  const regrouped = '((organization_id IS NOT NULL AND org_access_allowed(organization_id)) OR (organization_id IS NULL AND (SELECT public.is_grand_master())) OR (SELECT public.is_platform_owner((SELECT auth.uid()))))';
+  assert.ok(auditTruthTableMismatches(regrouped).some((row) => !row.isNull && row.po && !row.expected));
 });
