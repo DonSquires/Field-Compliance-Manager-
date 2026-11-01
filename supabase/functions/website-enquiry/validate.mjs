@@ -226,12 +226,16 @@ export function validateEnquiry(body) {
 
 /** @param {{ get(name: string): string | null }} headers */
 export function clientIpFromHeaders(headers) {
+  // Cloudflare overwrites CF-Connecting-IP but appends to a client-supplied
+  // X-Forwarded-For, so the first forwarded entry can be spoofed to dodge the limit.
+  const connecting = headers.get('cf-connecting-ip')?.trim();
+  if (connecting) return connecting;
   const forwarded = headers.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0]?.trim();
     if (first) return first;
   }
-  return headers.get('x-real-ip')?.trim() || headers.get('cf-connecting-ip')?.trim() || 'unknown';
+  return headers.get('x-real-ip')?.trim() || 'unknown';
 }
 
 /** @param {string} value */

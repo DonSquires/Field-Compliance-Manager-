@@ -317,3 +317,12 @@ test('database errors map to 429, 400 or a 500 that never leaks the cause', asyn
   const noReference = await makeHandler({ result: { data: null, error: null } });
   assert.equal((await noReference.handle(post(validEnquiry()))).status, 500);
 });
+
+test('rate-limit identity prefers the proxy-set client address over a spoofable forwarded chain', async () => {
+  const { clientIpFromHeaders } = await loadModules();
+  const headers = (init) => new Headers(init);
+  assert.equal(clientIpFromHeaders(headers({ 'cf-connecting-ip': '198.51.100.7', 'x-forwarded-for': '1.2.3.4, 198.51.100.7' })), '198.51.100.7');
+  assert.equal(clientIpFromHeaders(headers({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' })), '203.0.113.9');
+  assert.equal(clientIpFromHeaders(headers({ 'x-real-ip': '192.0.2.4' })), '192.0.2.4');
+  assert.equal(clientIpFromHeaders(headers({})), 'unknown');
+});
