@@ -13,7 +13,7 @@ import { useHref, useLocation, useNavigate } from 'react-router-dom';
 import { ROSTERING_HR_TABS, isRosteringHrView } from '../lib/workforceSections';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { plainWords } from '../lib/rosterWords';
+import { plainWords, submittedWords } from '../lib/rosterWords';
 import { RosterRulesPanel } from '../components/RosterRulesPanel';
 import { CREDENTIAL_TYPES, credentialExpiryState, credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import './PageStyles.css';
@@ -137,6 +137,7 @@ interface TimesheetRow {
   status: string;
   branch_review_notes?: string | null;
   branch_reviewed_by?: string | null;
+  submitted_at?: string | null;
 }
 
 interface DispatchPayLineRow {
@@ -371,7 +372,7 @@ const TimesheetRows: React.FC<TimesheetRowsProps> = ({ rows, staffNames, corpora
         <td>{staffNames[item.staff_id] || 'Staff identity unavailable'}</td>
         <td>{item.period_start} – {item.period_end}</td>
         <td>{item.scheduled_hours ?? '—'}</td><td>{item.work_derived_hours ?? '—'}{item.work_summary?.source_count !== undefined && <small> · {item.work_summary.source_count} work records</small>}</td><td>{item.adjustment_hours ?? '—'}</td><td>{item.actual_hours ?? '—'}</td>
-        <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span></td>
+        <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span>{item.submitted_at && <small className="hr-timesheet-submitted">{submittedWords(item.submitted_at)}</small>}</td>
         <td><div className="hr-timesheet-actions">
           {onCorrect && ['submitted', 'branch_checked'].includes(item.status) && <button className="btn btn-sm btn-secondary" onClick={() => onCorrect(item)}>Edit hours</button>}
           {item.status === 'submitted' && <><button className="btn btn-sm btn-secondary" onClick={() => onReview(item, 'branch_checked')}>Branch check</button><button className="btn btn-sm btn-danger" onClick={() => onReview(item, 'rejected')}>Return for correction</button></>}
@@ -669,7 +670,7 @@ const RosterHRPage: React.FC = () => {
           workingInBranch
             ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })
             // ATLAS READS: timesheets — at organisation level the corporate payroll reviewer sees every branch's sheets (RLS: is_admin_for_org)
-            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
+            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
