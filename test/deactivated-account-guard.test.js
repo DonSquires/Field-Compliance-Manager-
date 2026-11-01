@@ -52,8 +52,10 @@ function checksDeactivation(name, stack = new Set()) {
 }
 
 // Never a sole grant: each policy using it must also pass deactivation-aware helpers.
+// Each requirement lists acceptable alternatives. Organisation reach may be org_access_allowed()
+// or its per-statement inline form over accessible_org_ids() (20261102200000_org_access_policies_initplan).
 const CONJOINED_HELPERS = new Map([
-  ['nzta_reveal_active', ['org_access_allowed', 'can_access_vehicle_owner_identity', 'can_access_person_contacts']],
+  ['nzta_reveal_active', [['org_access_allowed', 'accessible_org_ids'], ['can_access_vehicle_owner_identity'], ['can_access_person_contacts']]],
 ]);
 
 test('every table whose policies read user_profiles inline without a deactivation check carries the restrictive guard', () => {
@@ -75,9 +77,10 @@ test('every policy helper keyed on auth.uid() fails closed for a deactivated pro
 
   for (const [helper, required] of CONJOINED_HELPERS) {
     for (const policy of policies.filter((candidate) => candidate.body.includes(`${helper}(`))) {
-      for (const guard of required) {
-        assert.ok(checksDeactivation(guard), `${guard} must check deactivation`);
-        assert.ok(policy.body.includes(`${guard}(`), `${policy.table}.${policy.name} uses ${helper} without ${guard}`);
+      for (const alternatives of required) {
+        const used = alternatives.filter((guard) => policy.body.includes(`${guard}(`));
+        assert.ok(used.length > 0, `${policy.table}.${policy.name} uses ${helper} without ${alternatives.join(' or ')}`);
+        for (const guard of used) assert.ok(checksDeactivation(guard), `${guard} must check deactivation`);
       }
     }
   }
