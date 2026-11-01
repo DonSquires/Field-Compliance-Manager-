@@ -7,7 +7,7 @@ describe('workflow navigation context', () => {
   });
 
   it('round trips the complete supported context', () => {
-    const context = { accountId: 'a', agreementId: 'g', ledgerId: 'l', locationId: 'p', siteId: 's', zoneId: 'z', workUnitId: 'w', handoffId: 'h' };
+    const context = { accountId: 'a', agreementId: 'g', ledgerId: 'l', locationId: 'p', siteId: 's', zoneId: 'z', workUnitId: 'w', handoffId: 'h', providerId: 'b' };
     expect(readWorkflowContext(workflowContextQuery(context))).toEqual(context);
   });
 });

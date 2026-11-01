@@ -64,8 +64,9 @@ truthful schema or the code changes; read it before touching shared terrain;
 never hand-edit it.
 
 1. **Bob's Atlas** — the in-app AI assistant's own `query_atlas` tool
-   (`supabase/functions/bob-query-atlas/index.ts`), gated to the admiral role.
-   This is Bob navigating his own build during a live chat turn.
+   (`supabase/functions/bob-query-atlas/index.ts`), available to every active
+   signed-in rank (owner ruling 2026-11-01); Conductor egress redacts per
+   caller. This is Bob navigating his own build during a live chat turn.
 2. **The build-terrain map** — the actual data this repo is asking every
    agent (human or AI, not just Bob) to use before touching any part of the
    app. It lives in two live Supabase tables:

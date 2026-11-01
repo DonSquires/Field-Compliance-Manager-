@@ -103,7 +103,7 @@ function ScopeGroup({ id, legend, emptyLabel, options, selectedIds, getLabel, on
 
 export function CustomReportBuilder({ agreements, initialAgreementId, periodStart, periodEnd, onClose, onCreated }: CustomReportBuilderProps) {
   const eligibleAgreements = useMemo(
-    () => agreements.filter((agreement) => agreement.invitation_status === 'accepted' && agreement.agreement_type === 'operational'),
+    () => agreements.filter((agreement) => agreement.agreement_type === 'operational'),
     [agreements]
   );
   const initialEligibleAgreementId = eligibleAgreements.some((agreement) => agreement.id === initialAgreementId)
@@ -218,14 +218,14 @@ export function CustomReportBuilder({ agreements, initialAgreementId, periodStar
       </header>
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
-      {eligibleAgreements.length === 0 && <div className="alert alert-info" role="status">No accepted operational agreement is available for a custom report.</div>}
+      {eligibleAgreements.length === 0 && <div className="alert alert-info" role="status">No operational agreement is available for a custom report.</div>}
 
       <form onSubmit={createDraft}>
         <div className="custom-report-foundation">
           <label>
             <span>Service agreement</span>
             <select value={agreementId} onChange={(event) => setAgreementId(event.target.value)} disabled={eligibleAgreements.length === 0} required>
-              <option value="">Choose an accepted agreement</option>
+              <option value="">Choose an agreement</option>
               {eligibleAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.client_name ? `${agreement.client_name} · ` : ''}{agreement.name}</option>)}
             </select>
           </label>

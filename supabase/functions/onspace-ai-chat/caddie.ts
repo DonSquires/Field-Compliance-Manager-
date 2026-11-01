@@ -301,6 +301,11 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     governance: 'WRITE-direct; admiral only; human-confirms-before-cancellation; caller-scoped RPC',
     effect_class: 'direct_world_change'
   },
+  update_records: {
+    purpose: "UPDATE PEOPLE, VEHICLES AND REPORTS from facts the user gives you (a pasted email, a call note, an officer's account). Use this instead of saying you have no write path. Turn every fact into one operation: { kind: \"person_details\", person: { name } | { person_record_id, name }, fields: { category?: \"role or affiliation, e.g. Compliance officer, City Council\", notes?, email?, phone?, date_of_birth?: \"YYYY-MM-DD\" }, confirm_new_person?: true only after the user confirms they are not the same as a similar or same-name person already recorded (a date_of_birth also tells namesakes apart) } to create a person record or add details to one | { kind: \"vehicle_details\", plate, fields: { make?, model?, year?, colour?, body_type?, rego_expiry?, wof_expiry?, cof_expiry? } } | { kind: \"vehicle_person_link\", plate, person: { name } | { person_record_id }, relationship: \"associated_person\"|\"driver\"|\"owner\", source: \"officer_observed\"|\"owner_declared\"|\"other\", basis } | { kind: \"person_alias\", person, alias, alias_kind: \"aka\"|\"preferred_name\"|\"legal_name\"|\"previous_name\"|\"maiden_name\"|\"nickname\" } (a name someone gave or used; it can follow a person_details create in the same call) | { kind: \"safety_warning\", target: { type: \"person\", name } | { type: \"vehicle\", plate } | { type: \"site\", site_id } | { type: \"place\", place_id }, hazard_class: violence_or_aggression|weapons|dangerous_dog|hazardous_substances|unsafe_structure_or_ground|vehicle_defect|medical_or_welfare|other, alert_level: low|medium|high|critical, note } | { kind: \"record_note\", record_kind: \"observation\"|\"location_event\", record_id, entry_kind: \"note\"|\"follow_up_requested\"|\"follow_up_resolved\"|\"hs_concern\", body } | { kind: \"unsupported\", statement, reason } for a fact with no matching kind (for example a vehicle leaving, someone regularly staying at a place, or merging two person records; record it as a record_note when the report id is known). Args: { source_summary: \"one line naming the source\", operations: [...], remove?: [preview item numbers, or wording copied from exactly one preview line, including a \"Not included\" line], corrections?: [{ kind: \"person\"|\"plate\", from: \"name or plate as the preview shows it\", to: \"corrected value\" }], replace_all?: true }. The first call only PREVIEWS: Bob matches plates and people with the caller's own access and shows exactly what will change. While a preview waits for its yes, call again with only the new or corrected operations (remove for items to drop; corrections when a name or plate in the preview was wrong, which moves every item about it to the corrected value instead of adding a second person or vehicle): they merge into that preview and one updated preview is shown; replace_all: true starts over. When the preview holds a similar-person item, ask the user who it is; if they say it is a different person, send that person_details again with confirm_new_person: true; if they say it is one of the people listed, use corrections to move it to that person's recorded name. The changes are applied only after the user replies yes in the next message, as that user, through the existing audited record RPCs (creating or editing a person record needs identity-register administrator rights); anything the database refuses is reported, never hidden.",
+    governance: 'WRITE-direct after the caller confirms an in-chat preview; caller JWT; existing audited RPCs only; the database enforces rank and tenant scope',
+    effect_class: 'direct_world_change'
+  },
   laptop_shell: {
     purpose: "Run ONE PowerShell command on the owner's own Windows laptop (fcm-gpu-laptop) over the private Tailscale link — the owner's terminal for Bob. Use it when the owner asks you to look at, list, read, or check something on their computer (folders, documents, the GPU link: `ollama list`, `nvidia-smi`, `tailscale status`, `docker compose ... ps`), or to do setup they asked for. Two-turn: FIRST call with args { command, purpose } to SHOW the exact command; it runs only after the owner's affirmative on the next turn. Prefer read-only commands; never propose deletion, formatting, account/firewall/registry changes, credential access, or download-and-execute — the control plane refuses them. Output comes back capped; summarise it for the owner rather than dumping it. If the laptop is off or the owner's Bob switch is off, say so and tell them how to turn it on (laptop-tailscale.ps1 -Allow).",
     governance: 'WRITE-direct on the owner\'s laptop; admiral only; human-confirms-every-command; owner-toggled SSH; deny list + audit on the control plane',
@@ -319,7 +324,7 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
   // ── !1403 "Bob full-access v2" family (#329) ──────────────────────────────
   query_atlas: {
     purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Start with (1) status - report Atlas row counts, latest refresh timestamps, and whether source-commit parity is provable. If source_parity is unknown, compare Atlas with current repo_search or assess_system evidence before calling it current. Other actions: (2) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (3) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (4) gap_report - run a bounded complete scan of dormant/never-run entities; args { action, limit? }. (5) expectation_report - evaluate authored required/prohibited paths against live flow terrain; args { action, limit? }. These two report actions aggregate pages automatically up to a bounded limit; report a scan as complete only when no next_offset remains. (6) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
-    governance: 'read-only; bob_capability_map + bob_app_map_edges',
+    governance: 'read-only; every signed-in rank; Conductor egress redacts per caller; bob_capability_map + bob_app_map_edges',
     effect_class: 'admin_diagnostic_substrate_action'
   },
   inspect_platform_services: {
@@ -405,6 +410,9 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
   }
   // direct_world_change: admiral only (write_bob_chat, write_self_memory)
   if (effectClass === 'direct_world_change') {
+    // update_records applies only the caller's own confirmed preview, as the caller, through audited RPCs
+    // that check the caller's real database authority; the conductor tier is not the permission.
+    if (tool === 'update_records') return caps.canCompareData;
     return caps.tier === 'admiral';
   }
   // admin_diagnostic_substrate_action: tiered by tool
@@ -414,7 +422,8 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
       return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
     }
     if (tool === 'query_atlas') {
-      return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
+      // Owner ruling 2026-11-01: every rank; Conductor egress redacts per caller.
+      return true;
     }
     if (tool === 'inspect_platform_services') {
       return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
@@ -723,6 +732,9 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     //   switch and calls the caller-scoped builder_cancel_job RPC. There is no
     //   separate 'bob-cancel-builder-job' edge function.
     cancel_builder_job: 'onspace-ai-chat',
+    // update_records: conductor-inline; index.ts previews and, on the caller's next-turn yes, applies
+    //   through the caller-scoped record RPCs in _shared/record-updates.mjs. No separate edge function.
+    update_records: 'onspace-ai-chat',
     // read_bob_chat: conductor calls callFn('bob-repo-search', { action:
     //   'read_bob_chat' }) — routed through bob-repo-search, not a separate
     //   'bob-read-bob-chat' edge function (which does not exist).

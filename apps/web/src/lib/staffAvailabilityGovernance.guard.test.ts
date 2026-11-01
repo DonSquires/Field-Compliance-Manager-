@@ -37,7 +37,7 @@ describe('governed staff availability', () => {
     expect(page).toContain('Availability record removed with an audit receipt.');
     expect(page).toContain('Keep record');
     expect(page).toContain('Confirm removal');
-    expect(page).toContain('Approved leave remains governed in People, Pay &amp; HR.');
+    expect(page).toContain('Approved leave remains governed in People.');
     expect(page).toContain('openAvailabilityDialog(person, isoDate(day))');
     expect(page).not.toContain('availabilityOccurrences.map(({ day, person, record }, index) => <button type="button" onClick={() => openCreate(person, day)}');
   });

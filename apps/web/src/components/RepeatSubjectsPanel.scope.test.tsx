@@ -13,6 +13,9 @@ vi.mock('../context/ServiceRelationshipContext', () => ({
   }),
 }));
 vi.mock('./RecordEvidencePanel', () => ({ RecordEvidencePanel: () => null }));
+vi.mock('./RecordUpdatesPanel', () => ({ RecordUpdatesPanel: () => null }));
+vi.mock('./VehicleOwnerPanel', () => ({ VehicleOwnerPanel: () => null }));
+vi.mock('./ObservationIndicators', () => ({ ObservationIndicators: () => null, useObservationAnnotations: () => ({ annotations: {}, reload: vi.fn() }) }));
 
 describe('all-authorised repeat subject scope', () => {
   beforeEach(() => {
@@ -42,5 +45,28 @@ describe('all-authorised repeat subject scope', () => {
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('can_manage_r_and_m_identity'));
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Repeat vehicles')).toBeNull();
+  });
+
+  it('offers person links only for organisations whose R&M identity scope answers exactly true', async () => {
+    const sighting = (id: string, organizationId: string) => ({
+      source: 'patrol', record_id: id, organization_id: organizationId, observed_at: '2026-10-01T00:00:00Z', place_id: null,
+      officer_id: null, note: null, canonical_vehicle_id: 'vehicle-1', evidence_item_id: null, compliance_status: null,
+      compliance_reason: null, photo_url: null,
+    });
+    const scopes: Record<string, unknown> = { 'org-allowed': true, 'org-denied': false, 'org-truthy': 'true' };
+    rpc.mockImplementation(async (name: string, args?: { p_organization_id?: string }) => {
+      if (name === 'can_manage_r_and_m_identity') return { data: true, error: null };
+      if (name === 'list_repeat_vehicle_subjects_for_agreement') return { data: [{ plate: 'TST123', sightings: 3, places: 1, officers: 0, patrol_sightings: 3, cctv_sightings: 0, first_seen: '2026-10-01T00:00:00Z', last_seen: '2026-10-02T00:00:00Z', owner_identified: false, total_count: 1 }], error: null };
+      if (name === 'list_vehicle_subject_history_for_agreement') return { data: [sighting('obs-allowed', 'org-allowed'), sighting('obs-denied', 'org-denied'), sighting('obs-truthy', 'org-truthy')], error: null };
+      if (name === 'can_view_rnm_identity_for_organization') return { data: scopes[args?.p_organization_id ?? ''], error: null };
+      return { data: [], error: null };
+    });
+    render(<RepeatSubjectsPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open sighting history for TST123' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Link a verified person to this sighting' })).toHaveLength(1));
+    for (const organizationId of Object.keys(scopes)) {
+      expect(rpc).toHaveBeenCalledWith('can_view_rnm_identity_for_organization', { p_organization_id: organizationId });
+    }
+    expect(rpc).not.toHaveBeenCalledWith('list_verified_person_projections_for_organization', expect.anything());
   });
 });

@@ -26,6 +26,17 @@
 .cctv-triage__error { align-items: center; background: rgba(216, 80, 80, .14); border: 1px solid var(--cc-critical); border-radius: 6px; color: #ffb4ad; display: flex; gap: 10px; justify-content: space-between; margin-bottom: 12px; padding: 8px 12px; }
 .cctv-triage__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .cctv-triage__count { background: rgba(242, 191, 58, .18); border-radius: 12px; color: var(--cc-watch); font-size: 12px; font-weight: 700; margin-left: auto; padding: 2px 8px; }
+.cctv-triage__header-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.cctv-triage__keys { align-items: center; color: var(--cc-text-3); display: inline-flex; font-size: 11px; gap: 4px; }
+.cctv-triage__keys kbd { background: var(--cc-elevated); border: 1px solid var(--cc-line-strong); border-radius: 3px; color: var(--cc-text); font-family: inherit; font-size: 10px; font-weight: 700; padding: 0 4px; }
+.cctv-triage__receipt { align-items: center; background: rgba(35, 194, 176, .09); border: 1px solid rgba(35, 194, 176, .28); border-radius: 6px; color: var(--cc-text-2); display: flex; flex-wrap: wrap; font-size: 12px; gap: 8px; margin-bottom: 12px; padding: 7px 10px; }
+.cctv-triage__receipt > svg { color: var(--cc-normal); flex: 0 0 auto; }
+.cctv-triage__receipt strong { color: var(--cc-text); }
+.cctv-triage__receipt > span { flex: 1 1 260px; min-width: 0; }
+.cctv-triage__receipt .page-action { font-size: 11px; padding: 4px 8px; }
+.cctv-triage__receipt-close { align-items: center; background: none; border: 0; border-radius: 4px; color: var(--cc-text-3); cursor: pointer; display: inline-flex; padding: 4px; }
+.cctv-triage__receipt-close:hover, .cctv-triage__receipt-close:focus-visible { background: var(--cc-elevated); color: var(--cc-text); }
+.admin-shell[data-theme='light'] .cctv-triage__receipt { background: rgba(36, 95, 65, .07); border-color: rgba(36, 95, 65, .25); }
 
 .cctv-triage__layout { display: grid; gap: 16px; grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); align-items: start; }
 
@@ -45,6 +56,11 @@
 .cctv-triage__detail-head { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
 .cctv-triage__detail-head h2 { color: var(--cc-text); font-size: 18px; margin: 0 0 4px; }
 .cctv-triage__hero { border-radius: 6px; max-height: 420px; object-fit: contain; width: 100%; background: #030a0f; }
+.cctv-triage__frame { border: 1px solid var(--cc-line); border-radius: 6px; margin: 0; max-width: 360px; overflow: hidden; }
+.cctv-triage__frame figcaption { color: var(--cc-text-3); font-size: 11px; padding: 6px 8px; }
+.cctv-triage__provenance { display: flex; flex-wrap: wrap; gap: 5px; list-style: none; margin: -6px 0 0; padding: 0; }
+.cctv-triage__provenance li { background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 10px; color: var(--cc-text-2); font-size: 11px; line-height: 1.3; padding: 2px 8px; }
+.cctv-triage__provenance li.is-weak { border-color: var(--cc-watch); color: var(--cc-watch); }
 .cctv-triage__record-state { align-items: center; background: rgba(35, 194, 176, .09); border: 1px solid rgba(35, 194, 176, .28); border-radius: 6px; color: var(--cc-text-2); display: flex; gap: 9px; line-height: 1.4; padding: 9px 11px; }
 .admin-shell[data-theme='light'] .cctv-triage__record-state { background: rgba(180, 35, 50, .06); border-color: rgba(180, 35, 50, .2); }
 .cctv-triage__record-state svg { color: var(--cc-brand); flex: 0 0 auto; }
@@ -73,4 +89,8 @@
   .cctv-triage__history-row > img,
   .cctv-triage__history-icon { height: 40px; width: 54px; }
   .cctv-triage__history-row > div { grid-column: 1 / -1; }
+  .cctv-triage__header { flex-direction: column; }
+  .cctv-triage__header-actions { justify-content: flex-start; }
+  .cctv-triage__keys { display: none; }
+  .cctv-triage__frame { max-width: none; }
 }

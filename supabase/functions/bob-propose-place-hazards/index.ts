@@ -30,7 +30,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin']);
+const CAN_PROPOSE = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const HAZARD_CLASSES = new Set([
   'violence_or_aggression', 'weapons', 'dangerous_dog', 'hazardous_substances',
   'biological_or_infection', 'sharps', 'slips_trips_falls', 'traffic_and_vehicles',

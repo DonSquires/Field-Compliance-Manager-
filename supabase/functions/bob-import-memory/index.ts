@@ -34,7 +34,8 @@ const CORS = {
 const CAN_LEARN = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const MEMORY_KIND = 'import_mapping';
 function json(body, status = 200) {

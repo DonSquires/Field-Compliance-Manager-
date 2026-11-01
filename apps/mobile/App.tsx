@@ -27,7 +27,14 @@ export default function App() {
     setSigningIn(true);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setSigningIn(false);
-    if (error) Alert.alert('Sign-in unavailable', error.message);
+    if (error) {
+      Alert.alert(
+        'Sign-in unavailable',
+        error.code === 'user_banned'
+          ? 'This account has been deactivated. Contact an administrator if you believe this is incorrect.'
+          : error.message,
+      );
+    }
   };
 
   const signOut = async () => {

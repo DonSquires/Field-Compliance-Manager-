@@ -101,6 +101,78 @@ test('NZTA MVR screenshots produce source-time person and vehicle review candida
   assert.match(nztaComplianceSourceMigration, /'nzta_mvr'::text/);
 });
 
+test('NZTA owner name comes from the registered-person field, not the owner-count heading or the second column', () => {
+  const rowReading = [
+    'Current details query results 06/10/2026 09:18:08',
+    'Plate: ABC123 Vehicle details',
+    'Current registered person details (3 registered persons)',
+    'Current registered person: JANE MARY CITIZEN Acquisition date: 01/02/2024',
+    'Physical address: 12 Example Street Sex or company: Female',
+    'Exampletown 9999 Registered person status: Inactive',
+  ].join('\n');
+  const sparseReading = [
+    'Current registered person details (3 registered persons)',
+    '',
+    'Current registered person:',
+    '',
+    'JANE MARY CITIZEN',
+    '',
+    '‘Acquisition date:',
+    '01/02/2024',
+  ].join('\n');
+  const fields = extractIdentityFields(rowReading, 'nzta_mvr_record');
+  assert.equal(fields.display_name, 'JANE MARY CITIZEN');
+  assert.equal(fields.physical_address, '12 Example Street');
+  assert.equal('registered_to_company' in fields, false);
+  assert.equal(extractIdentityFields(sparseReading, 'nzta_mvr_record').display_name, 'JANE MARY CITIZEN');
+  assert.equal(extractIdentityFields('Current registered person details (1 registered person)\nVehicle details', 'nzta_mvr_record').display_name, undefined);
+
+  const agreed = extractIdentityFieldsConsensus([rowReading, sparseReading], 'nzta_mvr_record');
+  assert.equal(agreed.fields.display_name, 'JANE MARY CITIZEN');
+  assert.equal(agreed.identifier_verification.display_name.status, 'variants_agree');
+  const disputed = extractIdentityFieldsConsensus([rowReading, sparseReading.replace('CITIZEN', 'CITIZFN')], 'nzta_mvr_record');
+  assert.equal(disputed.identifier_verification.display_name.status, 'variants_disagree');
+  assert.equal(extractIdentityFieldsConsensus(['Current registered person details (2 registered persons)'], 'nzta_mvr_record')
+    .identifier_verification.display_name.status, 'not_read');
+
+  const company = extractIdentityFields(
+    'Current registered person: EXAMPLE RENTALS LIMITED Acquisition date: 01/02/2024\nSex or company: Company',
+    'nzta_mvr_record',
+  );
+  assert.equal(company.display_name, 'EXAMPLE RENTALS LIMITED');
+  assert.equal(company.registered_to_company, true);
+
+  // OCR splits right-column labels into fragments; owner names are printed in capitals.
+  assert.equal(extractIdentityFields('Current registered person: JANE CITIZEN Acqui\nsition date: 01/02/2024', 'nzta_mvr_record').display_name, 'JANE CITIZEN');
+  assert.equal(extractIdentityFields('Current registered person det\nails (2 registered persons)\nCurrent registered person: JOHN O’BRIEN deta', 'nzta_mvr_record').display_name, 'JOHN O’BRIEN');
+  const withheld = extractIdentityFieldsConsensus([
+    'Current registered person details (4 registered persons)\nCurrent registered person: Information not available',
+    'Current registered person:\n\nInformation not available',
+  ], 'nzta_mvr_record');
+  assert.equal(withheld.fields.display_name, undefined);
+  assert.equal(withheld.identifier_verification.display_name.status, 'owner_withheld');
+  const unknown = extractIdentityFieldsConsensus([
+    'Current registered person: PERSON UNKNOWN Acquisition date: 01/02/2020',
+    'Current registered person:\n\nPERSON UNKNOWN',
+  ], 'nzta_mvr_record');
+  assert.equal(unknown.fields.display_name, undefined);
+  assert.equal(unknown.identifier_verification.display_name.status, 'owner_withheld');
+
+  // Macrons survive cleaning; initials and a title-case surname are kept; a label fragment is still trimmed.
+  const owner = (value) => extractIdentityFields(`Current registered person: ${value}`, 'nzta_mvr_record').display_name;
+  assert.equal(owner('ĀPERA TĀMATI'), 'ĀPERA TĀMATI');
+  assert.equal(owner('J. Smith'), 'J. Smith');
+  assert.equal(owner('JANE Smith'), 'JANE Smith');
+  assert.equal(owner('JANE CITIZEN Regis'), 'JANE CITIZEN');
+  assert.equal(owner('JANE CITIZEN Acg'), 'JANE CITIZEN');
+  assert.equal(owner('Registered Person'), undefined);
+  const macron = extractIdentityFieldsConsensus([
+    'Current registered person: ĀPERA TĀMATI Acquisition date: 01/02/2024',
+    'Current registered person:\n\nAPERA TAMATI',
+  ], 'nzta_mvr_record');
+  assert.equal(macron.identifier_verification.display_name.status, 'variants_agree');
+});
+
 test('NZTA plate extraction requires valid multi-location OCR consensus and blocks conflicting model text', () => {
   const noisy = [
     'Current details query results\nShow the results for plate/VIN\n11739\nPlate: 11739\nPlate type: Standard',
@@ -290,11 +362,11 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /Reject evidence/);
   assert.match(workspace, /contain one source face that can become a candidate after approval/);
   assert.match(workspace, /Security licence \/ CoA/);
-  assert.match(workspace, /People &amp;\s*HR → Credentials/);
+  assert.match(workspace, /People → Credentials/);
   assert.match(workspace, /multiple/);
   assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
   assert.match(workspace, /review_canonical_identity_evidence/);
-  assert.match(workspace, /unverified credential handoff is ready in People & HR → Credentials/);
+  assert.match(workspace, /unverified credential handoff is ready in People → Credentials/);
   assert.match(workspace, /Reject it, then upload it under the matching evidence type/);
   assert.match(workspace, /Historical licence retained without replacing current details/);
   assert.match(workspace, /Historical evidence · Current details unchanged/);

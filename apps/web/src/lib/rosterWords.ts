@@ -33,9 +33,30 @@ export const plainWords = (value: string | null | undefined, fallback = 'Not rec
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
+/** Commercial readiness codes that need no action from the rosterer. */
+export const COMMERCIAL_READY_STATUSES = ['ready', 'accepted', 'verified', 'not_applicable', 'source_verified'];
+
+/** Readiness code -> words; seeded spreadsheet jobs are R&M's verified source of record. */
+export const commercialStatusLabel = (status: string | null | undefined): string =>
+  status === 'source_verified' ? 'Verified by source records' : plainWords(status);
+
+/** Readiness areas (`billing`, `cost centre`) still needing action for one slot's readiness row. */
+export const commercialIssueAreas = (readiness: object): string[] =>
+  Object.entries(readiness)
+    .filter(([key, value]) => key.endsWith('_status') && !COMMERCIAL_READY_STATUSES.includes(String(value)))
+    .map(([key]) => key.replace(/_status$/, '').replaceAll('_', ' '));
+
 /** `21:00–01:00` in NZ local time, 24-hour so it fits a roster chip. */
 export const timeRange = (start: string, end: string): string =>
   `${new Date(start).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}\u2013${new Date(end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+
+/** Server submission receipt in NZ time, e.g. `Submitted 2 Nov, 10:15 am`; missing or unreadable -> null. */
+export const submittedWords = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  return `Submitted ${at.toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' })}`;
+};
 
 /** `1 draft`, `3 drafts`. */
 export const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;

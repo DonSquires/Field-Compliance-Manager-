@@ -15,8 +15,10 @@
  * - Integration: BobPanel, NotificationsBell, PortalSwitcher, UniversalSearch
  */
 
+import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { PEOPLE_SECTIONS, ROSTER_SECTIONS, ROSTER_SETUP_PATH, isRosteringHrView, shouldShowRosterSetupFallback, workforceSectionFor } from '../lib/workforceSections';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
@@ -49,6 +51,8 @@ import {
   Settings,
     Tags,
   Shield,
+  ShieldCheck,
+  UserSearch,
   Users,
   Wrench,
   Gauge,
@@ -63,7 +67,6 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { reportMonitoredError } from '../lib/bobFrictionMonitor';
 import { BobPanel } from '../components/BobPanel';
-import { WorkflowRail } from '../components/WorkflowRail';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
@@ -79,6 +82,7 @@ import { DESKTOP_V2_DOWNLOAD_URL, DESKTOP_V2_FILENAME, DESKTOP_V2_VERSION } from
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
 const ClientSetupPage = React.lazy(() => import('../pages/ClientSetupPage'));
+const ServiceClientPage = React.lazy(() => import('../components/ServiceClientWorkspace').then(module => ({ default: module.ServiceClientWorkspace })));
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
@@ -97,6 +101,7 @@ const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryRev
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
 const ZoneDetailPage = React.lazy(() => import('../pages/ZoneDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
+const NztaRegisterPage = React.lazy(() => import('../pages/NztaRegisterPage'));
 const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
 const OrganizationSetupPage = React.lazy(() => import('../pages/OrganizationSetupPage'));
@@ -120,6 +125,7 @@ const LiveMapPage = React.lazy(() => import('../pages/LiveMapPage'));
 const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerActivityTimelinePage'));
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
+const PersonSearchPage = React.lazy(() => import('../pages/PersonSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
 const InvestigationPage = React.lazy(() => import('../pages/InvestigationPage'));
 const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
@@ -133,12 +139,13 @@ const CCTVVideoLibraryPage = React.lazy(() => import('../pages/CCTVVideoLibraryP
 const CCTVImportPage = React.lazy(() => import('../pages/CCTVImportPage'));
 const CCTVConsolePage = React.lazy(() => import('../pages/CCTVConsolePage'));
 const CCTVTriagePage = React.lazy(() => import('../pages/CCTVTriagePage'));
+const CCTVQualityPage = React.lazy(() => import('../pages/CCTVQualityPage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
-  | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
+  | 'approvals' | 'nzta-register' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
@@ -153,8 +160,6 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
   'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
 ]);
 
-const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin']);
-const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets']);
 
 // Maps an AdminPage to the platform module (see platformModuleManifest.ts)
@@ -170,9 +175,7 @@ const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined, isModuleEnabled: (moduleKey: string) => boolean): boolean {
   if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
-  if (CRM_MANAGEMENT_PAGES.has(page) && !(role === 'grand_master' || role === 'master' || role === 'admin')) return false;
-  if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;
-  if (ROSTER_MANAGEMENT_PAGES.has(page) && (!role || !ROSTER_MANAGEMENT_ROLES.has(role))) return false;
+  if ((CRM_MANAGEMENT_PAGES.has(page) || ROSTER_MANAGEMENT_PAGES.has(page) || page === 'approvals' || page === 'nzta-register') && !isAdminTierRole(role)) return false;
   const requiredModule = PAGE_PLATFORM_MODULE[page];
   if (requiredModule && !isModuleEnabled(requiredModule)) return false;
   return true;
@@ -209,6 +212,8 @@ interface WorkspaceItem {
   label: string;
   icon: LucideIcon;
   area?: FieldOpsSubArea;
+  /** Pages reached through this destination's section strip, which keep it highlighted. */
+  also?: AdminPage[];
 }
 
 export interface AdminConsoleTelemetry {
@@ -292,24 +297,18 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'field-ops', label: 'Field reports', icon: ClipboardCheck, area: 'field-reports' },
     { id: 'field-ops', label: 'Operational continuity', icon: Handshake, area: 'operational-continuity' },
     { id: 'field-ops', label: 'Video evidence', icon: FolderOpen, area: 'cctv-console' },
-    { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
-    { id: 'locations', label: 'Location Houses', icon: MapPin },
-    { id: 'zones', label: 'Zone Facets', icon: MapPin },
-    { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
+    { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
   Workforce: [
-    { id: 'roster', label: 'Schedules & Rosters', icon: Users },
-    { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
-    { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
-    { id: 'users', label: 'People & Access', icon: Users },
+    { id: 'roster', label: 'Rosters', icon: Route, also: ['roster-targets'] },
+    { id: 'people-hr', label: 'People', icon: Users, also: ['users'] },
   ],
   'Clients & Delivery': [
-    { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
+    { id: 'crm', label: 'Clients', icon: Building2 },
     { id: 'relationships', label: 'Agreements & services', icon: Handshake },
-    { id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck },
-    { id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck },
-    { id: 'handoffs', label: 'Start delivery', icon: ClipboardCheck },
+    { id: 'onboarding', label: 'Activation checklist', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Service handoffs', icon: Handshake },
   ],
   Finance: [
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
@@ -326,6 +325,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   'Intelligence & Records': [
     { id: 'files', label: 'File System', icon: FolderOpen },
     { id: 'investigations', label: 'Investigations', icon: Search },
+    { id: 'nzta-register', label: 'NZTA register (s241)', icon: ShieldCheck },
   ],
   'Platform & Settings': [
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
@@ -343,7 +343,8 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
 
 const NAVIGABLE_ADMIN_PAGES = new Set<AdminPage>([
   ...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id)),
-  'bob', 'document-studio',
+  ...Object.values(NAVIGATION_MAP).flatMap((items) => items.flatMap((item) => item.also ?? [])),
+  'bob', 'document-studio', 'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites',
 ]);
 
 const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
@@ -491,9 +492,9 @@ const AdminShell: React.FC = () => {
   }, []);
 
   const isFieldOpsAreaEnabled = useCallback((area: FieldOpsSubArea) => {
-    if (modulesStatus === 'loading') return area !== 'welfare-alerts';
-    return canAccessFieldOpsArea(area, isModuleEnabled);
-  }, [isModuleEnabled, modulesStatus]);
+    if (modulesStatus === 'loading') return area !== 'welfare-alerts' && canAccessFieldOpsArea(area, () => true, profile?.role);
+    return canAccessFieldOpsArea(area, isModuleEnabled, profile?.role);
+  }, [isModuleEnabled, modulesStatus, profile?.role]);
 
   useEffect(() => {
     // The module gate is evaluated only once the tenant's subscription state is known. While it is
@@ -516,7 +517,7 @@ const AdminShell: React.FC = () => {
     }
 
     if (redirectTarget) {
-      if (redirectTarget.fieldOpsSubArea && !canAccessFieldOpsArea(redirectTarget.fieldOpsSubArea, moduleCheck)) {
+      if (redirectTarget.fieldOpsSubArea && !canAccessFieldOpsArea(redirectTarget.fieldOpsSubArea, moduleCheck, profile?.role)) {
         const areaNotice = modulesStatus === 'error'
           ? deniedNotice
           : 'This operational area is not enabled for your current organisation.';
@@ -554,7 +555,7 @@ const AdminShell: React.FC = () => {
           if (requestedArea) navigate('/admin/field-ops', { replace: true });
           return;
         }
-        if (!canAccessFieldOpsArea(requestedArea, moduleCheck)) {
+        if (!canAccessFieldOpsArea(requestedArea, moduleCheck, profile?.role)) {
           const areaNotice = modulesStatus === 'error'
             ? deniedNotice
             : 'This operational area is not enabled for your current organisation.';
@@ -598,7 +599,7 @@ const AdminShell: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage');
+  const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage' || fieldOpsSubArea === 'cctv-quality');
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
     // While subscriptions are still loading, isModuleEnabled() answers false for everything; that is "unknown", not "denied".
     // Role checks still apply, and the route effect re-evaluates the module gate once loading finishes.
@@ -691,19 +692,50 @@ const AdminShell: React.FC = () => {
     if (activePage === 'bob') return;
     setBobOpen(true);
   }, [activePage]);
+  const rosterSetupFallback = shouldShowRosterSetupFallback(
+    isPageEnabled('roster'),
+    isPageEnabled('people-hr'),
+    canAccessAdminPage('roster', profile?.role, () => true),
+  );
+  const openRosterSetup = () => {
+    setActivePage('people-hr');
+    setMobileMenuOpen(false);
+    const contextQuery = workflowContextQuery(workflowContext);
+    navigate(`${ROSTER_SETUP_PATH}${contextQuery ? `&${contextQuery.slice(1)}` : ''}`);
+  };
 
+  // Without the HR module, People still opens logins and access.
+  const enabledNavItems = (items: WorkspaceItem[]) => items
+    .map((item) => (item.id === 'people-hr' && !isPageEnabled('people-hr') ? { ...item, id: 'users' as AdminPage, also: [] } : item))
+    .filter((item) => (isPageEnabled(item.id) || (item.id === 'roster' && rosterSetupFallback)) && (!item.area || isFieldOpsAreaEnabled(item.area)));
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
-    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))) }));
-  const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
+    .map(([group, items]) => ({ group, items: enabledNavItems(items) }));
+  const workforceSection = workforceSectionFor(activePage, location.search);
+  const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage || item.also?.includes(activePage)))
     ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
     if (item.id === 'bob') openBobCommandCenter();
+    else if (item.id === 'roster' && rosterSetupFallback) openRosterSetup();
     else if (item.area) navigateToFieldOps(item.area);
     else navigateToPage(item.id, workflowContext);
   };
-  const isWorkspaceItemActive = (item: WorkspaceItem) => item.id === activePage
-    && (item.id !== 'field-ops' || (item.area ?? 'landing') === fieldOpsSubArea);
+  const isWorkspaceItemActive = (item: WorkspaceItem) => {
+    if (item.also && workforceSection) return workforceSection.startsWith(item.id === 'roster' ? 'roster-' : 'people-');
+    return item.id === activePage && (item.id !== 'field-ops' || (item.area ?? 'landing') === fieldOpsSubArea);
+  };
+  const sectionPage = { 'roster-board': 'roster', 'roster-coverage': 'roster-targets', 'roster-setup': 'people-hr', 'people-hr': 'people-hr', 'people-access': 'users' } as const;
+  const workforceSections = workforceSection
+    ? (workforceSection.startsWith('roster-') ? ROSTER_SECTIONS : PEOPLE_SECTIONS).filter((section) => isPageEnabled(sectionPage[section.key]))
+    : [];
+  const openWorkforceSection = (key: keyof typeof sectionPage) => {
+    if (key === 'roster-setup') { openRosterSetup(); return; }
+    navigateToPage(sectionPage[key], workflowContext);
+  };
+  const workforceSectionNav = workforceSections.length > 1
+    && <nav className="admin-workforce-sections" aria-label={workforceSection?.startsWith('roster-') ? 'Roster sections' : 'People sections'}>
+      {workforceSections.map((section) => <button type="button" key={section.key} aria-current={section.key === workforceSection ? 'page' : undefined} onClick={() => openWorkforceSection(section.key)}>{section.label}</button>)}
+    </nav>;
 
   const moduleAccessNotice = useMemo(() => {
     if (modulesStatus === 'configured') return null;
@@ -767,7 +799,9 @@ const AdminShell: React.FC = () => {
       case 'crm':
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'client-setup':
-        return <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+        return new URLSearchParams(location.search).get('view') === 'delivery'
+          ? <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
+          : <ServiceClientPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
       case 'cost-of-service':
@@ -794,6 +828,8 @@ const AdminShell: React.FC = () => {
             return <BreachReviewPage />;
           case 'vehicle-search':
             return <VehicleSearchPage />;
+      case 'person-search':
+        return <PersonSearchPage />;
           case 'observation-search':
             return <ObservationSearchPage />;
           case 'field-reports':
@@ -804,6 +840,8 @@ const AdminShell: React.FC = () => {
             return <CCTVConsolePage />;
           case 'cctv-triage':
             return <CCTVTriagePage />;
+          case 'cctv-quality':
+            return <CCTVQualityPage />;
           case 'cctv-review':
             return <CCTVReviewPage />;
           case 'cctv-library':
@@ -851,6 +889,8 @@ const AdminShell: React.FC = () => {
         return <PlatformSubscribersPage />;
       case 'approvals':
         return <ApprovalsActivityPage />;
+      case 'nzta-register':
+        return <NztaRegisterPage />;
       case 'roster':
         return <RosterOperationsPage />;
       case 'rate-rules':
@@ -868,13 +908,13 @@ const AdminShell: React.FC = () => {
       case 'finance-pricing':
         return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'people-hr':
-        return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage />;
+        return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage key={isRosteringHrView(location.search) ? 'rostering' : 'people'} />;
       case 'roster-targets':
         return <RosterTargetsPage />;
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen, telemetry]);
+  }, [activePage, fieldOpsSubArea, location.search, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen, telemetry]);
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
@@ -883,7 +923,7 @@ const AdminShell: React.FC = () => {
   const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
     || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
     || (activePage === 'field-ops' && fieldOpsSubArea === 'landing');
-  const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage);
+  const showWorkspaceNavigation = !['crm', 'client-setup', 'locations', 'finance-bureau', 'finance-money'].includes(activePage);
   const countScope = telemetryZoneIds.length ? 'Agreement zones' : 'Organisation-wide';
   const telemetryPills = <div className="admin-console-telemetry" role="group" aria-label={`Operational counts · ${countScope}`}>
     {([
@@ -971,6 +1011,9 @@ const AdminShell: React.FC = () => {
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-shell-icon" onClick={() => openVehicleSearchPopout()} title="Open vehicle search in its own window" aria-label="Open vehicle search in its own window">
                 <ExternalLink size={17} aria-hidden="true" />
               </button>}
+              {isFieldOpsAreaEnabled('person-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('person-search')} aria-label="Open person search">
+                <UserSearch size={17} aria-hidden="true" /><span>Person search</span>
+              </button>}
               <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
@@ -979,12 +1022,12 @@ const AdminShell: React.FC = () => {
           </header>
 
           <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
-          {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+          {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {showWorkspaceNavigation && workforceSectionNav}
           <div className="bob-page-layout">
           <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-            {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
             <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
               <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
             </LazyPageRecovery></div>
@@ -1029,7 +1072,8 @@ const AdminShell: React.FC = () => {
         </div>
       </header>
       <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
-      {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {showWorkspaceNavigation && workforceSectionNav}
 
       {mobileMenuOpen && (
         <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
@@ -1037,7 +1081,7 @@ const AdminShell: React.FC = () => {
             {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))).map((item) => {
+                {enabledNavItems(items).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={`${item.id}:${item.area ?? ''}`} onClick={() => openWorkspaceItem(item)} className={`admin-mobile-nav-item ${isWorkspaceItemActive(item) ? 'is-active' : ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined}>
@@ -1055,7 +1099,6 @@ const AdminShell: React.FC = () => {
       <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-        {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
         <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
           <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
         </LazyPageRecovery></div>

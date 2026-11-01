@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Seeds planner-approved historical patrol-log labour into roster_slots through the governed
-// import_historical_patrol_labour_slots RPC, acting as the R&M import automation profile.
+// import_historical_patrol_labour_slots RPC, acting as the R&M import automation profile, then
+// routes the labour onto primary-officer patrol routes via apply_historical_patrol_labour_routes.
 // Rolls back by default. --commit requires the owner-approved planner fingerprint.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -16,6 +17,10 @@ const HEX64 = /^[0-9a-f]{64}$/;
 export function batchRequestId(reportFingerprint, index) {
   const hex = createHash('sha256').update(`rm_patrol_log_labour|${reportFingerprint}|${index}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+export function routingRequestId(reportFingerprint) {
+  return batchRequestId(reportFingerprint, 'route');
 }
 
 const dollarQuote = (text, tag) => {
@@ -41,8 +46,12 @@ SELECT set_config('request.jwt.claim.sub','${IMPORT_ACTOR}',true),
   set_config('request.jwt.claims','{"sub":"${IMPORT_ACTOR}","role":"authenticated"}',true);
 CREATE TEMP TABLE labour_receipts(batch integer, receipt jsonb) ON COMMIT DROP;
 ${calls.join('\n')}
+-- Route once, after every batch, so each placement sees the full attendance history.
+CREATE TEMP TABLE labour_routing ON COMMIT DROP AS
+SELECT public.apply_historical_patrol_labour_routes('${PROVIDER}'::uuid, '${routingRequestId(reportFingerprint)}'::uuid) AS receipt;
 SELECT jsonb_build_object(
   'mode', ${commit ? "'commit'" : "'rollback'"},
+  'routing', (SELECT receipt - 'routes' FROM pg_temp.labour_routing),
   'batches', (SELECT count(*) FROM pg_temp.labour_receipts),
   'inserted', (SELECT sum((receipt->>'inserted')::integer) FROM pg_temp.labour_receipts),
   'unchanged', (SELECT sum((receipt->>'unchanged')::integer) FROM pg_temp.labour_receipts),
@@ -52,6 +61,8 @@ SELECT jsonb_build_object(
   'labour_hours', (SELECT round(sum(extract(epoch FROM scheduled_end-scheduled_start))/3600.0, 4) FROM public.roster_slots
     WHERE organization_id='${PROVIDER}'::uuid AND external_refs->>'source'='rm_patrol_log_labour'),
   'work_units', (SELECT count(*) FROM public.roster_work_units WHERE organization_id='${PROVIDER}'::uuid AND external_refs->>'source'='rm_patrol_log_labour'),
+  'by_route', (SELECT jsonb_object_agg(route, n) FROM (SELECT coalesce(external_refs->>'route_code', 'unrouted') route, count(*) n
+      FROM public.roster_slots WHERE organization_id='${PROVIDER}'::uuid AND external_refs->>'source'='rm_patrol_log_labour' GROUP BY 1) x),
   'pay', (SELECT jsonb_build_object('slots', count(*), 'pay_cost', sum(l.pay_cost), 'billable', sum(l.billable))
       FROM public.get_roster_labour_cost('${PROVIDER}'::uuid, '1900-01-01'::timestamptz, now()) l
       JOIN public.roster_slots s ON s.id = l.slot_id AND s.external_refs->>'source'='rm_patrol_log_labour'),

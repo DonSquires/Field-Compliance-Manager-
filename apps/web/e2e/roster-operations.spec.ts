@@ -376,7 +376,7 @@ test('roster page explains what to set up first when the branch has nothing to r
         await expect(page.getByText(/Build a patrol run from a client agreement in Client Portfolios/)).toBeVisible();
         await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Client Portfolios' })).toBeVisible();
         await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Work units' })).toBeVisible();
-        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'People, Pay & HR' })).toBeVisible();
+        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'People' })).toBeVisible();
         await expect(page.locator('.roster-board')).toHaveCount(0);
         await expect(page.getByRole('button', { name: /Publish .*draft/ })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Create shift' })).toHaveCount(0);
@@ -416,7 +416,7 @@ test('when the employer has no rest and hours rules the Create shift dialog says
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
         const notes = dialog.locator('.roster-assignment-note');
         await expect(notes.nth(0)).toContainText('4 h in the week starting 24 Aug · no other shift nearby · day 1 in a row.');
-        await expect(notes.nth(1)).toContainText('No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in People & HR › Rostering › Rest & hours rules.');
+        await expect(notes.nth(1)).toContainText('No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in Rosters › Shift setup & open shifts › Rest & hours rules.');
         // a server refusal lands inside the dialog, not behind it
         await dialog.getByRole('button', { name: 'Create shift' }).click();
         await expect(dialog.locator('.roster-dialog-error')).toContainText("Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10");

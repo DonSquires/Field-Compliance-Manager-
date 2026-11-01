@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -396,7 +397,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           )}
           </div>
           <footer className="admin-queue-footer">
-            {profile?.role && ['grand_master', 'master', 'admin'].includes(profile.role) && <button type="button" onClick={() => onNavigate?.('approvals')}>Open approvals <ArrowRight size={13} aria-hidden="true" /></button>}
+            {isAdminTierRole(profile?.role) && <button type="button" onClick={() => onNavigate?.('approvals')}>Open approvals <ArrowRight size={13} aria-hidden="true" /></button>}
             <small>Review, approve or assign in the governed record.</small>
           </footer>
         </section>

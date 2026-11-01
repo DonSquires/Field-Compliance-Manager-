@@ -51,7 +51,8 @@ const CORS = {
 const CAN_PLAN = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const DEFAULT_MAX_CANDIDATES = 4;
 const DEFAULT_SAMPLE_SIZE = 25;

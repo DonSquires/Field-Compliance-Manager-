@@ -44,6 +44,8 @@ describe('notification navigation', () => {
 
   it('opens safety review and assessment notifications on the correct role surface', () => {
     expect(resolveNotificationDestination('admin', notification({ link_page: 'safety-reviews' }))).toEqual({ kind: 'admin_field_ops', area: 'field-reports' });
+    expect(resolveNotificationDestination('admin_officer', notification({ category: 'notice_expiry', link_page: 'person-search' }))).toEqual({ kind: 'admin_field_ops', area: 'person-search' });
+    expect(resolveNotificationDestination('officer', notification({ category: 'notice_expiry', link_page: 'person-search' }))).toBeNull();
     expect(resolveNotificationDestination('officer', notification({ link_page: 'safety-assessments' }))).toEqual({ kind: 'officer_module', module: null });
     expect(resolveNotificationDestination('client_viewer', notification({ link_page: 'safety-reviews' }))).toBeNull();
   });

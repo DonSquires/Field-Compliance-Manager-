@@ -169,7 +169,7 @@ export function CrmOnboardingPanel({
   const blocked = row.readiness?.dimensions.filter((dimension) => dimension.status === 'blocked') ?? [];
   const invitationStatus = row.invitation_status ?? 'not_invited';
   const clientUserCount = row.client_user_count ?? 0;
-  // invite-org seats the client's administrator when the invitation is sent; accept_quote also writes 'accepted' with nobody seated
+  // invite-org seats the client's administrator when the invitation is sent; quotes accepted before the 2026-11-01 ruling also wrote 'accepted' with nobody seated
   const seated = clientUserCount > 0;
   const clientAccepted = seated && invitationStatus === 'accepted';
   const canInvite = !seated && (row.readiness ? row.readiness.ready : row.has_primary_contact);

@@ -1,3 +1,4 @@
+import { isAdminTierRole } from '../lib/roles';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -27,6 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
+import { engineLabel, inferenceCoverage } from '../lib/cctvQuality';
 import { buildCCTVPrintableReport, type CCTVReportReceiptProvenance } from '../lib/cctvReport';
 import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';
 import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
@@ -273,7 +275,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [jobAction, setJobAction] = useState<'retry' | 'reprocess' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+  const isAdmin = isAdminTierRole(profile?.role);
 
   const chooseWorkspaceMode = useCallback((mode: ReviewWorkspaceMode) => {
     setWorkspaceMode(mode);
@@ -692,6 +694,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const consolidated = useMemo(() => {
     return consolidateResultData(selected?.result?.result);
   }, [selected?.result?.result]);
+  const coverage = useMemo(() => inferenceCoverage(selected?.result?.result), [selected?.result?.result]);
 
   useEffect(() => {
     let active = true;
@@ -1589,6 +1592,28 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>Animal detection: {consolidated.quality_summary.animal_detection_status === 'model_not_staged' ? 'not enabled for this deployment' : consolidated.quality_summary.animal_detection_status || 'not reported'}.</span>
                 </div>
               )}
+              {selected.result ? (
+                coverage ? (
+                  <div className={`cctv-coverage-panel${coverage.framesUnanswered > 0 || coverage.mixedDetectors ? ' is-warning' : ''}`} aria-label="Detector coverage">
+                    <strong>Detector coverage · {engineLabel(coverage.engineVersion)}{coverage.pinnedModel ? ` · ${coverage.pinnedModel}` : ''}</strong>
+                    {coverage.capped && coverage.motionFrames ? (
+                      <span>The detector examined {coverage.framesExamined.toLocaleString()} sampled frame{coverage.framesExamined === 1 ? '' : 's'} spread across {coverage.motionFrames.toLocaleString()} motion frames (about 1 in every {Math.max(1, Math.round(coverage.motionFrames / Math.max(1, coverage.framesSampled))).toLocaleString()}). Motion between samples was not examined, so a brief sighting there can be missed — report it from the console if you see one.</span>
+                    ) : coverage.capped ? (
+                      <span>The detector examined {coverage.framesExamined.toLocaleString()} sampled motion frame{coverage.framesExamined === 1 ? '' : 's'}; this clip had more motion than the sampling budget{coverage.framesParsed ? ` (${coverage.framesParsed.toLocaleString()} source frame positions parsed, static footage included)` : ''}. Motion between samples was not examined, so a brief sighting there can be missed — report it from the console if you see one.</span>
+                    ) : (
+                      <span>The detector examined {coverage.framesExamined.toLocaleString()} of {coverage.framesSampled.toLocaleString()} motion frame{coverage.framesSampled === 1 ? '' : 's'}.</span>
+                    )}
+                    {coverage.framesUnanswered > 0 ? <span>{coverage.framesUnanswered} sampled frame{coverage.framesUnanswered === 1 ? '' : 's'} got no detector answer. Treat {coverage.framesUnanswered === 1 ? 'it' : 'them'} as a gap, not as nothing seen.</span> : null}
+                    {coverage.providers.length ? <span>Read by {coverage.providers.map((entry) => `${entry.label} (${entry.frames})`).join(' · ')}.</span> : null}
+                    {coverage.mixedDetectors ? <span>Different detector models read frames of this clip, so its sightings are not measured on one standard. Reprocessing with engine v2 reads every frame with one pinned model and keeps human decisions.</span> : null}
+                  </div>
+                ) : (
+                  <div className="cctv-coverage-panel" aria-label="Detector coverage">
+                    <strong>Detector coverage</strong>
+                    <span>Not recorded for this result. It predates frame-coverage tracking, so it cannot show which motion frames the detector examined.</span>
+                  </div>
+                )
+              ) : null}
 
               <div className="cctv-records-summary" aria-label="Observation record summary">
                 <Database size={17} aria-hidden="true" />

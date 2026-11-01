@@ -254,6 +254,9 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     const sourceFingerprint = recordFingerprint(desired);
     const action = { external_ref: row.external_ref, kind, source_fingerprint: sourceFingerprint };
     const legacy = Boolean(current && !checkpoint && current.kind === kind && current.source_file === null && current.source_sheet === null);
+    // Imported earlier from this same workbook and sheet, but before source history was recorded.
+    const unversioned = Boolean(current && !checkpoint && current.kind === kind
+      && current.source_file === row.payload?.source_file && current.source_sheet === row.payload?.source_sheet);
     if (superseded.has(row.external_ref)) {
       actions.push({ ...action, operation: 'superseded' });
       continue;
@@ -289,8 +292,9 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     } else if (recordFingerprint(current.record) === sourceFingerprint) {
       actions.push({ ...action, operation: 'unchanged', record_id: current.id,
         ...(checkpoint ? {} : { baseline_required: true }) });
-    } else if (legacy && kind === 'event') {
-      // Pre-provenance import: the server corrects only known legacy artifacts and holds anything else.
+    } else if (legacy || unversioned) {
+      // Source truth (owner ruling 2026-10-30): the server corrects only the known importer artifacts
+      // and holds anything else.
       actions.push({ ...action, operation: 'legacy_correct', record_id: current.id, desired });
     } else if (!checkpoint) {
       actions.push({ ...action, operation: 'hold', reason: 'initial_difference_requires_review', record_id: current.id });
@@ -908,7 +912,7 @@ COMMIT;`);
     status: 'completed', summary: summarizeSyncResults(results), results };
 }
 
-function cliQuery(sql) {
+export function cliQuery(sql) {
   const directory = mkdtempSync(path.join(tmpdir(), 'fcm-reconcile-'));
   try {
     const input = path.join(directory, 'query.sql');
@@ -917,14 +921,20 @@ function cliQuery(sql) {
     const result = JSON.parse(execFileSync(process.execPath, [cli, 'db', 'query', '--linked', '--file', input, '--output-format', 'json'], {
       encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
     }));
-    if (!Array.isArray(result.rows)) throw new Error('Linked query returned no rows');
-    return result.rows;
+    // Inside an agent session the CLI wraps rows in a { boundary, rows, warning } envelope;
+    // unattended runs (e.g. the scheduled task) get the bare row array.
+    const rows = Array.isArray(result) ? result : result?.rows;
+    if (!Array.isArray(rows)) {
+      const detail = String(result?.message ?? result?.error ?? Object.keys(result ?? {}).join(',')).slice(0, 300);
+      throw new Error(`Linked query returned no rows (${detail})`);
+    }
+    return rows;
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 }
 
-function linkedQuery(sql) {
+export function linkedQuery(sql) {
   return cliQuery(`BEGIN READ ONLY;\n${sql}\nROLLBACK;`);
 }
 

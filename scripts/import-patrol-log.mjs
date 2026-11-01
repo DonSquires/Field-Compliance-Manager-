@@ -100,7 +100,7 @@ function parseCsv(text) {
 function workbookCellText(cell) {
   const value = cell.type === ExcelJS.ValueType.Formula ? cell.result : cell.value;
   if (value === null || value === undefined) return '';
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
   if (typeof value === 'object') return cell.text ?? '';
   return String(value);
 }
@@ -217,8 +217,10 @@ function runCliQuery(query) {
       maxBuffer: 32 * 1024 * 1024,
     });
     const result = JSON.parse(output);
-    if (!Array.isArray(result.rows)) throw new Error('Supabase CLI returned no query rows');
-    return result.rows;
+    // Agent sessions get a { boundary, rows, warning } envelope; unattended runs get the bare array.
+    const rows = Array.isArray(result) ? result : result?.rows;
+    if (!Array.isArray(rows)) throw new Error('Supabase CLI returned no query rows');
+    return rows;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

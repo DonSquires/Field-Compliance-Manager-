@@ -75,6 +75,44 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 | **Master Shell** | Master, Grand Master | Policy & Governance | Multi-tenant setup, platform terms, module subscriptions |
 | **Bob Studio** | Owner, Grand Master | IDE / Multi-Ability Studio | Continuous in-app build, testing, and system extensions |
 
+### Client and location setup
+
+- Open **Clients**, then **Set up a new client**. Enter the client name and
+  confirm that your provider is engaged. Email, phone and notes are optional.
+  Choose an existing matching organisation instead of creating a duplicate.
+- Save the client, then use **Add location**. A location name is enough to
+  record an unverified site or area. No address, price, schedule or invitation
+  is required at this stage.
+- Select a location row to open its profile. Edit its name, notes and site
+  briefing/access/safety details; an address can be selected from address
+  search. **Scheduling and services** retains the client/site context.
+  **Reporting and activity** shows records for that location's sites/zones.
+  **Map, areas and restrictions** opens the existing specialist editor.
+  Delivery editing requires an existing client. A delivery link without one
+  opens the same simple setup form, not the former organisation/contact wizard.
+  Provider context follows the client into its profile and delivery editor.
+  Where several sites share a location, choose the intended active site before
+  opening scheduling. Area-only locations open agreement/service configuration
+  rather than defaulting to another site's schedule.
+- On the officer home page, use **Places**. Select the client and existing
+  location, or add a new one. If several site/area boundaries share the
+  location, choose the intended boundary. Capture GPS, inspect the map and
+  correct the point if needed, then confirm and save.
+- Accuracy worse than 10 m is a warning, not a claim of precise GPS. The
+  original fix/time/accuracy and corrected point are retained. Captures older
+  than ten minutes must be reacquired. Failed tiles cannot be confirmed.
+- The admin row/profile displays **Officer verified** after persistence. This
+  means a separate 10 m reference point was confirmed, not that the perimeter
+  or legal rules were verified. Existing boundaries and officer history remain.
+  To move or re-verify that reference point, capture it again through **Places**;
+  the specialist boundary editor cannot overwrite its verification provenance.
+  Reference points are not delivery locations, work areas or restriction targets.
+  Offline captures are not queued by this workflow; wait for the save receipt.
+- A stale-record error requires reloading before retrying. Multiple current
+  agreements require an administrator to review the intended engagement
+  rather than allowing the form to guess. Contacts, invitations, prices and
+  advanced readiness/handoff tools remain available separately.
+
 ### Vehicle search and cross-area subject trends
 
 - In **Vehicle Search & Flags**, enter any part of a registration. Plain text
@@ -123,8 +161,37 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   every screen that shows them. Everyone else sees only that the owner (or
   driver) has been identified and the suburb and town/city. Owners sourced from
   NZTA are marked **NZTA restricted** and must only be used for the purpose they
-  were obtained for. **No longer owner / driver** ends a link with a reason. The
+  were obtained for. An NZTA-sourced person is labelled **Registered person (at
+  check date)** — not proof of ownership — and stays hidden until an authorised
+  user chooses **Reveal with a stated purpose**, picks the Gazette purpose (or
+  the notice being followed up) and writes the reason. The details stay visible
+  to that user for 15 minutes (timed by the server, so the screen hides them
+  again even if the device clock is wrong) and the view is logged. **Following
+  up a trespass or warning notice** is offered only when an issued notice about
+  that person or vehicle exists. The same reveal applies in Person search and
+  the identity records workspace; in the identity records workspace, hidden NZTA
+  records are listed by plate ? open the vehicle, reveal, then choose **Review
+  this NZTA record**. **No longer owner / driver** ends a link with a reason. The
   owner can also be added from the repeat-subject drawer.
+- **NZTA register (s241)** (Admin → Investigations & Evidence, admin-tier only)
+  keeps the records NZTA can ask for: **Lookup register** (record every Motochek
+  lookup with the individual user, purpose, reason and later the outcome;
+  historical checks without a purpose are flagged), **Access log** (every
+  in-app reveal), **People & training** (record training and confidentiality,
+  each valid for up to 12 months; a new NZTA tick cannot be saved until both
+  are current — choose **Staff without access** to record them for someone
+  before granting access; administrators from a parent, provider or platform
+  organisation who can see the register are listed too), **Quarterly reviews**,
+  and the **Annual summary** with per-zone signage evidence and the retention
+  counts (18 months, 2 years and 5 years; report only, nothing is deleted).
+  Training and confidentiality belong to the person and count in every
+  organisation they can view. NZTA source documents and NZTA owner links cannot
+  be read directly from the database tables; they are only returned through a
+  logged reveal. Historical checks can be linked to the recorded lookup that
+  explains them with **Link to recorded lookup**. The lookup register, access
+  log and annual summary export CSV; the summary also prints, for the period
+  shown only. If a period has more entries than the screen can list, a banner
+  says so and export is turned off until the dates are narrowed.
 - A flagged vehicle's profile has a border in the colour of its highest active
   flag (red for high/critical, amber for medium, blue for low) and a risk
   banner at the top listing the active flags.

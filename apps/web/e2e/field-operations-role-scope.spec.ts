@@ -3,7 +3,7 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 const enabledOperationalModules = ['dispatch', 'cctv', 'static_guarding', 'freedom_camping', 'parking_enforcement'];
 
-test('admin officer receives enabled response and review tools', async ({ page }) => {
+test('admin officer receives enabled response and review tools', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'admin'));
   await installSupabaseFixtures(page, { adminRole: 'admin_officer', officerModules: enabledOperationalModules });
@@ -11,10 +11,15 @@ test('admin officer receives enabled response and review tools', async ({ page }
 
   await expect(page.getByRole('heading', { name: 'Operations workspace' })).toBeVisible();
   await expect(page.getByText('Respond now', { exact: true })).toBeVisible();
-  await expect(page.getByText('Review and investigate', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Dispatch console Create jobs/ })).toBeVisible();
+  if (testInfo.project.name === 'mobile-chromium') {
+    await page.getByRole('navigation', { name: 'Workflow panes' }).getByRole('button', { name: /Operational records/ }).click();
+  }
+  await expect(page.getByText('Review and investigate', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /^CCTV & video/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Import camera footage/ })).toHaveCount(0);
-  await expect(page.locator('.field-ops-workflow')).toHaveCount(11);
+  await expect(page.getByRole('button', { name: /^Vehicle search/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Person search/ })).toBeVisible();
+  await expect(page.locator('.field-ops-workflow')).toHaveCount(13);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

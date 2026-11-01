@@ -608,18 +608,20 @@ function collectSchemaViewEdges(rootDir, inventory = collectDdlEntities(rootDir)
       const dependencySchema = dependency[1]?.toLowerCase();
       const dependencyName = dependency[2];
       if (dependencySchema && dependencySchema !== 'public') continue;
-      if (dependencyName === viewName || cteNames.has(dependencyName.toLowerCase()) || !inventory.tables.has(dependencyName)) continue;
+      const isFunction = /^\s*\(/.test(body.slice(dependency.index + dependency[0].length));
+      if (isFunction ? !inventory.rpcs.has(dependencyName)
+        : dependencyName === viewName || cteNames.has(dependencyName.toLowerCase()) || !inventory.tables.has(dependencyName)) continue;
       const edge = {
         source_type: 'table',
         source_name: viewName,
-        target_type: 'table',
+        target_type: isFunction ? 'rpc' : 'table',
         target_name: dependencyName,
-        edge_kind: 'reads',
+        edge_kind: isFunction ? 'calls' : 'reads',
         evidence_class: 'live-schema',
         retirement_status: 'live',
         source_file: schemaFile,
         migration_name: null,
-        caller_context: `${OWNER_MARKER} SQL view reads public.${dependencyName}`,
+        caller_context: `${OWNER_MARKER} SQL view ${isFunction ? 'calls' : 'reads'} public.${dependencyName}`,
         refresh_source: 'ci_generator'
       };
       edges.set(edgeKey(edge), edge);

@@ -46,6 +46,11 @@ radius of any change. Screens are the last thing built, not the first.
   `pg_cron` schedule declarations. A later explicit unschedule removes that
   scheduler caller from the generated terrain. Static evidence is recorded as
   `live-code` or `live-schema`; it never sets `exercised=true`.
+- SQL views record `reads` edges to tables/views and `calls` edges to
+  set-returning RPCs. For example, `person_permits_fieldwork` calls
+  `read_person_permits_fieldwork`; it no longer directly reads the underlying
+  permit/vehicle tables. Follow the RPC's edges rather than inventing a direct
+  read across a privacy projection.
 - `scripts/atlas-exercise-evidence.mjs` may promote a scheduled RPC only when
   the current active cron job has a successful `cron.job_run_details` receipt.
   It uses the read-only Management API path when a management token is

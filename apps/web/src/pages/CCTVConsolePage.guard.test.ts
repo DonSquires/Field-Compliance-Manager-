@@ -197,7 +197,7 @@ describe('CCTV console', () => {
   });
 
   it('lets only administrators apply an evidence lock, and only over a hashed original, through the governed RPC', () => {
-    expect(page).toContain("const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');");
+    expect(page).toContain('const isAdmin = isAdminTierRole(profile?.role);');
     expect(page).toContain("supabase.rpc('lock_cctv_evidence'");
     expect(page).toContain('disabled={!activeClip || Boolean(activeClip.lockedAt) || !activeClip.sha256}');
     expect(page).toContain('lockDraft.reason.trim().length < 5');

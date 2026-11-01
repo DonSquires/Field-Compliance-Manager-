@@ -11,9 +11,123 @@ npm run test:e2e:human
 
 The default run uses the existing Supabase fixtures. It covers the admin shell and officer entry point on the configured desktop and mobile Playwright projects.
 
+## Bob's automatic production verification
+
+Owner ruling 2026-10-27 (Don Squires, owner): Bob runs Dr Bob himself after
+production deploys. No owner or admiral request is required. The control plane
+polls Vercel for the deployment serving the `HUMAN_TEST_BASE_URL` alias in the
+configured project. It waits while the newest production deployment is still
+queued or building, and acts only when the serving deployment is `READY` with a
+Git SHA. A project mismatch, missing SHA or failed lookup is reported as
+`unavailable`, never as a deployment to test. It waits for the release lane to
+record that SHA, unless the lane has been stuck for 30 minutes, then waits for
+Builder execution, main health and other Dr Bob runs to become idle. Each SHA
+receives one `suite` run requested by `bob:production-verify`, using the
+dedicated test identity and the read-only live phase. The live phase observes
+`BOB_PRODUCTION_HUMAN_TEST_ROUTE`, which defaults to `/admin/builder`, so the
+authenticated route check never silently skips.
+
+Runs use private detached snapshots under the Builder workspace root, pinned to
+the deployment commit. Shared checkout refreshes therefore cannot change files
+under a running browser walk. `/health` reports `activeHumanTests` and the
+latest production verification status without credentials. The release lane
+does not restart the control plane while `activeHumanTests` is nonzero.
+
+Passing or failing tests are recorded once per SHA. Interrupted, timed-out or
+infrastructure-coded worker failures retry at most three times before
+`gave_up`. A live phase that fails because its deployment preflight was
+`unavailable`, `stale` or `unverified` is classified as infrastructure and
+retried, not recorded as an application failure. The attempt is persisted
+before the worker starts, so a control-plane crash during a start still spends
+budget. If a different SHA is confirmed `READY` on production when the run
+finishes, the older verdict becomes `superseded` and the newer SHA receives its
+own run; a settling or unavailable deployment never supersedes. The newest 50
+terminal verdicts are retained; pending and running states are never evicted.
+
+Disable the monitor with `BOB_PRODUCTION_HUMAN_TEST=false`; adjust polling with
+`BOB_PRODUCTION_HUMAN_TEST_INTERVAL_MS` (minimum 60 seconds) and the first check
+after startup with `BOB_PRODUCTION_HUMAN_TEST_STARTUP_DELAY_MS` (1 second to 10
+minutes, default 2 minutes). A failure is evidence for Builder investigation. It
+is not an approval or release decision. A genuine live failure is routed into
+governed triage (below); only packets the triage classifier marks `routine` may
+become a bounded repair job.
+
+### Findings to triage
+
+Owner ruling 2026-10-27: a failed production verdict must not stop at a log
+line. When a live phase fails (fixture failures, passes, infrastructure retries
+and superseded runs never file), the control plane:
+
+1. Reads each `human-test-report.json` written under the run's
+   `live/test-results/` directory. Symlinks, files over 2 MB, more than 100
+   test directories and more than 500 events per report are refused or
+   truncated.
+2. Collapses the structured `httpErrorEvents` into distinct findings by a
+   fingerprint of status, method, endpoint and page. Server errors come first,
+   and at most 10 findings are filed per verdict.
+3. Redacts each finding before it leaves the control plane. The endpoint keeps
+   only the Supabase path kind and name (`rpc/<name>`, `functions/<name>`,
+   `rest/<table>`) or a host with identifiers masked. The page keeps only its
+   path, with UUIDs, numbers, emails and tokens masked, plus the `area`, `tab`,
+   `view`, `section` and `mode` query parameters. No query values, response
+   bodies, record data or credentials are sent.
+4. Signs in as the dedicated `GRANDMASTER_TEST_EMAIL` identity with the anon
+   key. It posts each finding to `bob-triage-report` through the same
+   user-JWT path as any signed-in reporter, with module `dr_bob_production`
+   and a client packet key of `dr-bob:<fingerprint>:<first 12 SHA characters>`. It always signs
+   out (`scope=local`) afterwards. No service-role branch is added to triage.
+   The service key is used only for a read that skips a defect which already
+   has an `open` or `reviewing` packet from this observer, so later SHAs do
+   not duplicate it.
+5. Records `triage_intake` on the verdict: status
+   (`filed`/`partial`/`failed`/`none`/`unconfigured`/`error`), attempts,
+   finding count, filed packets with their repair risk, skipped open packets
+   and redacted errors. `/health.productionHumanTest.latest.triage_intake`
+   shows it. Intake failures retry at most three times on later ticks while
+   that SHA is still production. They never change the verdict and never re-run
+   the walk. A restart mid-intake resumes from the persisted `pending` state.
+
+Filing happens after the read-only walk has finished, against Bob's own
+operational triage table. The browser walk itself still never commits a record.
+
+The triage classifier keeps its existing governance. A 5xx or 404 with no
+stop-line or protected signal is a `routine` repair, which the routine self-heal
+lane claims as a bounded Builder job. 401/403 responses are `data_problem`, and
+other 4xx responses go to the self-heal apparatus with `unknown` risk, so they
+stay `not_eligible` for unattended repair. Finance, auth, schema, enforcement,
+legal, evidential and similar signals are `protected` or stop-lines and wait
+for the Grandmaster. On 2026-10-27 the classifier stopped matching protected
+terms against envelope keys. Before that, the persisted key `schema_version`
+made every monitored packet `protected`, so the routine lane had never fired.
+
+Disable filing with `BOB_DR_BOB_TRIAGE=false`; the verdict is still recorded.
+Known gap: the Builder change-request queue lists only user reports, so
+monitored packets that are `awaiting_grandmaster` or `not_eligible` are visible
+through `/health` and the triage table, not yet in a review UI.
+
+Known limits:
+
+- Vercel credentials stay in the control plane. It resolves the deployment
+  serving production before the live worker starts and again after it exits;
+  the worker receives only the SHA the control plane verified, never
+  `VERCEL_TOKEN`, `VERCEL_PROJECT_ID` or `VERCEL_TEAM_ID`. If the deployment is
+  not the expected SHA beforehand, no worker starts and the test identity is
+  not used. If it moved during the walk, the live phase fails.
+- The live worker still runs repository test code from a commit that is
+  already on `main`, and holds the dedicated test password in its Node process
+  while it does. The password never reaches a receipt, and the browser context
+  sees it only as typed login input. A short-lived, audited test-session broker
+  would remove that remaining exposure.
+- The release lane's idle check and the monitor's start are not one atomic
+  reservation. Duplicate starts are refused synchronously inside the control
+  plane, and the release lane defers while `/health.activeHumanTests` is
+  non-zero. If a release still restarts the control plane during a start, the
+  run is marked `interrupted` and retried within the bounded budget, and a
+  newer production SHA supersedes it.
+
 ## Run through Bob
 
-An admiral can ask Bob to start a Dr Bob human test. Bob calls the governed
+An admiral can also ask Bob to start a Dr Bob human test. Bob calls the governed
 Builder control room, which starts the existing browser worker against a
 commit-pinned checkout and immediately returns a durable run ID. The run is
 persisted through control-plane restarts with one of these states:
@@ -28,15 +142,20 @@ receipt instead of creating duplicate work.
 An explicit instruction to run Dr Bob is deterministically dispatched to this
 tool even if the planner proposes research or prose instead. `suite` mode runs
 the fixture-backed phase first and, only if it passes, runs the read-only live
-phase under the same durable run ID. The request can pin a 40-character
-`expected_sha` and an approved admin route such as `/admin/builder`; a source
+phase under the same durable run ID. `live` and `suite` runs are refused with
+HTTP 409 before any snapshot is created or credential is used unless the
+commit is already merged to `main`; an unreviewed branch commit can only run in
+`fixture` mode. The request can pin a 40-character `expected_sha` and an
+approved admin route such as `/admin/builder`; a source
 SHA mismatch fails before a browser worker starts unless the newer source and
 deployed commits have the exact same `apps/web` Git tree. This permits
 server-only Bob commits without pretending they changed the deployed web
 artifact.
 
-Fixture-backed runs use a bounded four-worker browser pool. Live runs remain
-serial and require `HUMAN_TEST_BASE_URL` plus the dedicated
+Fixture-backed runs use a bounded four-worker browser pool. Safe fixture
+button interactions wait up to five seconds for scheduled navigation to settle
+before recording a click failure. Live runs remain serial and require
+`HUMAN_TEST_BASE_URL` plus the dedicated
 `GRANDMASTER_TEST_EMAIL` and `GRANDMASTER_TEST_PASSWORD` test identity. Bob
 does not retrieve or reuse an arbitrary user's password, token, browser
 session, or MFA factor.
@@ -53,19 +172,35 @@ npm run test:e2e:human:live
 
 Set `HUMAN_TEST_BASE_URL` to point at another deployment. Live mode performs navigation and observation only. It does not submit, save, approve, resolve, publish, assign, delete, or sign out.
 
+The browser runner enforces this. With `HUMAN_TEST_LIVE=true`, the session is
+read-only and cannot opt out: safe-button clicks, field fills, submit
+follow-through and button walks are skipped and recorded with the reason
+`live-read-only`. Only tab and admin-navigation changes are performed. Checks
+that depend on local Supabase fixtures (officer modules, admin route families,
+desktop companion, officer and client control groups) are skipped in live mode.
+
 ## Deployment preflight
 
-Before a live human journey, Bob performs a server-side deployment preflight. If
-`VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available to the test process, it
-checks the target production deployment state and compares its Git SHA with
-`HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
-`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale deployment must block
-the test rather than produce a warning. Vercel credentials never enter the
-browser context.
+Before a live human journey, Bob performs a server-side deployment preflight.
+For local and CI runs, if `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available
+to the test process, it looks up the deployment serving the target hostname
+(falling back to the project's production deployments), checks its state, and
+compares its Git SHA with `HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
+`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale or unverifiable
+deployment must block the test rather than produce a warning; a serving
+deployment without a Git SHA is then an error. The preflight prints a
+`[HUMAN DEPLOYMENT PREFLIGHT] result=matched|stale|unavailable|unverified`
+line. Vercel credentials never enter the browser context.
 
-Bob's governed live and suite dispatch requires those Vercel settings and sets
-`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. A missing preflight, stale SHA, or
-failed fixture phase is a failed run, not a warning-shaped success.
+Bob's governed live and suite dispatch performs that lookup in the control plane
+instead, so it requires `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` there. It starts
+the live worker only when production is ready and serving the expected SHA,
+passes the worker `HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA` (no Vercel credentials),
+and sets `HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. After the worker exits, the
+control plane checks production again and records the worst of the before,
+after and worker results as the phase's `deployment_preflight`. A stale,
+unavailable or unverified result, or a failed fixture phase, is a failed run,
+not a warning-shaped success.
 
 ## Evidence
 
@@ -73,7 +208,7 @@ Each test produces:
 
 - A screenshot after login, every discovered admin navigation item, safe tab, and final state.
 - Console output describing the visible heading, fields, buttons, links, and page text.
-- A `human-test-report.json` attachment containing steps, URLs, findings, console errors, and failed requests.
+- A `human-test-report.json` attachment containing steps, URLs, findings, console errors, and failed requests. The same report is written to the test's output directory, with structured `httpErrorEvents` (status, method, query-free endpoint, page and step), so the control plane can route production findings to triage.
 - Playwright traces and failure screenshots when the configured Playwright policy retains them.
 
 Reports and images are available through the Playwright HTML report:

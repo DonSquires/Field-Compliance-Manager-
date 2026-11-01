@@ -56,7 +56,8 @@ const CORS = {
 const CAN_MAP = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 // Owner rule: confident only with >=3 columns where header maps AND data matches type.
 const CONFIDENCE_MIN_VALIDATED_COLUMNS = 3;

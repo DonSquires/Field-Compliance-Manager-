@@ -30,7 +30,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-const CAN_MANAGE = ['grand_master', 'master', 'admin', 'client_admin'];
+const CAN_MANAGE = ['grand_master', 'master', 'admin', 'admin_officer', 'client_admin'];
 const ROLE_LABELS: Record<string, string> = {
   grand_master: 'Grand Master', master: 'Master', admin: 'Administrator', admin_officer: 'Admin Officer',
   nzscv_monitor: 'NZSCV Monitor', officer: 'Officer', scan_operator: 'Scan Operator',

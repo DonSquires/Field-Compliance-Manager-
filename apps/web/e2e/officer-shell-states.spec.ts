@@ -53,7 +53,7 @@ test.describe('Officer shell states and chrome', () => {
     // Bottom action bar is visible
     const actionBar = page.locator('.officer-action-bar');
     await expect(actionBar).toBeVisible();
-    await expect(actionBar.getByRole('button', { name: 'Modules' })).toBeVisible();
+    await expect(actionBar.getByRole('button', { name: 'Tools' })).toBeVisible();
     await expect(actionBar.getByRole('button', { name: 'Report' })).toBeVisible();
     await expect(actionBar.locator('.officer-sos-action')).toBeVisible();
 
@@ -121,9 +121,9 @@ test.describe('Officer shell states and chrome', () => {
     await signInAsOfficer(page, '/officer');
 
     // Navigate to module selector
-    await page.locator('.officer-action-bar').getByRole('button', { name: 'Modules' }).click();
+    await page.locator('.officer-action-bar').getByRole('button', { name: 'Tools' }).click();
     await expect(page).toHaveURL(/\/officer\/modules$/);
-    await expect(page.getByRole('heading', { name: 'Enabled modules' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Tools' })).toBeVisible();
 
     // Verify module cards are displayed
     const moduleCards = page.locator('.officer-module-card');

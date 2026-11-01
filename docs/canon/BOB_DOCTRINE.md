@@ -11,6 +11,180 @@
 
 ## 1. What Bob is
 
+**Autonomous Dr Bob verification, owner ruling 2026-10-27 (Don Squires,
+owner).** Bob has his own service-owned authority to run Dr Bob human tests. A
+person does not request or approve a post-production verification run. After
+the deployment serving the production alias is `READY` with a Git SHA and the
+governed release lane has reached the same SHA (or a bounded grace period has
+expired), the control plane starts one fixture-then-live suite for that SHA when
+no Builder job, main-health check or Dr Bob run is active. It uses only the
+dedicated configured test identity and a private snapshot pinned to the
+deployment commit. The live identity is only given to commits already merged to
+`main`. The live phase is observation-only: the browser runner refuses every
+click, fill and submit apart from tab and admin-navigation changes, and
+fixture-only checks are skipped. Receipts and health may expose run status and
+counts but never credentials. Infrastructure failures, including an unavailable,
+stale or unverified deployment preflight, retry boundedly; an application
+failure is recorded once. This authority does not approve code, open repairs,
+mutate tenant data, impersonate real users, weaken the release lane or treat a
+passing walk as proof of every workflow.
+
+**Whole-job acceptance, owner decision 2026-10-26.** The owner selected fixing
+Builder's acceptance gate before another correction of the partial-success
+repair. A lane skip routes work; it cannot waive a mandatory outcome. Before
+human/independent/no-review progression or release, reconcile every delivery
+requirement from the current specification against current worker-verified
+implementation evidence, not superseded seeds or author-only runs. Missing,
+invented, duplicate or incompatible evidence is an explicit blocker. Scope
+conflicts require an authorized specification correction rather than silent
+reassignment or invented completion claims.
+
+Record the complete coverage report and exact target, correction, specification,
+artifact checksums, lane states and worker inputs/outputs in the existing test
+step context and audit ledger. Changed evidence invalidates the receipt.
+Database gates protect automated review, approval and release even when a caller
+bypasses the coordinator. Human mode may expose an explicitly incomplete review
+for owner-confirmed same-job corrections, with approval blocked. Incomplete
+acceptance parks non-terminally rather than failing the job. Rejection and
+confirmed corrections remain available; no attempt
+reset, duplicate job or automatic approval is introduced. Coverage reconciliation
+is not semantic acceptance: independent review must compare the full outcomes,
+required workflow evidence and original/correction brief with the actual patch
+and tests. Narrow passing commands alone do not prove a full workflow repair.
+
+**Prototype engineering scope, owner direction 2026-10-26.** The owner permits
+inspection and correction throughout Builder Chat, Bob Builder, Vibe Builder
+and their build stack, including measured changes to in-house/cloud models, to
+deliver an enterprise-grade assisted building system for repairs, pages,
+workflows and new systems within Field Compliance Manager. This is engineering
+scope, not authority to bypass data classification, cloud-transfer consent,
+tenant isolation, consequential-action approvals or protected release. Model
+changes need capability and task evidence, not assumed ranking or larger size.
+
+**Failed correction recovery, owner decision 2026-10-26.** A correction cycle
+must not demand an unrelated frontend edit before a backend-owned repair can
+run. An explicit sibling-lane no-change result names an unprotected source
+path and routes through the existing audited implementation skip; it is not
+proof that the whole requirement is satisfied. Protected paths, missing
+evidence and exhausted budgets are not permission to skip safety checks.
+
+PM may prepare `request_builder_implementation_recovery` for an accepted
+same-thread correction job that failed in authoring without a patch before
+downstream verification started. Authenticated owner confirmation is bound to
+the failed step, target, correction approval and job version. It resumes the
+same job, preserves specification, seeds, attempt counts and history, and
+records an audit receipt. This is an explicit owner-authorized continuation,
+not automatic retries or reset budgets. Worker/test/security failures, active
+or published work and stale cards are refused. A new recovery identity
+invalidates the author's saved failed checkpoint; existing correction-cycle
+verification identity remains because verification has not started. Fresh
+verification, security and human review still gate delivery. No underlying
+repair is proven by a recovery receipt.
+
+**Builder memory continuity clarification, owner reminder 2026-10-25.**
+Bob already has his own `bob_self_memory` and must be able to write to it and
+use it to support lessons, continuity and jobs. Reuse that diary; do not invent
+a second identity or memory silo for Builder Chat. It remains append-only,
+direct-write without an approval gate or bell. Corrections append rather than
+overwrite. A reflection is not approved canonical knowledge, a new permission,
+independently verified evidence or human-judged conduct/growth.
+
+Independent Builder conversations and task receipts do not require separating
+Bob from his own self-memory. The global diary has no organization column:
+tenant/personal material does not belong there. General lessons may be
+`reflection`; job-continuity notes use `builder_note`, which existing in-app
+automatic recall excludes. The current cloud PM can choose a bounded append
+using only its approved non-sensitive packet. Private recall uses the existing
+owner-gated read path; excerpts join a cloud packet only after review and fresh
+packet approval. No private diary is automatically dumped into cloud inference.
+
+**Builder Chat PM/QA and cloud-purpose ruling, owner decision 2026-10-25.**
+Builder Chat is the technical PM, investigator and QA lead, not the coding
+agent. Vibe Builder handles interactive implementation and Bob Builder durable
+autonomous implementation; both are full-stack. The owner directs Chat model
+inference straight to Ollama Cloud, bypassing VPS/laptop models. The engineering
+implementation assigns Kimi K2.7 Code
+to normal PM conversation, investigation planning and visual design review;
+DeepSeek V4 Pro to an explicitly requested independent QA challenge; Kimi
+K2.7 Code to explicitly requested technical handoff review. Do not run every
+question through multiple models or silently fall back to private inference.
+Model assignments require live capability checks and task acceptance, not
+claims of comparative superiority. Kimi K3 was the initial candidate, but
+live native-tool probes returned tool-like text rather than executable calls
+and an unsupported diary-save claim. Kimi K2.7 Code and DeepSeek V4 Pro returned
+valid native calls; the PM assignment uses the measured working contract.
+
+The owner selected **human-reviewed non-sensitive evidence summaries** as the
+cloud evidence flow. A current approved question, summary and selected approved
+public/non-sensitive attachments may be transferred. Private history, source,
+tenant records, credentials, knowledge-card dumps and raw diagnostic output
+remain excluded. Consent is per packet and changes invalidate it; a summary is
+reported evidence, not independent verification. Missing withheld facts must be
+identified rather than invented. Local tools may collect private evidence, but
+collection is not permission to transfer it. Private preparation of a candidate
+summary is distinct from disclosure: no automatic summarizer or classifier can
+replace the human review required by this selected cloud evidence flow.
+
+This supersedes the private-first default for new PM Chat turns, not the
+builders' model policy or existing private queued turns. A prose cloud handoff
+brief remains advisory: it does not satisfy the source-inspected repair-plan
+gate, start a builder, create a job, approve a change or establish completion.
+
+**Investigation handoff implementation, 2026-10-25:** following the owner's
+instruction to connect and UI-test PM-to-builder work, Chat may prepare a native
+`propose_builder_investigation` card for Bob Builder. This is an investigation
+delegation, explicitly not a source-verified repair proposal. It binds a quote
+from the approved current report, hypotheses, unknowns, investigation steps and
+acceptance checks to the originating message. The existing owner Create job
+control, reservation, control-room creation and persisted job receipt perform
+the handoff. No model prose starts work. Builder must check duplicate work,
+inspect source/schema/Atlas, establish cause and satisfy its existing
+specification/review/release gates before implementation. This narrow
+engineering implementation does not waive the source-inspected repair-plan
+gate or authorize private material to cloud. Vibe dispatch is not connected by
+this slice; independent QA remains advisory.
+
+**Same-job review feedback implementation, 2026-10-26:** the UI acceptance
+test exposed that creating a job did not let PM Chat coordinate its revision.
+The native `request_builder_spec_revision` prepares a confirmation card for an
+accepted handoff in the same chat thread, bound to the current pending
+specification approval and pinned target. Owner confirmation records an audit
+receipt, cancels that pending approval without approving implementation,
+marks the reviewed artifact superseded (retaining its content), and returns
+the same job's analyst step to pending with review feedback. The immutable
+original task, job identity, target, attempt count and later gates remain.
+Only idle initial specification review is supported; moved gates, running work
+and unrelated jobs are refused explicitly. Repeating confirmation returns the
+same receipt, not another job or reset. The analyst receives the confirmed
+feedback as reported review, not a source-verified diagnosis. This is a narrow
+engineering continuation of the existing connected-delivery direction, not a
+new right to approve, merge, deploy or transfer private evidence to cloud.
+
+Governed handoff and live acceptance remain separate delivery gates. The isolated
+cloud packet is an interim transport/reasoning slice, not the PM's target
+capability ceiling. It must not be presented as complete autonomous investigation
+or require the owner to diagnose code. Governed tool discovery, evidence
+collection, approved continuity, handoff and outcome verification remain work
+to connect under the existing rails and protected-effect gates.
+
+**Same-job code-review corrections, owner decision 2026-10-26:** PM Chat must
+be able to deliver implementation feedback at pending human code review, not
+only at initial specification review. The owner selected a same-job correction
+loop rather than notes-only delivery. A native `request_builder_code_changes`
+card is confirmed by the authenticated owner. It cancels the old pending
+review (never approving or terminally rejecting the job), preserves the
+specification, immutable task/target, attempt counters and historical artifacts,
+and returns implementation to pending. Prior implementation/test/security
+artifacts become superseded, not deleted. Each implementation lane starts
+from its exact reviewed, checksum-verified patch and receives the confirmed
+feedback as reported evidence. Old completed checkpoints must not bypass it.
+Verification and security run again; the unchanged human policy requires a new
+review of fresh evidence. No duplicate job, analysis rewind, approval, merge or
+deployment is implied. Active work, stale/expired reviews, unrelated threads
+and already-published work are refused. Repeated confirmation returns the
+original audit receipt without a second reset. Release and live UI acceptance
+remain necessary before calling this delivered or the underlying defect fixed.
+
 **Atlas evidence clarification, owner ruling 2026-10-25.** Atlas is a map
 showing Bob where to go and look, not evidence establishing facts about those
 areas. Bob must research the mapped locations: inspect current source and
@@ -25,7 +199,8 @@ Builder chat remains separate from in-app conversations and operational memory.
 It may retrieve the same active platform-canonical knowledge cards as other Bob
 surfaces, with source/version/hash provenance, and its own thread-scoped tool
 receipts. Shared canonical guidance is not shared tenant conversation, private
-diary or a new approval authority. No tenant cards or unreviewed experience notes
+diary dump or a new approval authority. The diary continuity clarification above
+permits Bob to append his own reflections and use reviewed excerpts. No tenant cards or unreviewed experience notes
 are loaded by this path. Private knowledge and operational evidence stay on
 private compute; isolated public research still receives neither. Existing
 Create job and protected release gates remain unchanged.
@@ -183,6 +358,68 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   legal, HR, identity-critical, enforcement, commercial commitments and
   protected release paths require the appropriate human key. A read-only
   inventory is a staging phase for writer/creator proposals, not the end state.
+- **Confirmed in-chat record updates (implements the Reader / Writer / Creator
+  ruling; owner request, 2026-10-28, that in-app Bob update records from the
+  information he is given).** When a user gives Bob facts about people,
+  vehicles or reports (a pasted email, a call note, an officer's account),
+  `update_records` turns each fact into one operation and previews it, resolved
+  with the caller's own read access; that turn writes nothing. Only the
+  caller's own short, unhedged yes on the very next turn applies it, within 30
+  minutes and for the same user, conversation and organisation, using the
+  caller's JWT and only the existing audited RPCs (`manage_identity_vehicle`,
+  `update_vehicle_profile_details`, `record_vehicle_person`, `add_person_alias`,
+  `raise_entity_flag`, `add_record_update`, and, for creating a person record
+  or adding details such as role or affiliation, contact details, date of birth
+  and notes, `record_identity_person_details`, which the database limits to
+  identity-register administrators). The identity-critical human key is
+  that confirmation of the exact preview, turned with the caller's own rank and
+  `can_access_vehicle_owner_identity`: Bob holds no write authority of his own
+  here, never uses the service role, never writes the sensitive floor directly,
+  and does not unlock `generic_write`. Ambiguous people, unconfirmed identities,
+  NZTA-register facts and anything without a governed path are held in the
+  preview, not guessed. The preview shows every value in full and names people
+  by their stored record name, so the yes covers exactly what will be written.
+  Only a preview the server signed (HMAC over the exact plan) and carried by a
+  single transcript row can be applied, so a row another member inserts into
+  the conversation can never borrow the caller's yes. A preview is answered
+  once: the stored preview row is
+  claimed before anything is applied or discarded, so overlapping replies
+  cannot apply it twice. Each step reports applied, already present (only an
+  exact duplicate), failed or not attempted; Bob never claims a change without
+  a receipt. People are matched with the register's own scoring
+  (`find_person_matches`): an exact name or active alias binds, a supplied date
+  of birth tells namesakes apart (someone recorded with a different date of
+  birth is a different person; someone recorded without one may be the same
+  person), and any other candidate the register returns (a spelling or surname
+  variant, or a similar name) holds the create, and every link, name or warning
+  for that person, until the user says who it is or confirms the person is
+  different (`confirm_new_person`), exactly as the register screen asks. The
+  create itself is one database operation serialised per organisation and
+  name: if someone with that exact name and no conflicting date of birth was
+  recorded after the preview, it returns that person (reported as already on
+  record) instead of making a second record, and the records the user said are
+  different people never count. Editing a person changes details only, under
+  the row lock: the name is never sent, so a rename made since the preview
+  stands, and a person merged or resolved into another record since the preview
+  is refused with nothing written. Each step is audited against the source of
+  the items it came from. A follow-up message while a preview waits amends that
+  preview rather than replacing it: new or corrected items merge into it (the
+  same vehicle, person, link, name, warning, site, place or report replaces the
+  earlier item), `corrections` move every carried item from a mistyped name or
+  plate to the corrected one, and items can be dropped by number (a combined
+  person item drops everything it combined) or by wording that matches exactly
+  one preview line, including a copied "Not included" line; wording that fits
+  several lines changes nothing. One updated preview of everything needs a
+  fresh yes. Before any successor is issued, the waiting preview is retired in
+  its one transcript row while it is still unanswered, so a copied preview or
+  one confirmed meanwhile is never carried forward and the earlier preview and
+  its successor can never both be confirmed. A rejected amendment re-issues the
+  earlier preview unchanged (steps, held items and sources), a preview made
+  before amendments existed is re-issued unchanged with a note that it cannot
+  be amended, and the planner's verifier blocks a prose refusal when the user
+  asked for record changes and `update_records` was available, without
+  treating a capability question ("can you update vehicle records?") as a
+  request and reading the end of a long pasted message as well as its start.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no
@@ -210,6 +447,13 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   files appear, or more than eight files change, the automation pauses for
   Grandmaster review. Routine automation is authority to repair a defect, not
   authority to invent a capability.
+- **Dr Bob findings ruling (owner, 2026-10-27).** Bob's own post-production
+  Dr Bob suite is a runtime-friction reporter. A genuine live failure files
+  its distinct, redacted HTTP findings into the same triage path as the
+  dedicated test identity, once per open defect, and the same deterministic
+  classifier decides routine, not eligible, or Grandmaster review. Filing
+  never changes the verdict, never re-runs the walk, and never widens the
+  routine lane (`docs/HUMAN_TESTING.md`).
 - **Natural-language Builder autonomy ruling (owner, 2026-10-13).** An explicit
   software-build instruction from the admiral is itself the recorded key to
   open and drive the isolated Builder job; Bob must not ask the admiral to
@@ -247,7 +491,7 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Conductor — turn gate, tool dispatch, egress, task/memory state | `onspace-ai-chat` + `resolveUserCapabilities`/`gateTool`/`redactOutgoing` | `supabase/functions/onspace-ai-chat/index.ts` (`isToolEffectPermitted`, `applyEgressSweep`, `persist`, `emitEvent`) |
 | Caddie — tool catalogue from Atlas-wired capability; describes, never selects | `caddie.ts` `TOOL_REGISTRY` + caddie cards | `supabase/functions/onspace-ai-chat/caddie.ts` (`generateToolCatalogue`) |
 | Oracle — truth-state of turn, caller, candidate effect, proof grade, safety | welfare seam | `conductor-oracle.ts`, `conductor-welfare-seam.ts` |
-| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (admiral/captain/commander; read-only) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
+| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (every active signed-in rank; read-only; Conductor egress redacts per caller) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
 | Planner | `apps/api/src/bobPlan.ts` (23 routes) → conductor cross-checks | VPS `/api/bob/plan` via `callPlan` → `services/fcm-api/src/bob/plan.js` (prompt `planPrompt.js`, model routing `modelGateway.js`); `bob-inference` fallback |
 | Verifier (chat lane) | — | `services/fcm-api/src/bob/verify.js`: deterministic checks + independent critic (different model), recommend-only; author repairs once |
 | Working subagents | Duo flows (GitLab) | planner `delegate` → conductor `runSubagents` (read-only tools via `dispatchTool`) + VPS `/api/bob/subagent` |
@@ -255,11 +499,21 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
 | Local document source | — | approved tenant-bound `document_reference_sources` alias → durable `document_source_ingestion_runs` → read-only laptop worker manifest → governed extraction/comparison/promotion tools |
 
-Owner ruling 2026-10-13: Atlas is Bob's read-only map of his own build, not a
-tenant business-record disclosure. Admiral, captain, and commander sessions may
-inspect Atlas so Bob can diagnose wiring and gap state. This does not widen
-business-data access, governed effects, Builder merge/deploy authority, or the
-human approval boundary.
+Owner ruling 2026-10-13 (rank limit superseded 2026-11-01): Atlas is Bob's
+read-only map of his own build, not a tenant business-record disclosure. This
+does not widen business-data access, governed effects, Builder merge/deploy
+authority, or the human approval boundary.
+
+Owner ruling 2026-11-01: Bob and Atlas are available at every level. Oracle and
+Conductor exist to restrict and redact per user level, so Atlas is not gated by
+rank: any active signed-in account (admiral through ensign and guest) may have
+Bob inspect Atlas, and admin and admin officer are never blocked. A deactivated
+account, or one with no profile, is refused; there is no owner-email exemption.
+Conductor egress redaction, the welfare hold on diagnostic
+substrate actions, and every business-data, effect, and approval boundary still
+apply. In the same ruling, org-less `audit_log` rows (no `organization_id`) are
+platform-only: only the grand master and the platform owner may read them;
+organisation-scoped rows keep `org_access_allowed`.
 
 Owner ruling 2026-10-13: Bob's agentic conversation and Bob Builder may share
 one chat surface, but they are separate execution lanes. Technical questions,
@@ -279,7 +533,8 @@ its own lane: `builder_chat_threads`/`builder_chat_messages` written only throug
 owner-only `builder_chat_*` RPCs, answered by the control-plane worker
 (`builder-chat-session.js`) on the builder model chain with read-only build
 tools (code, git log, canon, Atlas, job ledger). It shares no conversation,
-memory or planner with in-app Bob. It can only *propose* a job; the owner's
+operational task memory or planner with in-app Bob; Bob's own diary is shared
+under the later memory-continuity clarification. It can only *propose* a job; the owner's
 **Create job** click calls `bob-builder-control-room` and records the job on the
 proposal with `builder_chat_record_job`. It never edits, approves, merges or
 deploys, and a reply claiming it did is refused.

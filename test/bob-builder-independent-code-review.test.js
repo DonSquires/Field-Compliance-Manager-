@@ -179,9 +179,13 @@ test('independent reviewer aborts before dispatch when evidence still exceeds it
 
 test('independent reviewer uses a distinct configured model and cannot approve release', async () => {
   let captured;
+  const acceptance = { version: 1, passed: true, requirements: [{ requirement_id: 'DR-1',
+    outcome: 'Diary-save followed by final-answer failure gives a persisted, truthful receipt' }] };
   const result = await runIndependentCodeReview({
     supabase: {}, gateway: {},
-    job: { id: 'job-1', organization_id: 'org-1', target_sha: 'sha-1', code_review_mode: 'independent_ai' },
+    job: { id: 'job-1', organization_id: 'org-1', target_sha: 'sha-1', code_review_mode: 'independent_ai',
+      task_description: 'Handle the entire partial-success workflow', code_review_revision: { feedback: 'Retain the actual failure-path handling, not only the reader' } },
+    acceptance,
     step: { id: 'review-step', step_id: 'code_review', builder_mode: 'code_reviewer' },
     artifacts: { patch: { id: 'patch-1' }, manifest: { id: 'manifest-1' }, buildLogs: { id: 'logs-1' }, security: { id: 'security-1' } },
     reviewerModelName: 'reviewer-model',
@@ -197,6 +201,11 @@ test('independent reviewer uses a distinct configured model and cannot approve r
   assert.equal(captured.modelRequest.model_name, 'reviewer-model');
   assert.equal(captured.modelRequest.request.builder_mode, 'code_reviewer');
   assert.doesNotMatch(captured.modelRequest.request.system_prompt, /approve release/i);
+  const packet = JSON.parse(captured.modelRequest.request.user_prompt);
+  assert.deepEqual(packet.acceptance, acceptance);
+  assert.match(packet.original_task, /entire partial-success/);
+  assert.match(packet.correction_feedback, /not only the reader/);
+  assert.match(captured.modelRequest.request.system_prompt, /Coverage is not proof of behavior/);
   assert.equal(result.job.code_review_status, 'passed');
 });
 

@@ -195,7 +195,25 @@ test('Atlas refresh derives current SQL view reads without treating CTEs or lite
   }
 });
 
-test('current permit fieldwork and policy views expose their table dependencies', () => {
+test('view-backed RPCs are calls, even when a table shares the function name', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-view-rpc-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE TABLE public.permits(id uuid);
+      CREATE TABLE public.read_permits(id uuid);
+      CREATE OR REPLACE FUNCTION public.read_permits() RETURNS SETOF public.permits
+        LANGUAGE sql AS $$ SELECT * FROM public.permits $$;
+      CREATE VIEW public.permit_view AS SELECT * FROM public.read_permits();
+    `);
+    assert.deepEqual(collectSchemaViewEdges(root).map((edge) => [
+      edge.source_name, edge.target_type, edge.target_name, edge.edge_kind,
+    ]), [['permit_view', 'rpc', 'read_permits', 'calls']]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('current permit fieldwork and policy views expose their actual dependencies', () => {
   const edges = collectSchemaViewEdges(path.resolve(__dirname, '..'));
   const hasEdge = (source, target) => edges.some((edge) => (
     edge.source_name === source &&
@@ -203,7 +221,9 @@ test('current permit fieldwork and policy views expose their table dependencies'
     edge.edge_kind === 'reads'
   ));
 
-  assert.equal(hasEdge('person_permits_fieldwork', 'person_permit_vehicles'), true);
+  assert.equal(edges.some((edge) => edge.source_name === 'person_permits_fieldwork'
+    && edge.target_name === 'read_person_permits_fieldwork' && edge.target_type === 'rpc' && edge.edge_kind === 'calls'), true);
+  assert.equal(hasEdge('person_permits_fieldwork', 'person_permit_vehicles'), false);
   assert.equal(hasEdge('module_place_policy_summary', 'module_event_place_matrix'), true);
   assert.equal(hasEdge('house_event_anchor_reconciliation', 'house_event_anchor_projection'), true);
 });

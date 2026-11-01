@@ -170,6 +170,41 @@
   outline-offset: -2px;
 }
 
+.admin-workforce-sections {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-accent-silver);
+  background: var(--color-bg-surface);
+}
+
+.admin-workforce-sections button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--color-accent-silver);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-workforce-sections button[aria-current='page'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  font-weight: 700;
+}
+
+.admin-workforce-sections button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .admin-nav-group-label {
   padding: 5px 16px;
   color: var(--color-text-muted);
@@ -336,15 +371,16 @@
 
 .admin-shell-mobile {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   grid-template-columns: minmax(0, 1fr);
 }
 
 .admin-shell-mobile > .admin-mobile-header { grid-row: 1; }
 .admin-shell-mobile > .place-context-banner { grid-row: 2; }
 .admin-shell-mobile > .admin-workspace-bar { grid-row: 3; }
-.admin-shell-mobile > .bob-page-layout { grid-row: 4; }
-.admin-shell-mobile > .admin-mobile-tabs { grid-row: 5; }
+.admin-shell-mobile > .admin-workforce-sections { grid-row: 4; }
+.admin-shell-mobile > .bob-page-layout { grid-row: 5; }
+.admin-shell-mobile > .admin-mobile-tabs { grid-row: 6; }
 
 .admin-mobile-header {
   min-height: 44px;

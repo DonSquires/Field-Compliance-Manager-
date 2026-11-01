@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useEnabledModules } from './useEnabledModules';
+import { canUseModule } from '../lib/moduleAccess';
 
+const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock('../lib/supabase', () => {
-  return { supabase: { from: vi.fn() } };
+  return { supabase: { from } };
 });
 
-import { supabase } from '../lib/supabase';
-
 function mockOrgModulesResult(result: { data: unknown; error: unknown }) {
-  (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+  from.mockReturnValue({
     select: () => ({
       eq: () => Promise.resolve(result),
     }),
@@ -18,7 +18,7 @@ function mockOrgModulesResult(result: { data: unknown; error: unknown }) {
 
 describe('useEnabledModules', () => {
   it('reports loading while organizationId is present but the query has not resolved', () => {
-    (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+    from.mockReturnValue({
       select: () => ({ eq: () => new Promise(() => {}) }),
     });
     const { result } = renderHook(() => useEnabledModules('org-1'));
@@ -65,5 +65,45 @@ describe('useEnabledModules', () => {
     const { result } = renderHook(() => useEnabledModules('org-1'));
     await waitFor(() => expect(result.current.status).toBe('configured'));
     expect(result.current.isModuleEnabled('welfare', { safetyRelevant: true })).toBe(true);
+  });
+
+  it.each([true, false])('gives the canonical switch (%s) precedence over its conflicting alias', async (enabled) => {
+    mockOrgModulesResult({ data: [
+      { module_key: 'parking', enabled: !enabled },
+      { module_key: 'parking_enforcement', enabled },
+    ], error: null });
+    const { result } = renderHook(() => useEnabledModules('org-1'));
+    await waitFor(() => expect(result.current.status).toBe('configured'));
+    expect(result.current.isModuleEnabled('parking')).toBe(enabled);
+    expect(result.current.isModuleEnabled('parking_enforcement')).toBe(enabled);
+    expect(canUseModule({
+      moduleKey: 'parking', role: 'admin_officer', moduleAccess: [],
+      isModuleEnabled: result.current.isModuleEnabled,
+    })).toBe(enabled);
+  });
+
+  it('uses a historical alias when no canonical switch exists', async () => {
+    mockOrgModulesResult({ data: [{ module_key: 'parking', enabled: true }], error: null });
+    const { result } = renderHook(() => useEnabledModules('org-1'));
+    await waitFor(() => expect(result.current.status).toBe('configured'));
+    expect(result.current.isModuleEnabled('parking_enforcement')).toBe(true);
+  });
+
+  it('denies the new organisation from its first render, before the loading effect runs', async () => {
+    from.mockReturnValue({ select: () => ({ eq: (_column: string, org: string) => org === 'org-1'
+      ? Promise.resolve({ data: [{ module_key: 'parking_enforcement', enabled: true }], error: null })
+      : new Promise(() => {}) }) });
+    const renders: Array<{ org: string; status: string; enabled: boolean }> = [];
+    const { result, rerender } = renderHook(({ org }) => {
+      const gate = useEnabledModules(org);
+      renders.push({ org, status: gate.status, enabled: gate.isModuleEnabled('parking') });
+      return gate;
+    }, { initialProps: { org: 'org-1' } });
+    await waitFor(() => expect(result.current.isModuleEnabled('parking')).toBe(true));
+    rerender({ org: 'org-2' });
+    const newOrgRenders = renders.filter((render) => render.org === 'org-2');
+    expect(newOrgRenders.length).toBeGreaterThan(0);
+    expect(newOrgRenders.every((render) => render.status === 'loading' && !render.enabled)).toBe(true);
+    expect(result.current.enabledModules.size).toBe(0);
   });
 });

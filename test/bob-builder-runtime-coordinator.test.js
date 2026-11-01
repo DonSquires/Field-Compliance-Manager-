@@ -44,6 +44,55 @@ test('runtime planner selects product, UX, and implementation work from durable 
   assert.equal(planBuilderAction(backendOnly).type, 'continue_backend_only');
 });
 
+test('a confirmed correction reopens a required skipped lane before planning the next author', async () => {
+  const original = snapshot('implementation_pending', {
+    job: { frontend_required: true, backend_required: true, code_review_revision: { approval_id: 'cancelled-review' } },
+  });
+  original.steps.find(step => step.step_id === 'frontend_implementation').status = 'skipped';
+  const corrected = {
+    ...original,
+    steps: original.steps.map(step => step.step_id === 'frontend_implementation' ? { ...step, status: 'pending' } : step),
+  };
+  let reads = 0;
+  const calls = [];
+  let frontendInput;
+  const result = await advanceBuilderJob({
+    supabase: { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === 'builder_recover_expired_worker_runs') return { data: [], error: null };
+      if (name === 'builder_account_verifier_recoveries') return { data: 0, error: null };
+      return { data: { reopened: ['frontend_implementation'] }, error: null };
+    } },
+    gateway: {}, jobId: 'job-1', context: {},
+    loadSnapshot: async () => (++reads === 1 ? original : corrected),
+    handlers: { frontend: async input => { frontendInput = input; return { success: true }; } },
+  });
+  assert.equal(result.advanced, true);
+  assert.equal(result.action.type, 'run_frontend');
+  assert.equal(frontendInput.step.step_id, 'frontend_implementation');
+  assert.equal(reads, 2, 'planning uses the durable reopened step');
+  assert.deepEqual(calls.map(call => call.name), [
+    'builder_recover_expired_worker_runs',
+    'builder_account_verifier_recoveries',
+    'builder_reopen_required_implementation_lanes',
+  ]);
+  assert.deepEqual(calls.at(-1).args, { _job_id: 'job-1' });
+});
+
+test('runtime does not route around a required lane when recovery was not persisted', async () => {
+  const state = snapshot('implementation_pending', {
+    job: { frontend_required: true, backend_required: true, code_review_revision: { approval_id: 'cancelled-review' } },
+  });
+  state.steps.find(step => step.step_id === 'frontend_implementation').status = 'skipped';
+  await assert.rejects(advanceBuilderJob({
+    supabase: { rpc: async name => name === 'builder_account_verifier_recoveries'
+      ? { data: 0, error: null } : { data: [], error: null } },
+    gateway: {}, jobId: 'job-1', context: {},
+    loadSnapshot: async () => state,
+    handlers: { backend: async () => { assert.fail('backend must not bypass the required frontend lane'); } },
+  }), /Required implementation lane recovery was not persisted: frontend_implementation/);
+});
+
 test('runtime planner advances security, optional review, and release in order', () => {
   assert.equal(planBuilderAction(snapshot('testing')).type, 'run_security_review');
   const review = snapshot('security_review');
@@ -105,6 +154,29 @@ test('runtime stops re-launching a retryable step once its persisted attempt cou
   assert.equal(paused.paused, true);
   assert.equal(paused.reason, 'attempt_ceiling');
   assert.match(paused.detail, /failed 6 times/);
+});
+
+test('one current owner receipt permits exactly one same-patch verifier retry at the persisted attempt ceiling', () => {
+  const { MAX_STEP_ATTEMPTS } = require('../builder-runtime-coordinator');
+  const state = snapshot('implementation_pending', { job: { target_sha: 'a'.repeat(40) } });
+  const frontend = state.steps.find(step => step.step_id === 'frontend_implementation');
+  frontend.status = 'failed';
+  frontend.retryable = true;
+  frontend.attempt_count = MAX_STEP_ATTEMPTS;
+  frontend.error = 'Verifier recovery pending: owner-confirmed saved patch verification';
+  frontend.input_context = {
+    patch_artifact_id: 'saved-patch', target_sha: state.job.target_sha,
+    owner_patch_retry_receipt: 'owner-receipt', owner_patch_retry_attempt_count: MAX_STEP_ATTEMPTS,
+  };
+  state.artifacts.push({ id: 'saved-patch', step_id: frontend.id, artifact_type: 'code_implementation', status: 'final' });
+  assert.equal(planBuilderAction(state).type, 'run_frontend');
+
+  frontend.attempt_count += 1;
+  const consumed = planBuilderAction(state);
+  assert.equal(consumed.reason, 'attempt_ceiling', 'the receipt cannot grant an unbounded verifier retry loop');
+  frontend.attempt_count = MAX_STEP_ATTEMPTS;
+  frontend.input_context.owner_patch_retry_attempt_count -= 1;
+  assert.equal(planBuilderAction(state).reason, 'attempt_ceiling', 'stale receipts cannot bypass the ceiling');
 });
 
 test('runtime advances exactly one planned action', async () => {
@@ -215,6 +287,7 @@ test('agentic runtime advances the complete post-spec workflow to final human ap
     supabase: {}, gateway: {}, jobId: 'job-1', context: {}, maxActions: 8,
     loadSnapshot: async () => states[Math.min(index++, states.length - 1)],
     handlers: {
+      acceptance: async () => ({ passed: true, blockers: [] }),
       ux: async () => { calls.push('ux'); return { ok: true }; },
       frontend: async () => { calls.push('frontend'); return { success: true }; },
       backend: async () => { calls.push('backend'); return { success: true }; },
@@ -250,7 +323,7 @@ test('independent review and release receive the author patch plus the worker-ve
   const action = planBuilderAction(state);
   assert.equal(action.type, 'run_independent_review');
   let received;
-  await executeBuilderAction({ snapshot: state, action, supabase: {}, gateway: {}, context: { reviewerModelName: 'gpt-5.4-mini' }, handlers: { independentReview: async (input) => { received = input; return { ok: true }; } } });
+  await executeBuilderAction({ snapshot: state, action, supabase: {}, gateway: {}, context: { reviewerModelName: 'gpt-5.4-mini' }, handlers: { acceptance: async () => ({ passed: true, blockers: [] }), independentReview: async (input) => { received = input; return { ok: true }; } } });
   assert.deepEqual(received.artifacts.patch.map(a => a.id), ['proposal-2'], 'the author artifact keeps model-run provenance for the reviewer != author check');
   assert.deepEqual(received.artifacts.manifest.map(a => a.id), ['manifest']);
   assert.deepEqual(received.artifacts.buildLogs.map(a => a.id), ['verification']);
@@ -386,7 +459,7 @@ test('an author that ran out of turns reading gets one immediate second run seed
     assert.equal(calls.length, 2);
     assert.equal(rpcs.length, 1);
     assert.equal(rpcs[0].args._retryable, false);
-    assert.match(rpcs[0].args._reason, /two attempts ran out of turns without an edit; second attempt: still too big/);
+    assert.match(rpcs[0].args._reason, /Two author attempts produced no patch; second attempt: still too big/);
   } finally {
     require.cache[engineerPath].exports = originalEngineer;
     require.cache[handoffPath].exports = originalHandoff;
@@ -500,6 +573,38 @@ test('expired verifier leases are recovered before every advance, and the recove
   assert.equal(received.resumePatchArtifact, undefined);
 });
 
+test('owner-confirmed saved-patch retry bypasses author generation and re-verifies the exact artifact', async () => {
+  const { advanceBuilderJob, planBuilderAction } = require('../builder-runtime-coordinator');
+  const step = {
+    id: 'frontend-step', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer',
+    status: 'failed', retryable: true, attempt_count: 1,
+    error: 'Verifier recovery pending: owner-confirmed saved patch verification',
+    input_context: { patch_artifact_id: 'saved-patch', target_sha: 'a'.repeat(40) },
+  };
+  const snapshot = {
+    job: { id: 'retry-job', status: 'implementation_pending', target_sha: 'a'.repeat(40), frontend_required: true, backend_required: true },
+    steps: [
+      { id: 'analysis', step_id: 'product_analysis', builder_mode: 'product_analyst', status: 'completed' },
+      { id: 'design', step_id: 'ui_design', builder_mode: 'ux_designer', status: 'completed' },
+      step,
+      { id: 'backend', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'pending' },
+      ...['test_suite', 'security_review', 'code_review', 'release_prep'].map(step_id => ({ id: step_id, step_id, status: 'pending' })),
+    ],
+    artifacts: [{ id: 'saved-patch', step_id: step.id, artifact_type: 'code_implementation', status: 'final' }],
+    workerRuns: [], approvals: [],
+  };
+  assert.equal(planBuilderAction(snapshot).type, 'run_frontend');
+  let received;
+  const outcome = await advanceBuilderJob({
+    supabase: { rpc: async () => ({ data: 0, error: null }) },
+    gateway: {}, jobId: snapshot.job.id, context: {}, loadSnapshot: async () => snapshot,
+    handlers: { frontend: async input => { received = input; return { success: true }; } },
+  });
+  assert.equal(outcome.advanced, true);
+  assert.equal(received.resumePatchArtifact.id, 'saved-patch');
+  assert.equal(received.step.attempt_count, 1, 'the persisted worker claim, not the handoff, increments attempts');
+});
+
 test('ordinary failed implementation resumes from its exact patch and worker evidence across scheduler ticks', () => {
   const { failedImplementationEvidence } = require('../builder-runtime-coordinator');
   const step = { id: 'step', status: 'failed', retryable: true, error: 'Frontend worker verification failed', input_context: { patch_artifact_id: 'patch' } };
@@ -582,7 +687,7 @@ test('a cross-lane no-change skips this lane even before the sibling finishes', 
   delete require.cache[coordinatorPath];
   require.cache[engineerPath].exports = {
     ...originalEngineer,
-    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in builder-vibe-preview.js: outside the frontend lane', routing: { provider: 'openai' } }),
+    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in apps/web/src/Preview.tsx: outside the backend lane', routing: { provider: 'openai' } }),
   };
   const rpcs = [];
   const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };

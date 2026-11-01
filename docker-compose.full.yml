@@ -93,7 +93,7 @@ services:
       PORT: "3000"
       VEHICLE_ATTRS_PROVIDER: "basic"
       MODELS_DIR: /app/models
-      # CPU tier: RF-DETR small-512 with the 2x2 far-field tile pass; the GPU tier on RunPod runs large-704.
+      # CPU tier: RF-DETR small-512 with the 2x2 far-field tile pass; the laptop GPU tier runs large-704.
       DETECTOR_MODEL: rf-detr-small-512-coco
       DETECTOR_TILES: auto
       INFERENCE_DEVICE: cpu
@@ -245,15 +245,9 @@ services:
       VISION_DERIVED_ROOT: /opt/fcm/derived
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
-      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
-      RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
-      # Optional dedicated recognition-capture endpoint. Keep separate from the
-      # general detector so enhancement/ALPR/face work can be tuned independently.
-      RUNPOD_CAPTURE_API_URL: ${RUNPOD_CAPTURE_API_URL:-}
-      RUNPOD_CAPTURE_API_KEY: ${RUNPOD_CAPTURE_API_KEY:-${RUNPOD_API_KEY:-}}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
       VISION_MAX_OBSERVATION_DERIVATIVES: ${VISION_MAX_OBSERVATION_DERIVATIVES:-8}
-      VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
+      VISION_TRIAGE_BATCH_SIZE: ${VISION_TRIAGE_BATCH_SIZE:-6}
       # Two jobs at once, two FFmpeg decode threads each (2026-09-21): the extractor used to open one decode
       # thread per core per capture, so three jobs ran 24 decode threads against the detector on eight cores
       # and 1-3 minute clips took twenty minutes to scan. Raise both only on a box with cores to spare.
@@ -262,23 +256,29 @@ services:
       OMP_NUM_THREADS: ${VISION_DECODE_THREADS:-2}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
-      # Laptop GPU over Tailscale first; VPS CPU next; RunPod only for unanswered frames.
-      VISION_INFERENCE_POLICY: ${VISION_INFERENCE_POLICY:-local_gpu_first}
+      # gpu_consistent (owner ruling 2026-11-01): every frame of a job is read by one pinned detector on the laptop
+      # GPU over Tailscale; the VPS CPU model is never mixed in, the job waits instead. RunPod is not part of the
+      # stack (docs/CCTV_INFERENCE_TIER.md).
+      VISION_INFERENCE_POLICY: ${VISION_INFERENCE_POLICY:-gpu_consistent}
+      VISION_PINNED_DETECTOR_MODEL: ${VISION_PINNED_DETECTOR_MODEL:-rf-detr-large-704-coco}
       LOCAL_GPU_INFERENCE_URL: ${LOCAL_GPU_INFERENCE_URL:-}
       LOCAL_GPU_INFERENCE_API_KEY: ${LOCAL_GPU_INFERENCE_API_KEY:-${INFERENCE_API_KEY:-}}
       # The VPS detector shares eight cores with transcoding; two frames in flight per job keeps it responsive.
       VISION_LOCAL_DETECT_CONCURRENCY: ${VISION_LOCAL_DETECT_CONCURRENCY:-2}
-      VISION_RUNPOD_TIMEOUT_MS: ${VISION_RUNPOD_TIMEOUT_MS:-90000}
       # Local person/vehicle/animal triage on the VPS (/infer/detect); under vps_first this is the main path.
       VISION_LOCAL_DETECT_INFERENCE: ${VISION_LOCAL_DETECT_INFERENCE:-true}
       # Set per camera after calibration; without this, CCTV reports px/s only.
       VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
-      # Self-hosted vision-LLM hints (Moondream 2, Apache-2.0) for vehicle make/model guesses and a
-      # weapon-shaped-object flag — both unverified, human-review-required. The laptop worker uses its own
-      # already-running native Ollama instead (host.docker.internal), so this stays docker-internal only.
-      OLLAMA_VISION_URL: "http://ollama:11434"
-      OLLAMA_VISION_MODEL: "${OLLAMA_VISION_MODEL:-moondream}"
+      # Vision-language hints (vehicle make/model, weapon-shaped object, scene synopsis) — unverified, for human
+      # review only. Qwen3-VL runs on the laptop GPU's Ollama over Tailscale; when it is unreachable the hint is
+      # recorded as unavailable, never answered by a weaker model. Ollama Cloud is used only for vehicle crops of
+      # an organisation that opted in (set_cctv_inference_policy), plate-masked, person-free and receipted.
+      # CCTV_VLM_* are watcher-only names: Bob Vibe reads OLLAMA_VISION_* from /opt/fcm/.env for its own images.
+      OLLAMA_VISION_URL: "${CCTV_VLM_URL:-http://100.114.240.13:11434}"
+      OLLAMA_VISION_MODEL: "${CCTV_VLM_MODEL:-qwen3-vl:4b}"
+      OLLAMA_API_TOKEN: ${OLLAMA_API_TOKEN:-}
+      OLLAMA_CLOUD_VISION_MODEL: ${CCTV_CLOUD_VLM_MODEL:-gemma4:31b}
     volumes:
       - /opt/fcm/storage:/opt/fcm/storage:ro
       - /opt/fcm/vision-derived:/opt/fcm/derived

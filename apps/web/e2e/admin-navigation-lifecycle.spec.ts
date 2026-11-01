@@ -3,43 +3,69 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await installSupabaseFixtures(page, { officerModules: ['dispatch', 'patrol', 'static_guarding'] }); });
 
-test('admin navigation groups client delivery and finance in the order work happens', async ({ page }) => {
+test('admin navigation keeps client setup simple and follow-up work optional', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/hub');
 
   const isMobile = await page.evaluate(() => window.innerWidth < 768);
-  let navigation = page.locator('.admin-sidebar');
   if (isMobile) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
-    navigation = page.locator('.admin-mobile-drawer');
+    const navigation = page.locator('.admin-mobile-drawer');
+    await expect(navigation.getByText('Clients & Delivery')).toBeVisible();
+    await expect(navigation.getByRole('button', { name: 'Clients' })).toBeVisible();
+    await expect(navigation.getByRole('button', { name: 'Agreements & services' })).toBeVisible();
+    await expect(navigation.getByRole('button', { name: 'Activation checklist' })).toBeVisible();
+    await expect(navigation.getByRole('button', { name: 'Service handoffs' })).toBeVisible();
+    await expect(navigation.getByRole('button', { name: 'Finance home' })).toBeVisible();
+    await navigation.getByRole('button', { name: 'Clients' }).click();
   }
-  if (!isMobile) {
+  else {
+    const navigation = page.locator('.admin-sidebar');
     await expect(navigation.getByRole('button', { name: 'Guarding & Patrol', exact: true })).toBeVisible();
     await expect(navigation.getByRole('button', { name: 'HR & Rostering', exact: true })).toBeVisible();
     await navigation.getByRole('button', { name: 'CRM & Clients', exact: true }).click();
-    navigation = page.getByRole('navigation', { name: 'Workspace sections', exact: true });
-  } else {
-    await expect(navigation.getByText('Clients & Delivery')).toBeVisible();
   }
-  await expect(navigation.getByRole('button', { name: 'Client Portfolios' })).toBeVisible();
-  await expect(navigation.getByRole('button', { name: 'Set up a new client' })).toBeVisible();
-  await expect(navigation.getByRole('button', { name: 'Start delivery' })).toBeVisible();
-  if (isMobile) {
-    await expect(navigation.getByText('Finance', { exact: true })).toBeVisible();
-    await expect(navigation.getByRole('button', { name: 'Finance home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Client directory' })).toBeVisible();
+  await expect(page.locator('.workflow-rail, .workflow-rail-select')).toHaveCount(0);
+  const followUp = page.getByRole('navigation', { name: 'Client follow-up work' });
+  const viewportWidth = page.viewportSize()?.width ?? 0;
+  for (const name of ['Agreements & services', 'Activation checklist', 'Service handoffs']) {
+    const link = followUp.getByRole('button', { name });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect((box?.x ?? 0) + (box?.width ?? 0), `${name} stays inside the viewport`).toBeLessThanOrEqual(viewportWidth);
   }
+  await page.getByRole('button', { name: 'Set up a new client' }).click();
+  await expect(page.getByRole('heading', { name: 'Add client' })).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Client details' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Locations' })).toBeVisible();
 
-  await navigation.getByRole('button', { name: 'Set up a new client' }).click();
-  await expect(page.getByRole('heading', { name: 'Set up a new client' })).toBeVisible();
-    if (isMobile) await page.getByRole('button', { name: 'Open navigation' }).click();
-    await page.locator(isMobile ? '.admin-mobile-drawer' : '.admin-workspace-bar').getByRole('button', { name: 'Start delivery' }).click();
+  await page.goto('/admin/crm');
+  await expect(page.getByRole('heading', { name: 'Client directory' })).toBeVisible();
+  await followUp.getByRole('button', { name: 'Activation checklist' }).click();
+  await expect(page.getByRole('heading', { name: 'Clients being set up' })).toBeVisible();
+  const sections = page.getByRole('navigation', { name: 'Workspace sections' });
+  await expect(page.locator('.workflow-rail, .workflow-rail-select')).toHaveCount(0);
+  if (isMobile) {
+    const destinations = page.getByRole('combobox', { name: 'Workspace destination' });
+    await expect(destinations.locator('option', { hasText: 'Activation checklist' })).toHaveCount(1);
+    await expect(destinations.locator('option', { hasText: 'Service handoffs' })).toHaveCount(1);
+    await destinations.selectOption({ label: 'Service handoffs' });
+  } else {
+    await expect(sections.getByRole('button', { name: 'Activation checklist' })).toBeVisible();
+    await expect(sections.getByRole('button', { name: 'Service handoffs' })).toBeVisible();
+    await sections.getByRole('button', { name: 'Service handoffs' }).click();
+  }
   await expect(page.getByRole('heading', { name: 'Start delivery' })).toBeVisible();
-    if (isMobile) await page.getByRole('button', { name: 'Open navigation' }).click();
-    if (!isMobile) await page.getByRole('navigation', { name: 'Admin workspaces' }).getByRole('button', { name: 'Finance', exact: true }).click();
-    else await page.locator('.admin-mobile-drawer').getByRole('button', { name: 'Finance home' }).click();
-  await expect(page.getByRole('heading', { name: 'What would you like to do?' })).toBeVisible();
+
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await page.locator('.admin-mobile-drawer').getByRole('button', { name: 'Finance home' }).click();
+  } else {
+    await page.getByRole('navigation', { name: 'Admin workspaces' }).getByRole('button', { name: 'Finance', exact: true }).click();
+  }
+  await expect(page.getByRole('heading', { name: 'Finance' })).toBeVisible();
   if (!isMobile) {
-    await expect(page.getByRole('navigation', { name: 'Workspace sections' }).getByRole('button', { name: 'Pay & charge rules' })).toBeVisible();
     await page.getByRole('navigation', { name: 'Admin workspaces' }).getByRole('button', { name: 'Guarding & Patrol', exact: true }).click();
     const sections = page.getByRole('navigation', { name: 'Workspace sections' });
     await sections.getByRole('button', { name: 'Dispatch console', exact: true }).click();

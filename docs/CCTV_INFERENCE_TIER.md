@@ -15,6 +15,35 @@ VPS could not answer. Observation enhancement follows the same order: laptop GPU
 deterministic worker fallback. `VISION_INFERENCE_POLICY=local_gpu_first` is the platform default; the laptop
 watcher uses its co-located GPU service first and RunPod only for unanswered work.
 
+**Owner ruling 2026-11-01 — one detector per job, accuracy measured from human decisions.** Superseding the
+2026-09-25 default for video: `VISION_INFERENCE_POLICY=gpu_consistent` is the default. Every frame of a job is
+read by one pinned GPU detector (`rf-detr-large-704-coco`; the laptop GPU first, RunPod running the same model
+when the laptop cannot answer); the VPS CPU small model is never mixed into a job, and a frame no GPU answered
+defers the job instead of finishing it. The local vision-language model is Qwen3-VL on the laptop's Ollama;
+Ollama Cloud is permitted only for person-free, plate-masked vehicle crops, per organisation opt-in, with a
+receipt written before the crop leaves. Completed jobs are reprocessed with engine v2 while every human
+decision is kept. Owner scope: accuracy engine, model governance, accuracy measurement, reviewer workspace and
+the local VLM upgrade. Details, the expected-versus-present record and the remaining gaps are in §9.
+
+**Owner ruling 2026-11-01 (stack) — RunPod is retired.** "Runpod is not part of the stack … stack is supabase,
+vps hpanel, Laptop GPU, Ollama cloud, opne ai, github, vercel." This supersedes every RunPod route in this
+document, including the GPU fallback in the two rulings above, §2, §6, §7 and §8: those passages are kept as
+the history of what ran, not as the current design. Present behaviour:
+
+* `gpu_consistent` (default) reads every frame on the laptop GPU only; a frame the laptop did not answer on a
+  GPU execution provider (an answer reporting CPU, or no provider at all, is refused) stays unanswered and the
+  job is deferred. `local_gpu_first` asks the laptop, then the VPS CPU tier; `vps_first` and `vps_only` use
+  the VPS only. No policy calls a third-party GPU host.
+* Recognition enhancement is laptop GPU Real-ESRGAN, then the deterministic `deterministic_capture_v1`
+  profile. `runpod_handler.py`, the `fcm-capture-inference` worker and `runpod-qa-worker/` are deleted; the
+  inference image now starts uvicorn directly.
+* `check-services-health` never calls a RunPod host: if `INFERENCE_SERVICE_URL` still names one it reports
+  `retired_provider`. It otherwise reads `GET /health` on the configured inference service.
+* Historic `runpod_fallback` / `runpod` provenance stays readable (labelled legacy) and the database CHECK keeps
+  accepting it for existing rows; nothing new writes it.
+* Face recognition, person re-identification, ANPR and vehicle recognition remain in scope and are being
+  improved on this stack (laptop GPU first; OpenAI and Ollama Cloud only under the egress rules in §9.2).
+
 ## 1. What the tier is for
 
 One motion frame in, one **advisory** answer out: every person, vehicle and animal in the frame, each with a
@@ -36,7 +65,7 @@ wide, however confident the OCR claims to be.
 
 | Role | Model | Licence | Runtime | Where it runs |
 |---|---|---|---|---|
-| Entity detector (person / vehicle / animal) | RF-DETR COCO, `rf-detr-large-704-coco` | Apache-2.0 (weights via open-image-models, MIT wrapper) | onnxruntime CUDA | RunPod GPU workers |
+| Entity detector (person / vehicle / animal) | RF-DETR COCO, `rf-detr-large-704-coco` | Apache-2.0 (weights via open-image-models, MIT wrapper) | onnxruntime CUDA | laptop GPU (RunPod GPU workers until the 2026-11-01 stack ruling) |
 | Entity detector, CPU tier | RF-DETR COCO, `rf-detr-small-512-coco` | Apache-2.0 | onnxruntime CPU | VPS `fcm-inference` |
 | Plate detector | `yolo-v9-s-608-license-plate-end2end` | MIT | onnxruntime | both |
 | Plate OCR | `cct-s-v2-global-model` (fast-plate-ocr; region head includes New Zealand) | MIT | onnxruntime | both |
@@ -44,7 +73,7 @@ wide, however confident the OCR claims to be.
 | Person re-ID / vehicle colour-type | OpenVINO person-reidentification-retail-0288, vehicle-attributes-recognition-barrier-0039 | Apache-2.0 | OpenVINO CPU | both |
 | Vehicle-only fallback | OpenVINO vehicle-detection-0200 | Apache-2.0 | OpenVINO CPU | only when no RF-DETR export is present in `MODELS_DIR` |
 | Species | SpeciesNet v4.0.2a `always_crop` (Google; EfficientNetV2-M, 2,498 labels, camera-trap trained), exported to ONNX at image build from the Addax Data Science Hugging Face mirror (Apache-2.0, pinned revision `c56465f`), geofenced `NZL` | Apache-2.0 | onnxruntime | both |
-| Recognition still super-resolution | Real-ESRGAN x4plus, pinned ONNX SHA-256 `0a06c68f…eac2dc5` (upstream BSD-3-Clause; MIT-packaged conversion at fixed commit) | BSD-3-Clause / MIT packaging | onnxruntime CUDA, CPU fallback | laptop GPU primary; RunPod fallback |
+| Recognition still super-resolution | Real-ESRGAN x4plus, pinned ONNX SHA-256 `0a06c68f…eac2dc5` (upstream BSD-3-Clause; MIT-packaged conversion at fixed commit) | BSD-3-Clause / MIT packaging | onnxruntime CUDA, CPU fallback | laptop GPU; deterministic fallback (RunPod fallback retired 2026-11-01) |
 
 Rejected: Ultralytics YOLO (AGPL-3.0 — incompatible with a closed SaaS), Plate Recognizer / cloud ALPR
 (evidence leaves the custodian's control), tesseract on contour heuristics (kept only as the not-staged
@@ -63,8 +92,8 @@ medium 195 ms, large 297 ms per full frame; the VPS CPU tier (small-512, 5 passe
 Only observations that enter human review receive derivatives (default 8/job, hard cap 20). Up to 12
 usable source crops around the observation window are quality-ranked, affine-aligned and temporal-median
 fused (`aligned_temporal_median_v1`). Frames that cannot align at the minimum correlation are excluded and
-named in the receipt. The fused crop is sent to Real-ESRGAN on the laptop GPU; RunPod is the paid fallback;
-OpenCV levels/denoise/sharpen is the non-generative final fallback.
+named in the receipt. The fused crop is sent to Real-ESRGAN on the laptop GPU; OpenCV levels/denoise/sharpen
+is the non-generative fallback (the RunPod fallback was retired by the 2026-11-01 stack ruling).
 
 ALPR, face and animal/vehicle recognition run independently on the source crop and enhanced derivative.
 Both answers and their agreement are stored; disagreement never auto-resolves. The original and enhanced
@@ -108,7 +137,7 @@ is then superseded rather than promoted.
   detections").
 * **Provider honesty.** `onnx_providers()` offers CUDA only when `/proc/driver/nvidia/version`,
   `/dev/nvidia*` or `NVIDIA_VISIBLE_DEVICES` proves a driver; `create_session()` retries on CPU if CUDA
-  fails to initialise. The bound provider is reported on `/health`, in the RunPod `ping`, and on every
+  fails to initialise. The bound provider is reported on `/health` and on every
   result (`detector_execution_provider`, `detector_provider = rf_detr:<model>@<provider>`).
 * **Far-field tile pass.** Frames at least 1.5x the model input in both dimensions get a 2x2 overlapping
   (15 %) tile pass in the same batch (`passes: 5`). Tile detections must clear 0.45, must not span more than
@@ -173,8 +202,9 @@ registration; the console's enhancement/zoom gets the located box.
 
 ## 6. Consumers
 
-* RunPod `infer_batch` (`runpod_handler.py`) now returns `alpr` and `face` blocks per frame in addition to
-  the triage; `ping` returns the full health payload including providers.
+* `/infer/batch` returns `alpr` and `face` blocks per frame in addition to the triage, and `/health` returns
+  the full payload including execution providers. (Until the 2026-11-01 stack ruling the RunPod
+  `runpod_handler.py` exposed the same answer as `infer_batch`; it is deleted.)
 * **Vehicle-attribute evidence.** The worker preserves OpenVINO colour/type
   confidence, model/provider, crop and inference status instead of flattening
   them into an unlabelled observation. Make/model from the vision LLM remains
@@ -255,6 +285,15 @@ registration; the console's enhancement/zoom gets the located box.
   the host withheld ≥ `VISION_STARVED_STEAL_RATIO` (0.5) of the CPU **defers** the job for
   `VISION_STARVED_DEFER_SECONDS` (1 h, `extractor_starved_deferred`) instead of failing it — the video was
   never the problem. A timeout with the CPU available still fails, as it should.
+* **Release-time claim gate (PR #298 review, 2026-11-01).** The release lane deploys `cctv-vision`
+  (`fcm-inference` + `fcm-vision-watcher`) only after `pause_cctv_inference_claims('release-lane', …)`
+  (migration `20261102170000`) has stopped new claims and the `processing` video queue has drained.
+  `claim_cctv_inference_job` takes a shared advisory lock and returns no job while an unexpired pause
+  exists; the pause takes the lock exclusively, so a claim already in flight commits first and the drain
+  read sees it. Every watcher version, including the laptop worker, honours the gate without a code
+  change. The pause expires after 45 minutes if the lane dies; the lane resumes claims on every exit path,
+  and defers the release if the pause, queue read or drain fails. A failed or unhealthy replacement rolls
+  back to the previous release while claims are still paused.
 * RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:944b93bb…` (commit `6363ae2`), env
   `DETECTOR_MODEL=rf-detr-large-704-coco`; endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU
   types 4090 / RTX 6000 Ada / L40S / A40 (all CUDA 12), network-volume pin removed, idle 30 s, execution
@@ -264,11 +303,118 @@ registration; the console's enhancement/zoom gets the located box.
 
 ## 8. Open items / honest gaps
 
-* Tracking across frames is still the consolidator's IoU/embedding association; a Kalman/ByteTrack-style
-  tracker on the detector boxes is the next step to cut duplicate observations.
+* ~~Tracking across frames is still the consolidator's IoU/embedding association~~ — replaced by the engine v2
+  tracker (§9, `services/vision/entity_tracker.js`, 2026-11-01).
 * No live plate has yet been read from the TAPO corpus because none is legible at that resolution; the
   reader is proven with fake sessions (`test_inference_tier.py`) and on real frames for location only.
 * Species accuracy on NZ night-IR footage is unmeasured (no labelled NZ corpus in the repo); the first real
   possum/stoat clips should be kept as a regression set with the reviewer's verdicts.
-* RunPod idle timeout is 30 s; each cold start costs ~15–35 s (`delayTime`) — raise `workersMin` to 1 if
-  batch latency matters more than idle cost.
+* RunPod was retired from the stack by the owner ruling of 2026-11-01 (§9); its cold-start tuning no longer
+  applies.
+
+## 9. Engine v2 accuracy (owner ruling 2026-11-01)
+
+Owner request: "review cctv and the inference system, we need this to be more accurate … enterprise grade".
+The owner chose: `gpu_consistent` tier policy (defer rather than mix in the VPS small model); Qwen3-VL on the
+laptop as the local vision-language model; Ollama Cloud only for person-free, plate-masked vehicle crops with
+per-organisation opt-in and receipts; all five scope items (accuracy engine, model governance, accuracy
+measurement, reviewer workspace, local VLM); reprocessing of completed jobs keeping human decisions.
+
+### 9.1 What production showed before (read-only aggregates, 2026-11-01)
+
+* 521 sightings (209 animal, 92 person, 220 vehicle); only 18 had a human decision (17 accepted, 1 rejected),
+  so no confidence figure shown to reviewers was calibrated against anything.
+* Single clips were triaged by two detector models (for example 42 frames on the VPS `rf-detr-small-512` and
+  78 on the laptop `rf-detr-large-704`), so sightings inside one clip were not measured on one standard.
+* One camera produced the same parked car 76 times across 70 clips, split into 12 portfolios: stationary
+  coalescing worked only inside a clip.
+* 71 sightings came from a single frame; 98 animals had no species.
+* `classification_truncated` was true for 319 of 364 planned results (120-frame cap); 21 of those sampled as
+  few as 80 frames because the per-segment budget left unused frames behind.
+* Code defects: only the first vehicle per frame reached tracking (`vehicles[0]`); greedy nearest-track
+  assignment with no one-to-one rule (two people walking together merged); a spatial gate that grew to about
+  23 box sizes over a 15 s gap; track confidence was the single maximum; make/model came from moondream
+  with free-form JSON; confidence percentages had no calibration and no box was drawn on the still.
+
+### 9.2 What engine v2 does (expected once released)
+
+* **Tracker** (`services/vision/entity_tracker.js`, `ENGINE_VERSION = 'cctv-engine-v2'`): every detection in a
+  frame is tracked; one-to-one assignment per frame; bounded gate (max 4 box sizes, 2 with a constant-velocity
+  prediction); a detection below 0.4 can extend a track but never start one; weak colour-layout embeddings can
+  veto a match but never rescue one; a track is confirmed at 2 hits, or 1 frame at ≥ 0.85; track confidence is
+  evidence-weighted with the best frame kept separately. Tracks are review candidates, never identities.
+* **One detector per job** (`vision_job_watcher.js`): under `gpu_consistent` an answer counts only when it
+  came from the pinned model; other answers leave the frame unanswered and the job is deferred with a label
+  naming the model it waits for. Each result records `classification_plan.model_manifest` (engine version,
+  policy, pinned model, frames per detector model, rejected answers per model) and `coverage` (frames
+  sampled, examined and unanswered, by machine).
+* **Frame budget**: `selectFramesForClassification` now spends the whole budget in chronological order; budget
+  a short motion segment cannot use passes to longer segments, and with more segments than budget it samples
+  segments across the whole clip, never only the first ones.
+* **Vision-language hints** (`services/vision/vision_hints.js`): Qwen3-VL (`qwen3-vl:4b`) on the laptop Ollama
+  answers against a JSON schema at temperature 0; when it cannot answer the hint is recorded as unavailable,
+  never answered by a weaker model. Ollama Cloud (`gemma4:31b` default) is used for vehicle make/model only
+  when the local model failed, the organisation opted in, the plate reader examined the frame and every
+  located plate is blacked out, the person detector found no person intersecting the crop, and a receipt for
+  that crop's SHA-256 was written first — no receipt, no egress. Person, weapon and scene prompts never leave
+  the local tier. Every make/model hint keeps the governed label `vision_llm_hint_unverified` (the label
+  `review_cctv_entity_observation` relies on to keep a machine guess off the canonical vehicle when a plate is
+  accepted); which tier answered is recorded separately as `make_model_tier` (`local_vlm` or `ollama_cloud`)
+  with `make_model_model` and, for the cloud, `make_model_receipt_id`.
+* **Hint model acceptance (2026-11-01, laptop Ollama 0.40.13, `qwen3-vl:4b`)**: probing with the exact worker
+  request found two defects that would have made every hint "unavailable" in production, both fixed before
+  release. (1) Without a bounded context Ollama sized the KV cache for Qwen3-VL's full window and failed to load
+  the model (36.5 GB allocation); requests now send `num_ctx` 8192 (`VISION_HINT_NUM_CTX`), and the model loads
+  fully on the GPU at 4.3 GB. (2) The model reasons before answering (`think: false` did not stop it), and the
+  old 256-token output budget would have truncated five of six answers; the budget is now 1536
+  (`VISION_HINT_MAX_TOKENS`; the largest answer measured used 738). The prompt also defines the NZ body types,
+  because without them a Hilux pickup was filed as a campervan. On three openly licensed Wikimedia Commons
+  photographs (Toyota HiLux front, Mazda Demio front and rear), each sent clear at crop size and degraded to
+  160 px CCTV quality, make, model, body type and colour were right in 6 of 6; a synthetic drawn car was
+  answered "unknown" at low confidence; the weapon prompt answered no weapon and the scene synopsis read
+  "white ute parked on the street". Warm latency was 3.5–16 s per hint. This is a smoke test of the request
+  contract, not an accuracy measurement — precision comes only from reviewer decisions (§9.3).
+* **Configuration names**: the watcher reads `CCTV_VLM_URL`, `CCTV_VLM_MODEL` and `CCTV_CLOUD_VLM_MODEL` from
+  `/opt/fcm/.env` (compose maps them to the watcher's `OLLAMA_VISION_*`); do not set `OLLAMA_VISION_*` there,
+  because Bob Vibe reads those names for its own images. `VISION_PINNED_DETECTOR_MODEL` defaults to
+  `rf-detr-large-704-coco`.
+* **Database** (migration `20261102150000_cctv_enterprise_inference.sql`):
+  `reconcile_cctv_reviewed_observations` supersedes a reprocessed unreviewed sighting that duplicates an
+  accepted or rejected one (same footage and kind, overlapping time, and the same plate, box IoU ≥ 0.3 or a
+  stationary position) and records `carried_review_state`; reviewed rows are never changed.
+  `cctv_resident_objects` + `link_cctv_resident_vehicle_observations` give a parked vehicle that recurs in the
+  same place on the same camera one provisional portfolio across clips. `cctv_inference_policies` +
+  `set_cctv_inference_policy` hold the cloud opt-in (administrator only, reason required to enable, audited);
+  `cctv_cloud_inference_receipts` holds the crop hash and privacy checks, never the image.
+  `cctv_missed_detection_reports` with `report_cctv_missed_detection` / `resolve_cctv_missed_detection` measure
+  recall (only a confirmed miss counts; a wrong report is kept as `not_missed`). `cctv_accuracy_summary`
+  reports precision per entity kind, engine, detector, review basis and confidence band from human decisions
+  only, with the Wilson 95 % lower bound; a group is called calibrated at 30 decisions.
+* **Reviewer workspace**: the triage queue draws the detector box on the full frame (only when the sighting
+  carries its frame size — a guessed box is never drawn), lists provenance (engine, detector, basis, track
+  confirmation, motion, resident object, carried decision), and supports J/K to move, A/R to accept or reject,
+  optional move-to-next after deciding, and a receipt with "Back to it". There is deliberately no bulk accept:
+  one attributable decision per sighting is the accountability standard. The console can report a missed
+  sighting at the playhead. The new Detection quality page (`?area=cctv-quality`) shows precision with its
+  lower bound and calibration state per kind, a legacy-engine comparison, the breakdown table, missed reports
+  with administrator resolution, and the cloud vehicle-hint policy with its receipt count. The job review
+  panel shows detector coverage: frames examined against motion frames, unanswered frames as gaps, which
+  machines read them, and a warning when different detector models read one clip.
+* **Reprocessing**: `node scripts/rerun-prefix-cctv-jobs.mjs --scope engine-v2 --limit 25` lists completed
+  video jobs whose latest result was not produced by engine v2; `--apply` re-queues one batch (audited
+  `cctv_inference_rerun`). The migration must be live before the watcher is redeployed, and before any batch.
+  Photos are out of scope: engine v2 changed the video path only, and a photo result has no classification
+  plan, so the first live canary (2026-11-01, two photos) would otherwise have been re-selected every batch.
+
+### 9.3 Present state and honest gaps
+
+* Present in the repository on merge; live only after the release lane applies the migration and the watcher
+  is redeployed with Qwen3-VL pulled on the laptop. Nothing in §9.2 is "exercised" until a reprocessed batch
+  writes engine v2 results and reviewers decide them; until 30 decisions exist per group the quality page
+  says so instead of showing a calibrated figure.
+* Recall is only as good as reviewers' missed reports; there is no labelled ground-truth corpus (no CCTV video
+  in the classified sample corpus).
+* 107 "Unknown Person" profiles exist live, 32 of them orphaned. Engine v2 does not create or merge them; this
+  is recorded as a data gap, not fixed here.
+* Sampling is still capped at `VISION_MAX_CLASSIFICATION_FRAMES` (120); motion between samples is not
+  examined, and the review panel says so.

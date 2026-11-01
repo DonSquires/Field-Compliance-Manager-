@@ -118,6 +118,28 @@ as compliance observations).
   internal because they have no client, not because client jobs were classified
   as internal roster work.
 
+### Owner direction 2026-10-26: patrol routes and seeded source truth
+
+- Seeded patrol-log labour belongs on the Blenheim or Nelson patrol route, not
+  in per-client holding units. Dave Porter is the usual Blenheim officer; Dan
+  Douglas is the usual Nelson officer. `patrol_routes.primary_staff_id`
+  (admin-only, audited `set_patrol_route_primary_officer`) records each
+  route's usual officer; other staff may still cover the route.
+- Each place belongs to the route whose usual officer attends it most. Places
+  neither usual officer attends go to the nearest route working area, then to
+  a single existing route zone list. A shift follows the majority of its
+  places, then the officer's dated route assignment, then the officer's usual
+  route. Each slot keeps its client and the basis for its routing. Routing changes
+  the roster calendar and route coverage list only, not pay, payroll, invoices
+  or future patrol stops.
+- Every job seeded from R&M's spreadsheets is already verified truth. Those
+  sheets are R&M's source of record for reporting and billing until R&M
+  operate in FCM. Seeded jobs have no geofence requirement. They are billed by
+  their source and are not billing, quote or geofence exceptions. Roster
+  readiness reports them as `source_verified`. Seeded sources are an explicit list
+  (`roster_slot_is_source_truth`). Other tagged slots, such as Bob's tentative
+  blocks, are not source truth. New FCM-operated work keeps every normal gate.
+
 ### Owner direction 2026-10-20: as-attended patrols and recorded travel
 
 - R&M source-backed places completed by Dave Porter belong on Blenheim Forestry

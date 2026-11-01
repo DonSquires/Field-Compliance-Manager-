@@ -37,7 +37,8 @@ const ALLOWED_ROLES = [
 const CAN_INVITE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
@@ -66,7 +67,7 @@ serve(async (req)=>{
     }, 401);
     // Get caller profile to check role
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, employer_organization_id').eq('id', caller.id).single();
+    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, employer_organization_id').eq('id', caller.id).is('deactivated_at', null).single();
     // A client administrator may add client users to their own organisation (client portal only).
     const callerIsClientAdmin = callerProfile?.role === 'client_admin';
     if (!callerProfile || !(CAN_INVITE.includes(callerProfile.role) || callerIsClientAdmin)) {

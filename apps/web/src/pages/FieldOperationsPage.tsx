@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Route,
   ShieldAlert,
+  UserSearch,
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -20,11 +21,10 @@ import { useAuth, type AppRole } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { useEnabledModules } from '../hooks/useEnabledModules';
-import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'person-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-quality' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -77,7 +77,8 @@ const WORKFLOWS: FieldWorkflow[] = [
   { area: 'operational-continuity', label: 'Operational continuity', detail: 'Publish and acknowledge safe client/provider handoffs', icon: ArrowRightLeft, tone: 'teal', group: 'respond', roles: OPERATIONS_ROLES },
   { area: 'cctv-console', label: 'CCTV & video', detail: 'Playback, observations, imports, processing jobs, and evidence exports', icon: Camera, tone: 'slate', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['cctv'] },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement'] },
-  { area: 'vehicle-search', label: 'Vehicle intelligence', detail: 'Search vehicle, observation, and compliance history', icon: Car, tone: 'blue', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement'] },
+  { area: 'vehicle-search', label: 'Vehicle search', detail: 'Search vehicle, observation, permit and compliance history', icon: Car, tone: 'blue', group: 'review', roles: OPERATIONS_ROLES },
+  { area: 'person-search', label: 'Person search', detail: 'Find people, trespass and warning notices, expiry, and linked vehicles', icon: UserSearch, tone: 'red', group: 'review', roles: OPERATIONS_ROLES },
   { area: 'observation-search', label: 'Observation search', detail: 'Search observations by place, person, vehicle, incident, or note', icon: FileSearch, tone: 'teal', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement', 'cctv'] },
   { area: 'officer-activity', label: 'Officer investigations', detail: 'Build audited timelines and issue hashed evidence', icon: FileSearch, tone: 'slate', group: 'review', roles: OPERATIONS_ROLES },
 ];
@@ -97,10 +98,9 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   const { profile, operatingOrganizationId } = useAuth();
   const organizationId = operatingOrganizationId ?? profile?.organizationId;
   const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
-  const dispatchContext = useActiveModuleContext('dispatch');
   const { isModuleEnabled } = useEnabledModules(organizationId);
   const dispatchEnabled = isModuleEnabled('dispatch');
-  const dispatchAvailable = dispatchEnabled && dispatchContext.enabled;
+  const dispatchAvailable = dispatchEnabled;
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const role = profile?.role ?? 'unknown';
   const [workflowQuery, setWorkflowQuery] = useState('');
@@ -167,7 +167,6 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   }, [loadMetrics]);
 
   const warnings = Object.entries(metrics).filter(([, metric]) => metric.error);
-  if (dispatchEnabled && dispatchContext.error) warnings.push(['dispatchContext', { value: null, error: dispatchContext.error }]);
 
   return (
     <div className="field-ops-home field-ops-command" data-active-group={activeGroup}>

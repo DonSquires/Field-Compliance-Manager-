@@ -15,6 +15,14 @@ test('recovery accounting is fail-closed and scoped to one job', async () => {
   await assert.rejects(accountVerifierRecoveries({ rpc: async () => ({ data: null }) }, 'job'), /invalid evidence/);
 });
 
+test('detailed worker handoff failures remain recoverable and are retained in receipts', () => {
+  const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102130000_builder_verifier_handoff_failure_details.sql'), 'utf8');
+  assert.match(migration, /Frontend worker handoff failed during %/);
+  assert.match(migration, /Backend worker handoff failed during %/);
+  assert.match(migration, /verifier_failure_summary/);
+  assert.match(migration, /left\(_run\.log_summary, 500\)/);
+});
+
 test('Postgres refunds infrastructure once per lease, preserves real failures, and parks repeated recovery', {
   skip: process.env.BOB_TEST_POSTGRES !== '1', timeout: 60000
 }, () => {
@@ -30,6 +38,7 @@ test('Postgres refunds infrastructure once per lease, preserves real failures, a
     }
     assert.equal(ready, true, 'isolated PostgreSQL started');
     const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261018160000_builder_verifier_recovery_accounting.sql'), 'utf8');
+    const handoffFailureMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102130000_builder_verifier_handoff_failure_details.sql'), 'utf8');
     const sql = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
 CREATE SCHEMA auth;
@@ -39,6 +48,7 @@ CREATE TABLE public.builder_job_steps (id uuid primary key, job_id uuid, attempt
 CREATE TABLE public.builder_worker_runs (id uuid primary key, job_id uuid, organization_id uuid, step_id uuid, target_sha text, profile text, status text, log_summary text, created_at timestamptz, started_at timestamptz, patch_artifact_id uuid);
 CREATE TABLE public.builder_audit_events (organization_id uuid, job_id uuid, event_type text, actor_type text, new_value jsonb, change_summary text, related_artifact_ids uuid[]);
 ${migration}
+${handoffFailureMigration}
 INSERT INTO builder_jobs VALUES ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','pin','implementation_pending');
 INSERT INTO builder_job_steps VALUES ('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001',6,true,'lease expired',now(),'failed','{"patch_artifact_id":"00000000-0000-4000-8000-000000000004"}');
 INSERT INTO builder_worker_runs VALUES ('00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003','pin','frontend-verify','timeout',NULL,now(),now(),'00000000-0000-4000-8000-000000000004');
@@ -68,6 +78,23 @@ BEGIN
  IF (SELECT retryable FROM builder_job_steps) THEN RAISE EXCEPTION 'baseline was blindly retried'; END IF;
  IF (SELECT error FROM builder_job_steps) NOT LIKE 'baseline: repository red at the pinned commit:%' THEN RAISE EXCEPTION 'baseline attribution lost'; END IF;
  IF (SELECT attempt_count FROM builder_job_steps) <> 5 THEN RAISE EXCEPTION 'baseline consumed repair budget'; END IF;
+ UPDATE builder_worker_runs SET started_at = started_at + interval '1 second', status='failed',
+   log_summary='Frontend worker handoff failed during registering build-log evidence (Error code=E_UPLOAD)';
+ UPDATE builder_job_steps SET retryable=true, error='Frontend worker verification failed', attempt_count=6;
+ IF builder_account_verifier_recoveries(j) <> 1 THEN RAISE EXCEPTION 'detailed frontend handoff failure was not recovered'; END IF;
+ IF (SELECT new_value->>'verifier_failure_summary' FROM builder_audit_events
+     WHERE new_value->>'verifier_failure_summary' LIKE 'Frontend worker handoff failed during%')
+   <> 'Frontend worker handoff failed during registering build-log evidence (Error code=E_UPLOAD)' THEN
+   RAISE EXCEPTION 'frontend handoff detail missing from recovery receipt';
+ END IF;
+ UPDATE builder_worker_runs SET started_at = started_at + interval '1 second', profile='backend-verify',
+   log_summary='Backend worker handoff failed during verifying database migrations (Error)';
+ UPDATE builder_job_steps SET retryable=true, error='Backend worker verification failed', attempt_count=6;
+ IF builder_account_verifier_recoveries(j) <> 1 THEN RAISE EXCEPTION 'detailed backend handoff failure was not recovered'; END IF;
+ IF (SELECT count(*) FROM builder_audit_events
+     WHERE new_value->>'verifier_failure_summary' LIKE '%worker handoff failed during%') <> 2 THEN
+   RAISE EXCEPTION 'handoff recovery receipts are not append-only';
+ END IF;
 END $check$;
 SET request.jwt.claim.role = 'authenticated';
 DO $check$

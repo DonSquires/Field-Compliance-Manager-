@@ -14,6 +14,13 @@ acceptance examples, sample workflows, and mistakes to avoid; they are not
 parallel products and cannot overrule this canon, Atlas, the live schema, or
 `docs/REBUILD_PLAN.md`.
 
+Owner ruling 2026-11-01: **one service provider; client approval is not a
+condition of service.** R & M Security and Investigations is the only service
+provider, Iron Eagle is the billing and app-management owner, and no other
+organisation may sign up. A provider's current operational agreement is enough
+to deliver service; client acceptance gates only client-side disclosure. The
+ruling is recorded in [`ORG_SERVICE_MODEL.md`](ORG_SERVICE_MODEL.md#owner-ruling-2026-11-01--one-service-provider-client-approval-is-not-a-condition-of-service).
+
 ## Order of authority
 
 1. [`FOUNDATION.md`](../../FOUNDATION.md) (repo root) — why the app exists:

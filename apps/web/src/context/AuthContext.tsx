@@ -70,25 +70,51 @@ export const AuthContext = createContext<AuthContextValue>({
 });
 
 // ATLAS READS: user_profiles (mapped to the authenticated auth.users session)
-async function loadProfile(userId: string): Promise<AppProfile | null> {
+const DEACTIVATED_ACCOUNT_MESSAGE =
+  'This account has been deactivated. Contact an administrator if you believe this is incorrect.';
+
+async function loadProfile(userId: string): Promise<{
+  profile: AppProfile | null;
+  deactivated: boolean;
+  error: string | null;
+}> {
   // A confirmed email change lands in auth.users first; bring this profile's copy up to it.
   await supabase.rpc('sync_my_profile_email');
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('id, display_name, email, role, organization_id, employer_organization_id, module_access')
+    .select('id, display_name, email, role, organization_id, employer_organization_id, module_access, deactivated_at')
     .eq('id', userId)
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    console.error('[auth] profile lookup failed:', error);
+    return {
+      profile: null,
+      deactivated: false,
+      error: 'Unable to load your application profile. Please try again or contact an administrator.',
+    };
+  }
+  if (!data) return { profile: null, deactivated: false, error: null };
+  if (data.deactivated_at) {
+    return {
+      profile: null,
+      deactivated: true,
+      error: DEACTIVATED_ACCOUNT_MESSAGE,
+    };
+  }
 
   return {
-    id: data.id,
-    displayName: data.display_name || data.email || 'Unknown',
-    email: data.email ?? undefined,
-    role: (data.role as AppRole) ?? 'unknown',
-    organizationId: data.organization_id ?? null,
-    employerOrganizationId: data.employer_organization_id ?? null,
-    moduleAccess: data.module_access ?? [],
+    profile: {
+      id: data.id,
+      displayName: data.display_name || data.email || 'Unknown',
+      email: data.email ?? undefined,
+      role: (data.role as AppRole) ?? 'unknown',
+      organizationId: data.organization_id ?? null,
+      employerOrganizationId: data.employer_organization_id ?? null,
+      moduleAccess: data.module_access ?? [],
+    },
+    deactivated: false,
+    error: null,
   };
 }
 
@@ -120,7 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const hydrateProfile = async (userId: string) => {
-      const nextProfile = await loadProfile(userId);
+      const profileResult = await loadProfile(userId);
+      const nextProfile = profileResult.profile;
       const contexts = nextProfile ? await loadOperatingOrganizations() : [];
       const storageKey = `fcm:operating-organization:${userId}`;
       const storedOrganizationId = sessionStorage.getItem(storageKey);
@@ -129,10 +156,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ?? contexts[0];
       if (!cancelled) {
         setProfile(nextProfile);
+        setError(profileResult.error);
         setOperatingOrganizations(contexts);
         setOperatingOrganizationId(selected?.organizationId ?? null);
         if (selected) sessionStorage.setItem(storageKey, selected.organizationId);
         else sessionStorage.removeItem(storageKey);
+      }
+      if (profileResult.deactivated && !cancelled) {
+        window.setTimeout(() => {
+          void supabase.auth.signOut({ scope: 'global' }).then(({ error: signOutError }) => {
+            if (signOutError) {
+              console.error('[auth] failed to revoke deactivated account sessions:', signOutError);
+              if (!cancelled) {
+                setError('This account has been deactivated, but the session could not be fully signed out. Contact an administrator.');
+              }
+            }
+          }).catch((signOutError: unknown) => {
+            console.error('[auth] failed to revoke deactivated account sessions:', signOutError);
+            if (!cancelled) {
+              setError('This account has been deactivated, but the session could not be fully signed out. Contact an administrator.');
+            }
+          });
+        }, 0);
       }
     };
 
@@ -177,8 +222,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
     if (signInError) {
-      setError(signInError.message);
-      return { error: signInError.message };
+      // Deactivation bans the Auth user; show the account state instead of the raw Auth wording.
+      const message = signInError.code === 'user_banned' ? DEACTIVATED_ACCOUNT_MESSAGE : signInError.message;
+      setError(message);
+      return { error: message };
     }
     return { error: null };
   };

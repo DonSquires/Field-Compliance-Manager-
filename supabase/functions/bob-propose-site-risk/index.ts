@@ -23,7 +23,8 @@ const CORS = {
 const CAN_PROPOSE = new Set([
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ]);
 const ALLOWED_RATINGS = new Set([
   'low',

@@ -45,7 +45,8 @@ const CORS = {
 const CAN_PROPOSE = [
   'grand_master',
   'master',
-  'admin'
+  'admin',
+  'admin_officer'
 ];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Owner elevation: mirrors the conductor's OWNER_EMAILS set so the downstream

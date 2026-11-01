@@ -100,7 +100,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   if (browserProfile) {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755');
     // The Vibe walk runs unreviewed branch code offline: it only ever receives the fixture switches.
-    const forwarded = profile === 'vibe-human-qa' ? ['HUMAN_TEST_LIVE', 'E2E_OFFLINE'] : ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD', 'VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID'];
+    const forwarded = profile === 'vibe-human-qa' ? ['HUMAN_TEST_LIVE', 'E2E_OFFLINE'] : ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'HUMAN_TEST_DEPLOYMENT_VERIFIED_SHA', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD'];
     for (const key of forwarded) {
       if (environment[key]) args.push('--env', key);
     }
@@ -178,7 +178,7 @@ async function executeWorker(options, { spawnImpl = spawn } = {}) {
 }
 
 function prepareWorkerMounts(sourceDir, profile) {
-  if (profile !== 'main-health' && profile !== 'vibe-human-qa') return;
+  if (!['main-health', 'vibe-human-qa', 'human-qa', 'human-qa-live'].includes(profile)) return;
   // Docker cannot create nested mountpoints inside the read-only source bind.
   for (const relative of profile === 'main-health' ? ['node_modules', '.bob', 'apps/web/node_modules'] : ['apps/web/node_modules']) {
     const target = path.join(sourceDir, relative);
@@ -195,6 +195,14 @@ function summarizeHumanTest(result) {
   return summary;
 }
 
+// The live runner prints one preflight verdict per deployment check; the worst one stands, so a
+// run that could not confirm what production serves is never mistaken for an application verdict.
+function humanTestDeploymentPreflight(result) {
+  const output = `${result?.stdout || ''}\n${result?.stderr || ''}`;
+  const outcomes = new Set([...output.matchAll(/\[HUMAN DEPLOYMENT PREFLIGHT\] result=(matched|stale|unavailable|unverified)\b/g)].map((match) => match[1]));
+  return ['unavailable', 'stale', 'unverified', 'matched'].find((outcome) => outcomes.has(outcome)) ?? null;
+}
+
 function redact(value) {
   return value
     .replace(/authorization\s*[:=]\s*Bearer\s+[^\s,;]+/gi, 'authorization=[REDACTED]')
@@ -202,4 +210,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, prepareWorkerMounts, hostPath, redact, summarizeHumanTest, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, prepareWorkerMounts, hostPath, redact, summarizeHumanTest, humanTestDeploymentPreflight, workerCommand };
