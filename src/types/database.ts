@@ -33097,6 +33097,96 @@ export type Database = {
           },
         ]
       }
+      website_enquiries: {
+        Row: {
+          client_hash: string | null
+          created_at: string
+          email: string | null
+          handled_at: string | null
+          handled_by: string | null
+          id: string
+          location: string | null
+          message: string
+          name: string
+          organisation: string | null
+          phone: string | null
+          preferred_contact: string
+          privacy_ack: boolean
+          provider_organization_id: string
+          received_at: string
+          reference: string
+          services: string[]
+          source_page: string | null
+          status: string
+          status_note: string | null
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          client_hash?: string | null
+          created_at?: string
+          email?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          location?: string | null
+          message: string
+          name: string
+          organisation?: string | null
+          phone?: string | null
+          preferred_contact?: string
+          privacy_ack: boolean
+          provider_organization_id: string
+          received_at?: string
+          reference: string
+          services?: string[]
+          source_page?: string | null
+          status?: string
+          status_note?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          client_hash?: string | null
+          created_at?: string
+          email?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          location?: string | null
+          message?: string
+          name?: string
+          organisation?: string | null
+          phone?: string | null
+          preferred_contact?: string
+          privacy_ack?: boolean
+          provider_organization_id?: string
+          received_at?: string
+          reference?: string
+          services?: string[]
+          source_page?: string | null
+          status?: string
+          status_note?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "website_enquiries_handled_by_fkey"
+            columns: ["handled_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "website_enquiries_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       welfare_alerts: {
         Row: {
           acknowledged_at: string | null
@@ -50213,6 +50303,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_website_enquiry: {
+        Args: {
+          p_enquiry_id: string
+          p_expected_version: number
+          p_note: string
+          p_status: string
+        }
+        Returns: Json
+      }
       rollback_bob_roster_fill_plan: {
         Args: { p_action_id: string }
         Returns: {
@@ -52235,6 +52334,22 @@ export type Database = {
           received_at: string
           review_state: string
         }[]
+      }
+      submit_website_enquiry: {
+        Args: {
+          p_client_hash: string
+          p_email?: string
+          p_location?: string
+          p_message: string
+          p_name: string
+          p_organisation?: string
+          p_phone?: string
+          p_preferred_contact?: string
+          p_privacy_ack: boolean
+          p_services?: string[]
+          p_source_page?: string
+        }
+        Returns: string
       }
       supersede_duplicate_patrol_events: {
         Args: {
