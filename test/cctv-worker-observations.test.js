@@ -60,6 +60,7 @@ test('still recognition produces provisional face and ALPR review candidates wit
       faces: [{
         confidence: 0.88, bbox: { x: 14, y: 22, width: 20, height: 20 }, embedding: sourceFaceEmbedding,
         detector_confidence: 0.91, face_crop_width_px: 20, alignment_basis: 'deterministic_upscaled_crop',
+        usable_for_matching: true, face_quality_score: 0.91, matching_gate_version: 'face_quality_v1',
         face_detector_model: 'face_detection_yunet_2023mar.onnx', face_embedding_model: 'face_recognition_sface_2021dec.onnx',
       }],
       vehicles: [{ confidence: 0.95, bbox: { x: 100, y: 100, width: 200, height: 120 }, attributes: { vehicle_colour: 'white', vehicle_type: 'ute' } }],
@@ -73,6 +74,7 @@ test('still recognition produces provisional face and ALPR review candidates wit
   assert.equal(person.attributes.face_basis, 'authoritative_source');
   assert.equal(person.attributes.face_detector_confidence, 0.91);
   assert.equal(person.attributes.face_alignment_basis, 'deterministic_upscaled_crop');
+  assert.equal(person.attributes.face_usable_for_matching, true);
   assert.equal(person.attributes.face_detector_model, 'face_detection_yunet_2023mar.onnx');
   assert.equal(person.attributes.face_embedding_model, 'face_recognition_sface_2021dec.onnx');
   assert.equal(person.attributes.face_provider, 'laptop_gpu');
@@ -183,11 +185,19 @@ async function summaryFixture() {
     { frame_index: 15, relative_timestamp_seconds: 1.0, sha256_hash: 'v1', quality_state: 'clear',
       alpr: { success: true, plate: 'ABC123', confidence: 0.9, plate_bbox: { x: 10, y: 10, width: 40, height: 12 } },
       triage: { vehicle: { detection: { bbox: { x: 100, y: 100, width: 300, height: 180 }, confidence: 0.98 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1', inference_provider: 'test' } },
-      people: { success: true, people: [{ bbox: { x: 600, y: 150, width: 60, height: 190 }, confidence: 0.95, attributes: { appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'person-reidentification-retail-0288.xml', upper_body_colour: 'blue' } }] },
-      face: { success: true, faces: [{ embedding: Array(128).fill(0.088), bbox: { x: 610, y: 150, width: 30, height: 30 } }] } },
+      people: { success: true, people: [{ bbox: { x: 600, y: 150, width: 60, height: 190 }, confidence: 0.95, attributes: {
+        appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'person-reidentification-retail-0288.xml',
+        appearance_embedding_usable: true, appearance_quality_score: 0.82, upper_body_colour: 'blue',
+      } }] },
+      face: { success: true, faces: [{ embedding: Array(128).fill(0.088), bbox: { x: 610, y: 150, width: 30, height: 30 },
+        usable_for_matching: true, face_quality_score: 0.9 }] } },
     { frame_index: 30, relative_timestamp_seconds: 2.0, sha256_hash: 'v2', quality_state: 'clear',
       alpr: { success: true, plate: 'ABC123', confidence: 0.92 },
-      triage: { vehicle: { detection: { bbox: { x: 130, y: 100, width: 300, height: 180 }, confidence: 0.97 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
+      triage: { vehicle: { detection: { bbox: { x: 130, y: 100, width: 300, height: 180 }, confidence: 0.97 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } },
+      people: { success: true, people: [{ bbox: { x: 604, y: 151, width: 60, height: 190 }, confidence: 0.91, attributes: {
+        appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'person-reidentification-retail-0288.xml',
+        appearance_embedding_usable: true, appearance_quality_score: 0.76, upper_body_colour: 'blue',
+      } }] } },
     { frame_index: 45, relative_timestamp_seconds: 3.0, sha256_hash: 'v3', quality_state: 'clear',
       triage: { vehicle: { detection: { bbox: { x: 700, y: 300, width: 200, height: 120 }, confidence: 0.7 }, vehicle_colour: 'red', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
     animalFrame(40.0, { x: 100, y: 500, width: 60, height: 40 }, 'possum', 0.9),
@@ -216,7 +226,8 @@ test('buildEntityObservations emits one observation per tracked entity with abso
   assert.ok(plated, 'plated vehicle observation');
   assert.equal(plated.observed_at, '2026-09-10T08:15:01.000Z');
   assert.equal(plated.observed_to, '2026-09-10T08:15:02.000Z');
-  assert.equal(plated.appearance_embedding.length, 256);
+  assert.equal(plated.appearance_embedding, undefined, 'the deterministic fallback descriptor is not a cross-clip vehicle identity template');
+  assert.equal(plated.attributes.appearance_embedding_usable, false);
   assert.equal(plated.attributes.colour, 'white');
   assert.equal(plated.attributes.body_type, 'truck');
   assert.equal(plated.attributes.plate_confidence, 0.92);
@@ -226,6 +237,8 @@ test('buildEntityObservations emits one observation per tracked entity with abso
   const person = observations.find((item) => item.entity_kind === 'person');
   assert.equal(person.candidate_embedding.length, 128, 'the face seen during the body track rides on the person observation');
   assert.equal(person.appearance_embedding.length, 256);
+  assert.equal(person.attributes.appearance_embedding_usable, true);
+  assert.equal(person.attributes.appearance_template_frames, 2);
   assert.equal(person.attributes.upper_body_colour, 'blue');
   assert.equal(person.attributes.face_event_id, summary.consolidated_events.face_events[0].event_id);
 

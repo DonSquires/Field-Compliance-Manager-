@@ -708,6 +708,9 @@ async function enrichRepresentativeFrame(frame, image, job, triageAnswer) {
       const triageVehicleBoxes = Array.isArray(triageAnswer?.vehicles)
         ? triageAnswer.vehicles.map((vehicle) => vehicle?.bbox || vehicle?.attributes?.detection?.bbox).filter(Boolean)
         : [];
+      const faceForm = () => buildForm(null, Array.isArray(triageAnswer?.people)
+        ? { person_bboxes: triageAnswer.people.map((person) => person?.bbox).filter(Boolean) }
+        : null);
       // gpu_consistent never asks the VPS CPU detector: a missing triage answer stays missing.
       const needLocalDetect = !triageAnswer && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';
       // No triage answer at all: the VPS /infer/detect route (people + vehicles + animals + ALPR in one call)
@@ -720,7 +723,7 @@ async function enrichRepresentativeFrame(frame, image, job, triageAnswer) {
           : classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: triageVehicleBoxes.length ? triageVehicleBoxes : null })),
         triageFace
           ? Promise.resolve(null)
-          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/face', headers, buildForm),
+          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/face', headers, faceForm),
         LOCAL_PEOPLE_INFERENCE && triageAnswer && !Array.isArray(triageAnswer.people)
           ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm)
           : Promise.resolve(null),
@@ -847,14 +850,17 @@ function stillEntityObservations(recognition, context = {}) {
     const person = people.items[index] || {};
     const face = faces.items[index] || {};
     const sourceFace = faces.basis === 'authoritative_source' ? face : null;
+    const faceUsable = sourceFace?.usable_for_matching === true;
+    const appearanceUsable = person?.attributes?.appearance_embedding_usable === true;
     observations.push({
       source_event_id: `still-person-${index + 1}`,
       entity_kind: 'person',
       observed_at: observedAt,
       observed_to: observedAt,
       candidate_label: sourceFace?.subject_label || null,
-      candidate_embedding: Array.isArray(sourceFace?.embedding) ? sourceFace.embedding : undefined,
-      appearance_embedding: Array.isArray(person?.attributes?.appearance_embedding) ? person.attributes.appearance_embedding : undefined,
+      candidate_embedding: faceUsable && Array.isArray(sourceFace?.embedding) ? sourceFace.embedding : undefined,
+      appearance_embedding: appearanceUsable && Array.isArray(person?.attributes?.appearance_embedding)
+        ? person.attributes.appearance_embedding : undefined,
       model_confidence: confidence(person.confidence ?? face.confidence ?? face.det_score),
       quality_state: 'clear',
       attributes: {
@@ -866,9 +872,18 @@ function stillEntityObservations(recognition, context = {}) {
         face_embedding_model: face.face_embedding_model || null,
         face_detector_confidence: confidence(face.detector_confidence),
         face_crop_width_px: Number.isFinite(Number(face.face_crop_width_px)) ? Number(face.face_crop_width_px) : null,
+        face_quality_score: confidence(face.face_quality_score),
+        face_usable_for_matching: faceUsable,
+        face_matching_gate_version: face.matching_gate_version || null,
         face_alignment_basis: face.alignment_basis || null,
         person_basis: Object.keys(person).length ? people.basis : null,
         appearance_embedding_model: person?.attributes?.appearance_embedding_model || null,
+        appearance_embedding_usable: appearanceUsable,
+        appearance_quality_score: confidence(person?.attributes?.appearance_quality_score),
+        appearance_crop_width_px: Number.isFinite(Number(person?.attributes?.appearance_crop_width_px))
+          ? Number(person.attributes.appearance_crop_width_px) : null,
+        appearance_crop_height_px: Number.isFinite(Number(person?.attributes?.appearance_crop_height_px))
+          ? Number(person.attributes.appearance_crop_height_px) : null,
         authority: 'provisional',
         review_required: true,
       },
@@ -884,6 +899,7 @@ function stillEntityObservations(recognition, context = {}) {
   for (let index = 0; index < vehicleItems.length; index += 1) {
     const vehicle = vehicleItems[index] || {};
     const attributes = vehicle.attributes || vehicle.vehicle || {};
+    const appearanceUsable = attributes.appearance_embedding_usable === true;
     observations.push({
       source_event_id: `still-vehicle-${index + 1}`,
       entity_kind: 'vehicle',
@@ -891,7 +907,8 @@ function stillEntityObservations(recognition, context = {}) {
       observed_to: observedAt,
       candidate_label: attributes.vehicle_colour || attributes.colour || attributes.vehicle_type || null,
       candidate_plate: index === 0 ? plate?.plate || null : null,
-      appearance_embedding: vehicles.basis === 'authoritative_source' && Array.isArray(attributes.appearance_embedding) ? attributes.appearance_embedding : undefined,
+      appearance_embedding: vehicles.basis === 'authoritative_source' && appearanceUsable
+        && Array.isArray(attributes.appearance_embedding) ? attributes.appearance_embedding : undefined,
       model_confidence: confidence(vehicle.confidence ?? vehicle.detection?.confidence ?? (index === 0 ? plate?.confidence : null)),
       quality_state: 'clear',
       attributes: {
@@ -905,6 +922,8 @@ function stillEntityObservations(recognition, context = {}) {
         vehicle_attribute_status: attributes.vehicle_attribute_status || null,
         vehicle_crop_status: attributes.vehicle_crop_status || null,
         vehicle_attribute_source: attributes.inference_provider || attributes.vehicle_attribute_source || null,
+        appearance_embedding_usable: appearanceUsable,
+        appearance_quality_score: confidence(attributes.appearance_quality_score),
         vehicle_basis: vehicles.basis,
         plate_basis: plate ? (sourcePlate ? 'authoritative_source' : 'enhanced_candidate') : null,
         plate_confidence: confidence(plate?.confidence),

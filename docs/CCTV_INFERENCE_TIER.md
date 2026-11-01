@@ -418,3 +418,46 @@ measurement, reviewer workspace, local VLM); reprocessing of completed jobs keep
   is recorded as a data gap, not fixed here.
 * Sampling is still capped at `VISION_MAX_CLASSIFICATION_FRAMES` (120); motion between samples is not
   examined, and the review panel says so.
+
+### 9.4 Recognition evaluation
+
+`node scripts/cctv-recognition-eval.mjs --fixture` checks the metric calculations against synthetic
+review decisions, labeled plates and identity clusters. It is a harness test, not evidence that a model
+is accurate on real CCTV footage.
+
+For a live, single-organisation aggregate, run
+`node scripts/cctv-recognition-eval.mjs --live --organization-id <uuid> [--since <ISO timestamp>]`
+with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set in the server-side environment. This calls the
+read-only `cctv_accuracy_summary` RPC and emits only reviewer counts, precision and confidence bounds;
+it does not fetch or export observations, names, images, plate strings or embeddings. A service-role
+read must remain organization- and time-scoped.
+
+The current RPC does not return adjudicated plate strings or ground-truth identity links. Live plate
+exact-match and person-fragmentation metrics therefore report `not_available`; synthetic fixture values
+must never be presented as production accuracy. A governed, human-labeled evaluation set is required
+before those live metrics can be claimed. Existing diagnostic profile totals and the CCTV engine-v2
+profile counts have different scopes and no shared denominator; reconcile them by organisation and
+time window before using either as a fragmentation rate.
+
+The current quality gate only runs face detection inside detected person head regions. Face matching requires
+a clear source frame, sufficient original face size, detector confidence, sharpness and approximate frontal
+landmarks; upscaling does not make an originally tiny face eligible. A face outside every detected person box
+is not searched. Video person and vehicle appearance templates are quality-weighted and require at least two
+eligible detector crops; a still photo emits a single-frame template only when that crop passes the same gate.
+Deterministic fallback descriptors may help local track continuity but are not persisted as cross-clip
+identity templates. These thresholds are conservative engineering gates, not calibrated accuracy claims, and
+must be revisited against a governed labeled set. Plate reads are constrained to NZ formats, voted per
+character position with OCR character confidence where it still aligns with the normalised plate, and retain
+conflicting strings for human review.
+
+`record_cctv_entity_observations` (migration `20261102190000`) enforces the same gates in the database:
+person and vehicle templates are neither stored nor matched unless the observation is `clear` and carries
+its explicit usability flag. Only a stored, clear, usable face may create a new provisional Unknown Person
+profile. A usable body template may join a portfolio that already has a profile but never creates one, and
+low-quality sightings stay unlinked. The legacy workload-token motion ingest (`complete_motion_inference`)
+therefore keeps its face rows in manual review without minting profiles. Laptop GPU workers must run
+`deploy/laptop-worker/update-watcher.ps1` after release; until they do, their faces and appearance templates
+lack the usability flags and are dropped from matching (fail safe, lower recall).
+
+The Python inference-tier tests (`services/fcm-inference/test_inference_tier.py`) are not run by CI; run them
+locally with the service requirements and `pytest` before changing the inference service.

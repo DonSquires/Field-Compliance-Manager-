@@ -51,13 +51,26 @@ function cosineSimilarity(a, b) {
   return normA > 0 && normB > 0 ? dot / (Math.sqrt(normA) * Math.sqrt(normB)) : 0;
 }
 
-function averageEmbedding(existingAvg, count, newEmbedding) {
-  if (!existingAvg || !existingAvg.length) return [...newEmbedding];
-  const updated = new Array(existingAvg.length);
-  for (let i = 0; i < existingAvg.length; i++) {
-    updated[i] = (existingAvg[i] * (count - 1) + newEmbedding[i]) / count;
+function weightedEmbedding(observations, readEmbedding, readWeight) {
+  const samples = observations
+    .map((observation) => ({ embedding: readEmbedding(observation), weight: Number(readWeight(observation)) || 0 }))
+    .filter((sample) => Array.isArray(sample.embedding) && sample.embedding.length > 0 && sample.weight > 0);
+  if (!samples.length) return { embedding: null, frames: 0, quality: null };
+  const dimension = samples[0].embedding.length;
+  const compatible = samples.filter((sample) => sample.embedding.length === dimension);
+  const totalWeight = compatible.reduce((sum, sample) => sum + sample.weight, 0);
+  if (!totalWeight) return { embedding: null, frames: 0, quality: null };
+  const vector = new Array(dimension).fill(0);
+  for (const sample of compatible) {
+    sample.embedding.forEach((value, index) => { vector[index] += (Number(value) || 0) * sample.weight; });
   }
-  return updated;
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (!norm) return { embedding: null, frames: 0, quality: null };
+  return {
+    embedding: vector.map((value) => Number((value / norm).toFixed(7))),
+    frames: compatible.length,
+    quality: Number((totalWeight / compatible.length).toFixed(3)),
+  };
 }
 
 async function loadBase64Thumbnail(filePath, maxBytes = 40_000) {
@@ -128,6 +141,7 @@ async function consolidateFaces(frames, options = {}) {
     // Two faces in one frame are two people: a subject can be claimed by at most one face per frame.
     const claimedThisFrame = new Set();
     for (const detectedFace of frame.face.faces) {
+      if (detectedFace?.usable_for_matching !== true) continue;
       const embedding = Array.isArray(detectedFace.embedding) ? detectedFace.embedding : null;
       if (!embedding || embedding.length === 0) continue;
 
@@ -147,7 +161,14 @@ async function consolidateFaces(frames, options = {}) {
         // Matched existing person
         claimedThisFrame.add(bestSubject.subjectId);
         bestSubject.totalSightings++;
-        bestSubject.avgEmbedding = averageEmbedding(bestSubject.avgEmbedding, bestSubject.totalSightings, embedding);
+        const qualityWeight = Math.max(0.05, Number(detectedFace.face_quality_score) || 0.05);
+        const totalWeight = bestSubject.embeddingWeight + qualityWeight;
+        bestSubject.avgEmbedding = bestSubject.avgEmbedding.map((value, index) => (
+          (value * bestSubject.embeddingWeight + (Number(embedding[index]) || 0) * qualityWeight) / totalWeight
+        ));
+        const norm = Math.sqrt(bestSubject.avgEmbedding.reduce((sum, value) => sum + value * value, 0));
+        if (norm) bestSubject.avgEmbedding = bestSubject.avgEmbedding.map((value) => value / norm);
+        bestSubject.embeddingWeight = totalWeight;
 
         const track = bestSubject.activeTrack;
         if (track && timestamp - track.lastSeen <= maxGap) {
@@ -192,6 +213,7 @@ async function consolidateFaces(frames, options = {}) {
           subjectId,
           subjectLabel,
           avgEmbedding: [...embedding],
+          embeddingWeight: Math.max(0.05, Number(detectedFace.face_quality_score) || 0.05),
           totalSightings: 1,
           completedTracks: [],
           activeTrack: {
@@ -261,6 +283,9 @@ async function consolidateFaces(frames, options = {}) {
       best_bbox: tr.bestBbox,
       thumbnail,
       face_embedding: Array.isArray(tr.faceEmbedding) ? tr.faceEmbedding : null,
+      face_quality_score: Number.isFinite(Number(tr.bestFace?.face_quality_score)) ? Number(tr.bestFace.face_quality_score) : null,
+      face_template_frames: tr.frameCount,
+      usable_for_matching: true,
       face_provider: tr.bestFrame?.face?.provider || null,
       face_detector_model: tr.bestFace?.face_detector_model || null,
       face_embedding_model: tr.bestFace?.face_embedding_model || null,
@@ -357,7 +382,17 @@ async function consolidatePeople(frames, options = {}) {
   const events = [];
   for (const [index, track] of ordered.entries()) {
     const best = bestObservation(track);
-    const attributes = best.payload?.attributes || null;
+    const bestAttributes = best.payload?.attributes || {};
+    const { appearance_embedding: _bestFrameEmbedding, ...attributesWithoutEmbedding } = bestAttributes;
+    const attributes = Object.keys(attributesWithoutEmbedding).length ? attributesWithoutEmbedding : null;
+    const appearanceTemplate = weightedEmbedding(
+      track.observations,
+      (observation) => observation.payload?.attributes?.appearance_embedding_usable === true
+        ? observation.payload?.attributes?.appearance_embedding : null,
+      (observation) => (Number(observation.payload?.attributes?.appearance_quality_score) || 0)
+        * (Number(observation.confidence) || 0),
+    );
+    const appearanceReady = appearanceTemplate.frames >= 2;
     events.push({
       event_id: `person-${EVENT_PREFIX}-${index + 1}`,
       event_type: 'person',
@@ -371,8 +406,12 @@ async function consolidatePeople(frames, options = {}) {
       best_frame_hash: best.frame?.sha256_hash || null,
       best_bbox: best.bbox,
       attributes,
-      appearance_embedding: Array.isArray(attributes?.appearance_embedding) ? attributes.appearance_embedding : null,
-      appearance_embedding_model: attributes?.appearance_embedding_model || null,
+      appearance_embedding: appearanceReady ? appearanceTemplate.embedding : null,
+      appearance_embedding_model: appearanceReady
+        ? best.payload?.attributes?.appearance_embedding_model || null : null,
+      appearance_embedding_usable: appearanceReady,
+      appearance_template_frames: appearanceTemplate.frames,
+      appearance_quality_score: appearanceTemplate.quality,
       quality_state: frameQualityState(best.frame),
       gait_signature: buildGaitSignature(track.observations.map((observation) => ({ timestamp: observation.timestamp, center: bboxCenter(observation.bbox), width: observation.bbox.width, height: observation.bbox.height }))),
       thumbnail: await loadBase64Thumbnail(best.frame?.file_path),
@@ -478,12 +517,13 @@ function buildGaitSignature(samples) {
 function isPlatish(plate, confidence) {
   if (!plate || typeof plate !== 'string') return false;
   const clean = plate.trim().toUpperCase();
-  if (clean.length < 2 || clean.length > 8) return false;
-  // If 2 chars, require higher confidence to avoid single-letter OCR noise
-  if (clean.length === 2 && confidence < 0.75) return false;
-  // If only digits of length <= 2, filter out noise
-  if (/^\d{1,2}$/.test(clean)) return false;
-  return true;
+  return confidence >= 0.55 && nzPlatePattern(clean) !== null;
+}
+
+function nzPlatePattern(plate) {
+  if (/^[A-Z]{3}\d{3}$/.test(plate)) return 'standard_modern';
+  if (/^[A-Z]{2}\d{4}$/.test(plate)) return 'standard_older';
+  return /^[A-Z0-9]{4,7}$/.test(plate) && /[A-Z]/.test(plate) && /\d/.test(plate) ? 'personalised' : null;
 }
 
 function levenshteinDistance(a, b) {
@@ -587,8 +627,62 @@ function platesCompatible(a, b) {
   return a === b || (a.length >= 4 && b.length >= 4 && levenshteinDistance(a, b) <= 1);
 }
 
-// Weighted clustering of plate strings (edit distance <= 1 joins one-character OCR slips). Each cluster's
-// plate is the exact string with the most weight behind it.
+function plateEvidence(items) {
+  return items.flatMap((item) => {
+    const reads = item.platedTrack?.reads;
+    if (Array.isArray(reads) && reads.length) {
+      return reads.map((read) => ({ plate: read.plate, weight: Math.max(0.05, Number(read.confidence) || 0), read }));
+    }
+    return [{ plate: item.plate, weight: Math.max(0.05, Number(item.weight) || 0), read: item.read || null }];
+  }).filter((item) => nzPlatePattern(item.plate));
+}
+
+function votePlatePositions(items) {
+  const evidence = plateEvidence(items);
+  if (!evidence.length) return { plate: items[0]?.plate || null, characterVotes: null, conflict: false, patternConflict: false, alternatives: [] };
+  const patternWeights = new Map();
+  for (const item of evidence) patternWeights.set(nzPlatePattern(item.plate), (patternWeights.get(nzPlatePattern(item.plate)) || 0) + item.weight);
+  const [pattern] = [...patternWeights.entries()].sort((a, b) => b[1] - a[1])[0];
+  const patternEvidence = evidence.filter((item) => nzPlatePattern(item.plate) === pattern);
+  const lengthWeights = new Map();
+  for (const item of patternEvidence) lengthWeights.set(item.plate.length, (lengthWeights.get(item.plate.length) || 0) + item.weight);
+  const [length] = [...lengthWeights.entries()].sort((a, b) => b[1] - a[1])[0];
+  const aligned = patternEvidence.filter((item) => item.plate.length === length);
+  const characterVotes = Array.from({ length }, (_, index) => {
+    const totals = new Map();
+    for (const item of aligned) {
+      // OCR confidences index the raw text; use them only when they still line up with the normalised plate.
+      const confidences = item.read?.detail?.char_confidences;
+      const characterConfidence = Array.isArray(confidences) && confidences.length === length ? Number(confidences[index]) : NaN;
+      const weight = item.weight * (Number.isFinite(characterConfidence) && characterConfidence > 0
+        ? Math.max(0.05, Math.min(1, characterConfidence)) : 1);
+      totals.set(item.plate[index], (totals.get(item.plate[index]) || 0) + weight);
+    }
+    const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const total = ranked.reduce((sum, item) => sum + item[1], 0);
+    return {
+      winner: ranked[0]?.[0] || '',
+      conflict: Boolean(ranked[1] && ranked[1][1] >= ranked[0][1] * PLATE_CONFLICT_RATIO),
+      votes: Object.fromEntries(ranked.map(([character, weight]) => [character, Number(weight.toFixed(3))])),
+      confidence: total ? Number((ranked[0][1] / total).toFixed(3)) : null,
+    };
+  });
+  const voted = characterVotes.map((item) => item.winner).join('');
+  const patternConflict = patternEvidence.length !== evidence.length
+    && evidence.some((item) => item.weight >= patternWeights.get(pattern) * PLATE_CONFLICT_RATIO);
+  const voteConflict = characterVotes.some((item) => item.conflict);
+  const candidate = nzPlatePattern(voted) === pattern ? voted : aligned[0].plate;
+  const alternatives = [...new Set(evidence.map((item) => item.plate).filter((plate) => plate !== candidate))];
+  return {
+    plate: candidate,
+    characterVotes: characterVotes.map((item, index) => ({ position: index + 1, ...item })),
+    conflict: voteConflict || patternConflict || candidate !== voted,
+    patternConflict,
+    alternatives,
+  };
+}
+
+// Edit-distance clustering gathers likely OCR variants, then votes each slot without crossing NZ plate templates.
 function clusterPlates(items, canJoin = () => true) {
   const clusters = [];
   for (const item of [...items].sort((a, b) => b.weight - a.weight)) {
@@ -601,9 +695,12 @@ function clusterPlates(items, canJoin = () => true) {
     }
   }
   for (const cluster of clusters) {
-    const totals = new Map();
-    for (const item of cluster.items) totals.set(item.plate, (totals.get(item.plate) || 0) + item.weight);
-    cluster.plate = [...totals.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0][0];
+    const vote = votePlatePositions(cluster.items);
+    cluster.plate = vote.plate;
+    cluster.characterVotes = vote.characterVotes;
+    cluster.characterConflict = vote.conflict;
+    cluster.patternConflict = vote.patternConflict;
+    cluster.alternatives = vote.alternatives;
   }
   return clusters.sort((a, b) => b.weight - a.weight);
 }
@@ -721,7 +818,17 @@ function vehicleAttributeFields(observations, fallback = {}) {
   };
 }
 
-function vehicleDataFields(vehicleData) {
+function vehicleDataFields(vehicleData, observations = []) {
+  const appearanceTemplate = weightedEmbedding(
+    observations,
+    (observation) => observation.payload?.attributes?.appearance_embedding_usable === true
+      ? observation.payload?.attributes?.appearance_embedding : null,
+    (observation) => (Number(observation.payload?.attributes?.appearance_quality_score) || 0)
+      * (Number(observation.confidence) || 0),
+  );
+  const appearanceReady = appearanceTemplate.frames >= 2;
+  const templateModel = observations.find((observation) => observation.payload?.attributes?.appearance_embedding_usable === true)
+    ?.payload?.attributes?.appearance_embedding_model;
   return {
     vehicle_year: vehicleData.vehicle_year ?? null,
     vehicle_attribute_confidence: vehicleData.vehicle_attribute_confidence ?? null,
@@ -729,8 +836,11 @@ function vehicleDataFields(vehicleData) {
     vehicle_attribute_status: vehicleData.vehicle_attribute_status ?? vehicleData.attribute_status ?? null,
     vehicle_crop_status: vehicleData.vehicle_crop_status ?? null,
     inference_provider: vehicleData.inference_provider ?? null,
-    appearance_embedding: Array.isArray(vehicleData.appearance_embedding) ? vehicleData.appearance_embedding : null,
-    appearance_embedding_model: vehicleData.appearance_embedding_model ?? null,
+    appearance_embedding: appearanceReady ? appearanceTemplate.embedding : null,
+    appearance_embedding_model: appearanceReady ? templateModel || null : null,
+    appearance_embedding_usable: appearanceReady,
+    appearance_template_frames: appearanceTemplate.frames,
+    appearance_quality_score: appearanceTemplate.quality,
   };
 }
 
@@ -772,8 +882,14 @@ async function consolidateVehicles(frames, options = {}) {
       plate: winner.plate,
       weight: winner.weight,
       reads: winner.items.map((item) => item.read),
-      conflict: Boolean(runnerUp && runnerUp.weight >= winner.weight * PLATE_CONFLICT_RATIO),
-      alternatives: clusters.slice(1).map((cluster) => cluster.plate),
+      conflict: Boolean(
+        (runnerUp && runnerUp.weight >= winner.weight * PLATE_CONFLICT_RATIO)
+        || winner.characterConflict || winner.patternConflict
+      ),
+      alternatives: [...new Set([
+        ...winner.alternatives,
+        ...clusters.slice(1).map((cluster) => cluster.plate),
+      ])],
     });
   }
   const plateEntities = clusterPlates([
@@ -816,16 +932,21 @@ async function consolidateVehicles(frames, options = {}) {
     for (const read of reads) votes[read.plate] = (votes[read.plate] || 0) + 1;
     const peakDetector = entityTracks.length ? Math.max(...entityTracks.map((platedTrack) => platedTrack.track.peakConfidence)) : null;
     const frameCount = frameSet.size;
-    const conflict = entityTracks.some((platedTrack) => platedTrack.conflict);
+    const conflict = entityTracks.some((platedTrack) => platedTrack.conflict)
+      || entity.characterConflict || entity.patternConflict;
     platedEvents.push({
       event_id: `vehicle-${EVENT_PREFIX}-${entity.plate}`,
       event_type: 'vehicle',
       plate: entity.plate,
       confidence: round2(bestRead.confidence),
       plate_votes: votes,
+      plate_character_votes: entity.characterVotes,
       plate_read_count: reads.length,
       plate_conflict: conflict,
-      plate_alternatives: conflict ? [...new Set(entityTracks.flatMap((platedTrack) => platedTrack.alternatives))] : null,
+      plate_alternatives: conflict ? [...new Set([
+        ...entity.alternatives,
+        ...entityTracks.flatMap((platedTrack) => platedTrack.alternatives),
+      ])] : null,
       plate_attachment: entityTracks.length ? (entityOrphans.length ? 'tracked_vehicle_and_unattached_reads' : 'tracked_vehicle') : 'plate_only',
       alpr_provider: alprData.alpr_provider ?? null,
       alpr_models: alprData.alpr_models ?? null,
@@ -859,7 +980,7 @@ async function consolidateVehicles(frames, options = {}) {
       vehicle_model: vehicleData.vehicle_model ?? null,
       vehicle_make_model_source: vehicleData.vehicle_make || vehicleData.vehicle_model ? (vehicleData.vehicle_make_model_source ?? null) : null,
       ...vehicleAttributeFields(trackObservations, vehicleData),
-      ...vehicleDataFields(vehicleData),
+      ...vehicleDataFields(vehicleData, trackObservations),
       quality_state: frameQualityState(bestRead.frame),
       speed_px_per_second: speedPxPerSecond,
       speed_kmh: speedPxPerSecond !== null && metersPerPixel !== null ? Number((speedPxPerSecond * metersPerPixel * 3.6).toFixed(2)) : null,
@@ -897,7 +1018,7 @@ async function consolidateVehicles(frames, options = {}) {
       vehicle_model: vehicleData.vehicle_model ?? null,
       vehicle_make_model_source: vehicleData.vehicle_make || vehicleData.vehicle_model ? (vehicleData.vehicle_make_model_source ?? null) : null,
       ...vehicleAttributeFields(track.observations, vehicleData),
-      ...vehicleDataFields(vehicleData),
+      ...vehicleDataFields(vehicleData, track.observations),
       quality_state: frameQualityState(best.frame),
       review_required: true,
       temporal_consensus: track.hits >= 2,
@@ -1042,6 +1163,9 @@ function buildEntityObservations(summary, context = {}) {
         colour_confidence: event.vehicle_colour_confidence, body_type_confidence: event.vehicle_type_confidence,
         vehicle_attribute_model: event.vehicle_attribute_model, vehicle_attribute_status: event.vehicle_attribute_status,
         vehicle_crop_status: event.vehicle_crop_status, vehicle_attribute_source: event.inference_provider,
+        appearance_embedding_usable: event.appearance_embedding_usable === true,
+        appearance_quality_score: event.appearance_quality_score,
+        appearance_template_frames: event.appearance_template_frames,
         plate_confidence: plated ? event.confidence : null,
         bbox: event.best_bbox, frame_count: event.frame_count, visit_count: event.visit_count, temporal_consensus: event.temporal_consensus,
         speed_kmh: event.speed_kmh, inference_provider: event.inference_provider, appearance_embedding_model: event.appearance_embedding_model,
@@ -1051,7 +1175,8 @@ function buildEntityObservations(summary, context = {}) {
         detector_provider: event.detector_provider,
         candidate_state: event.candidate_state, review_candidate_basis: reviewCandidateBasis(event),
         ...engineAttributes(event),
-        plate_votes: plated ? event.plate_votes : null, plate_read_count: plated ? event.plate_read_count : null,
+        plate_votes: plated ? event.plate_votes : null, plate_character_votes: plated ? event.plate_character_votes : null,
+        plate_read_count: plated ? event.plate_read_count : null,
         plate_conflict: plated && event.plate_conflict ? true : null, plate_alternatives: plated ? event.plate_alternatives : null,
         plate_attachment: plated ? event.plate_attachment : null, plate_bbox: plated ? event.plate_bbox : null,
         plate_scan_state: plated ? null : event.plate_scan_state, detector_confidence: event.detector_confidence,
@@ -1091,7 +1216,12 @@ function buildEntityObservations(summary, context = {}) {
         face_event_id: face?.event_id, face_visit_count: face?.visit_count, appearance_embedding_model: event.appearance_embedding_model,
         face_provider: face?.face_provider, face_detector_model: face?.face_detector_model, face_embedding_model: face?.face_embedding_model,
         face_detector_confidence: face?.face_detector_confidence, face_crop_width_px: face?.face_crop_width_px,
+        face_quality_score: face?.face_quality_score, face_template_frames: face?.face_template_frames,
+        face_usable_for_matching: face?.usable_for_matching === true,
         face_alignment_basis: face?.face_alignment_basis,
+        appearance_embedding_usable: event.appearance_embedding_usable === true,
+        appearance_quality_score: event.appearance_quality_score,
+        appearance_template_frames: event.appearance_template_frames,
         weapon_hint: event.weapon_hint,
         review_candidate_basis: reviewCandidateBasis(event, Boolean(face)),
         ...engineAttributes(event),
@@ -1115,6 +1245,8 @@ function buildEntityObservations(summary, context = {}) {
         bbox: face.best_bbox, frame_count: face.frame_count, visit_count: face.visit_count, face_only: true,
         face_provider: face.face_provider, face_detector_model: face.face_detector_model, face_embedding_model: face.face_embedding_model,
         face_detector_confidence: face.face_detector_confidence, face_crop_width_px: face.face_crop_width_px,
+        face_quality_score: face.face_quality_score, face_template_frames: face.face_template_frames,
+        face_usable_for_matching: face.usable_for_matching === true,
         face_alignment_basis: face.face_alignment_basis,
         engine_version: face.engine_version,
       }),

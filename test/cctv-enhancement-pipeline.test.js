@@ -86,12 +86,15 @@ test('the enhancement model is pinned, checksummed, GPU-aware and explicitly gen
 
 test('face candidates carry model and crop provenance on both inference paths', () => {
   assert.match(inference, /"detector_confidence": round\(float\(detection\[-1\]\), 6\)/);
-  assert.match(inference, /"face_crop_width_px": box_width/);
+  assert.match(inference, /"face_crop_width_px": round\(box_width, 3\)/);
+  assert.match(inference, /"face_crop_height_px": round\(box_height, 3\)/);
+  assert.match(inference, /"matching_gate_version": "face_quality_v1"/);
   assert.match(inference, /"alignment_basis": alignment_basis/);
   assert.match(inference, /"face_detector_model": YUNET_MODEL_PATH\.name/);
   assert.match(inference, /"face_embedding_model": SFACE_MODEL_PATH\.name/);
-  assert.match(inference, /def _face_sync\(image: np\.ndarray\)/);
-  assert.match(inference, /faces = _face_sync\(image\)/, 'the batch answer uses the same face path as \/infer\/face');
+  assert.match(inference, /def _face_sync\(image: np\.ndarray, person_bboxes: list\[dict\[str, Any\]\] \| None = None\)/);
+  assert.match(inference, /results = await _run_cpu\(_face_sync, image, parsed_boxes\)/, '\/infer\/face uses the shared person-guided face path');
+  assert.match(inference, /faces = _face_sync\(image, person_bboxes\)/, 'the batch answer uses the same face path as \/infer\/face');
 });
 
 test('derivatives are bounded, private, evidence-scoped and persisted only through the service writer', () => {

@@ -6,6 +6,7 @@ import hmac
 import json
 import math
 import os
+import threading
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypeVar
 
@@ -29,6 +30,13 @@ MIN_PLATE_REGION_HEIGHT = 8
 MIN_PLATE_SCORE = 0.55
 SIMILARITY_THRESHOLD = 0.92
 DIFFERENT_VEHICLE_THRESHOLD = 0.75
+MIN_PERSON_REID_WIDTH = 64
+MIN_PERSON_REID_HEIGHT = 128
+MIN_VEHICLE_REID_WIDTH = 96
+MIN_VEHICLE_REID_HEIGHT = 48
+MIN_FACE_MATCH_WIDTH = 64
+MIN_FACE_MATCH_HEIGHT = 64
+MIN_FACE_MATCH_SHARPNESS = 15.0
 APP_PATH = Path(__file__).resolve()
 REPO_MODELS_DIR = APP_PATH.parents[2] / "models" if len(APP_PATH.parents) > 2 else APP_PATH.parent / "models"
 DEFAULT_MODELS_DIR = Path("/app/models") if Path("/app/models").is_dir() else REPO_MODELS_DIR
@@ -47,6 +55,7 @@ VEHICLE_REID_MODEL_PATH = Path(os.getenv("VEHICLE_REID_MODEL_PATH", MODELS_DIR /
 APPEARANCE_EMBEDDING_DIMENSION = 256
 _face_detector: cv2.FaceDetectorYN | None = None
 _face_recognizer: cv2.FaceRecognizerSF | None = None
+_face_lock = threading.Lock()
 _vehicle_model: Any = None
 _vehicle_compiled: Any = None
 _person_compiled: Any = None
@@ -280,9 +289,9 @@ def _expand_vehicle_bbox(image: np.ndarray, bbox: dict[str, Any] | None) -> np.n
     return crop if crop.size else image
 
 
-def _trained_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
+def _trained_vehicle_attributes(image: np.ndarray, detector_crop: bool = False) -> dict[str, Any]:
     runtime = _vehicle_runtime()
-    region = _vehicle_region(image)
+    region = image if detector_crop else _vehicle_region(image)
     blob = cv2.dnn.blobFromImage(region, 1.0, (72, 72), swapRB=False)
     outputs = runtime([blob])
     by_name = {output.any_name: np.asarray(value).reshape(-1) for output, value in outputs.items()}
@@ -368,7 +377,7 @@ def _visible_head_region(crop: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> dict[str, Any]:
+def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int], confidence: float | None = None) -> dict[str, Any]:
     x0 = max(0, int(bbox['x']))
     y0 = max(0, int(bbox['y']))
     x1 = min(image.shape[1], x0 + int(bbox['width']))
@@ -380,6 +389,9 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
             "height_status": "camera_calibration_required",
             "review_required": True,
         }
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    brightness = float(gray.mean())
     try:
         embedding = _person_reid_embedding(crop)
         embedding_model = PERSON_REID_MODEL_PATH.name
@@ -387,6 +399,19 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
         # Same 256-d shape as the re-ID model so portfolio search still works, labelled as the fallback.
         embedding = _hsv_layout_embedding(crop)
         embedding_model = "deterministic_hsv_layout_v1"
+    detector_confidence_ok = confidence is None or confidence >= 0.65
+    embedding_usable = (
+        embedding_model == PERSON_REID_MODEL_PATH.name
+        and crop.shape[1] >= MIN_PERSON_REID_WIDTH
+        and crop.shape[0] >= MIN_PERSON_REID_HEIGHT
+        and sharpness >= 8.0
+        and 20.0 <= brightness <= 240.0
+        and detector_confidence_ok
+    )
+    resolution_score = min(1.0, crop.shape[1] / 128) * min(1.0, crop.shape[0] / 256)
+    sharpness_score = min(1.0, sharpness / 100)
+    brightness_score = max(0.0, 1.0 - abs(brightness - 127.5) / 127.5)
+    quality_score = round(resolution_score * sharpness_score * brightness_score * (confidence if confidence is not None else 1.0), 3)
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     midpoint = max(1, hsv.shape[0] // 2)
     upper = hsv[:midpoint]
@@ -420,6 +445,16 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
         "appearance_embedding": embedding,
         "appearance_embedding_dimension": len(embedding),
         "appearance_embedding_model": embedding_model,
+        "appearance_embedding_usable": embedding_usable,
+        "appearance_quality_score": quality_score,
+        "appearance_quality_reason": None if embedding_usable else (
+            "fallback_embedding" if embedding_model != PERSON_REID_MODEL_PATH.name
+            else "insufficient_crop_or_visual_quality"
+        ),
+        "appearance_crop_width_px": int(crop.shape[1]),
+        "appearance_crop_height_px": int(crop.shape[0]),
+        "appearance_crop_sharpness": round(sharpness, 2),
+        "appearance_crop_brightness": round(brightness, 2),
         "body_proportions": {
             "pixel_height": int(crop.shape[0]),
             "pixel_width": int(crop.shape[1]),
@@ -457,7 +492,7 @@ def _detect_people(image: np.ndarray) -> list[dict[str, Any]]:
         people.append({
             "bbox": person_bbox,
             "confidence": round(confidence, 3),
-            "attributes": _person_appearance_attributes(image, person_bbox),
+            "attributes": _person_appearance_attributes(image, person_bbox, confidence),
         })
     return people
 
@@ -496,24 +531,58 @@ def _vehicle_colour(image: np.ndarray) -> tuple[str | None, float]:
     return (colour, round(float(confidence), 3)) if confidence >= 0.12 else ("mixed", round(float(confidence), 3))
 
 
-def _infer_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
+def _infer_vehicle_attributes(
+    image: np.ndarray,
+    detector_crop: bool = False,
+    detection_confidence: float | None = None,
+) -> dict[str, Any]:
     height, width = image.shape[:2]
-    trained = _trained_vehicle_attributes(image)
+    trained = _trained_vehicle_attributes(image, detector_crop)
     colour, heuristic_confidence = _vehicle_colour(image)
     if trained["vehicle_colour"] is None and colour is not None:
         trained["vehicle_colour"] = colour
         trained["vehicle_colour_confidence"] = round(heuristic_confidence, 3)
     appearance_embedding, appearance_model = _vehicle_appearance_embedding(image)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.size else np.empty((0, 0), dtype=np.uint8)
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var()) if gray.size else 0.0
+    brightness = float(gray.mean()) if gray.size else 0.0
+    detector_confidence_ok = detection_confidence is None or detection_confidence >= 0.65
+    appearance_usable = (
+        detector_crop
+        and appearance_model == VEHICLE_REID_MODEL_PATH.name
+        and width >= MIN_VEHICLE_REID_WIDTH
+        and height >= MIN_VEHICLE_REID_HEIGHT
+        and sharpness >= 8.0
+        and 20.0 <= brightness <= 240.0
+        and detector_confidence_ok
+    )
+    resolution_score = min(1.0, width / 192) * min(1.0, height / 96)
+    sharpness_score = min(1.0, sharpness / 100)
+    brightness_score = max(0.0, 1.0 - abs(brightness - 127.5) / 127.5)
+    quality_score = round(
+        resolution_score * sharpness_score * brightness_score
+        * (detection_confidence if detection_confidence is not None else 1.0), 3,
+    )
     return {
         "embedding": _vehicle_embedding(image),
         "embedding_quality": round(min(1.0, max(0.0, (width * height) / (1280 * 720))), 3),
         "appearance_embedding": appearance_embedding,
         "appearance_embedding_model": appearance_model,
+        "appearance_embedding_usable": appearance_usable,
+        "appearance_quality_score": quality_score,
+        "appearance_quality_reason": None if appearance_usable else (
+            "fallback_embedding" if appearance_model != VEHICLE_REID_MODEL_PATH.name
+            else "insufficient_crop_or_visual_quality"
+        ),
+        "appearance_crop_width_px": width,
+        "appearance_crop_height_px": height,
+        "appearance_crop_sharpness": round(sharpness, 2),
+        "appearance_crop_brightness": round(brightness, 2),
         "detection": {
             "bbox": {"x": 0, "y": 0, "width": width, "height": height},
             "confidence": 0.25,
         },
-        "vehicle_crop_status": "full_frame_review_only",
+        "vehicle_crop_status": "detector_crop" if detector_crop else "full_frame_review_only",
         "vehicle_make": None,
         "vehicle_model": None,
         "vehicle_year": None,
@@ -573,6 +642,95 @@ def _upscale_face_region(image: np.ndarray, detection: np.ndarray, detector: Any
     return upscaled, best
 
 
+def _face_person_boxes(image: np.ndarray, person_bboxes: list[dict[str, Any]] | None) -> list[dict[str, int]]:
+    if person_bboxes is None:
+        triage = entity_detector.triage_frame(image)
+        coverage = set(triage.get("detector_coverage") or [])
+        if triage.get("detector_status") == "ready" and "person" in coverage:
+            person_bboxes = triage.get("people") or []
+        else:
+            try:
+                person_bboxes = _detect_people(image)
+            except (FileNotFoundError, RuntimeError, cv2.error):
+                return []
+    height, width = image.shape[:2]
+    normalized = []
+    for item in person_bboxes:
+        raw = item.get("bbox") if isinstance(item, dict) and isinstance(item.get("bbox"), dict) else item
+        if not isinstance(raw, dict):
+            continue
+        try:
+            x, y, box_width, box_height = (float(raw[key]) for key in ("x", "y", "width", "height"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(value) for value in (x, y, box_width, box_height)) or box_width <= 0 or box_height <= 0:
+            continue
+        x0, y0 = max(0, int(x)), max(0, int(y))
+        x1, y1 = min(width, int(x + box_width)), min(height, int(y + box_height))
+        if x1 - x0 < 16 or y1 - y0 < 32:
+            continue
+        candidate = {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+        duplicate = False
+        for existing in normalized:
+            overlap_width = max(0, min(existing["x"] + existing["width"], x1) - max(existing["x"], x0))
+            overlap_height = max(0, min(existing["y"] + existing["height"], y1) - max(existing["y"], y0))
+            intersection = overlap_width * overlap_height
+            union = existing["width"] * existing["height"] + candidate["width"] * candidate["height"] - intersection
+            if union > 0 and intersection / union >= 0.75:
+                duplicate = True
+                break
+        if not duplicate:
+            normalized.append(candidate)
+    return normalized
+
+
+def _face_quality(region: np.ndarray, detection: np.ndarray) -> dict[str, Any]:
+    x, y, box_width, box_height = (float(value) for value in detection[:4])
+    x0, y0 = max(0, int(x)), max(0, int(y))
+    x1, y1 = min(region.shape[1], int(x + box_width)), min(region.shape[0], int(y + box_height))
+    crop = region[y0:y1, x0:x1]
+    if crop.size == 0:
+        return {"face_quality_score": 0.0, "face_crop_sharpness": 0.0, "face_crop_brightness": 0.0, "face_frontality_score": 0.0, "usable_for_matching": False}
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    brightness = float(gray.mean())
+    if len(detection) >= 15 and box_width > 0:
+        right_eye, left_eye = detection[4:6], detection[6:8]
+        nose = detection[8:10]
+        right_mouth, left_mouth = detection[10:12], detection[12:14]
+        eye_midpoint = (float(right_eye[0]) + float(left_eye[0])) / 2
+        mouth_midpoint = (float(right_mouth[0]) + float(left_mouth[0])) / 2
+        yaw_offset = abs(float(nose[0]) - eye_midpoint) / box_width
+        mouth_offset = abs(mouth_midpoint - eye_midpoint) / box_width
+        eye_tilt = abs(float(right_eye[1]) - float(left_eye[1])) / box_width
+        frontality = max(0.0, min(1.0, 1.0 - yaw_offset * 2.5 - mouth_offset * 1.3 - eye_tilt * 1.5))
+        eye_separation = abs(float(right_eye[0]) - float(left_eye[0])) / box_width
+        if eye_separation < 0.2:
+            frontality = min(frontality, 0.3)
+    else:
+        frontality = 0.0
+    detector_confidence = max(0.0, min(1.0, float(detection[-1])))
+    size_score = min(1.0, box_width / 112) * min(1.0, box_height / 112)
+    sharpness_score = min(1.0, sharpness / 100)
+    brightness_score = max(0.0, 1.0 - abs(brightness - 127.5) / 127.5)
+    quality_score = round(detector_confidence * size_score * sharpness_score * brightness_score * frontality, 3)
+    usable = (
+        box_width >= MIN_FACE_MATCH_WIDTH
+        and box_height >= MIN_FACE_MATCH_HEIGHT
+        and detector_confidence >= 0.85
+        and sharpness >= MIN_FACE_MATCH_SHARPNESS
+        and 25.0 <= brightness <= 235.0
+        and frontality >= 0.5
+    )
+    return {
+        "face_quality_score": quality_score,
+        "face_crop_sharpness": round(sharpness, 2),
+        "face_crop_brightness": round(brightness, 2),
+        "face_frontality_score": round(frontality, 3),
+        "usable_for_matching": usable,
+    }
+
+
 def _crop_to_bbox(image: np.ndarray, bbox: dict[str, Any], padding: float = 0.1) -> np.ndarray:
     try:
         x, y, width, height = (int(bbox[key]) for key in ('x', 'y', 'width', 'height'))
@@ -593,7 +751,7 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
     coverage = set(triage.get("detector_coverage") or [])
     if triage["detector_status"] == "ready" and "person" in coverage:
         for person in triage["people"]:
-            person["attributes"] = _person_appearance_attributes(image, person["bbox"])
+            person["attributes"] = _person_appearance_attributes(image, person["bbox"], person.get("confidence"))
         triage["people_provider"] = triage.get("detector_provider")
     else:
         try:
@@ -605,7 +763,7 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
     for vehicle in triage["vehicles"]:
         crop = _crop_to_bbox(image, vehicle["bbox"])
         try:
-            attributes = _infer_vehicle_attributes(crop)
+            attributes = _infer_vehicle_attributes(crop, detector_crop=True, detection_confidence=vehicle.get("confidence"))
         except (FileNotFoundError, RuntimeError, cv2.error):
             embedding, model_name = _vehicle_appearance_embedding(crop)
             attributes = {"appearance_embedding": embedding, "appearance_embedding_model": model_name, "attribute_status": "vehicle_attribute_model_not_staged"}
@@ -883,57 +1041,94 @@ async def alpr(
     return JSONResponse(result)
 
 
-def _face_sync(image: np.ndarray) -> list[dict[str, Any]]:
+def _face_sync(image: np.ndarray, person_bboxes: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    with _face_lock:
+        return _face_sync_locked(image, person_bboxes)
+
+
+def _face_sync_locked(image: np.ndarray, person_bboxes: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     detector, recognizer = _face_models()
-    height, width = image.shape[:2]
-    detector.setInputSize((width, height))
-    _, detections = detector.detect(image)
+    person_boxes = _face_person_boxes(image, person_bboxes)
     results: list[dict[str, Any]] = []
-    for index, detection in enumerate(detections if detections is not None else []):
-        align_image, align_detection = image, detection
-        alignment_basis = "authoritative_source"
-        if 0 < detection[2] < MIN_FACE_CROP_WIDTH:
-            enhanced = _upscale_face_region(image, detection, detector)
-            if enhanced is not None:
-                align_image, align_detection = enhanced
-                alignment_basis = "deterministic_upscaled_crop"
-                detector.setInputSize((width, height))  # restore before this detector is reused for the next face/request
-        aligned = recognizer.alignCrop(align_image, align_detection)
-        embedding = recognizer.feature(aligned)
-        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-        norm = float(np.linalg.norm(vector))
-        if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
+    index = 0
+    for person in person_boxes:
+        pad_x, pad_y = round(person["width"] * 0.08), round(person["height"] * 0.02)
+        x0 = max(0, person["x"] - pad_x)
+        y0 = max(0, person["y"] - pad_y)
+        x1 = min(image.shape[1], person["x"] + person["width"] + pad_x)
+        y1 = min(image.shape[0], person["y"] + round(person["height"] * 0.38))
+        region = image[y0:y1, x0:x1]
+        if region.size == 0:
             continue
-        vector = vector / norm
-        x, y, box_width, box_height = [round(float(value), 3) for value in detection[:4]]
-        results.append({
-            "subject_label": f"Unidentified subject #{index + 1}",
-            "face_index": index,
-            "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
-            "embedding": [round(float(value), 7) for value in vector],
-            "embedding_dimension": int(vector.size),
-            "detector_confidence": round(float(detection[-1]), 6),
-            "face_crop_width_px": box_width,
-            "alignment_basis": alignment_basis,
-            "face_detector_model": YUNET_MODEL_PATH.name,
-            "face_embedding_model": SFACE_MODEL_PATH.name,
-            "candidate_person_record_id": None,
-            "review_state": "manual_review_required",
-        })
+        detector.setInputSize((region.shape[1], region.shape[0]))
+        _, detections = detector.detect(region)
+        for detection in detections if detections is not None else []:
+            quality = _face_quality(region, detection)
+            if not quality["usable_for_matching"]:
+                continue
+            align_image, align_detection = region, detection
+            alignment_basis = "person_head_region"
+            if 0 < detection[2] < MIN_FACE_CROP_WIDTH:
+                enhanced = _upscale_face_region(region, detection, detector)
+                if enhanced is not None:
+                    align_image, align_detection = enhanced
+                    alignment_basis = "deterministic_upscaled_head_region"
+            aligned = recognizer.alignCrop(align_image, align_detection)
+            embedding = recognizer.feature(aligned)
+            vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(vector))
+            if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
+                continue
+            vector = vector / norm
+            face_x, face_y, box_width, box_height = [float(value) for value in detection[:4]]
+            index += 1
+            results.append({
+                "subject_label": f"Unidentified subject #{index}",
+                "face_index": index,
+                "bbox": {
+                    "x": round(x0 + face_x, 3), "y": round(y0 + face_y, 3),
+                    "width": round(box_width, 3), "height": round(box_height, 3),
+                },
+                "embedding": [round(float(value), 7) for value in vector],
+                "embedding_dimension": int(vector.size),
+                "detector_confidence": round(float(detection[-1]), 6),
+                "face_crop_width_px": round(box_width, 3),
+                "face_crop_height_px": round(box_height, 3),
+                "alignment_basis": alignment_basis,
+                "face_detector_model": YUNET_MODEL_PATH.name,
+                "face_embedding_model": SFACE_MODEL_PATH.name,
+                "candidate_person_record_id": None,
+                "review_state": "manual_review_required",
+                "matching_gate_version": "face_quality_v1",
+                **quality,
+            })
+    detector.setInputSize((image.shape[1], image.shape[0]))
     return results
 
 
 @app.post("/infer/face")
 async def face(
     photo: Annotated[UploadFile, File()],
+    person_bboxes: Annotated[str | None, Form()] = None,
     authorization: Annotated[str | None, Header()] = None,
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
+    parsed_boxes = None
+    if person_bboxes is not None:
+        try:
+            parsed_boxes = json.loads(person_bboxes)
+            if not isinstance(parsed_boxes, list) or any(not isinstance(item, dict) for item in parsed_boxes):
+                raise ValueError("person_bboxes must be a JSON array of bounding boxes")
+        except (json.JSONDecodeError, ValueError) as error:
+            raise HTTPException(status_code=422, detail="person_bboxes must be a JSON array of bounding boxes") from error
     try:
-        results = await _run_cpu(_face_sync, image)
-        return JSONResponse({"success": True, "faces": results, "identity_resolution": "manual_review_required"})
+        results = await _run_cpu(_face_sync, image, parsed_boxes)
+        return JSONResponse({
+            "success": True, "faces": results, "identity_resolution": "manual_review_required",
+            "face_detection_scope": "person_head_regions", "matching_gate_version": "face_quality_v1",
+        })
     except FileNotFoundError:
         return _capability_unavailable("yunet_sface_models")
     except (RuntimeError, cv2.error) as error:
@@ -1011,9 +1206,9 @@ async def person_signature(
     })
 
 
-def _infer_face_if_requested(image: np.ndarray) -> dict[str, Any]:
+def _infer_face_if_requested(image: np.ndarray, person_bboxes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     try:
-        faces = _face_sync(image)
+        faces = _face_sync(image, person_bboxes)
         return {"state": "candidate", "result": {"success": True, "faces": faces, "identity_resolution": "manual_review_required"}, "review_required": True}
     except Exception as error:
         return {"state": "unavailable", "reason": str(error), "review_required": True}
@@ -1060,7 +1255,7 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         else ("ready" if triage["species_status"] == "ready" else "detector_only_species_not_staged")
     )
     if "face" in tasks:
-        face = _infer_face_if_requested(image)
+        face = _infer_face_if_requested(image, (triage or {}).get("people") if triage is not None else None)
         if face.get("state") == "candidate":
             result["face"] = face["result"]
         else:

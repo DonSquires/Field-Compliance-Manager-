@@ -260,6 +260,7 @@ def _read_crop(crop: np.ndarray) -> list[dict[str, Any]]:
         region_prob = getattr(prediction, "region_prob", None)
         readings.append({
             "variant": variant, "text": text, "char_min": round(char_min, 3), "char_mean": round(char_mean, 3),
+            "char_confidences": [round(float(value), 3) for value in used[: len(text)]],
             "region": str(region) if region else None,
             "region_confidence": round(float(region_prob), 3) if region_prob is not None else None,
         })
@@ -310,6 +311,7 @@ def read_plates(image: np.ndarray, vehicles: list[dict[str, int]] | None = None)
                 "plate": plate, "score": score, "box": bbox, "valid_nz_format": True, "nz_pattern": pattern,
                 "raw_text": reading["text"], "corrections": corrections, "ocr_variant": reading["variant"],
                 "char_confidence_min": reading["char_min"], "char_confidence_mean": reading["char_mean"],
+                "char_confidences": reading["char_confidences"],
                 "detector_confidence": box["confidence"], "region": reading["region"], "region_confidence": reading["region_confidence"],
                 "vehicle_bbox": box.get("vehicle_bbox"), "plate_source": box["source"], "plate_width_px": bbox["width"],
             }
