@@ -59,12 +59,27 @@ test('a changed live catalog is committed with the verified identity, pushed, op
   assert.equal(result.number, 7);
   assert.deepEqual(result.files.sort(), ['src/types/database.ts', 'supabase/schema.sql']);
   const branch = `bob/catalog-${fx.base.slice(0, 8)}`;
-  assert.equal(fx.git(fx.root, `--git-dir=${fx.remote}`, 'log', '-1', '--format=%an <%ae>', branch), 'Don Squires <256263525+DonSquires@users.noreply.github.com>');
+  const identity = 'Don Squires <256263525+DonSquires@users.noreply.github.com>';
+  assert.deepEqual(fx.git(fx.root, `--git-dir=${fx.remote}`, 'log', '-1', '--format=%an <%ae>%n%cn <%ce>', branch).split('\n'), [identity, identity]);
   assert.match(fx.git(fx.root, `--git-dir=${fx.remote}`, 'show', `${branch}:supabase/schema.sql`), /create table b/);
   const merge = api.calls.find(call => call.url.endsWith('/merge'));
   assert.equal(merge.body.sha, fx.git(fx.root, `--git-dir=${fx.remote}`, 'rev-parse', branch));
-  assert.equal(merge.body.merge_method, 'squash');
+  assert.equal(merge.body.merge_method, 'rebase');
   assert.equal(fx.git(fx.repo, 'worktree', 'list').split('\n').length, 1);
+});
+
+test('catalog refresh refuses a mismatched configured Git identity before contacting services', async () => {
+  const { refreshCatalog } = await load();
+  const api = fakeApi();
+  await assert.rejects(refreshCatalog({
+    repo: 'unused',
+    base: 'a'.repeat(40),
+    schema: 'unused',
+    env: { ...env('unused'), GIT_AUTHOR_EMAIL: 'squires.don@gmail.com' },
+    fetchImpl: api.fetchImpl,
+    log: () => {},
+  }), /configured Git identity is not the verified GitHub identity/);
+  assert.equal(api.calls.length, 0);
 });
 
 test('an unchanged catalog opens nothing', async () => {

@@ -75,6 +75,21 @@ fetch_err="$("${FETCH_ENV[@]}" git -C "$REPO_DIR" "${FETCH_CONFIG[@]}" fetch -q 
   }
 HEAD_SHA="$(git -C "$REPO_DIR" rev-parse refs/remotes/release-lane/main)"
 
+VERIFIED_GITHUB_NAME="Don Squires"
+VERIFIED_GITHUB_EMAIL="256263525+DonSquires@users.noreply.github.com"
+verify_main_author() {
+  local actual
+  actual="$(git -C "$REPO_DIR" show -s --format='%an <%ae>' "$HEAD_SHA")" || {
+    log "release refused: could not read main branch-head author"
+    return 1
+  }
+  if [[ "$actual" != "$VERIFIED_GITHUB_NAME <$VERIFIED_GITHUB_EMAIL>" ]]; then
+    log "release refused: main branch-head author is not the verified GitHub identity"
+    return 1
+  fi
+}
+if ! verify_main_author; then exit 1; fi
+
 # 2. What is live? (bootstrap: the newest release worktree the deploy script left behind)
 DEPLOYED_FILE="$STATE_DIR/deployed_sha"
 if [[ ! -s "$DEPLOYED_FILE" ]]; then
