@@ -81,7 +81,7 @@ describe('enterprise roster operations', () => {
     expect(page).not.toContain('Import from Deputy');
     expect(page).toContain('workUnits.length > 0 && <>');
     expect(page).toContain("(loading || workUnits.length > 0) && <>");
-    expect(page).toContain("Add rosterable staff in People, Pay & HR as well.");
+    expect(page).toContain("Add rosterable staff in People as well.");
   });
 
   it('uses role-specific planning language without changing the roster job', () => {

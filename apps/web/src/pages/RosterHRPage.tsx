@@ -10,6 +10,7 @@
 import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useHref, useLocation, useNavigate } from 'react-router-dom';
+import { ROSTERING_HR_TABS, isRosteringHrView } from '../lib/workforceSections';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
@@ -321,9 +322,9 @@ const TABS: { id: RosterTab; label: string }[] = [
 ];
 
 const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
-  { id: 'workforce', label: 'Workforce', tabs: ['staff', 'onboarding', 'credentials'] },
-  { id: 'people', label: 'People', tabs: ['recruitment', 'performance', 'cases', 'leave'] },
-  { id: 'rostering', label: 'Rostering', tabs: ['shift-templates', 'roster-rules', 'coverage', 'oncall', 'court'] },
+  { id: 'workforce', label: 'Staff', tabs: ['staff', 'onboarding', 'credentials'] },
+  { id: 'people', label: 'HR', tabs: ['recruitment', 'performance', 'cases', 'leave'] },
+  { id: 'rostering', label: 'Rostering', tabs: [...ROSTERING_HR_TABS] },
   { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
 ];
 
@@ -468,8 +469,14 @@ const RosterHRPage: React.FC = () => {
   const canManagePayRoles = isAdminTierRole(profile?.role);
   const requestedTab = new URLSearchParams(location.search).get('tab') as RosterTab | null;
   const roleTabs = new Set<RosterTab>(TABS.map((item) => item.id));
-  const visibleTabGroups = TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => roleTabs.has(item)) })).filter((group) => group.tabs.length > 0);
-  const initialTab = requestedTab && roleTabs.has(requestedTab) ? requestedTab : 'staff';
+  // Shift setup is reached from Rosters; staff, pay and HR from People. Each view shows only its own groups.
+  const rosteringView = isRosteringHrView(location.search);
+  const visibleTabGroups = TAB_GROUPS
+    .filter((group) => (group.id === 'rostering') === rosteringView)
+    .map((group) => ({ ...group, tabs: group.tabs.filter((item) => roleTabs.has(item)) }))
+    .filter((group) => group.tabs.length > 0);
+  const viewTabs = new Set<RosterTab>(visibleTabGroups.flatMap((group) => group.tabs));
+  const initialTab = requestedTab && viewTabs.has(requestedTab) ? requestedTab : visibleTabGroups[0]?.tabs[0] ?? 'staff';
   const [tab, setTab] = useState<RosterTab>(initialTab);
   const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(initialTab));
   const [loading, setLoading] = useState(true);
@@ -592,7 +599,7 @@ const RosterHRPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (roleTabs.has(tab)) return;
+    if (viewTabs.has(tab)) return;
     const fallback = visibleTabGroups[0]?.tabs[0] ?? 'staff';
     setTab(fallback);
     setTabGroup(tabGroupFor(fallback));
@@ -836,7 +843,7 @@ const RosterHRPage: React.FC = () => {
   }, [loadAll]);
 
   useEffect(() => {
-    if (!requestedCredentialId) return;
+    if (!requestedCredentialId || rosteringView) return;
     setTab('credentials');
     setTabGroup('workforce');
     document.getElementById(`credential-${requestedCredentialId}`)?.scrollIntoView({ block: 'center' });
@@ -1730,8 +1737,8 @@ const RosterHRPage: React.FC = () => {
       {timesheetCorrection && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-correction-title" onSubmit={correctTimesheet}><header><div><span>Payroll correction</span><h2 id="timesheet-correction-title">Edit timesheet hours</h2></div><button type="button" onClick={() => setTimesheetCorrection(null)} aria-label="Close timesheet correction">×</button></header><p>Correction returns the timesheet to submitted review and records before/after values in the audit trail.</p><label><span>Actual hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.actualHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, actualHours: event.target.value })} /></label><label><span>Overtime hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.overtimeHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, overtimeHours: event.target.value })} /></label><label><span>Correction reason</span><textarea required rows={4} value={timesheetCorrection.reason} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, reason: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setTimesheetCorrection(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !timesheetCorrection.reason.trim()}>Save correction</button></footer></form></div>}
       {swapReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-review-title" onSubmit={reviewSwap}><header><div><span>Roster governance</span><h2 id="shift-swap-review-title">{swapReview.decision === 'approved' ? 'Approve' : 'Decline'} shift swap?</h2></div><button type="button" onClick={() => setSwapReview(null)} aria-label="Close shift swap review">×</button></header><p>Approval transfers ownership of the unstarted shift and its linked roster slot. Declined requests remain in the audit history.</p><label><span>Review notes</span><textarea rows={4} required={swapReview.decision === 'declined'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setSwapReview(null)}>Cancel</button><button type="submit" className={swapReview.decision === 'declined' ? 'btn btn-danger' : 'btn btn-primary'} disabled={saving || (swapReview.decision === 'declined' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       <header className="page-header">
-        <h1>Roster & HR</h1>
-        <p className="subtitle">{staff.length} staff · Credentials, shifts, leave, timesheets</p>
+        <h1>{rosteringView ? 'Shift setup & open shifts' : 'People, pay & HR'}</h1>
+        <p className="subtitle">{rosteringView ? 'Shift templates, rest rules, open shifts, on-call and court' : `${staff.length} staff · Onboarding, credentials, leave, timesheets`}</p>
       </header>
 
       {error && (
@@ -1745,15 +1752,15 @@ const RosterHRPage: React.FC = () => {
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
       {evidenceAction?.action === 'record_induction' && siteInductionState.length > 0 && <div className="alert alert-info" role="status">Current induction state: {siteInductionState.filter((item) => item.completed).length} of {siteInductionState.length} requirements complete.</div>}
 
-      <div className="crm-branch-filter" aria-label="Roster and HR workspace">
+      {visibleTabGroups.length > 1 && <div className="crm-branch-filter" aria-label="People and HR workspace">
         {visibleTabGroups.map((group) => (
           <button type="button" key={group.id} className={`btn btn-sm ${tabGroup === group.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTabGroup(group.id); setTab(group.tabs[0]); }}>
             {group.label}
           </button>
         ))}
-      </div>
+      </div>}
       <div className="roster-hr-tab-list" aria-label={`${visibleTabGroups.find((group) => group.id === tabGroup)?.label} views`}>
-        {TABS.filter((item) => roleTabs.has(item.id) && tabGroupFor(item.id) === tabGroup).map((t) => (
+        {TABS.filter((item) => viewTabs.has(item.id) && tabGroupFor(item.id) === tabGroup).map((t) => (
           <button
             key={t.id}
             className={`btn btn-sm ${tab === t.id ? 'btn-primary' : 'btn-secondary'}`}

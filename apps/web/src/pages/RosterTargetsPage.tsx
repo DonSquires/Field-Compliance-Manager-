@@ -465,7 +465,7 @@ const RosterTargetsPage: React.FC = () => {
                 <X />
               </button>
             </header>
-            <p className="targets-dialog-note"><strong>{skillDialog.unit.name}</strong> may only be assigned to staff who hold every selected current skill. Site inductions remain separate in People, Pay &amp; HR.</p>
+            <p className="targets-dialog-note"><strong>{skillDialog.unit.name}</strong> may only be assigned to staff who hold every selected current skill. Site inductions remain separate in People.</p>
             {skills.length ? (
               <fieldset className="targets-skill-picker">
                 <legend>Organisation skill catalog</legend>
@@ -483,8 +483,8 @@ const RosterTargetsPage: React.FC = () => {
             ) : (
               <div className="targets-prereq" role="status">
                 <strong>No active skills are configured.</strong>
-                <p>Create the organisation’s reusable skill catalog in People, Pay &amp; HR before requiring skills here.</p>
-                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People, Pay &amp; HR</button>
+                <p>Create the organisation’s reusable skill catalog in People before requiring skills here.</p>
+                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People</button>
               </div>
             )}
             <p className="targets-skill-impact">{skillDialog.selectedIds.length
@@ -557,8 +557,8 @@ const RosterTargetsPage: React.FC = () => {
             ) : (
               <div className="targets-prereq" role="status">
                 <strong>No active skills are configured.</strong>
-                <p>You can create this work unit now, then set up reusable skills in People, Pay &amp; HR before adding assignment requirements.</p>
-                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People, Pay &amp; HR</button>
+                <p>You can create this work unit now, then set up reusable skills in People before adding assignment requirements.</p>
+                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People</button>
               </div>
             )}
             {type === 'patrol' && (routes.length === 0 ? (

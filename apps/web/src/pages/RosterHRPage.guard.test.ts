@@ -29,13 +29,15 @@ describe('governed HR administration', () => {
     expect(page).toContain('role_code: staffProfileById.get(p.id)?.role_code ?? null');
   });
 
-  it('groups the full Roster HR workspace without removing payroll access', () => {
+  it('splits shift setup from staff, pay and HR without removing payroll access', () => {
     expect(page).toContain("type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets'");
-    expect(page).toContain("{ id: 'workforce', label: 'Workforce'");
-    expect(page).toContain("{ id: 'people', label: 'People'");
+    expect(page).toContain("{ id: 'workforce', label: 'Staff'");
+    expect(page).toContain("{ id: 'people', label: 'HR'");
     expect(page).toContain("{ id: 'rostering', label: 'Rostering'");
     expect(page).toContain("{ id: 'pay-assets', label: 'Pay & Assets'");
     expect(page).toContain("{ id: 'pay-review', label: 'Pay Review' }");
+    expect(page).toContain(".filter((group) => (group.id === 'rostering') === rosteringView)");
+    expect(page).toContain("const initialTab = requestedTab && viewTabs.has(requestedTab) ? requestedTab : visibleTabGroups[0]?.tabs[0] ?? 'staff';");
   });
 
   it('uses server-owned leave and timesheet decisions', () => {

@@ -1436,11 +1436,11 @@ const APP_DESTINATIONS: Record<string, { label: string; path: string; job: strin
   investigations: { label: 'Open Investigations', path: '/admin/investigations', job: 'investigate linked records and observations' },
   locations: { label: 'Open Location Houses', path: '/admin/locations', job: 'work with operational places and their layers' },
   organization_settings: { label: 'Open Organisation Settings', path: '/admin/org-setup', job: 'configure the active organization' },
-  people: { label: 'Open People, Pay & HR', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
+  people: { label: 'Open People', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
   reports: { label: 'Open Reports', path: '/admin/reports', job: 'review operational and compliance reporting' },
-  roster: { label: 'Open Schedules & Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
+  roster: { label: 'Open Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
   sites: { label: 'Open Site Workspaces', path: '/admin/site-360', job: 'work with a place, agreement, work, evidence, and audit context' },
-  users: { label: 'Open People & Access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
+  users: { label: 'Open Logins & access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
   zones: { label: 'Open Zone Facets', path: '/admin/zones', job: 'work with zones and geofenced operational rules' }
 };
 
@@ -1453,7 +1453,7 @@ function execNavigateApp(args: Record<string, unknown>) {
       meta: {
         tool: 'navigate_app',
         outcome: 'need_destination',
-        answer_options: ['Open Schedules & Rosters', 'Open People, Pay & HR', 'Open Organisation Settings', 'Open Approvals']
+        answer_options: ['Open Rosters', 'Open People', 'Open Organisation Settings', 'Open Approvals']
       }
     };
   }

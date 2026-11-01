@@ -279,6 +279,33 @@ Owner-directed client/place simplification, 2026-10-28:
   viewport. Further consolidation should follow observed tasks, not hide
   necessary safety, NZTA, client disclosure or commercial decisions.
 
+Owner-directed Workforce consolidation, 2026-11-03 (follows the 2026-10-28
+simplification; owner chose "consolidate to 2" and "leave roster_templates"):
+
+- **Before:** the HR & Rostering workspace had four peer destinations
+  (Schedules & Rosters, People Pay & HR, Work Units & Coverage, People &
+  Access). The HR page also held a Rostering group, so shift setup lived in a
+  different destination from the roster board. Atlas (dry-run refresh, 1,616
+  capabilities / 9,685 edges) showed every HR/roster table reaching a screen
+  except `roster_templates` (FK-only, privileges revoked from app roles, 0 live
+  rows) and `staff_biometrics` (reads tightened separately in #311).
+- **During:** two destinations, **Rosters** and **People**, each with a section
+  strip. Rosters: Roster board (`/admin/roster`), Work units & coverage
+  (`/admin/roster-targets`), Shift setup & open shifts
+  (`/admin/people-hr?section=rostering`). People: Staff, pay & HR
+  (`/admin/people-hr`), Logins & access (`/admin/users`). The HR page shows only
+  its own view's groups (Staff, HR, Pay & Assets, or the rostering tabs).
+  Without the HR module, People opens Logins & access. No route, permission,
+  module gate or data path changed; old links and `?tab=` deep links to rostering
+  tabs still land in the right view.
+- **After:** `roster_templates` stays legacy-only (no screen, no writer). Its
+  retirement needs its own migration and evidence.
+- **Evidence gate:** vitest guards and the section helper pass. Desktop/mobile
+  synthetic Playwright runs pass for HR administration and credential renewal,
+  with win32 baselines regenerated. `roster-operations` week-board/publish and
+  `geofence-spine-map` screenshot failures also fail on `main` before this
+  change. No human walkthrough has been done yet.
+
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
 diagnostics/capability discovery, then shared knowledge/evidence, investigation

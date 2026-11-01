@@ -18,6 +18,7 @@
 import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { PEOPLE_SECTIONS, ROSTER_SECTIONS, ROSTER_SETUP_PATH, isRosteringHrView, workforceSectionFor } from '../lib/workforceSections';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
@@ -211,6 +212,8 @@ interface WorkspaceItem {
   label: string;
   icon: LucideIcon;
   area?: FieldOpsSubArea;
+  /** Pages reached through this destination's section strip, which keep it highlighted. */
+  also?: AdminPage[];
 }
 
 export interface AdminConsoleTelemetry {
@@ -298,10 +301,8 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
   Workforce: [
-    { id: 'roster', label: 'Schedules & Rosters', icon: Users },
-    { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
-    { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
-    { id: 'users', label: 'People & Access', icon: Users },
+    { id: 'roster', label: 'Rosters', icon: Route, also: ['roster-targets'] },
+    { id: 'people-hr', label: 'People', icon: Users, also: ['users'] },
   ],
   'Clients & Delivery': [
     { id: 'crm', label: 'Clients', icon: Building2 },
@@ -342,6 +343,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
 
 const NAVIGABLE_ADMIN_PAGES = new Set<AdminPage>([
   ...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id)),
+  ...Object.values(NAVIGATION_MAP).flatMap((items) => items.flatMap((item) => item.also ?? [])),
   'bob', 'document-studio', 'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites',
 ]);
 
@@ -691,18 +693,39 @@ const AdminShell: React.FC = () => {
     setBobOpen(true);
   }, [activePage]);
 
+  // Without the HR module, People still opens logins and access.
+  const enabledNavItems = (items: WorkspaceItem[]) => items
+    .map((item) => (item.id === 'people-hr' && !isPageEnabled('people-hr') ? { ...item, id: 'users' as AdminPage, also: [] } : item))
+    .filter((item) => isPageEnabled(item.id) && (!item.area || isFieldOpsAreaEnabled(item.area)));
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
-    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))) }));
-  const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
+    .map(([group, items]) => ({ group, items: enabledNavItems(items) }));
+  const workforceSection = workforceSectionFor(activePage, location.search);
+  const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage || item.also?.includes(activePage)))
     ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
     if (item.id === 'bob') openBobCommandCenter();
     else if (item.area) navigateToFieldOps(item.area);
     else navigateToPage(item.id, workflowContext);
   };
-  const isWorkspaceItemActive = (item: WorkspaceItem) => item.id === activePage
-    && (item.id !== 'field-ops' || (item.area ?? 'landing') === fieldOpsSubArea);
+  const isWorkspaceItemActive = (item: WorkspaceItem) => {
+    if (item.also && workforceSection) return workforceSection.startsWith(item.id === 'roster' ? 'roster-' : 'people-');
+    return item.id === activePage && (item.id !== 'field-ops' || (item.area ?? 'landing') === fieldOpsSubArea);
+  };
+  const sectionPage = { 'roster-board': 'roster', 'roster-coverage': 'roster-targets', 'roster-setup': 'people-hr', 'people-hr': 'people-hr', 'people-access': 'users' } as const;
+  const workforceSections = workforceSection
+    ? (workforceSection.startsWith('roster-') ? ROSTER_SECTIONS : PEOPLE_SECTIONS).filter((section) => isPageEnabled(sectionPage[section.key]))
+    : [];
+  const openWorkforceSection = (key: keyof typeof sectionPage) => {
+    if (key !== 'roster-setup') { navigateToPage(sectionPage[key], workflowContext); return; }
+    setActivePage('people-hr');
+    setMobileMenuOpen(false);
+    navigate(ROSTER_SETUP_PATH);
+  };
+  const workforceSectionNav = workforceSections.length > 1
+    && <nav className="admin-workforce-sections" aria-label={workforceSection?.startsWith('roster-') ? 'Roster sections' : 'People sections'}>
+      {workforceSections.map((section) => <button type="button" key={section.key} aria-current={section.key === workforceSection ? 'page' : undefined} onClick={() => openWorkforceSection(section.key)}>{section.label}</button>)}
+    </nav>;
 
   const moduleAccessNotice = useMemo(() => {
     if (modulesStatus === 'configured') return null;
@@ -875,13 +898,13 @@ const AdminShell: React.FC = () => {
       case 'finance-pricing':
         return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'people-hr':
-        return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage />;
+        return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage key={isRosteringHrView(location.search) ? 'rostering' : 'people'} />;
       case 'roster-targets':
         return <RosterTargetsPage />;
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen, telemetry]);
+  }, [activePage, fieldOpsSubArea, location.search, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen, telemetry]);
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
@@ -990,6 +1013,7 @@ const AdminShell: React.FC = () => {
 
           <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
           {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {showWorkspaceNavigation && workforceSectionNav}
           <div className="bob-page-layout">
           <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
@@ -1039,6 +1063,7 @@ const AdminShell: React.FC = () => {
       </header>
       <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
       {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
+      {showWorkspaceNavigation && workforceSectionNav}
 
       {mobileMenuOpen && (
         <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
@@ -1046,7 +1071,7 @@ const AdminShell: React.FC = () => {
             {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))).map((item) => {
+                {enabledNavItems(items).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={`${item.id}:${item.area ?? ''}`} onClick={() => openWorkspaceItem(item)} className={`admin-mobile-nav-item ${isWorkspaceItemActive(item) ? 'is-active' : ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined}>
