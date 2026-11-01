@@ -16,7 +16,7 @@ test('recovery accounting is fail-closed and scoped to one job', async () => {
 });
 
 test('detailed worker handoff failures remain recoverable and are retained in receipts', () => {
-  const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102120000_builder_verifier_handoff_failure_details.sql'), 'utf8');
+  const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102130000_builder_verifier_handoff_failure_details.sql'), 'utf8');
   assert.match(migration, /Frontend worker handoff failed during %/);
   assert.match(migration, /Backend worker handoff failed during %/);
   assert.match(migration, /verifier_failure_summary/);
@@ -38,7 +38,7 @@ test('Postgres refunds infrastructure once per lease, preserves real failures, a
     }
     assert.equal(ready, true, 'isolated PostgreSQL started');
     const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261018160000_builder_verifier_recovery_accounting.sql'), 'utf8');
-    const handoffFailureMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102120000_builder_verifier_handoff_failure_details.sql'), 'utf8');
+    const handoffFailureMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261102130000_builder_verifier_handoff_failure_details.sql'), 'utf8');
     const sql = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
 CREATE SCHEMA auth;
