@@ -310,6 +310,36 @@ simplification; owner chose "consolidate to 2" and "leave roster_templates"):
   `geofence-spine-map` screenshot failures also fail on `main` before this
   change. No human walkthrough has been done yet.
 
+HR and roster Atlas gap triage, 2026-11-03 (live Atlas at `d9f435e9`, 216
+present-but-unwired entities; live schema and migration ledger match the repo):
+
+- **Before:** the submit RPCs stamp `timesheets.submitted_at` (2 of 2 live
+  rows), but neither the HR timesheet list, the branch review queue
+  (`get_branch_timesheet_queue`) nor the officer timesheet page showed it.
+  Reviewers could not tell a sheet sent that morning from one waiting for a
+  week. The queue function also had EXECUTE for PUBLIC and anon:
+  `20260905005800` dropped and recreated it without restoring the
+  authenticated-only grant from `20260905005500`. Its body still rejects a null
+  `auth.uid()`.
+- **During:** migration `20261103100000` returns `submitted_at` from the queue
+  and restores `REVOKE … FROM PUBLIC, anon` / `GRANT … TO authenticated,
+  service_role`. A rolled-back dry run on the live catalog confirmed the new
+  shape and an ACL limited to postgres, authenticated and service_role. The HR
+  list, the branch queue and the officer page show "Submitted 24 Aug, 9:30 am"
+  in NZ time.
+- **Left as is, with reasons:** `timesheets.payroll_export_batch_id` is written
+  by payroll export and read by `prepare_nz_payday_filing_package`; a batch UUID
+  adds nothing for a person. `external_refs` on shifts, roster assignments and
+  staff profiles is import provenance and is populated on every row.
+  `staff_biometrics` has 0 rows and no caller; it stays dormant by design.
+  `project_historical_patrol_roster` is intentionally disabled; its comment
+  points to `apply_historical_roster_assignment_import`. Person-domain items
+  such as `persons.homeless_status` are not HR.
+- **Evidence gate:** vitest guards, `rosterWords` and the web build pass. Serial
+  synthetic Playwright runs of HR administration and officer timesheets pass
+  apart from `officer-timesheet.spec.ts:22`, which assumes a UTC browser and
+  fails only on an NZ-time machine. No human walkthrough has been done yet.
+
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
 diagnostics/capability discovery, then shared knowledge/evidence, investigation

@@ -12,7 +12,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { loadOfficerTimesheetWork, resubmitRejectedTimesheetFromWork, submitOfficerTimesheetFromWork, type TimesheetWorkEntry } from '../lib/officerTimesheetWork';
-import { plainWords, plural } from '../lib/rosterWords';
+import { plainWords, plural, submittedWords } from '../lib/rosterWords';
 import './PageStyles.css';
 
 interface Timesheet {
@@ -25,6 +25,7 @@ interface Timesheet {
   status: string;
   review_notes: string | null;
   approved_at: string | null;
+  submitted_at: string | null;
 }
 
 const TIMESHEET_STATUS_LABELS: Record<string, string> = {
@@ -48,7 +49,7 @@ export const hoursAndMinutes = (minutes: number) => `${Math.floor(minutes / 60)}
 const dateWords = (value: string) => new Date(value).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
 const timeWords = (value: string) => new Date(value).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' });
 const hours = (value: number | null | undefined) => value == null ? '–' : `${Number(value).toFixed(2)} h`;
-const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status, review_notes, approved_at';
+const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status, review_notes, approved_at, submitted_at';
 
 const OfficerTimesheetPage: React.FC = () => {
   const location = useLocation();
@@ -211,6 +212,7 @@ const OfficerTimesheetPage: React.FC = () => {
                   <td>{hours(t.overtime_hours)}</td>
                   <td>
                     <span className={`status-badge status-${t.status}`}>{timesheetStatusLabel(t.status)}</span>
+                    {t.submitted_at && <small className="timesheet-review-note">{submittedWords(t.submitted_at)}</small>}
                     {t.review_notes && <small className="timesheet-review-note"><strong>Review note:</strong> {t.review_notes}{t.approved_at ? ` · ${new Date(t.approved_at).toLocaleString('en-NZ')}` : ''}</small>}
                   </td>
                 </tr>

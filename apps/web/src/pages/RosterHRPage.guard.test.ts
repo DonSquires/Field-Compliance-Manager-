@@ -51,8 +51,18 @@ describe('governed HR administration', () => {
   it('shows corporate payroll every branch\'s timesheets at organisation level, and the branch queue only in a branch', () => {
     expect(page).toContain("const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);");
     expect(page).toContain("workingInBranch\n            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })");
-    expect(page).toContain(".from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by').eq('organization_id', orgId)");
+    expect(page).toContain(".from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at').eq('organization_id', orgId)");
     expect(page).toContain("{workingInBranch ? 'Branch timesheets' : 'Timesheets across branches'}");
+  });
+
+  it('shows reviewers when each timesheet was submitted from both queues', () => {
+    const queueMigration = read('../../supabase/migrations/20261103100000_branch_timesheet_queue_submitted_at.sql');
+    expect(queueMigration).toContain('branch_reviewed_by uuid, submitted_at timestamp with time zone)');
+    expect(queueMigration).toContain('t.branch_reviewed_by,t.submitted_at from public.timesheets t');
+    expect(queueMigration).toContain("'timesheet_local_review'");
+    expect(queueMigration).toContain('REVOKE ALL ON FUNCTION public.get_branch_timesheet_queue(uuid) FROM PUBLIC, anon;');
+    expect(queueMigration).toContain('GRANT EXECUTE ON FUNCTION public.get_branch_timesheet_queue(uuid) TO authenticated, service_role;');
+    expect(page).toContain('{item.submitted_at && <small className="hr-timesheet-submitted">{submittedWords(item.submitted_at)}</small>}');
   });
 
   it('surfaces generated dispatch pay evidence without directly mutating financial lines', () => {
