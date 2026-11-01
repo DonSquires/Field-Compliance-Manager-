@@ -18,6 +18,7 @@ import { CustomReportBuilder } from '../components/CustomReportBuilder';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
+import { CURRENT_REPORT_PDF_RENDERER } from '../lib/reportPackRenderer';
 import './PageStyles.css';
 
 interface BreachAlert {
@@ -102,8 +103,6 @@ function reportKindLabel(pack: MonthlyReportPack): string {
 function hasCurrentPdf(pack: MonthlyReportPack): boolean {
   return Boolean(pack.pdf_path && pack.pdf_source_updated_at && pack.pdf_source_updated_at === pack.updated_at);
 }
-
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v10';
 
 function hasLatestReportPdf(pack: MonthlyReportPack): boolean {
   return hasCurrentPdf(pack) && pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER;

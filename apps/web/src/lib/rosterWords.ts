@@ -50,6 +50,14 @@ export const commercialIssueAreas = (readiness: object): string[] =>
 export const timeRange = (start: string, end: string): string =>
   `${new Date(start).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}\u2013${new Date(end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
 
+/** Server submission receipt in NZ time, e.g. `Submitted 2 Nov, 10:15 am`; missing or unreadable -> null. */
+export const submittedWords = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  return `Submitted ${at.toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' })}`;
+};
+
 /** `1 draft`, `3 drafts`. */
 export const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
 

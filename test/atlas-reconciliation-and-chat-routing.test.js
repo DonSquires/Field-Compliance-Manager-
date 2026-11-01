@@ -20,8 +20,8 @@ test('seed data reconciliation is service-role-only and never invents canonical 
   assert.doesNotMatch(compare, /'_seed_fs_nelson_clients_raw'/);
 });
 
-test('explicit admiral Atlas requests reach the read-only Atlas tool when planning falls back to an answer', () => {
-  assert.match(chat, /const atlasDiagnosticTier = caps\.tier === 'admiral' \|\| caps\.tier === 'captain' \|\| caps\.tier === 'commander';/);
+test('explicit Atlas requests at any rank reach the read-only Atlas tool when planning falls back to an answer', () => {
+  assert.doesNotMatch(chat, /atlasDiagnosticTier/);
   // Declared once: a redeclaration took onspace-ai-chat down with BOOT_ERROR on 2026-10-14.
   assert.equal(chat.match(/const explicitAtlasRequest =/g).length, 1);
   assert.match(chat, /chosenTool = 'query_atlas'/);
@@ -95,7 +95,7 @@ test('visible app navigation is bounded to known role-gated destinations', () =>
   assert.match(caddie, /navigate_app: \{/);
   assert.match(caddie, /navigate_app: 'onspace-ai-chat'/);
   assert.match(chat, /const APP_DESTINATIONS:/);
-  assert.match(chat, /roster: \{ label: 'Open Schedules & Rosters', path: '\/admin\/roster'/);
+  assert.match(chat, /roster: \{ label: 'Open Rosters', path: '\/admin\/roster'/);
   assert.match(chat, /organization_settings: \{ label: 'Open Organisation Settings', path: '\/admin\/org-setup'/);
   assert.match(chat, /case 'navigate_app':/);
   assert.match(chat, /navigation_actions: \[\{ label: destination\.label, path: destination\.path \}\]/);

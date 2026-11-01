@@ -20,6 +20,7 @@
 .hr-roster-reconciliation .reports-table th { color:#c7d6e6; background:#142133; }
 .hr-timesheet-actions { display:flex; align-items:center; flex-wrap:wrap; gap:5px; }
 .hr-timesheet-actions small { max-width:230px; line-height:1.4; }
+.hr-timesheet-submitted { display:block; margin-top:4px; color:var(--color-text-secondary); font-size:.8rem; white-space:nowrap; }
 .hr-timesheet-table { min-width:0; max-width:100%; overflow:auto; }
 .hr-roster-reconciliation .btn { min-height:30px; padding:4px 8px; font-size:12px; }
 .hr-roster-reconciliation .btn-secondary { color:#e0e9f4; background:#192b42; border:1px solid #49617b; }

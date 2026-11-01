@@ -8,16 +8,20 @@ const source = fs.readFileSync(
   'utf8',
 );
 
-test('report-pack PDFs expose source snapshot provenance and scope', () => {
-  assert.match(source, /Report pack ID: \$\{packId\}/);
-  assert.match(source, /Source snapshot generated:/);
-  assert.match(source, /Renderer: \$\{rendererVersion\}/);
-  assert.match(source, /governed FCM report-pack snapshot/);
+test('report-pack PDFs keep snapshot provenance in document metadata, not on client pages', () => {
+  assert.match(source, /pdf\.setProducer\(rendererVersion\)/);
+  assert.match(source, /`report-pack:\$\{packId\}`/);
+  assert.match(source, /`snapshot-generated:\$\{snapshotGeneratedAt \?\? 'not-recorded'\}`/);
+  assert.match(source, /`renderer:\$\{rendererVersion\}`/);
   assert.match(source, /generated_at/);
+  assert.match(source, /p_renderer_version: rendererVersion/);
+  for (const technical of [/Report pack ID:/, /Source snapshot generated:/, /Renderer: \$\{rendererVersion\}/, /governed FCM report-pack snapshot/]) {
+    assert.doesNotMatch(source, technical, 'client pages carry no system provenance');
+  }
 });
 
-test('monthly PDFs render agreement-scoped activity sections without provider-wide totals', () => {
-  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v10'/);
+test('monthly PDFs render agreement-scoped client sections without provider-wide or operational totals', () => {
+  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v12'/);
   assert.match(source, /embedPdfNotoFonts\(pdf\)/);
   assert.doesNotMatch(source, /noto-sans-[^'" ]+\.woff/);
   assert.doesNotMatch(source, /pdf\.embedFont\(/);
@@ -25,13 +29,27 @@ test('monthly PDFs render agreement-scoped activity sections without provider-wi
   assert.match(source, /editorial\.title\.trim\(\)/);
   assert.match(source, /templateTitle = typeof template\?\.name === 'string'/);
   assert.match(source, /\$\{templateTitle\} - \$\{period\}/);
+  assert.match(source, /monthlyActivityBlocks\(snapshot, activityLines\)/);
+  assert.match(source, /siteLogBlocks\(snapshot, activityLines\)/);
   assert.match(source, /Patrol and Activity Summary/);
   assert.match(source, /Site Coverage/);
   assert.match(source, /Service Level Performance/);
-  assert.match(source, /patrolVisits/);
-  assert.match(source, /cameraActivations/);
-  assert.match(source, /vehicleObservations/);
-  assert.match(source, /patrolTravelKm/);
-  const monthlyRenderer = source.slice(source.indexOf('const drawMonthlySections'), source.indexOf("draw('Field Compliance Manager'"));
+  assert.match(source, /sla\.some\(\(\[, value\]\) => \(value \?\? 0\) > 0\)/, 'the service-level table is drawn only when there is something to report');
+  const monthlyRenderer = source.slice(source.indexOf('const drawMonthlySections'), source.indexOf('const drawCover'));
+  assert.ok(monthlyRenderer.length > 200);
   assert.doesNotMatch(monthlyRenderer, /incidentsTotal|breachAlerts|checkpointVisits/);
+  assert.doesNotMatch(monthlyRenderer, /patrolTravelKm|travelKm|hours/i, 'travel and hours never reach the client PDF');
+});
+
+test('report photos are embedded from site-photo buckets only, within fixed limits', () => {
+  const photos = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/_shared/report-photos.ts'), 'utf8');
+  assert.match(photos, /REPORT_PHOTO_BUCKETS: readonly string\[\] = \['bob-uploads', 'scans'\]/);
+  assert.match(photos, /REPORT_PHOTO_BUCKETS\.includes\(bucket\)/, 'a snapshot bucket hint cannot widen storage access');
+  assert.match(photos, /ref\.p\.includes\('\.\.'\)/);
+  assert.match(photos, /data\.size > MAX_SOURCE_BYTES/);
+  assert.match(photos, /CONVERT_BUDGET_MS/);
+  assert.match(source, /PHOTOS_PER_ENTRY = 3/);
+  assert.match(source, /MAX_REPORT_PHOTOS = \d+/);
+  assert.match(source, /loadPhotos: \(refs\) => loadReportPhotos\(admin, refs\)/);
+  assert.match(source, /held on file/);
 });

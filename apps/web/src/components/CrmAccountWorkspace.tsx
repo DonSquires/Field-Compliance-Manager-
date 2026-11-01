@@ -13,6 +13,7 @@ import { CrmSiteDialog } from './CrmSiteDialog';
 import { OperationalPlaceManager } from './OperationalPlaceManager';
 import { GeneratedArtifactActions } from './GeneratedArtifactActions';
 import type { EditableCrmOrganization } from './CrmOrganizationDialog';
+import { isReportPackPdfCurrent } from '../lib/reportPackRenderer';
 import './CrmAccountWorkspace.css';
 import './CrmAccountWorkspaceResponsive.css';
 
@@ -37,10 +38,8 @@ interface OrganizationModule { id: string; module_key: string; enabled: boolean;
 interface GeofenceConfig { config_key: string; config_value: number; zone_type: string | null; }
 interface JobRow { id: string; job_type: string; status: string; priority: string; sla_breached: boolean; created_at: string; service_agreement_id: string | null; client_site_id: string | null; zone_id: string | null; }
 interface ReportPackRow { id: string; template_code: string; period_start: string; period_end: string; status: string; updated_at: string; pdf_path: string | null; pdf_renderer_version: string | null; pdf_source_updated_at: string | null; }
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v9';
 function hasCurrentReportPdf(pack: ReportPackRow): boolean {
-  return Boolean(pack.pdf_path && pack.pdf_source_updated_at === pack.updated_at
-    && (pack.status === 'sent' || pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER));
+  return isReportPackPdfCurrent(pack);
 }
 interface QuoteRow { id: string; title: string; status: string; total_charge: number; created_at: string; service_agreement_id: string | null; provider_org_id: string; tender_id: string | null; discount_schedule_id: string | null; }
 export type WorkspaceQuote = QuoteRow;
@@ -181,6 +180,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const [locationStage, setLocationStage] = useState<'search' | 'create'>('search');
   const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
   const [locationSearched, setLocationSearched] = useState(false);
+  const [locationSearchPending, setLocationSearchPending] = useState(false);
   const [locationForm, setLocationForm] = useState({ name: '', address: '', suburb: '', postcode: '', notes: '' });
   const [view, setView] = useState<'overview' | 'structure' | 'contacts' | 'activity' | 'agreements' | 'sites' | 'modules' | 'operations' | 'readiness' | 'jobs' | 'reports' | 'finance'>(initialView);
   const [contactForm, setContactForm] = useState(emptyContact);
@@ -203,11 +203,15 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const [notice, setNotice] = useState<string | null>(null);
   const contactRequestId = useRef(crypto.randomUUID());
   const activityRequestId = useRef(crypto.randomUUID());
+  const locationSearchRequestId = useRef(0);
   // the headline is the live operational agreement (accepted first); an ended or cancelled one never leads
   const liveOperational = agreements.filter((agreement) => agreement.agreement_type === 'operational' && ['live', 'ending'].includes(agreementTermState(agreement)));
   const headlineAgreement = liveOperational.find((agreement) => agreement.invitation_status === 'accepted') ?? liveOperational[0] ?? agreements.find((agreement) => agreement.agreement_type === 'operational') ?? agreements[0] ?? null;
   const headlineInvitation = headlineAgreement?.invitation_status?.replaceAll('_', ' ') ?? 'not invited';
   const portfolioUpdatedAt = organizationDetails?.updated_at ?? null;
+  const hasExactAddressInAccount = locationCandidates.some(
+    (candidate) => candidate.match_reason === 'Exact address match' && candidate.belongs_to_account,
+  );
   const canAddBranch = ['owner', 'service_provider', 'branch'].includes(organizationDetails?.organization_type ?? '');
   const portfolioFlow = [
     { label: 'Account', complete: Boolean(organizationDetails?.name), current: view === 'overview' || view === 'structure' || view === 'contacts' },
@@ -449,18 +453,47 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   };
 
   const searchLocations = async (event: FormEvent) => {
-    event.preventDefault(); setSaving(true); setError(null); setLocationSearched(false);
-    const { data, error: searchError } = await supabase.rpc('find_crm_location_candidates', {
-      p_account_organization_id: account.id,
-      p_query: locationForm.name.trim() || null,
-      p_address: locationForm.address.trim() || null,
-    });
-    if (searchError) setError(searchError.message);
-    else { setLocationCandidates((data as LocationCandidate[]) ?? []); setLocationSearched(true); }
-    setSaving(false);
+    event.preventDefault();
+    const requestId = ++locationSearchRequestId.current;
+    setLocationSearchPending(true);
+    setError(null);
+    setLocationCandidates([]);
+    setLocationSearched(false);
+    try {
+      const { data, error: searchError } = await supabase.rpc('find_crm_location_candidates', {
+        p_account_organization_id: account.id,
+        p_query: locationForm.name.trim() || null,
+        p_address: locationForm.address.trim() || null,
+      });
+      if (requestId !== locationSearchRequestId.current) return;
+      if (searchError) setError(searchError.message);
+      else { setLocationCandidates((data as LocationCandidate[]) ?? []); setLocationSearched(true); }
+    } catch (searchRequestError) {
+      if (requestId !== locationSearchRequestId.current) return;
+      setError(searchRequestError instanceof Error ? searchRequestError.message : 'Location search failed. Please try again.');
+    } finally {
+      if (requestId === locationSearchRequestId.current) setLocationSearchPending(false);
+    }
+  };
+
+  const updateLocationForm = (update: Partial<typeof locationForm>) => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
+    setLocationForm((current) => ({ ...current, ...update }));
+    setLocationCandidates([]);
+    setLocationSearched(false);
+    setError(null);
+  };
+
+  const closeLocationLookup = () => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
+    setLocationDialogOpen(false);
   };
 
   const openLocationLookup = () => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
     setLocationDialogOpen(true); setLocationStage('search'); setLocationCandidates([]); setLocationSearched(false); setError(null);
   };
 
@@ -523,8 +556,56 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
       {showActivityForm && <form className="crm-workspace-form" onSubmit={saveActivity}><header><strong>Log relationship activity</strong><button type="button" onClick={() => setShowActivityForm(false)}><X size={16} /></button></header><div className="crm-form-grid"><label><span>Activity type</span><select value={activityForm.type} onChange={(e) => setActivityForm({ ...activityForm, type: e.target.value })}><option value="call">Call</option><option value="email">Email</option><option value="meeting">Meeting</option><option value="note">Note</option><option value="task">Task</option></select></label><label><span>Occurred at</span><input type="datetime-local" required value={activityForm.occurredAt} onChange={(e) => setActivityForm({ ...activityForm, occurredAt: e.target.value })} /></label></div><label><span>Subject</span><input required value={activityForm.subject} onChange={(e) => setActivityForm({ ...activityForm, subject: e.target.value })} /></label><label><span>Details</span><textarea rows={4} value={activityForm.details} onChange={(e) => setActivityForm({ ...activityForm, details: e.target.value })} /></label><label><span>Outcome</span><input value={activityForm.outcome} onChange={(e) => setActivityForm({ ...activityForm, outcome: e.target.value })} /></label><label><span>Follow up at</span><input type="datetime-local" value={activityForm.followUpAt} onChange={(e) => setActivityForm({ ...activityForm, followUpAt: e.target.value })} /></label><footer><span>Activities are append-only account history.</span><div><button type="button" onClick={() => setShowActivityForm(false)}>Cancel</button><button type="submit" disabled={saving || !activityForm.subject.trim()}>{saving ? 'Recording' : 'Record activity'}</button></div></footer></form>}
       {showTenderDocumentForm && <form className="crm-workspace-form" onSubmit={attachTenderDocument}><header><strong>Attach tender source</strong><button type="button" onClick={() => setShowTenderDocumentForm(false)}><X size={16} /></button></header><p>The source is recorded as unreviewed evidence. Uploading it does not accept its contents or change the tender status.</p><label><span>Tender</span><select required value={tenderDocumentTenderId} onChange={(event) => setTenderDocumentTenderId(event.target.value)}>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.title}</option>)}</select></label><div className="crm-form-grid"><label><span>Document type</span><select value={tenderDocumentType} onChange={(event) => setTenderDocumentType(event.target.value)}><option value="proposal">Proposal</option><option value="contract">Contract</option><option value="clause">Clause</option><option value="reference">Reference</option><option value="other">Other</option></select></label><label><span>Source reference</span><input value={tenderDocumentReference} onChange={(event) => setTenderDocumentReference(event.target.value)} placeholder="Portal, email, addendum, or source locator" /></label></div><label><span>Source file</span><input type="file" required onChange={(event) => setTenderDocumentFile(event.target.files?.[0] ?? null)} /><small>Maximum 25 MB. The SHA-256 hash is recorded for provenance.</small></label><footer><span>The attachment remains unreviewed until a separate human review.</span><div><button type="button" onClick={() => setShowTenderDocumentForm(false)}>Cancel</button><button type="submit" disabled={saving || !tenderDocumentTenderId || !tenderDocumentFile}>{saving ? 'Attaching' : 'Attach source'}</button></div></footer></form>}
         {siteDialogOpen && <CrmSiteDialog account={{ id: account.id, name: account.name }} locationId={siteDialogLocationId ?? undefined} onClose={() => setSiteDialogOpen(false)} onCreated={() => { setSiteDialogOpen(false); setNotice('Site created. Continue with its zones and boundary inside Places.'); void loadWorkspace(); }} />}
-        {locationDialogOpen && locationStage === 'search' && <form className="crm-workspace-form" onSubmit={searchLocations}><header><strong>Find location / place</strong><button type="button" onClick={() => setLocationDialogOpen(false)}><X size={16} /></button></header><p>Search physical place records before creating a Location House. Results never expose another account's organization, finance, contacts, jobs, safety notes, or agreements.</p><div className="crm-form-grid"><label><span>Location name</span><input value={locationForm.name} onChange={(event) => setLocationForm({ ...locationForm, name: event.target.value })} placeholder="e.g. Nelson Civic Centre" /></label><label><span>Street address</span><input value={locationForm.address} onChange={(event) => setLocationForm({ ...locationForm, address: event.target.value })} placeholder="Full physical address" /></label></div><footer><button type="button" onClick={() => setLocationDialogOpen(false)}>Cancel</button><button type="submit" disabled={saving || (locationForm.name.trim().length < 2 && locationForm.address.trim().length < 4)}>{saving ? 'Searching' : 'Search places'}</button></footer>{locationSearched && <section className="crm-location-lookup-results"><strong>{locationCandidates.length ? 'Possible physical place matches' : 'No matching physical places found'}</strong><span>{locationCandidates.length ? 'Review the shared physical setup before creating another Location House.' : 'A new Location House can be created for this account.'}</span>{locationCandidates.map((candidate) => <article key={candidate.location_id}><div><strong>{candidate.name}</strong><span>{[candidate.address, candidate.suburb, candidate.postcode].filter(Boolean).join(', ') || 'Address not recorded'}</span><small>{candidate.match_reason} · {candidate.site_count} site facet{candidate.site_count === 1 ? '' : 's'} · {candidate.zone_count} zone facet{candidate.zone_count === 1 ? '' : 's'} · {candidate.boundary_state}</small></div>{candidate.belongs_to_account ? <button type="button" onClick={() => { setLocationDialogOpen(false); setManagedLocationId(candidate.location_id); }}>Open existing place</button> : <em>Existing place is managed by another account. Arrange authorized service access; do not duplicate it.</em>}</article>)}{!locationCandidates.some((candidate) => candidate.match_reason === 'Exact address match') && <button type="button" onClick={() => setLocationStage('create')}>Create new location</button>}</section>}</form>}
-        {locationDialogOpen && locationStage === 'create' && <form className="crm-workspace-form" onSubmit={createLocation}><header><strong>Create location / place</strong><button type="button" onClick={() => setLocationDialogOpen(false)}><X size={16} /></button></header><p>Create an organization-owned Location House only after no matching physical place is found. Sites and zones remain sibling facets managed from this organization card.</p><div className="crm-form-grid"><label><span>Location name</span><input required maxLength={200} value={locationForm.name} onChange={(event) => setLocationForm({ ...locationForm, name: event.target.value })} placeholder="e.g. Nelson Civic Centre" /></label><label><span>Street address</span><input value={locationForm.address} onChange={(event) => setLocationForm({ ...locationForm, address: event.target.value })} placeholder="Full physical address" /></label></div><div className="crm-form-grid"><label><span>Suburb / locality</span><input value={locationForm.suburb} onChange={(event) => setLocationForm({ ...locationForm, suburb: event.target.value })} /></label><label><span>Postcode</span><input inputMode="numeric" value={locationForm.postcode} onChange={(event) => setLocationForm({ ...locationForm, postcode: event.target.value })} /></label></div><label><span>Location notes</span><textarea rows={3} value={locationForm.notes} onChange={(event) => setLocationForm({ ...locationForm, notes: event.target.value })} placeholder="Access context, hazards, or other house-level notes" /></label><footer><button type="button" onClick={() => setLocationStage('search')}>Back to matches</button><button type="submit" disabled={saving || !locationForm.name.trim()}>{saving ? 'Creating' : 'Create location / place'}</button></footer></form>}
+        {locationDialogOpen && locationStage === 'search' && (
+          <form className="crm-workspace-form" onSubmit={searchLocations}>
+            <header><strong>Find location / place</strong><button type="button" onClick={closeLocationLookup}><X size={16} /></button></header>
+            <p>Search physical place records before creating a Location House. Results never expose another account's organization, finance, contacts, jobs, safety notes, or agreements.</p>
+            <div className="crm-form-grid">
+              <label><span>Location name</span><input value={locationForm.name} onChange={(event) => updateLocationForm({ name: event.target.value })} placeholder="e.g. Nelson Civic Centre" /></label>
+              <label><span>Street address</span><input value={locationForm.address} onChange={(event) => updateLocationForm({ address: event.target.value })} placeholder="Full physical address" /></label>
+            </div>
+            <footer>
+              <button type="button" onClick={closeLocationLookup}>Cancel</button>
+              <button type="submit" disabled={saving || locationSearchPending || (locationForm.name.trim().length < 2 && locationForm.address.trim().length < 4)}>{locationSearchPending ? 'Searching' : saving ? 'Saving' : 'Search places'}</button>
+            </footer>
+            {locationSearched && <section className="crm-location-lookup-results">
+              <strong>{locationCandidates.length ? 'Possible physical place matches' : 'No matching physical places found'}</strong>
+              <span>{locationCandidates.length ? 'Review the shared physical setup before creating another Location House.' : 'A new Location House can be created for this account.'}</span>
+              {locationCandidates.map((candidate) => <article key={candidate.location_id}>
+                <div>
+                  <strong>{candidate.name}</strong>
+                  <span>{[candidate.address, candidate.suburb, candidate.postcode].filter(Boolean).join(', ') || 'Address not recorded'}</span>
+                  <small>{candidate.match_reason} · {candidate.site_count} site facet{candidate.site_count === 1 ? '' : 's'} · {candidate.zone_count} zone facet{candidate.zone_count === 1 ? '' : 's'} · {candidate.boundary_state}</small>
+                </div>
+                {candidate.belongs_to_account
+                  ? <button type="button" onClick={() => { setLocationDialogOpen(false); setManagedLocationId(candidate.location_id); }}>Open existing place</button>
+                  : <em>{candidate.match_reason === 'Exact address match'
+                    ? "Another account already has its own house at this address. You can create a separate house for this account linked to the shared canonical place; their house and records stay separate."
+                    : 'Possible place match in another account. Confirm whether it is the same physical place before creating a separate location.'}</em>}
+              </article>)}
+              {!hasExactAddressInAccount && <button type="button" onClick={() => setLocationStage('create')}>Create location for this account</button>}
+            </section>}
+          </form>
+        )}
+        {locationDialogOpen && locationStage === 'create' && (
+          <form className="crm-workspace-form" onSubmit={createLocation}>
+            <header><strong>Create location / place</strong><button type="button" onClick={() => setLocationDialogOpen(false)}><X size={16} /></button></header>
+            <p>Create a Location House for this account. When the address matches an existing canonical place, the new house links to that shared place identity; other accounts' houses and records remain separate. Sites and zones stay as sibling facets.</p>
+            <div className="crm-form-grid">
+              <label><span>Location name</span><input required maxLength={200} value={locationForm.name} onChange={(event) => updateLocationForm({ name: event.target.value })} placeholder="e.g. Nelson Civic Centre" /></label>
+              <label><span>Street address</span><input value={locationForm.address} onChange={(event) => updateLocationForm({ address: event.target.value })} placeholder="Full physical address" /></label>
+            </div>
+            <div className="crm-form-grid">
+              <label><span>Suburb / locality</span><input value={locationForm.suburb} onChange={(event) => updateLocationForm({ suburb: event.target.value })} /></label>
+              <label><span>Postcode</span><input inputMode="numeric" value={locationForm.postcode} onChange={(event) => updateLocationForm({ postcode: event.target.value })} /></label>
+            </div>
+            <label><span>Location notes</span><textarea rows={3} value={locationForm.notes} onChange={(event) => updateLocationForm({ notes: event.target.value })} placeholder="Access context, hazards, or other house-level notes" /></label>
+            <footer>
+              <button type="button" onClick={() => setLocationStage('search')}>Back to matches</button>
+              <button type="submit" disabled={saving || !locationForm.name.trim()}>{saving ? 'Creating' : 'Create location / place'}</button>
+            </footer>
+          </form>
+        )}
         {managedLocationId && <OperationalPlaceManager locationId={managedLocationId} onClose={() => { setManagedLocationId(null); void loadWorkspace(); }} onSaved={() => void loadWorkspace()} />}
       {view === 'sites' && <section className="crm-location-finance"><header><div><span>Location house 360</span><strong>Agreements and finance by place</strong><p>Commercial authority is held at the Site or Zone under this physical house.</p></div></header>{locations.map((location) => { const siteIdsAtLocation = sites.filter((site) => site.location_id === location.id).map((site) => site.id); const zoneIdsAtLocation = zones.filter((zone) => zone.location_id === location.id).map((zone) => zone.id); const agreementsAtLocation = locationAgreements.filter((link) => (link.site_id !== null && siteIdsAtLocation.includes(link.site_id)) || (link.zone_id !== null && zoneIdsAtLocation.includes(link.zone_id))); const financeAtLocation = locationFinance.filter((finance) => (finance.site_id !== null && siteIdsAtLocation.includes(finance.site_id)) || (finance.zone_id !== null && zoneIdsAtLocation.includes(finance.zone_id))); return <article key={location.id}><div className="crm-location-finance-heading"><strong>{location.name}</strong><span>{agreementsAtLocation.length} agreement link{agreementsAtLocation.length === 1 ? '' : 's'} · {financeAtLocation.length} finance record{financeAtLocation.length === 1 ? '' : 's'}</span></div>{agreementsAtLocation.length > 0 ? <div className="crm-location-agreements">{agreementsAtLocation.map((link) => <div key={link.id}><strong>{link.agreement?.name ?? 'Service agreement'}</strong><span>{link.agreement?.agreement_type ?? 'operational'} · {link.status} · contract price {link.share_contract_price ? 'shared' : 'private'} · actual cost {link.share_actual_cost ? 'shared' : 'private'}</span></div>)}</div> : <p className="crm-workspace-subtle">No service agreement is anchored to this house yet.</p>}{financeAtLocation.length > 0 && <div className="crm-location-finance-grid">{financeAtLocation.map((finance) => <div key={finance.id}><span>{finance.billing_model.replaceAll('_', ' ')}</span>{finance.hourly_rate != null && <strong>NZ${Number(finance.hourly_rate).toFixed(2)}/hr</strong>}{finance.per_visit_rate != null && <strong>NZ${Number(finance.per_visit_rate).toFixed(2)}/visit</strong>}{finance.flat_rate_monthly != null && <strong>NZ${Number(finance.flat_rate_monthly).toFixed(2)}/month</strong>}<small>{finance.payment_terms_days} day payment terms</small></div>)}</div>}</article>; })}</section>}
       {setupAgreement && <CrmAgreementSetupDialog agreement={{ id: setupAgreement.id, name: setupAgreement.name, clientName: account.name, invitationStatus: setupAgreement.invitation_status }} onClose={() => { setSetupAgreement(null); void loadWorkspace(); }} />}

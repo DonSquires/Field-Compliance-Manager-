@@ -1,6 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { CAN_SQL, OWNER_EMAILS } from '../_shared/auth.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -96,11 +95,13 @@ serve(async (req)=>{
       error: 'Unauthorized'
     }, 401);
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: profile } = await admin.from('user_profiles').select('role').eq('id', user.id).single();
-    const isOwner = OWNER_EMAILS.has((user.email ?? '').toLowerCase().trim());
-    const role = String(profile?.role ?? '');
-    if (!isOwner && !CAN_SQL.has(role)) return json({
-      error: 'Forbidden: Atlas inspection requires an admin diagnostic role'
+    // Owner ruling 2026-11-01: Atlas is available to every signed-in rank. It is a
+    // map of the build, not tenant business records; the Conductor and Oracle
+    // restrict and redact what Bob says per caller rank. Every caller, owners
+    // included, needs an existing, active profile; a failed lookup fails closed.
+    const { data: profile } = await admin.from('user_profiles').select('deactivated_at').eq('id', user.id).maybeSingle();
+    if (!profile || profile.deactivated_at) return json({
+      error: 'Forbidden: Atlas inspection requires an active account'
     }, 403);
     const body = await req.json();
     const action = String(body.action ?? 'capability_map').trim();

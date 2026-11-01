@@ -98,8 +98,8 @@ Post-release helper grant finding, 2026-11-02 (applied; #296):
   `authenticated`; anonymous RPC calls to the helpers return 401; and
   anonymous reads of the affected tables still succeed without errors.
 
-Anonymous RLS exposure finding, 2026-11-02 (migration
-`20261102180000_close_anonymous_rls_exposure.sql`, pending release):
+Anonymous RLS exposure finding, 2026-11-01 (migration
+`20261102180000_close_anonymous_rls_exposure.sql`, merged as #301):
 
 - **Before:** a count-only anonymous sweep of the 252 relations `anon` can
   select from, cross-checked against the live catalog and `schema.sql`, found
@@ -131,11 +131,93 @@ Anonymous RLS exposure finding, 2026-11-02 (migration
   - Grand-master and officer row counts are unchanged, except the invite
     ledger, which is now service-only.
   - No PUBLIC policy remains on these tables.
-  - Still to verify after release: the live catalog refresh, a re-run of the
-    anonymous sweep, and an Atlas refresh.
-- **Owner question (open):** org-less audit rows and the Atlas/Bob governance
-  tables stay readable by every authenticated account, including officers.
-  Narrowing that to platform roles is a separate access decision.
+  - Verified after release: the catalog refresh merged as #302, and Atlas
+    refreshed for that head. Live, none of the fifteen tables has a PUBLIC
+    policy, and only `service_role` (and the owner) can execute
+    `check_invite_rate_limit`. A re-run of the anonymous sweep reached only
+    the PostGIS reference tables.
+- **Owner ruling 2026-11-01:** Bob and Atlas are available at every level,
+  because Oracle and Conductor restrict and redact per user level. The
+  Atlas/Bob governance tables therefore stay readable by authenticated
+  accounts, and `bob-query-atlas` plus Bob's `query_atlas` tool now accept any
+  active signed-in rank (admin and admin officer are never blocked; deactivated
+  accounts are refused). Org-less audit rows are platform-only:
+  `20261102190000_platform_only_orgless_audit_rows.sql` limits them to the
+  grand master and a platform owner, while organisation rows keep
+  `org_access_allowed`. In a live rollback rehearsal the grand master, the
+  platform owner and Bob's service identity kept all 31 org-less rows; a
+  master, an admin officer and a non-platform identity dropped to 0; and every
+  actor's organisation-row sample was unchanged. Released as #303 (catalog
+  #305): live `audit_log_select` carries the platform-only arm, and the
+  deployed `bob-query-atlas` was updated after the merge.
+
+Organisation reach evaluated per row, 2026-11-02 (migration
+`20261102200000_org_access_policies_initplan.sql`):
+
+- **Before:** 357 public policies on 257 tables made 410 calls to
+  `org_access_allowed(X)`. Postgres ran that function once for every candidate
+  row. Each call re-read the caller's profile, organisation tree, grants and
+  agreements, so a plain read of a large table was slow even when few rows were
+  visible. Live, an admin officer counting `bob_event_log` took about 20 s,
+  past the 8 s authenticated statement timeout, so the request failed.
+  `bob_messages` took 5.8 s, `observations` 4.3 s, and the anonymous key
+  spent 1.3–4.2 s on the same tables to return no rows.
+- **During:** `accessible_org_ids()` returns the caller's whole reach as one
+  array. It is the same six-clause rule as `org_access_allowed`, and it is
+  empty for anonymous and deactivated callers. Every policy now uses
+  `((SELECT is_grand_master()) OR COALESCE((X) = ANY ((SELECT
+  accessible_org_ids())::uuid[]), false))`. The scalar sub-selects run once
+  per statement as initPlans. COALESCE keeps a NULL target false, as before.
+  The migration was generated from the live catalog after #303, so each policy
+  keeps its other arms, including the platform-only org-less audit arm.
+- **Evidence:**
+  - On live, the function and the template agree for every caller and
+    target.
+  - A row and hash comparison before and after the rewrite matched on every
+    table for a narrow officer, and on the slices that completed for a wide
+    officer and a master.
+  - In a rollback rehearsal, those same reads took 3–29 ms. In the
+    wide-officer sweep, `audit_log` fell from 12.6 s to 44 ms and
+    `bob_event_log` from 22 s to 14 ms. `observations` fell only from 7 s to
+    1.4 s, because other per-row helpers remain (see follow-ups).
+  - `test/org-access-policy-initplan.test.js` adds:
+    - a static guard: no effective policy may call `org_access_allowed`, and
+      every `accessible_org_ids` use must sit inside the guarded template;
+    - a coupling check: a migration that redefines `org_access_allowed` must
+      also redefine `accessible_org_ids`;
+    - a Postgres fixture (`BOB_TEST_POSTGRES=1`) comparing the function and
+      policy forms over a seeded hierarchy with grants, agreements, a
+      deactivated account and anonymous callers. Breaking one clause of
+      `accessible_org_ids` makes the fixture fail.
+  - An apply-only live rehearsal ran in 317 ms and was rolled back. It left 0
+    per-row public policies and 357 initPlan policies, did not touch storage,
+    and confirmed that PUBLIC has no EXECUTE on the new function.
+- **Lesson:** the full live equivalence sweep held each rewrite inside a
+  rollback transaction while it measured. One slice ran past the Management
+  API's 100 s gateway limit, and its server transaction kept the policy locks
+  after the HTTP call failed. Live reads were briefly blocked (most bursts were
+  under 7 s, one was about 45 s) until the sweep was stopped. Rehearsals that
+  alter policies on production must now be apply-and-check only, with a
+  `lock_timeout`. Row comparison belongs in the local fixture. The migration
+  itself sets a 5 s `lock_timeout`, so if a long query holds a table, the
+  migration fails cleanly and the release lane retries it on its next tick.
+- **Follow-ups:** other per-row helpers still dominate a few tables after this
+  rewrite. Each needs its own set form and its own proof:
+  - `location_events`: 39 s for a wide officer, from
+    `has_location_access(client_site_id, zone_id, 'client_reads_provider')` in
+    `location_events_client_select`.
+  - `entity_links`: 4.9 s, from `can_access_vehicle_owner_identity`,
+    `can_access_person_contacts` and `nzta_reveal_active`.
+  - `observations`: 1.4 s, from `user_has_task_entitlement(auth.uid(), id)`,
+    which `observations_task_entitlement_select` calls for every row outside
+    the caller's reach.
+  - `evidence_items`: 4.7 s, from `nzta_evidence_restricted(id)`.
+  - `document_classifications`: 1.9 s. Its FOR ALL write policy calls
+    `is_admin_for_org` for reads too.
+  - Eight `storage.objects` policies (bob_uploads, identity_evidence,
+    notice_artifacts and scans, insert and select) still call
+    `org_access_allowed` on the folder name. `schema.sql` covers `public`
+    only, so they need their own migration and evidence.
 
 Owner-directed client/place simplification, 2026-10-28:
 
@@ -164,6 +246,28 @@ Owner-directed client/place simplification, 2026-10-28:
   on field capture; ordinary profile edits do not infer agreements or pricing.
   Administrators can explicitly confirm their own current pending engagement
   without accepting a client invitation, and recapture restores inactive markers.
+- **Cross-organisation place reuse finding, 2026-11-02:** Before, CRM search
+  showed an exact-address match owned by another account but hid the create
+  action, directing the operator to arrange access to that account's house.
+  That contradicted the house model: each organisation needs its own house,
+  while the address key links both houses to one canonical place. During, an
+  exact match in the selected account still opens its existing house; a match
+  in another account permits creation of a separate house for the selected
+  account. The existing `manage_crm_location` writer and place-identity trigger
+  create the account-scoped house and reuse the canonical address identity;
+  they do not grant access to the other account's house or records. Editing
+  either search field invalidates the pending lookup generation, clears stale
+  results and errors, and causes any late success or failure response to be
+  ignored. Closing or reopening the lookup also invalidates pending requests.
+  After, the two houses remain separate while their `canonical_place_id` is
+  shared. The CRM workspace guard and browser regressions cover cross-account
+  creation plus stale success/error responses; the place-model convergence
+  database fixture verifies the shared canonical identity. The local Atlas
+  manifest confirms the existing component calls to
+  `find_crm_location_candidates` and `manage_crm_location` and its read of
+  `locations`; no live Atlas write was made because the session has no
+  authorized Atlas credentials. The protected main-branch refresh remains the
+  release path.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,
   actual constraints and place/agreement/financial triggers, stale fix/version
   rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
@@ -174,6 +278,67 @@ Owner-directed client/place simplification, 2026-10-28:
   field audit of HR, finance, every specialist module, every role and every
   viewport. Further consolidation should follow observed tasks, not hide
   necessary safety, NZTA, client disclosure or commercial decisions.
+
+Owner-directed Workforce consolidation, 2026-11-03 (follows the 2026-10-28
+simplification; owner chose "consolidate to 2" and "leave roster_templates"):
+
+- **Before:** the HR & Rostering workspace had four peer destinations
+  (Schedules & Rosters, People Pay & HR, Work Units & Coverage, People &
+  Access). The HR page also held a Rostering group, so shift setup lived in a
+  different destination from the roster board. Atlas (dry-run refresh, 1,616
+  capabilities / 9,685 edges) showed every HR/roster table reaching a screen
+  except `roster_templates` (FK-only, privileges revoked from app roles, 0 live
+  rows) and `staff_biometrics` (reads tightened separately in #311).
+- **During:** two destinations, **Rosters** and **People**, each with a section
+  strip. Rosters: Roster board (`/admin/roster`), Work units & coverage
+  (`/admin/roster-targets`), Shift setup & open shifts
+  (`/admin/people-hr?section=rostering`). People: Staff, pay & HR
+  (`/admin/people-hr`), Logins & access (`/admin/users`). The HR page shows only
+  its own view's groups (Staff, HR, Pay & Assets, or the rostering tabs).
+  Without the HR module, People opens Logins & access. If Rostering is disabled
+  while HR remains enabled, Rosters falls back to the existing HR-gated setup
+  view; the roster board and work-unit coverage stay behind their Rostering
+  gates. Section navigation preserves the handoff and work-unit context.
+  No route, permission or data path changed; old links and `?tab=` deep links to
+  rostering tabs still land in the right view.
+- **After:** `roster_templates` stays legacy-only (no screen, no writer). Its
+  retirement needs its own migration and evidence.
+- **Evidence gate:** vitest guards and the section helper pass. Desktop/mobile
+  synthetic Playwright runs cover HR administration, credential renewal,
+  HR-only Rosters fallback and mobilisation-context preservation, with win32
+  baselines regenerated. `roster-operations` week-board/publish and
+  `geofence-spine-map` screenshot failures also fail on `main` before this
+  change. No human walkthrough has been done yet.
+
+HR and roster Atlas gap triage, 2026-11-03 (live Atlas at `d9f435e9`, 216
+present-but-unwired entities; live schema and migration ledger match the repo):
+
+- **Before:** the submit RPCs stamp `timesheets.submitted_at` (2 of 2 live
+  rows), but neither the HR timesheet list, the branch review queue
+  (`get_branch_timesheet_queue`) nor the officer timesheet page showed it.
+  Reviewers could not tell a sheet sent that morning from one waiting for a
+  week. The queue function also had EXECUTE for PUBLIC and anon:
+  `20260905005800` dropped and recreated it without restoring the
+  authenticated-only grant from `20260905005500`. Its body still rejects a null
+  `auth.uid()`.
+- **During:** migration `20261103100000` returns `submitted_at` from the queue
+  and restores `REVOKE … FROM PUBLIC, anon` / `GRANT … TO authenticated,
+  service_role`. A rolled-back dry run on the live catalog confirmed the new
+  shape and an ACL limited to postgres, authenticated and service_role. The HR
+  list, the branch queue and the officer page show "Submitted 24 Aug, 9:30 am"
+  in NZ time.
+- **Left as is, with reasons:** `timesheets.payroll_export_batch_id` is written
+  by payroll export and read by `prepare_nz_payday_filing_package`; a batch UUID
+  adds nothing for a person. `external_refs` on shifts, roster assignments and
+  staff profiles is import provenance and is populated on every row.
+  `staff_biometrics` has 0 rows and no caller; it stays dormant by design.
+  `project_historical_patrol_roster` is intentionally disabled; its comment
+  points to `apply_historical_roster_assignment_import`. Person-domain items
+  such as `persons.homeless_status` are not HR.
+- **Evidence gate:** vitest guards, `rosterWords` and the web build pass. Serial
+  synthetic Playwright runs of HR administration and officer timesheets pass
+  apart from `officer-timesheet.spec.ts:22`, which assumes a UTC browser and
+  fails only on an NZ-time machine. No human walkthrough has been done yet.
 
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable

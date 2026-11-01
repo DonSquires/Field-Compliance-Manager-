@@ -1047,7 +1047,9 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   if (canCompareData) allowedTools.push('update_records');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
-  if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('query_atlas');
+  // Owner ruling 2026-11-01: Bob's Atlas is available at every rank. It maps the
+  // build, not tenant records; egress (Conductor/Oracle) redacts per caller rank.
+  allowedTools.push('query_atlas');
   if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('inspect_platform_services');
   if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'read_issues', 'propose_client_root_org');
   else if (tier === 'captain' || tier === 'commander') allowedTools.push('sql_read', 'check_proposals');
@@ -1434,11 +1436,11 @@ const APP_DESTINATIONS: Record<string, { label: string; path: string; job: strin
   investigations: { label: 'Open Investigations', path: '/admin/investigations', job: 'investigate linked records and observations' },
   locations: { label: 'Open Location Houses', path: '/admin/locations', job: 'work with operational places and their layers' },
   organization_settings: { label: 'Open Organisation Settings', path: '/admin/org-setup', job: 'configure the active organization' },
-  people: { label: 'Open People, Pay & HR', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
+  people: { label: 'Open People', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
   reports: { label: 'Open Reports', path: '/admin/reports', job: 'review operational and compliance reporting' },
-  roster: { label: 'Open Schedules & Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
+  roster: { label: 'Open Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
   sites: { label: 'Open Site Workspaces', path: '/admin/site-360', job: 'work with a place, agreement, work, evidence, and audit context' },
-  users: { label: 'Open People & Access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
+  users: { label: 'Open Logins & access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
   zones: { label: 'Open Zone Facets', path: '/admin/zones', job: 'work with zones and geofenced operational rules' }
 };
 
@@ -1451,7 +1453,7 @@ function execNavigateApp(args: Record<string, unknown>) {
       meta: {
         tool: 'navigate_app',
         outcome: 'need_destination',
-        answer_options: ['Open Schedules & Rosters', 'Open People, Pay & HR', 'Open Organisation Settings', 'Open Approvals']
+        answer_options: ['Open Rosters', 'Open People', 'Open Organisation Settings', 'Open Approvals']
       }
     };
   }
@@ -1735,7 +1737,7 @@ function attachGuidedProposalWorkflow(meta: JsonRecord) {
     t.tool === 'read_bob_chat' && caps.tier === 'admiral' || // assess_system is read-only whole-build assessment — ADMIRAL ONLY.
     t.tool === 'assess_system' && caps.tier === 'admiral' || // write_bob_chat is Bob's append-only notepad write — ADMIRAL ONLY.
     t.tool === 'write_bob_chat' && caps.tier === 'admiral' ||
-    t.tool === 'query_atlas' && (caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander') ||
+    t.tool === 'query_atlas' ||
     t.tool === 'inspect_platform_services' && (caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander') ||
     t.tool === 'read_issues' && caps.tier === 'admiral' || // write_self_memory is Bob's direct-write to his own memory — ADMIRAL ONLY.
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
@@ -4352,14 +4354,7 @@ async function execInspectPlatformServices(
     }
   };
 }
-async function execQueryAtlas(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
-  if (caps.tier !== 'admiral' && caps.tier !== 'captain' && caps.tier !== 'commander') return {
-    reply: 'Querying the Atlas is restricted to admin diagnostic roles.',
-    meta: {
-      tool: 'query_atlas',
-      outcome: 'forbidden'
-    }
-  };
+async function execQueryAtlas(authHeader: string, _caps: Caps, toolArgs: JsonRecord) {
   const action = String(toolArgs.action ?? 'capability_map').trim();
   if (action === 'status') {
     const statusResult = await callFn('bob-query-atlas', authHeader, { action });
@@ -10476,9 +10471,8 @@ serve(async (req)=>{
         next_tool: chosenTool ?? null
       });
     }
-    const atlasDiagnosticTier = caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
-    const explicitAtlasRequest = atlasDiagnosticTier
-      && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
+    // Owner ruling 2026-11-01: an explicit Atlas request reaches Atlas at every rank.
+    const explicitAtlasRequest = /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
       && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
     const explicitReadOnlyAtlasRequest = explicitAtlasRequest
       && (/\bread[- ]only\b/i.test(message) || /\bdo not (?:create|propose|open|run) (?:a )?builder\b/i.test(message));

@@ -115,6 +115,22 @@ Gates SELECT on ~60 tables. Passes if ANY of these is true:
 6. **Agreement-based (0271)** — user's org (or employer org) is a party on
    an active `service_agreement` with the target org. **Bidirectional.**
 
+**Policy form (2026-11-02).** Row-level security policies do not call
+`org_access_allowed(X)`, because Postgres would run it once per candidate row.
+They use the initPlan form, which computes the caller's reach once per
+statement:
+
+```sql
+((SELECT public.is_grand_master())
+  OR COALESCE((X) = ANY ((SELECT public.accessible_org_ids())::uuid[]), false))
+```
+
+`accessible_org_ids()` is the set form of clauses 2–6. It is empty for
+anonymous and deactivated callers. `org_access_allowed` remains the check for
+function bodies and single-row decisions. The two must stay equivalent, so a
+change to one is a change to both, proven again by
+`test/org-access-policy-initplan.test.js` (run with `BOB_TEST_POSTGRES=1`).
+
 ### Write gates
 
 - **`is_master_for_org(p_org_id)`** — master can manage orgs in their
@@ -608,7 +624,10 @@ approve anything for service to be given."
   limits direct audit inserts to the caller's own action in an organisation it
   can access, and makes the invite rate-limit RPC callable by the service role
   only. `test/anonymous-rls-exposure.test.js` fails if any such PUBLIC policy
-  returns.
+  returns. Owner ruling 2026-11-01: org-less audit rows are platform records,
+  so `20261102190000_platform_only_orgless_audit_rows.sql` lets only the grand
+  master and a platform owner read them; organisation rows keep
+  `org_access_allowed`.
   The remaining exposure, until the access token expires (at most one hour),
   is a deactivated user's own self-row data and any definer RPC that reads
   `user_profiles` directly instead of using the deactivation-aware helpers.

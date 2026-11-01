@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const test = require('node:test');
-const { spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
@@ -106,6 +106,42 @@ test('release lane prefers authoritative GitHub SSH and keeps a token-safe Gitea
   // systemd gives root no HOME, so the global safe.directory is invisible; the script must carry its own.
   assert.match(source, /GIT_CONFIG_KEY_0=safe\.directory GIT_CONFIG_VALUE_0="\$REPO_DIR"/);
   assert.match(source, /GIT_CONFIG_KEY_1=safe\.directory GIT_CONFIG_VALUE_1="\$RELEASES_DIR\/\*"/);
+});
+
+test('release lane refuses a main branch head with an unverified author', (t) => {
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
+  const guardStart = source.indexOf('VERIFIED_GITHUB_NAME=');
+  const guardEnd = source.indexOf('\n# 2. What is live?', guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart, 'the branch-head identity guard is present');
+  const guard = source.slice(guardStart, guardEnd);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-identity-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const repo = path.join(directory, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  fs.writeFileSync(path.join(repo, 'fixture.txt'), 'verified\n');
+  execFileSync('git', ['-C', repo, 'add', '.']);
+  const commit = (name, email, message) => {
+    execFileSync('git', ['-C', repo, '-c', `user.name=${name}`, '-c', `user.email=${email}`, 'commit', '-q', '--allow-empty', '-m', message], {
+      env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email },
+    });
+    return execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+  const verifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'verified');
+  const unverifiedHead = commit('Don Squires', 'squires.don@gmail.com', 'unverified');
+  const bashRepo = process.platform === 'win32'
+    ? repo.replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, '/')
+    : repo;
+  const runGuard = (head) => spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `REPO_DIR='${bashRepo}'\nHEAD_SHA='${head}'\nlog() { printf '%s\\n' "$*" >&2; }\n${guard}`,
+  });
+  const accepted = runGuard(verifiedHead);
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+  const refused = runGuard(unverifiedHead);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /main branch-head author is not the verified GitHub identity/);
+  assert.ok(source.indexOf('if ! verify_main_author') < source.indexOf('# 2. What is live?'));
 });
 
 test('release lane skips applied migrations and exclusively owns its live pointer', () => {
