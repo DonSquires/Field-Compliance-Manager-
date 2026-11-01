@@ -202,6 +202,20 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       assert.ok(start >= 0, symbol);
       return schema.slice(start, schema.indexOf('$function$;', start) + '$function$;'.length);
     }).join('\n');
+    // The catalog refresh after release carries the saved-patch retry already applied; reverse exactly its two
+    // anchored replacements so the migration is exercised on the claim function it was written against.
+    const retryLiteral = name => {
+      const match = savedPatchRetryMigration.match(new RegExp(`\\s${name} text := '((?:[^']|'')*)';`));
+      assert.ok(match, name);
+      return match[1].replaceAll("''", "'");
+    };
+    const retryPatches = [['v_anchor', 'v_replacement'], ['v_context_anchor', 'v_context_replacement']]
+      .map(([anchor, replacement]) => [retryLiteral(anchor), retryLiteral(replacement)]);
+    const retryCounts = retryPatches.map(([, replacement]) => claimFunctions.split(replacement).length - 1);
+    assert.ok(retryCounts.every(count => count === retryCounts[0] && count <= 1),
+      `catalog claim function carries the saved-patch retry wholly or not at all (${retryCounts})`);
+    const preRetryClaimFunctions = retryPatches
+      .reduce((sql, [anchor, replacement]) => sql.replace(replacement, () => anchor), claimFunctions);
     const originalClaimFunctions = [
       ['20260830090000_builder_frontend_worker_leases.sql', 'builder_claim_frontend_worker'],
       ['20260830180000_builder_backend_worker_leases.sql', 'builder_claim_backend_worker'],
@@ -585,7 +599,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
         input: fixture + migration + skipFunction + recoveryMigration + requiredLaneMigration + reviewFunctions + checks + requiredLaneChecks + recoveryChecks + cycleFixture
-          + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks + savedPatchRetrySchema + savedPatchRetryMigration + savedPatchRetryChecks,
+          + originalClaimFunctions + cycleMigration + cycleChecks + preRetryClaimFunctions + cycleChecks + savedPatchRetrySchema + savedPatchRetryMigration + savedPatchRetryChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) { throw new Error(`PostgreSQL correction checks failed: ${error.stderr || error.message}`); }
