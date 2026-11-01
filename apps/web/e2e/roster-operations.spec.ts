@@ -376,7 +376,7 @@ test('roster page explains what to set up first when the branch has nothing to r
         await expect(page.getByText(/Build a patrol run from a client agreement in Client Portfolios/)).toBeVisible();
         await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Client Portfolios' })).toBeVisible();
         await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Work units' })).toBeVisible();
-        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'People, Pay & HR' })).toBeVisible();
+        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'People' })).toBeVisible();
         await expect(page.locator('.roster-board')).toHaveCount(0);
         await expect(page.getByRole('button', { name: /Publish .*draft/ })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Create shift' })).toHaveCount(0);

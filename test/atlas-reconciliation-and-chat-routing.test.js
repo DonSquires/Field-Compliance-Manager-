@@ -95,7 +95,7 @@ test('visible app navigation is bounded to known role-gated destinations', () =>
   assert.match(caddie, /navigate_app: \{/);
   assert.match(caddie, /navigate_app: 'onspace-ai-chat'/);
   assert.match(chat, /const APP_DESTINATIONS:/);
-  assert.match(chat, /roster: \{ label: 'Open Schedules & Rosters', path: '\/admin\/roster'/);
+  assert.match(chat, /roster: \{ label: 'Open Rosters', path: '\/admin\/roster'/);
   assert.match(chat, /organization_settings: \{ label: 'Open Organisation Settings', path: '\/admin\/org-setup'/);
   assert.match(chat, /case 'navigate_app':/);
   assert.match(chat, /navigation_actions: \[\{ label: destination\.label, path: destination\.path \}\]/);
