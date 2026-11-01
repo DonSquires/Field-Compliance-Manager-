@@ -41,7 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
-import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
+import { validateRecordUpdatePlan, amendRecordUpdatePlan, recordUpdateSources, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
 const CORS = {
@@ -968,6 +968,8 @@ function isValidGeoJsonBoundary(b: any) {
 }
 async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: string, userId: string | null = null) {
   const r = (role || '').toLowerCase();
+  // Owner ruling (2026-11-01): the officer role is deliberately the ensign tier in Bob (as in _shared/auth.ts);
+  // there is no 'officer' tier, so field officers do not get ingest, import, schema inspection or entitled-org scope.
   const tier = r === 'grand_master' ? 'admiral' : r === 'master' ? 'captain' : r === 'admin' || r === 'admin_officer' ? 'commander' : r === 'officer' ? 'ensign' : 'guest';
   const crossOrgUnrestricted = tier === 'admiral';
   let scopeOrgIds = orgId ? [
@@ -990,7 +992,7 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   // Operational-data scope (sites/zones) = full entitled set incl. bidirectional
   // agreements, per the ratified scoping ruling (!1350). Transcripts are
   // owning-org-only (a different, tighter scope) and are NOT scoped here.
-  if (userId && (tier === 'captain' || tier === 'commander' || tier === 'officer')) {
+  if (userId && (tier === 'captain' || tier === 'commander')) {
     try {
       const { data: entitled } = await supabase.rpc('my_entitled_org_ids_for_user', {
         p_user_id: userId
@@ -1024,9 +1026,9 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
     }
   }
   const canWrite = tier === 'admiral' || tier === 'captain' || tier === 'commander';
-  const canIngest = canWrite || tier === 'officer';
+  const canIngest = canWrite;
   const canPromote = canWrite;
-  const canInspectSchema = canWrite || tier === 'officer';
+  const canInspectSchema = canWrite;
   const canCompareData = tier !== 'guest';
   const allowedTools = [
     'understand_document',
@@ -1049,7 +1051,7 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('inspect_platform_services');
   if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'read_issues', 'propose_client_root_org');
   else if (tier === 'captain' || tier === 'commander') allowedTools.push('sql_read', 'check_proposals');
-  else if (tier === 'officer' || tier === 'ensign') allowedTools.push('check_proposals');
+  else if (tier === 'ensign') allowedTools.push('check_proposals');
   // C2 (issue #3): resolve the caller's area x level matrix for this org. Admiral
   // (grand_master) is unrestricted, so the matrix is not applied to them. For
   // everyone else it is a best-effort NARROWING signal read by the UI/help layer;
@@ -9881,25 +9883,80 @@ serve(async (req)=>{
             if (!caps.canCompareData) return { reply: 'Guest accounts cannot change records.', meta: toolMeta('forbidden') };
             if (!orgId) return { reply: 'Your account is not attached to an organisation, so I cannot change records for you.', meta: toolMeta('no_org') };
             if (!conversationId) return { reply: 'Open a saved Bob conversation first so I can hold the preview for you to confirm.', meta: toolMeta('need_params') };
-            const validated = validateRecordUpdatePlan(toolArgs);
+            // A follow-up while a preview awaits its yes amends that preview (the user's corrections and additions
+            // merge into it) unless the planner explicitly starts over. Only a preview this server signed for this
+            // caller, conversation and organisation can be amended.
+            const prior = pending?.kind === 'record_updates_pending' ? pending.record_updates : null;
+            const trustedPrior = Boolean(prior) && toolArgs.replace_all !== true && typeof pending?.message_id === 'string' &&
+              isTrustedPendingRecordUpdates(prior, { userId: user.id, conversationId, organizationId: orgId }) &&
+              await verifyPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, prior);
+            const amendable = trustedPrior && Array.isArray(prior?.source_operations);
+            // Every successor (amended, or the same preview re-issued) first retires the preview it replaces, in its
+            // one transcript row and only while it is still unanswered. A copy of a signed preview in a second row,
+            // or a preview confirmed meanwhile, cannot be carried forward under a fresh plan id.
+            const retirePrior = () => claimRecordUpdatePreview({
+              db: admin, messageId: pending?.message_id, conversationId, planId: prior?.plan_id, answer: 'amend'
+            });
+            const alreadyAnswered = () => ({
+              reply: 'That preview has already been answered or replaced, so I have not changed it and nothing more was written. Ask me what changed if you want to check.',
+              meta: toolMeta('already_answered', { record_updates_plan_id: prior?.plan_id })
+            });
+            // The preview still waiting is kept exactly as it was (steps, held items and sources) under a fresh plan
+            // id; created_at keeps its expiry.
+            const reissuePrior = async (lead: string, extra: JsonRecord) => {
+              let kept;
+              try {
+                kept = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, { ...prior, plan_id: crypto.randomUUID() });
+              } catch {
+                return null;
+              }
+              if (!(await retirePrior())) return alreadyAnswered();
+              return {
+                reply: `${lead}\n\nThe earlier preview still stands unchanged. Reply **yes** to apply it as shown, or **no** to discard it.`,
+                meta: toolMeta('proposed', { pending_record_updates: kept, ...extra })
+              };
+            };
+            if (trustedPrior && !amendable) {
+              // A preview made before previews could be amended carries no sources to rebuild it from.
+              const kept = await reissuePrior(
+                'That preview was made before I could change a preview in place, so I cannot amend it. Reply **no** to discard it and then tell me the full set of changes, and I will show a fresh preview.',
+                { legacy_preview_reissued_for_plan_id: prior?.plan_id }
+              );
+              if (kept) return kept;
+              return { reply: 'I cannot change or hold that preview right now, so nothing will be changed. Tell me the full set of changes again shortly and I will show a fresh preview.', meta: toolMeta('unavailable') };
+            }
+            const validated = amendable ? amendRecordUpdatePlan(prior, toolArgs) : validateRecordUpdatePlan(toolArgs);
             const plan = validated.ok ? validated.plan : null;
-            if (!plan) return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
+            if (!plan) {
+              if (amendable) {
+                // The rejected amendment must not consume the preview that is still waiting.
+                const kept = await reissuePrior(String(validated.error ?? 'I could not apply that change to the preview.'), { amendment_rejected_for_plan_id: prior?.plan_id });
+                if (kept) return kept;
+              }
+              return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
+            }
+            const amendedFrom = amendable ? { amended_from_plan_id: prior?.plan_id } : {};
             const resolved = await resolveRecordUpdatePlan({
               rpc: (name: string, args: JsonRecord) => callerClient.rpc(name, args), organizationId: orgId, plan
             });
-            const preview = renderRecordUpdatePreview(resolved);
-            if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length }) };
+            const preview = renderRecordUpdatePreview({ ...resolved, amended: amendable });
+            if (!resolved.steps.length) {
+              if (amendable && !(await retirePrior())) return alreadyAnswered();
+              return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length, ...amendedFrom }) };
+            }
             let signed;
             try {
               signed = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, {
                 plan_id: crypto.randomUUID(), user_id: user.id, conversation_id: conversationId, organization_id: orgId,
                 created_at: new Date().toISOString(), source_summary: plan.source_summary,
-                steps: resolved.steps, held: resolved.held
+                steps: resolved.steps, held: resolved.held,
+                source_operations: recordUpdateSources(plan, amendable ? [] : (Array.isArray(toolArgs.operations) ? toolArgs.operations : []))
               });
             } catch {
               return { reply: 'I cannot hold a change preview for you to confirm right now, so nothing will be changed. Please try again shortly.', meta: toolMeta('unavailable') };
             }
-            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed }) };
+            if (amendable && !(await retirePrior())) return alreadyAnswered();
+            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed, ...amendedFrom }) };
           }
         case 'cancel_builder_job':
           {
