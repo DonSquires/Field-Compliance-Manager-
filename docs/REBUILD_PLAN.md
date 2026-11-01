@@ -98,8 +98,8 @@ Post-release helper grant finding, 2026-11-02 (applied; #296):
   `authenticated`; anonymous RPC calls to the helpers return 401; and
   anonymous reads of the affected tables still succeed without errors.
 
-Anonymous RLS exposure finding, 2026-11-02 (migration
-`20261102180000_close_anonymous_rls_exposure.sql`, pending release):
+Anonymous RLS exposure finding, 2026-11-01 (migration
+`20261102180000_close_anonymous_rls_exposure.sql`, merged as #301):
 
 - **Before:** a count-only anonymous sweep of the 252 relations `anon` can
   select from, cross-checked against the live catalog and `schema.sql`, found
@@ -133,9 +133,18 @@ Anonymous RLS exposure finding, 2026-11-02 (migration
   - No PUBLIC policy remains on these tables.
   - Still to verify after release: the live catalog refresh, a re-run of the
     anonymous sweep, and an Atlas refresh.
-- **Owner question (open):** org-less audit rows and the Atlas/Bob governance
-  tables stay readable by every authenticated account, including officers.
-  Narrowing that to platform roles is a separate access decision.
+- **Owner ruling 2026-11-01:** Bob and Atlas are available at every level,
+  because Oracle and Conductor restrict and redact per user level. The
+  Atlas/Bob governance tables therefore stay readable by authenticated
+  accounts, and `bob-query-atlas` plus Bob's `query_atlas` tool now accept any
+  active signed-in rank (admin and admin officer are never blocked; deactivated
+  accounts are refused). Org-less audit rows are platform-only:
+  `20261102190000_platform_only_orgless_audit_rows.sql` limits them to the
+  grand master and a platform owner, while organisation rows keep
+  `org_access_allowed`. In a live rollback rehearsal the grand master, the
+  platform owner and Bob's service identity kept all 31 org-less rows; a
+  master, an admin officer and a non-platform identity dropped to 0; and every
+  actor's organisation-row sample was unchanged.
 
 Owner-directed client/place simplification, 2026-10-28:
 

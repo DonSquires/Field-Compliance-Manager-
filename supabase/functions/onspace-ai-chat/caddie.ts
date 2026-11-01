@@ -324,7 +324,7 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
   // ── !1403 "Bob full-access v2" family (#329) ──────────────────────────────
   query_atlas: {
     purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Start with (1) status - report Atlas row counts, latest refresh timestamps, and whether source-commit parity is provable. If source_parity is unknown, compare Atlas with current repo_search or assess_system evidence before calling it current. Other actions: (2) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (3) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (4) gap_report - run a bounded complete scan of dormant/never-run entities; args { action, limit? }. (5) expectation_report - evaluate authored required/prohibited paths against live flow terrain; args { action, limit? }. These two report actions aggregate pages automatically up to a bounded limit; report a scan as complete only when no next_offset remains. (6) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
-    governance: 'read-only; bob_capability_map + bob_app_map_edges',
+    governance: 'read-only; every signed-in rank; Conductor egress redacts per caller; bob_capability_map + bob_app_map_edges',
     effect_class: 'admin_diagnostic_substrate_action'
   },
   inspect_platform_services: {
@@ -422,7 +422,8 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
       return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
     }
     if (tool === 'query_atlas') {
-      return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
+      // Owner ruling 2026-11-01: every rank; Conductor egress redacts per caller.
+      return true;
     }
     if (tool === 'inspect_platform_services') {
       return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';

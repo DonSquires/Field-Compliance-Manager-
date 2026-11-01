@@ -20,8 +20,8 @@ test('seed data reconciliation is service-role-only and never invents canonical 
   assert.doesNotMatch(compare, /'_seed_fs_nelson_clients_raw'/);
 });
 
-test('explicit admiral Atlas requests reach the read-only Atlas tool when planning falls back to an answer', () => {
-  assert.match(chat, /const atlasDiagnosticTier = caps\.tier === 'admiral' \|\| caps\.tier === 'captain' \|\| caps\.tier === 'commander';/);
+test('explicit Atlas requests at any rank reach the read-only Atlas tool when planning falls back to an answer', () => {
+  assert.doesNotMatch(chat, /atlasDiagnosticTier/);
   // Declared once: a redeclaration took onspace-ai-chat down with BOOT_ERROR on 2026-10-14.
   assert.equal(chat.match(/const explicitAtlasRequest =/g).length, 1);
   assert.match(chat, /chosenTool = 'query_atlas'/);
