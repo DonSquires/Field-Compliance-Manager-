@@ -17,6 +17,7 @@ const modelGatewayToken = 'test-model-gateway-token';
 const webhookSecret = 'test-webhook-secret';
 const baseUrl = `http://127.0.0.1:${port}`;
 let serverProcess;
+let serverStartupFailure = null;
 
 test('model-run disconnect cancels upstream work without writing to a closed response', async () => {
   const { EventEmitter } = require('node:events');
@@ -142,15 +143,25 @@ else process.exit(2);
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
+  serverProcess.once('exit', (code, signal) => {
+    serverStartupFailure = `process exited (${signal || code})`;
+  });
   await once(serverProcess, 'spawn');
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  let lastHealthError = 'no health response';
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (serverStartupFailure) break;
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) return;
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 50));
+      lastHealthError = `health returned HTTP ${response.status}`;
+    } catch (error) {
+      lastHealthError = error.message;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error('Bob control plane did not start');
+  throw new Error(
+    `Bob control plane did not start after 15 seconds: ${serverStartupFailure || lastHealthError}`
+  );
 });
 
 test.after(() => {

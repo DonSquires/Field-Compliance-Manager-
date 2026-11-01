@@ -5,6 +5,7 @@ const { spawnSync } = require('node:child_process');
 const { isProtectedPath } = require('./builder-path-policy');
 const { INFRASTRUCTURE_PATTERNS } = require('./builder-verification-outcome');
 const { baselineInfo, renderBaselines } = require('./builder-visual-baseline');
+const { patchTestPreservationFailures } = require('./builder-test-preservation');
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 100;
@@ -226,7 +227,7 @@ function frontendVerificationCommands({ changedFiles = [], webDir = null } = {})
   ];
 }
 
-function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/work/repository' }) {
+function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/work/repository', runCommand = run }) {
   const patchText = fs.readFileSync(patchPath, 'utf8');
   const changedFiles = validatePatchText(patchText);
   fs.rmSync(workDir, { recursive: true, force: true });
@@ -243,23 +244,33 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
 
   const before = Object.fromEntries(changedFiles.map(file => [file, sha256File(path.join(workDir, file))]));
   const commands = [];
-  commands.push(run('git', ['apply', '--check', '--whitespace=error-all', patchPath], { cwd: workDir }));
+  commands.push(runCommand('git', ['apply', '--check', '--whitespace=error-all', patchPath], { cwd: workDir }));
   let patchApplied = false;
   if (commands.at(-1).status === 0) {
-    commands.push(run('git', ['apply', '--whitespace=error-all', patchPath], { cwd: workDir }));
+    commands.push(runCommand('git', ['apply', '--whitespace=error-all', patchPath], { cwd: workDir }));
     patchApplied = commands.at(-1).status === 0;
   }
 
   let baseline = null;
   let visualBaselines = null;
   if (patchApplied) {
-    const visualFiles = changedFiles.filter(baselineInfo);
-    if (visualFiles.length) {
-      try {
-        visualBaselines = renderBaselines({ workDir, files: visualFiles, run, verifyOnly: true });
-        commands.push(...visualBaselines.commands);
-      } catch (error) {
-        commands.push({ command: 'independent visual baseline render', status: 1, stdout: '', stderr: redactLog(error.message) });
+    let preservationFailures;
+    try {
+      preservationFailures = patchTestPreservationFailures({ beforeDir: sourceDir, afterDir: workDir, patchPath });
+    } catch (error) {
+      preservationFailures = [`Existing test preservation could not be checked; refusing verification: ${redactLog(error.message)}`];
+    }
+    if (preservationFailures.length) {
+      commands.push({ command: 'pinned regression test preservation', status: 1, stdout: '', stderr: preservationFailures.join('; ') });
+    } else {
+      const visualFiles = changedFiles.filter(baselineInfo);
+      if (visualFiles.length) {
+        try {
+          visualBaselines = renderBaselines({ workDir, files: visualFiles, run: runCommand, verifyOnly: true });
+          commands.push(...visualBaselines.commands);
+        } catch (error) {
+          commands.push({ command: 'independent visual baseline render', status: 1, stdout: '', stderr: redactLog(error.message) });
+        }
       }
     }
     const e2eTargeted = targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web'));
@@ -269,15 +280,15 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
       // Evidence before each step: a worker killed at its lease still tells the handoff what was running.
       fs.mkdirSync(artifactDir, { recursive: true });
       fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: ['npm', ...args].join(' '), started_at: new Date().toISOString(), commands, e2e_selection: { smoke: E2E_SMOKE_SPECS, targeted: e2eTargeted, project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } }, null, 2)}\n`, { mode: 0o600 });
-      commands.push(run('npm', args, { cwd: workDir }));
+      commands.push(runCommand('npm', args, { cwd: workDir }));
       if (commands.at(-1).status !== 0) {
-        baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands, patched: commands.at(-1) });
+        baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands, patched: commands.at(-1), runCommand });
         if (tolerateBaselineFailures(commands.at(-1), baseline, args)) continue;
         break;
       }
     }
     if (commands.every(commandPassed)) {
-      commands.push(run('node', ['scripts/atlas-refresh.js'], { cwd: workDir }));
+      commands.push(runCommand('node', ['scripts/atlas-refresh.js'], { cwd: workDir }));
     }
   }
 
@@ -336,16 +347,16 @@ function tolerateBaselineFailures(command, baseline, args) {
  * at the pinned commit (job 72edc782: three guard tests broken by unrelated commits on main) and
  * the author must not be sent that failure as their own.
  */
-function baselineCheck({ workDir, patchPath, args, progressPath, commands, patched }) {
+function baselineCheck({ workDir, patchPath, args, progressPath, commands, patched, runCommand = run }) {
   const label = ['npm', ...args].join(' ');
   fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: `baseline check: ${label}`, started_at: new Date().toISOString(), commands }, null, 2)}\n`, { mode: 0o600 });
-  const revert = run('git', ['apply', '-R', '--whitespace=nowarn', patchPath], { cwd: workDir });
+  const revert = runCommand('git', ['apply', '-R', '--whitespace=nowarn', patchPath], { cwd: workDir });
   if (revert.status !== 0) return { command: label, checked: false, reason: 'patch could not be reverted for a baseline check' };
   let result;
   try {
-    result = run('npm', args, { cwd: workDir });
+    result = runCommand('npm', args, { cwd: workDir });
   } finally {
-    const restored = run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
+    const restored = runCommand('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
     if (restored.status !== 0) throw new Error('Could not restore candidate patch after baseline verification');
   }
   const alsoFails = result.status !== 0;
