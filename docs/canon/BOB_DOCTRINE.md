@@ -368,7 +368,10 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   minutes and for the same user, conversation and organisation, using the
   caller's JWT and only the existing audited RPCs (`manage_identity_vehicle`,
   `update_vehicle_profile_details`, `record_vehicle_person`, `add_person_alias`,
-  `raise_entity_flag`, `add_record_update`). The identity-critical human key is
+  `raise_entity_flag`, `add_record_update`, and, for creating a person record
+  or adding details such as role or affiliation, contact details and notes,
+  `manage_identity_person_record`, which the database limits to
+  identity-register administrators). The identity-critical human key is
   that confirmation of the exact preview, turned with the caller's own rank and
   `can_access_vehicle_owner_identity`: Bob holds no write authority of his own
   here, never uses the service role, never writes the sensitive floor directly,
@@ -383,7 +386,17 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   claimed before anything is applied or discarded, so overlapping replies
   cannot apply it twice. Each step reports applied, already present (only an
   exact duplicate), failed or not attempted; Bob never claims a change without
-  a receipt.
+  a receipt. A person record is created only when no exact match exists; a
+  strong near match (a spelling or surname variant) is held until the user says
+  the person is different, and the register is checked again immediately
+  before creating. Editing a person never renames them: the update carries the
+  name the register holds at that moment. A follow-up message while a preview
+  waits amends that preview rather than replacing it: new or corrected items
+  merge into it (the same vehicle, person, link, name or warning replaces the
+  earlier item), numbered items can be dropped, and one updated preview of
+  everything needs a fresh yes. A rejected amendment leaves the earlier
+  preview standing, and the planner's verifier blocks a prose refusal when the
+  user asked for record changes and `update_records` was available.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no

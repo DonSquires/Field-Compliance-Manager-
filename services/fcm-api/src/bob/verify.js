@@ -37,6 +37,27 @@ const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|fir
 // implemented, I will propose the changes" — no job was opened, the 7B critic passed it).
 const PROMISED_WORK_RE = /\b(?:I(?:'ll| will| am going to|'m going to)\s+(?:now\s+)?(?:update|fix|change|add|implement|create|open|make|propose|write|refactor|patch|correct|adjust|modify|wire|remove)\b|once (?:the|this) (?:fix|change|patch) is (?:implemented|made|in place)|I will (?:then )?propose the changes)/i;
 const CODE_NOUN_RE = /\b(?:code|logic|function|test(?: case)?s?|bug|patch|pull request|PR|migration|handler|regex|component|edge function|repository|refactor|implementation)\b/i;
+// A request to put supplied facts into the people/vehicle/report records ("update vehicle and people records with
+// the below details"). Live 2026-11: Bob answered in prose that there was "no vehicle/person record update path"
+// while update_records was in his catalogue, twice, and the critic's repair answered in prose again.
+const RECORD_UPDATE_VERB_RE = /\b(?:update|add|record|create|log|register|link|enter|save|put|file|capture|amend|correct|change|attach|note)\b/i;
+const RECORD_NOUN_RE = /\b(?:records?|register|details|alias(?:es)?|aka|safety warnings?|hazard warnings?)\b/i;
+// Person/vehicle/identity evidence, in the request or in Bob's own reply ("Vehicle record: …"), so a roster or
+// training-record request is not pushed into this tool.
+const RECORD_DOMAIN_RE = /\b(?:(?:person|people|persons)\s+(?:records?|register|details|profiles?)|veh[a-z]{2,6}|plates?|regos?|registration|alias(?:es)?|aka|safety warnings?|canonical records?|identity (?:register|records?))\b/i;
+const RECORD_UPDATE_REQUEST_RE = new RegExp(`${RECORD_UPDATE_VERB_RE.source}[^.?!\\n]{0,80}?${RECORD_NOUN_RE.source}`, 'i');
+const STATUS_QUESTION_RE = /^\s*(?:did|have|has|was|were|is|are|how|what|where|why|when|which|who)\b/i;
+const RECORD_UPDATE_REFUSAL_RE = /\b(?:can(?:no|')?t|cannot|unable to|not able to)\b[^.\n]{0,60}\b(?:write|update|apply|create|record|add|link|register|change)\b|\b(?:no|isn't an?|is not an?|there is no|without an?)\b[^.\n]{0,40}\b(?:update|write|record)\s+(?:path|tool|route)\b/i;
+
+function skippedRecordUpdate(decision, input, message, reply) {
+  if (decision.action !== 'answer' || decision.tool) return false;
+  if (!(Array.isArray(input.tools) && input.tools.some((t) => t && t.tool === 'update_records'))) return false;
+  const opening = message.replace(/[\u2018\u2019]/g, "'").slice(0, 300);
+  const answer = reply.replace(/[\u2018\u2019]/g, "'");
+  if (STATUS_QUESTION_RE.test(opening)) return false;
+  if (!RECORD_DOMAIN_RE.test(opening) && !RECORD_DOMAIN_RE.test(answer)) return false;
+  return RECORD_UPDATE_REQUEST_RE.test(opening) || RECORD_UPDATE_REFUSAL_RE.test(answer);
+}
 
 function countQuestionLines(text) {
   return String(text || '').split('\n').filter((line) => /^\s*(?:\d+[.)]|[-*•])\s+.*\?\s*$/.test(line)).length;
@@ -182,6 +203,9 @@ function runDeterministicChecks(decision, input) {
     const filler = reply.match(BANNED_FILLER_RE) || [];
     if (filler.length) {
       issues.push({ code: 'banned_filler', severity: 'style', note: `Remove banned filler phrasing (${[...new Set(filler.map((f) => f.toLowerCase()))].slice(0, 4).join(', ')}); speak plainly in Bob\'s voice.` });
+    }
+    if (skippedRecordUpdate(decision, input, message, reply)) {
+      issues.push({ code: 'record_update_tool_skipped', severity: 'block', note: 'The user asked you to put information into the records, and update_records is in your catalogue. Do not refuse, describe the change in prose, or offer a change note: select update_records now with every fact as an operation (person_details to create or describe a person, with role or affiliation in fields.category; vehicle_details; vehicle_person_link; person_alias; safety_warning; record_note). The tool previews first and writes nothing until the user says yes; anything it cannot do is listed in its preview with the reason.' });
     }
   }
   if (decision.action === 'use_tool' && decision.tool === 'query_records') {

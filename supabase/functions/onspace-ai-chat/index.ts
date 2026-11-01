@@ -41,7 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
-import { validateRecordUpdatePlan, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
+import { validateRecordUpdatePlan, amendRecordUpdatePlan, recordUpdateSources, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
 const CORS = {
@@ -9881,25 +9881,49 @@ serve(async (req)=>{
             if (!caps.canCompareData) return { reply: 'Guest accounts cannot change records.', meta: toolMeta('forbidden') };
             if (!orgId) return { reply: 'Your account is not attached to an organisation, so I cannot change records for you.', meta: toolMeta('no_org') };
             if (!conversationId) return { reply: 'Open a saved Bob conversation first so I can hold the preview for you to confirm.', meta: toolMeta('need_params') };
-            const validated = validateRecordUpdatePlan(toolArgs);
+            // A follow-up while a preview awaits its yes amends that preview (the user's corrections and additions
+            // merge into it) unless the planner explicitly starts over. Only a preview this server signed for this
+            // caller, conversation and organisation can be amended.
+            const prior = pending?.kind === 'record_updates_pending' ? pending.record_updates : null;
+            const amendable = Boolean(prior) && toolArgs.replace_all !== true && Array.isArray(prior?.source_operations) &&
+              isTrustedPendingRecordUpdates(prior, { userId: user.id, conversationId, organizationId: orgId }) &&
+              await verifyPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, prior);
+            const validated = amendable ? amendRecordUpdatePlan(prior, toolArgs) : validateRecordUpdatePlan(toolArgs);
             const plan = validated.ok ? validated.plan : null;
-            if (!plan) return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
+            if (!plan) {
+              if (amendable) {
+                // The rejected amendment must not consume the preview that is still waiting: re-issue it unchanged
+                // under a fresh plan id (a copied plan id is refused at claim time); created_at keeps its expiry.
+                try {
+                  const kept = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, { ...prior, plan_id: crypto.randomUUID() });
+                  return {
+                    reply: `${String(validated.error ?? 'I could not apply that change to the preview.')}\n\nThe earlier preview still stands unchanged. Reply **yes** to apply it as shown, or **no** to discard it.`,
+                    meta: toolMeta('proposed', { pending_record_updates: kept, amendment_rejected_for_plan_id: prior?.plan_id })
+                  };
+                } catch {
+                  // Fall through: without a signing key the earlier preview cannot be carried forward.
+                }
+              }
+              return { reply: String(validated.error ?? 'Tell me what should change.'), meta: toolMeta('need_params') };
+            }
+            const amendedFrom = amendable ? { amended_from_plan_id: prior?.plan_id } : {};
             const resolved = await resolveRecordUpdatePlan({
               rpc: (name: string, args: JsonRecord) => callerClient.rpc(name, args), organizationId: orgId, plan
             });
-            const preview = renderRecordUpdatePreview(resolved);
-            if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length }) };
+            const preview = renderRecordUpdatePreview({ ...resolved, amended: amendable });
+            if (!resolved.steps.length) return { reply: preview, meta: toolMeta('nothing_to_apply', { held_count: resolved.held.length, ...amendedFrom }) };
             let signed;
             try {
               signed = await signPendingRecordUpdates(RECORD_UPDATE_SIGNING_KEY, {
                 plan_id: crypto.randomUUID(), user_id: user.id, conversation_id: conversationId, organization_id: orgId,
                 created_at: new Date().toISOString(), source_summary: plan.source_summary,
-                steps: resolved.steps, held: resolved.held
+                steps: resolved.steps, held: resolved.held,
+                source_operations: recordUpdateSources(plan, amendable ? [] : (Array.isArray(toolArgs.operations) ? toolArgs.operations : []))
               });
             } catch {
               return { reply: 'I cannot hold a change preview for you to confirm right now, so nothing will be changed. Please try again shortly.', meta: toolMeta('unavailable') };
             }
-            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed }) };
+            return { reply: preview, meta: toolMeta('proposed', { pending_record_updates: signed, ...amendedFrom }) };
           }
         case 'cancel_builder_job':
           {
