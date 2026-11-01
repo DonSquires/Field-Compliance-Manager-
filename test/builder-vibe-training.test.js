@@ -96,3 +96,10 @@ test('Vibe teaches workflow evidence, test-data provenance and the correct brows
   assert.match(spec, /import \{ expect, test \} from '@playwright\/test'/);
   assert.doesNotMatch(spec, /process\.env\.VITEST|let test: any|Intentionally left empty/);
 });
+
+test('Builder engineers use authenticated Playwright fixtures and preserve existing test coverage', () => {
+  const prompt = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS });
+  assert.match(prompt, /never delete, rename, weaken or replace an existing test/);
+  assert.match(prompt, /inspect apps\/web\/e2e\/fixtures\.ts and a passing authenticated spec/);
+  assert.match(prompt, /bare unauthenticated page for a protected route/);
+});

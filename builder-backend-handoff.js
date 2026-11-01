@@ -7,7 +7,8 @@ const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 const {
   verifyRepositorySnapshot,
   downloadVerifiedArtifact,
-  uploadAndRegisterOutput
+  uploadAndRegisterOutput,
+  recordWorkerHandoffFailure
 } = require('./builder-frontend-handoff');
 const { parseBackendProposal } = require('./supabase/functions/_shared/builder-backend-engineer');
 const { executeBackendDatabaseVerification } = require('./backend-database-verifier');
@@ -46,7 +47,7 @@ async function finishBackendWorker(supabase, lease, succeeded, exitCode, summary
     _exit_code: exitCode,
     _log_summary: summary
   });
-  if (error) throw new Error('backend worker completion failed');
+  if (error) throw new Error('backend worker completion failed', { cause: error });
   return data;
 }
 
@@ -86,6 +87,7 @@ async function runBackendHandoff({
   let lease;
   let heartbeatTimer;
   let heartbeatError = null;
+  let failureStage = 'claiming verifier lease';
   try {
     lease = await claim(supabase, {
       jobId: job.id,
@@ -95,12 +97,14 @@ async function runBackendHandoff({
       targetSha: job.target_sha,
       timeoutSeconds
     });
+    failureStage = 'resetting verifier retry state';
     await resetRetry(supabase, lease);
     heartbeatTimer = setInterval(() => {
       heartbeat(supabase, lease).catch(error => { heartbeatError = error; });
     }, Math.min(60000, Math.max(10000, Math.floor(timeoutSeconds * 500))));
     heartbeatTimer.unref?.();
 
+    failureStage = 'running backend verification';
     const result = await execute({
       image: workerImage,
       sourceDir,
@@ -115,6 +119,7 @@ async function runBackendHandoff({
     heartbeatTimer = null;
     if (heartbeatError) throw new Error('backend worker lost its lease heartbeat');
 
+    failureStage = 'reading backend verification evidence';
     const verificationPath = path.join(artifactDir, 'backend-verification.json');
     let verification = null;
     if (fs.existsSync(verificationPath)) {
@@ -128,6 +133,7 @@ async function runBackendHandoff({
       && verification?.migration_execution?.performed === false;
     let databaseVerification = null;
     if (staticSucceeded) {
+      failureStage = 'verifying database migrations';
       databaseVerification = verifyDatabase({
         sourceDir,
         patchPath: path.join(artifactDir, 'input.patch'),
@@ -159,12 +165,16 @@ async function runBackendHandoff({
           : classifyMissingEvidence(result);
     const artifacts = [];
     if (verification) {
+      failureStage = 'registering build-log evidence';
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));
     }
     if (succeeded) {
+      failureStage = 'registering validated-patch evidence';
       artifacts.push(await registerOutput(supabase, lease, path.join(artifactDir, 'validated.patch'), 'code_implementation', 'text/x-diff'));
+      failureStage = 'registering changed-file evidence';
       artifacts.push(await registerOutput(supabase, lease, path.join(artifactDir, 'changed-files.json'), 'changed_file_manifest', 'application/json'));
     }
+    failureStage = 'completing verifier run';
     const completedJob = await finish(
       supabase,
       lease,
@@ -180,7 +190,10 @@ async function runBackendHandoff({
           ? `Backend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified`
           : 'Backend patch verification failed'
     );
-    if (infrastructure.infrastructure || infrastructure.baseline) await accountVerifierRecoveries(supabase, job.id);
+    if (infrastructure.infrastructure || infrastructure.baseline) {
+      failureStage = 'recording verifier recovery';
+      await accountVerifierRecoveries(supabase, job.id);
+    }
     return {
       success: succeeded,
       job: completedJob,
@@ -195,7 +208,7 @@ async function runBackendHandoff({
     };
   } catch (error) {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
-    if (lease) await finish(supabase, lease, false, 1, 'Backend worker handoff failed').catch(() => {});
+    if (lease) await recordWorkerHandoffFailure(finish, supabase, lease, 'Backend', failureStage, error);
     throw error;
   } finally {
     fs.rmSync(artifactDir, { recursive: true, force: true });
