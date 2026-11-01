@@ -201,6 +201,7 @@ test('admin_officer resolves exactly like admin as a real database role', {
       ${actor(adminOfficer)}
       SELECT pg_temp.check(public.is_admin_for_org('${org}') AND public.is_admin_for_org('${child}'),'admin officer administers org and branch');
       SELECT pg_temp.check(public.org_access_allowed('${child}'),'admin officer reaches branch');
+      SELECT pg_temp.check('${child}' = ANY(public.accessible_org_ids()),'admin officer set reach includes branch');
       SELECT pg_temp.check(NOT public.is_admin_for_org('${other}'),'admin officer stays inside the tenant');
       SELECT pg_temp.check(${visible([1, 3, 5])},'admin officer sees admin, own-role and direct notifications');
       WITH u AS (UPDATE public.notifications SET read_at=now() WHERE id='${n(1)}' RETURNING 1)
@@ -220,6 +221,7 @@ test('admin_officer resolves exactly like admin as a real database role', {
       ${actor(inactiveAdminOfficer)}
       SELECT pg_temp.check(NOT public.is_admin_for_org('${org}'),'deactivated admin officer refused');
       SELECT pg_temp.check(NOT public.org_access_allowed('${child}'),'deactivated admin officer has no reach');
+      SELECT pg_temp.check(cardinality(public.accessible_org_ids())=0,'deactivated admin officer has no set reach');
       ${ADMIN_READ_POLICIES.map(([, table]) => `
         SELECT pg_temp.check((SELECT count(*) FROM public.${table})=0,'inactive admin officer cannot read ${table}');
       `).join('\n')}
