@@ -289,3 +289,63 @@ test('release lane heals out-of-band nginx drift every tick and keeps the drifte
   assert.equal(fs.readFileSync(live, 'utf8'), 'managed v2\n');
   assert.deepEqual(fs.readdirSync(drift).filter((f) => /\.(restore|absent)$/.test(f)), []);
 });
+
+test('CCTV watcher and inference changes redeploy the cctv-vision target', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const classification = lane.slice(lane.indexOf('has()'), lane.indexOf('WEB_ONLY_NOTE='));
+  for (const changed of ['services/vision/vision_job_watcher.js', 'services/fcm-inference/app.py']) {
+    const result = spawnSync('bash', ['-s'], {
+      encoding: 'utf8',
+      input: `set -euo pipefail
+CHANGED=${changed}
+${classification}
+printf '%s\\n' "\${TARGETS[@]}"
+`,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split('\n'), ['cctv-vision'], changed);
+  }
+});
+
+test('a CCTV job that starts during the image build defers the watcher restart without rollback or advancing', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const helpers = lane.slice(lane.indexOf('cctv_idle()'), lane.indexOf("if printf '%s\\n' \"${TARGETS[@]:-}\" | grep -qx 'cctv-vision'"));
+  const action = lane.slice(lane.indexOf('    cctv-vision)\n      if'), lane.indexOf('    worker-image)'));
+  assert.ok(helpers.includes('require_cctv_idle()') && action.includes('require_cctv_idle'), 'cctv-vision gate not found');
+  const run = (queue) => spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `set -euo pipefail
+HEAD_SHA=fixture123456; SHA8=fixture1; OK=true; RESULTS=()
+SUPABASE_URL=https://example.invalid; SUPABASE_SERVICE_ROLE_KEY=fixture
+log() { printf '%s\\n' "$*"; }
+curl() { printf '%s' '${queue}'; }
+docker() { if [[ "$*" == *" build "* ]]; then echo build; elif [[ "$*" == *" up "* ]]; then echo up >&2; fi; }
+cctv_vision_healthy() { return 0; }
+fail_note() { echo failure; }
+rollback() { echo rollback; }
+${helpers}
+case cctv-vision in
+${action}
+esac
+echo advanced-release
+`,
+  });
+  const busy = run('[{"id":"00000000-0000-4000-8000-000000000001"}]');
+  assert.equal(busy.status, 0, busy.stderr);
+  assert.match(busy.stdout, /^build\ndeferred fixture1: a CCTV inference job is processing/);
+  assert.doesNotMatch(busy.stdout, /rollback|failure|advanced-release/);
+  assert.doesNotMatch(busy.stderr, /\bup\b/, 'services must not be recreated while a job is processing');
+  const idle = run('[]');
+  assert.equal(idle.status, 0, idle.stderr);
+  assert.match(idle.stdout, /^build\nadvanced-release/);
+  assert.equal(idle.stderr.trim(), 'up');
+});
+
+test('rollback rebuilds the previous release because service images have fixed tags', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const rollback = lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in'));
+  assert.match(rollback, /build -q fcm-inference fcm-vision-watcher \\\n\s*&& docker compose .* up -d --no-deps fcm-inference fcm-vision-watcher/);
+  assert.match(rollback, /control-plane\) \(cd "\$PREVIOUS_RELEASE" && DOCKER_GID=999 docker compose .* build -q bob-control-plane && /);
+  assert.match(rollback, /fcm-api\) \(cd "\$PREVIOUS_RELEASE" && docker compose .* build -q fcm-api && /);
+  assert.equal(bashSyntax(lane).status, 0);
+});

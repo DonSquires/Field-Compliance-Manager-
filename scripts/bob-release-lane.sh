@@ -161,6 +161,9 @@ has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|wor
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
 has '^(Dockerfile\.worker|frontend-worker\.js|visual-baseline-worker\.js|builder-visual-baseline\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
 has '^deploy/bob-vps/nginx/' && TARGETS+=(nginx)
+# The CCTV watcher and the inference service it calls (engine v2 sat merged but not running until 2026-11-01
+# because no target rebuilt them).
+has '^services/(vision|fcm-inference)/' && TARGETS+=(cctv-vision)
 WEB_ONLY_NOTE=""; has '^apps/web/' && WEB_ONLY_NOTE="apps/web changed: Vercel deploys it from main on its own"
 
 PLAN="$(node -e '
@@ -190,6 +193,35 @@ require_idle() {
 if printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
   require_idle "$(dirname "${BASH_SOURCE[0]}")/bob-runtime-idle.js"
 fi
+# Restarting the vision watcher mid-job drops the job's lease and repeats its GPU work; wait for an idle queue.
+cctv_idle() {
+  [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]] || return 1
+  local busy
+  busy="$(curl -sf --max-time 15 "$SUPABASE_URL/rest/v1/inference_jobs?select=id&status=eq.processing&limit=1" \
+    -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")" || return 1
+  [[ "$busy" == "[]" ]]
+}
+require_cctv_idle() {
+  if ! cctv_idle; then
+    log "deferred ${HEAD_SHA:0:8}: a CCTV inference job is processing or the queue is unreadable; retrying next tick"; exit 0
+  fi
+}
+if printf '%s\n' "${TARGETS[@]:-}" | grep -qx 'cctv-vision'; then
+  require_cctv_idle
+fi
+# Healthy = the inference container passes its own healthcheck and the watcher's heartbeat file is fresh.
+# watcher_healthcheck.js is not used here: it stops a watcher whose heartbeat is not written yet.
+cctv_vision_healthy() {
+  local _
+  for _ in $(seq 1 40); do
+    sleep 3
+    [[ "$(docker inspect -f '{{.State.Health.Status}}' fcm-inference 2>/dev/null)" == healthy ]] || continue
+    if docker exec fcm-vision-watcher node -e "process.exit(Date.now() - require('fs').statSync('/tmp/fcm-vision-watcher-health').mtimeMs < 90000 ? 0 : 1)" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
 SHA8="${HEAD_SHA:0:8}"
 PREVIOUS_RELEASE="$RELEASES_DIR/${DEPLOYED_SHA:0:8}"
 RESULTS=()
@@ -260,12 +292,23 @@ fi
 rollback() {
   local target="$1"
   [[ -d "$PREVIOUS_RELEASE" ]] || { fail_note "$target: no previous release to roll back to"; return; }
+  # Every service image has a fixed tag (:local / :current), so a rollback rebuilds the previous release
+  # (cached layers) before recreating; `up` alone would restart the image that just failed.
+  if [[ "$target" == cctv-vision ]]; then
+    if (cd "$PREVIOUS_RELEASE" && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml build -q fcm-inference fcm-vision-watcher \
+        && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-inference fcm-vision-watcher >/dev/null); then
+      fail_note "$target rolled back to ${DEPLOYED_SHA:0:8}"
+    else
+      fail_note "$target rollback to ${DEPLOYED_SHA:0:8} failed"
+    fi
+    return
+  fi
   if ! node scripts/bob-runtime-idle.js; then
     fail_note "$target rollback deferred: Bob execution is active or unverifiable"; return
   fi
   case "$target" in
-    control-plane) (cd "$PREVIOUS_RELEASE" && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null) ;;
-    fcm-api) (cd "$PREVIOUS_RELEASE" && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-api >/dev/null) ;;
+    control-plane) (cd "$PREVIOUS_RELEASE" && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null) ;;
+    fcm-api) (cd "$PREVIOUS_RELEASE" && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml build -q fcm-api && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-api >/dev/null) ;;
   esac
   fail_note "$target rolled back to ${DEPLOYED_SHA:0:8}"
 }
@@ -297,6 +340,12 @@ for target in "${TARGETS[@]:-}"; do
         for _ in $(seq 1 20); do sleep 2; if curl -sf -H "Authorization: Bearer $T" http://127.0.0.1:3001/api/bob/health >/dev/null; then healthy=true; break; fi; done
         if $healthy; then RESULTS+=("fcm-api live at $SHA8"); else OK=false; rollback fcm-api; fi
       else OK=false; fail_note "fcm-api build/up failed"; fi ;;
+    cctv-vision)
+      if docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml build -q fcm-inference fcm-vision-watcher \
+         && require_cctv_idle \
+         && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-inference fcm-vision-watcher >/dev/null; then
+        if cctv_vision_healthy; then RESULTS+=("cctv vision watcher and inference live at $SHA8"); else OK=false; rollback cctv-vision; fi
+      else OK=false; fail_note "cctv-vision build/up failed"; fi ;;
     worker-image)
       if docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null; then
         # Pin the image against the VPS's daily image prune (see scripts/bob-vps-deploy.sh).
