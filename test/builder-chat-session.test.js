@@ -801,6 +801,14 @@ test('proposal intent respects independent positive clauses, explanatory clauses
     ['Please do not create a job, but instead explain how to create a Builder job.', false],
     ['Please do not create a Builder job; explain how to create a job.', false],
     ['Do not just propose a Builder job; explain the options.', false],
+    ['Please do not edit any application files, however, propose a Builder job to fix dispatch spacing.', true],
+    ['How do I, just as an example, create a Builder job?', false],
+    ['Please explain the dispatch spacing issue and propose a Builder job to fix it.', true],
+    ['Please explain the dispatch spacing issue and then propose a Builder job to fix it.', true],
+    ['Please do propose a Builder job to fix dispatch spacing.', true],
+    ['Please explain how to draft and propose a Builder job.', false],
+    ['Do not explain the issue and propose a Builder job.', false],
+    ['Please do not create a Builder job and then propose a repair plan.', false],
   ];
   for (const [content, expected] of cases) {
     assert.equal(chat.proposeIntent(content), expected, content);
