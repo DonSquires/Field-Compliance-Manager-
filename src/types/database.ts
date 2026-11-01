@@ -6672,6 +6672,27 @@ export type Database = {
           },
         ]
       }
+      cctv_inference_claim_pauses: {
+        Row: {
+          created_at: string
+          holder: string
+          paused_until: string
+          reason: string
+        }
+        Insert: {
+          created_at?: string
+          holder: string
+          paused_until: string
+          reason: string
+        }
+        Update: {
+          created_at?: string
+          holder?: string
+          paused_until?: string
+          reason?: string
+        }
+        Relationships: []
+      }
       cctv_inference_policies: {
         Row: {
           cloud_vehicle_vlm_enabled: boolean
@@ -46773,6 +46794,10 @@ export type Database = {
           window_open: string
         }[]
       }
+      pause_cctv_inference_claims: {
+        Args: { p_holder: string; p_reason: string; p_seconds: number }
+        Returns: string
+      }
       person_name_extends: {
         Args: { p_full: string; p_recorded: string }
         Returns: boolean
@@ -49286,6 +49311,10 @@ export type Database = {
           source_count: number
           submitted_at: string
         }[]
+      }
+      resume_cctv_inference_claims: {
+        Args: { p_holder: string }
+        Returns: boolean
       }
       retire_person_alias: {
         Args: { p_alias_id: string; p_reason: string }
