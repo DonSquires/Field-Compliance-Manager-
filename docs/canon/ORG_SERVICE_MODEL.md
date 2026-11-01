@@ -115,6 +115,22 @@ Gates SELECT on ~60 tables. Passes if ANY of these is true:
 6. **Agreement-based (0271)** — user's org (or employer org) is a party on
    an active `service_agreement` with the target org. **Bidirectional.**
 
+**Policy form (2026-11-02).** Row-level security policies do not call
+`org_access_allowed(X)`, because Postgres would run it once per candidate row.
+They use the initPlan form, which computes the caller's reach once per
+statement:
+
+```sql
+((SELECT public.is_grand_master())
+  OR COALESCE((X) = ANY ((SELECT public.accessible_org_ids())::uuid[]), false))
+```
+
+`accessible_org_ids()` is the set form of clauses 2–6. It is empty for
+anonymous and deactivated callers. `org_access_allowed` remains the check for
+function bodies and single-row decisions. The two must stay equivalent, so a
+change to one is a change to both, proven again by
+`test/org-access-policy-initplan.test.js` (run with `BOB_TEST_POSTGRES=1`).
+
 ### Write gates
 
 - **`is_master_for_org(p_org_id)`** — master can manage orgs in their

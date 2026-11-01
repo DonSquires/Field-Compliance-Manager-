@@ -131,8 +131,11 @@ Anonymous RLS exposure finding, 2026-11-01 (migration
   - Grand-master and officer row counts are unchanged, except the invite
     ledger, which is now service-only.
   - No PUBLIC policy remains on these tables.
-  - Still to verify after release: the live catalog refresh, a re-run of the
-    anonymous sweep, and an Atlas refresh.
+  - Verified after release: the catalog refresh merged as #302, and Atlas
+    refreshed for that head. Live, none of the fifteen tables has a PUBLIC
+    policy, and only `service_role` (and the owner) can execute
+    `check_invite_rate_limit`. A re-run of the anonymous sweep reached only
+    the PostGIS reference tables.
 - **Owner ruling 2026-11-01:** Bob and Atlas are available at every level,
   because Oracle and Conductor restrict and redact per user level. The
   Atlas/Bob governance tables therefore stay readable by authenticated
@@ -144,7 +147,77 @@ Anonymous RLS exposure finding, 2026-11-01 (migration
   `org_access_allowed`. In a live rollback rehearsal the grand master, the
   platform owner and Bob's service identity kept all 31 org-less rows; a
   master, an admin officer and a non-platform identity dropped to 0; and every
-  actor's organisation-row sample was unchanged.
+  actor's organisation-row sample was unchanged. Released as #303 (catalog
+  #305): live `audit_log_select` carries the platform-only arm, and the
+  deployed `bob-query-atlas` was updated after the merge.
+
+Organisation reach evaluated per row, 2026-11-02 (migration
+`20261102200000_org_access_policies_initplan.sql`):
+
+- **Before:** 357 public policies on 257 tables made 410 calls to
+  `org_access_allowed(X)`. Postgres ran that function once for every candidate
+  row. Each call re-read the caller's profile, organisation tree, grants and
+  agreements, so a plain read of a large table was slow even when few rows were
+  visible. Live, an admin officer counting `bob_event_log` took about 20 s,
+  past the 8 s authenticated statement timeout, so the request failed.
+  `bob_messages` took 5.8 s, `observations` 4.3 s, and the anonymous key
+  spent 1.3–4.2 s on the same tables to return no rows.
+- **During:** `accessible_org_ids()` returns the caller's whole reach as one
+  array. It is the same six-clause rule as `org_access_allowed`, and it is
+  empty for anonymous and deactivated callers. Every policy now uses
+  `((SELECT is_grand_master()) OR COALESCE((X) = ANY ((SELECT
+  accessible_org_ids())::uuid[]), false))`. The scalar sub-selects run once
+  per statement as initPlans. COALESCE keeps a NULL target false, as before.
+  The migration was generated from the live catalog after #303, so each policy
+  keeps its other arms, including the platform-only org-less audit arm.
+- **Evidence:**
+  - On live, the function and the template agree for every caller and
+    target.
+  - A row and hash comparison before and after the rewrite matched on every
+    table for a narrow officer, and on the slices that completed for a wide
+    officer and a master.
+  - In a rollback rehearsal, those same reads took 3–29 ms. In the
+    wide-officer sweep, `audit_log` fell from 12.6 s to 44 ms and
+    `bob_event_log` from 22 s to 14 ms. `observations` fell only from 7 s to
+    1.4 s, because other per-row helpers remain (see follow-ups).
+  - `test/org-access-policy-initplan.test.js` adds:
+    - a static guard: no effective policy may call `org_access_allowed`, and
+      every `accessible_org_ids` use must sit inside the guarded template;
+    - a coupling check: a migration that redefines `org_access_allowed` must
+      also redefine `accessible_org_ids`;
+    - a Postgres fixture (`BOB_TEST_POSTGRES=1`) comparing the function and
+      policy forms over a seeded hierarchy with grants, agreements, a
+      deactivated account and anonymous callers. Breaking one clause of
+      `accessible_org_ids` makes the fixture fail.
+  - An apply-only live rehearsal ran in 317 ms and was rolled back. It left 0
+    per-row public policies and 357 initPlan policies, did not touch storage,
+    and confirmed that PUBLIC has no EXECUTE on the new function.
+- **Lesson:** the full live equivalence sweep held each rewrite inside a
+  rollback transaction while it measured. One slice ran past the Management
+  API's 100 s gateway limit, and its server transaction kept the policy locks
+  after the HTTP call failed. Live reads were briefly blocked (most bursts were
+  under 7 s, one was about 45 s) until the sweep was stopped. Rehearsals that
+  alter policies on production must now be apply-and-check only, with a
+  `lock_timeout`. Row comparison belongs in the local fixture. The migration
+  itself sets a 5 s `lock_timeout`, so if a long query holds a table, the
+  migration fails cleanly and the release lane retries it on its next tick.
+- **Follow-ups:** other per-row helpers still dominate a few tables after this
+  rewrite. Each needs its own set form and its own proof:
+  - `location_events`: 39 s for a wide officer, from
+    `has_location_access(client_site_id, zone_id, 'client_reads_provider')` in
+    `location_events_client_select`.
+  - `entity_links`: 4.9 s, from `can_access_vehicle_owner_identity`,
+    `can_access_person_contacts` and `nzta_reveal_active`.
+  - `observations`: 1.4 s, from `user_has_task_entitlement(auth.uid(), id)`,
+    which `observations_task_entitlement_select` calls for every row outside
+    the caller's reach.
+  - `evidence_items`: 4.7 s, from `nzta_evidence_restricted(id)`.
+  - `document_classifications`: 1.9 s. Its FOR ALL write policy calls
+    `is_admin_for_org` for reads too.
+  - Eight `storage.objects` policies (bob_uploads, identity_evidence,
+    notice_artifacts and scans, insert and select) still call
+    `org_access_allowed` on the folder name. `schema.sql` covers `public`
+    only, so they need their own migration and evidence.
 
 Owner-directed client/place simplification, 2026-10-28:
 
