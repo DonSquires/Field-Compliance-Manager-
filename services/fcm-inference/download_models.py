@@ -23,6 +23,7 @@ FILES = {
     'person-reidentification-retail-0288.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2022.3/models_bin/1/person-reidentification-retail-0288/FP16/person-reidentification-retail-0288.bin',
     'vehicle-attributes-recognition-barrier-0039.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.xml',
     'vehicle-attributes-recognition-barrier-0039.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.bin',
+    'vehicle-reid-0001.onnx': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/public/2022.1/vehicle-reid-0001/osnet_ain_x1_0_vehicle_reid.onnx',
 }
 # Entity detector and ALPR tier (always staged; every weight below is Apache-2.0 or MIT and runs on onnxruntime).
 #  - RF-DETR COCO exports from open-image-models: large-704 for GPU workers, small-512 for CPU hosts. Both are
@@ -64,6 +65,17 @@ OPTIONAL_FILES: dict[str, str] = {}
 EXPECTED_SHA256 = {
     'realesrgan_x4plus.onnx': '0a06c68f463a14bf5563b78d77d61ba4394024e148383c4308d6d3783eac2dc5',
 }
+EXPECTED_SHA384 = {
+    'vehicle-reid-0001.onnx': '0515ce72f653c39780d5b87dfed7255d396dd2b1e8b6e91fbaacdfad1da189166343157273c02f3b0fede3050ef7abb7',
+}
+
+
+def has_expected_checksum(path: Path, filename: str) -> bool:
+    if filename in EXPECTED_SHA256:
+        return hashlib.sha256(path.read_bytes()).hexdigest() == EXPECTED_SHA256[filename]
+    if filename in EXPECTED_SHA384:
+        return hashlib.sha384(path.read_bytes()).hexdigest() == EXPECTED_SHA384[filename]
+    return True
 
 
 def download_file(url: str, destination: Path) -> None:
@@ -79,8 +91,7 @@ def download_file(url: str, destination: Path) -> None:
     if size < MIN_BYTES.get(destination.suffix, 1):
         partial.unlink(missing_ok=True)
         raise RuntimeError(f'{destination.name} downloaded {size} bytes; expected a model file')
-    expected = EXPECTED_SHA256.get(destination.name)
-    if expected and hashlib.sha256(partial.read_bytes()).hexdigest() != expected:
+    if not has_expected_checksum(partial, destination.name):
         partial.unlink(missing_ok=True)
         raise RuntimeError(f'{destination.name} checksum mismatch')
     partial.replace(destination)
@@ -98,8 +109,7 @@ if __name__ == '__main__':
         targets = FILES
     for filename, url in targets.items():
         destination = MODELS_DIR / filename
-        expected = EXPECTED_SHA256.get(filename)
-        if destination.exists() and destination.stat().st_size >= MIN_BYTES.get(destination.suffix, 1) and (not expected or hashlib.sha256(destination.read_bytes()).hexdigest() == expected):
+        if destination.exists() and destination.stat().st_size >= MIN_BYTES.get(destination.suffix, 1) and has_expected_checksum(destination, filename):
             print(f'skipping {filename} (already present)')
             continue
         download_file(url, destination)

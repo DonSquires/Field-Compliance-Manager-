@@ -52,9 +52,17 @@ function cosineSimilarity(a, b) {
 }
 
 function weightedEmbedding(observations, readEmbedding, readWeight) {
-  const samples = observations
-    .map((observation) => ({ embedding: readEmbedding(observation), weight: Number(readWeight(observation)) || 0 }))
-    .filter((sample) => Array.isArray(sample.embedding) && sample.embedding.length > 0 && sample.weight > 0);
+  const samplesByFrame = new Map();
+  for (const observation of observations) {
+    const frame = observation?.frame;
+    const frameKey = frame?.frame_index ?? frame?.sha256_hash ?? frame ?? observation;
+    const sample = { embedding: readEmbedding(observation), weight: Number(readWeight(observation)) || 0 };
+    if (!Array.isArray(sample.embedding) || sample.embedding.length === 0 || sample.weight <= 0) continue;
+    if (!samplesByFrame.has(frameKey) || samplesByFrame.get(frameKey).weight < sample.weight) {
+      samplesByFrame.set(frameKey, sample);
+    }
+  }
+  const samples = [...samplesByFrame.values()];
   if (!samples.length) return { embedding: null, frames: 0, quality: null };
   const dimension = samples[0].embedding.length;
   const compatible = samples.filter((sample) => sample.embedding.length === dimension);
@@ -166,8 +174,6 @@ async function consolidateFaces(frames, options = {}) {
         bestSubject.avgEmbedding = bestSubject.avgEmbedding.map((value, index) => (
           (value * bestSubject.embeddingWeight + (Number(embedding[index]) || 0) * qualityWeight) / totalWeight
         ));
-        const norm = Math.sqrt(bestSubject.avgEmbedding.reduce((sum, value) => sum + value * value, 0));
-        if (norm) bestSubject.avgEmbedding = bestSubject.avgEmbedding.map((value) => value / norm);
         bestSubject.embeddingWeight = totalWeight;
 
         const track = bestSubject.activeTrack;
@@ -175,6 +181,11 @@ async function consolidateFaces(frames, options = {}) {
           // Extend active track
           track.lastSeen = timestamp;
           track.frameCount++;
+          track.personBoxesByFrame.push({
+            frame_index: frame.frame_index ?? null,
+            frame_sha256: frame.sha256_hash ?? null,
+            bbox: detectedFace.person_bbox || null,
+          });
           const bbox = detectedFace.bbox || null;
           const bboxArea = bbox ? (bbox.width || 0) * (bbox.height || 0) : 0;
           if (representativeFrameScore(frame, bbox) > representativeFrameScore(track.bestFrame, track.bestBbox)) {
@@ -201,6 +212,11 @@ async function consolidateFaces(frames, options = {}) {
             bestFace: detectedFace,
             bestBboxArea: bbox ? (bbox.width || 0) * (bbox.height || 0) : 0,
             similarityScore: highestSim,
+            personBoxesByFrame: [{
+              frame_index: frame.frame_index ?? null,
+              frame_sha256: frame.sha256_hash ?? null,
+              bbox: detectedFace.person_bbox || null,
+            }],
           };
         }
       } else {
@@ -228,6 +244,11 @@ async function consolidateFaces(frames, options = {}) {
             bestFace: detectedFace,
             bestBboxArea: bbox ? (bbox.width || 0) * (bbox.height || 0) : 0,
             similarityScore: 1.0,
+            personBoxesByFrame: [{
+              frame_index: frame.frame_index ?? null,
+              frame_sha256: frame.sha256_hash ?? null,
+              bbox: detectedFace.person_bbox || null,
+            }],
           },
         };
         subjects.push(newSubject);
@@ -258,6 +279,7 @@ async function consolidateFaces(frames, options = {}) {
       visitCount: tracks.length,
       isReturn: tracks.length > 1,
       faceEmbedding: subject.avgEmbedding,
+      personBoxesByFrame: tracks.flatMap((track) => track.personBoxesByFrame || []),
     };
   }).sort((a, b) => a.firstSeen - b.firstSeen);
 
@@ -281,6 +303,7 @@ async function consolidateFaces(frames, options = {}) {
       visit_count: tr.visitCount,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       best_bbox: tr.bestBbox,
+      person_boxes_by_frame: tr.personBoxesByFrame,
       thumbnail,
       face_embedding: Array.isArray(tr.faceEmbedding) ? tr.faceEmbedding : null,
       face_quality_score: Number.isFinite(Number(tr.bestFace?.face_quality_score)) ? Number(tr.bestFace.face_quality_score) : null,
@@ -412,6 +435,11 @@ async function consolidatePeople(frames, options = {}) {
       appearance_embedding_usable: appearanceReady,
       appearance_template_frames: appearanceTemplate.frames,
       appearance_quality_score: appearanceTemplate.quality,
+      person_boxes_by_frame: track.observations.map((observation) => ({
+        frame_index: observation.frame?.frame_index ?? null,
+        frame_sha256: observation.frame?.sha256_hash ?? null,
+        bbox: observation.bbox,
+      })),
       quality_state: frameQualityState(best.frame),
       gait_signature: buildGaitSignature(track.observations.map((observation) => ({ timestamp: observation.timestamp, center: bboxCenter(observation.bbox), width: observation.bbox.width, height: observation.bbox.height }))),
       thumbnail: await loadBase64Thumbnail(best.frame?.file_path),
@@ -668,8 +696,8 @@ function votePlatePositions(items) {
     };
   });
   const voted = characterVotes.map((item) => item.winner).join('');
-  const patternConflict = patternEvidence.length !== evidence.length
-    && evidence.some((item) => item.weight >= patternWeights.get(pattern) * PLATE_CONFLICT_RATIO);
+  const patternConflict = [...patternWeights.entries()]
+    .some(([candidatePattern, weight]) => candidatePattern !== pattern && weight >= patternWeights.get(pattern) * PLATE_CONFLICT_RATIO);
   const voteConflict = characterVotes.some((item) => item.conflict);
   const candidate = nzPlatePattern(voted) === pattern ? voted : aligned[0].plate;
   const alternatives = [...new Set(evidence.map((item) => item.plate).filter((plate) => plate !== candidate))];
@@ -818,16 +846,24 @@ function vehicleAttributeFields(observations, fallback = {}) {
   };
 }
 
-function vehicleDataFields(vehicleData, observations = []) {
-  const appearanceTemplate = weightedEmbedding(
+function vehicleAppearanceTemplate(observations) {
+  return weightedEmbedding(
     observations,
     (observation) => observation.payload?.attributes?.appearance_embedding_usable === true
+      && observation.payload?.attributes?.appearance_embedding_model === 'vehicle-reid-0001.onnx'
+      && observation.payload?.attributes?.appearance_embedding?.length === 512
       ? observation.payload?.attributes?.appearance_embedding : null,
     (observation) => (Number(observation.payload?.attributes?.appearance_quality_score) || 0)
       * (Number(observation.confidence) || 0),
   );
+}
+
+function vehicleDataFields(vehicleData, observations = []) {
+  const appearanceTemplate = vehicleAppearanceTemplate(observations);
   const appearanceReady = appearanceTemplate.frames >= 2;
-  const templateModel = observations.find((observation) => observation.payload?.attributes?.appearance_embedding_usable === true)
+  const templateModel = observations.find((observation) => observation.payload?.attributes?.appearance_embedding_usable === true
+    && observation.payload?.attributes?.appearance_embedding_model === 'vehicle-reid-0001.onnx'
+    && observation.payload?.attributes?.appearance_embedding?.length === 512)
     ?.payload?.attributes?.appearance_embedding_model;
   return {
     vehicle_year: vehicleData.vehicle_year ?? null,
@@ -924,6 +960,16 @@ async function consolidateVehicles(frames, options = {}) {
       ? meanSpeed(bestTrack.observations.map((observation) => ({ timestamp: observation.timestamp, center: bboxCenter(observation.bbox) })), maxGap)
       : meanSpeed(entityOrphans.filter((read) => read.box && read.timestamp >= bestVisit.start && read.timestamp <= bestVisit.end).map((read) => ({ timestamp: read.timestamp, center: bboxCenter(read.box) })), maxGap);
     const trackObservations = entityTracks.flatMap((platedTrack) => platedTrack.track.observations);
+    const appearanceTrack = entityTracks
+      .map((platedTrack) => ({
+        track: platedTrack.track,
+        template: vehicleAppearanceTemplate(platedTrack.track.observations),
+      }))
+      .sort((a, b) => b.template.frames - a.template.frames
+        || (b.template.quality || 0) - (a.template.quality || 0)
+        || b.track.hits - a.track.hits)[0];
+    const appearanceTrackObservations = appearanceTrack?.template.frames >= 2
+      ? appearanceTrack.track.observations : [];
     const bestDetection = bestRead.observation?.payload || (bestTrack ? bestObservation(bestTrack).payload : null);
     const vehicleData = bestDetection?.attributes || frameVehicleData(bestRead.frame);
     const alprData = bestRead.frame?.alpr || {};
@@ -980,7 +1026,7 @@ async function consolidateVehicles(frames, options = {}) {
       vehicle_model: vehicleData.vehicle_model ?? null,
       vehicle_make_model_source: vehicleData.vehicle_make || vehicleData.vehicle_model ? (vehicleData.vehicle_make_model_source ?? null) : null,
       ...vehicleAttributeFields(trackObservations, vehicleData),
-      ...vehicleDataFields(vehicleData, trackObservations),
+      ...vehicleDataFields(vehicleData, appearanceTrackObservations),
       quality_state: frameQualityState(bestRead.frame),
       speed_px_per_second: speedPxPerSecond,
       speed_kmh: speedPxPerSecond !== null && metersPerPixel !== null ? Number((speedPxPerSecond * metersPerPixel * 3.6).toFixed(2)) : null,
@@ -1088,6 +1134,66 @@ function overlapSeconds(a, b) {
   return Math.min(a.last_seen_seconds, b.last_seen_seconds) - Math.max(a.first_seen_seconds, b.first_seen_seconds);
 }
 
+function boxIntersectionOverUnion(first, second) {
+  const a = first?.bbox && typeof first.bbox === 'object' ? first.bbox : first;
+  const b = second?.bbox && typeof second.bbox === 'object' ? second.bbox : second;
+  if (!a || !b) return 0;
+  const ax = Number(a.x), ay = Number(a.y), aw = Number(a.width), ah = Number(a.height);
+  const bx = Number(b.x), by = Number(b.y), bw = Number(b.width), bh = Number(b.height);
+  if (![ax, ay, aw, ah, bx, by, bw, bh].every(Number.isFinite) || aw <= 0 || ah <= 0 || bw <= 0 || bh <= 0) return 0;
+  const intersection = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx))
+    * Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
+  const union = aw * ah + bw * bh - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function frameAssociationKey(observation) {
+  if (observation?.frame_index !== null && observation?.frame_index !== undefined) return `index:${observation.frame_index}`;
+  if (observation?.frame_sha256) return `hash:${observation.frame_sha256}`;
+  return null;
+}
+
+function facePersonAssociation(faceEvent, personEvent) {
+  const personBoxes = new Map((personEvent.person_boxes_by_frame || [])
+    .map((item) => [frameAssociationKey(item), item.bbox])
+    .filter(([key, box]) => key && box));
+  let matches = 0;
+  let overlap = 0;
+  for (const faceBox of faceEvent.person_boxes_by_frame || []) {
+    const key = frameAssociationKey(faceBox);
+    if (!key || !personBoxes.has(key)) continue;
+    const iou = boxIntersectionOverUnion(faceBox.bbox, personBoxes.get(key));
+    if (iou < 0.5) continue;
+    matches += 1;
+    overlap += iou;
+  }
+  return { frames: matches, overlap: matches ? overlap / matches : 0 };
+}
+
+function associateFaceEvents(personEvents, faceEvents) {
+  const pairs = [];
+  for (const face of faceEvents) {
+    const candidates = personEvents
+      .map((person) => ({ person, ...facePersonAssociation(face, person) }))
+      .filter((pair) => pair.frames > 0)
+      .sort((a, b) => b.frames - a.frames || b.overlap - a.overlap);
+    if (!candidates.length) continue;
+    const best = candidates[0];
+    if (candidates[1] && candidates[1].frames === best.frames && best.overlap - candidates[1].overlap < 0.1) continue;
+    pairs.push({ face, ...best });
+  }
+  const byPerson = new Map();
+  for (const person of personEvents) {
+    const candidates = pairs.filter((pair) => pair.person.event_id === person.event_id)
+      .sort((a, b) => b.frames - a.frames || b.overlap - a.overlap);
+    if (!candidates.length) continue;
+    const best = candidates[0];
+    if (candidates[1] && candidates[1].frames === best.frames && best.overlap - candidates[1].overlap < 0.1) continue;
+    byPerson.set(person.event_id, best.face);
+  }
+  return byPerson;
+}
+
 function isUsableQuality(state) {
   return !UNUSABLE_QUALITY_STATES.has(String(state || 'clear'));
 }
@@ -1124,6 +1230,9 @@ function engineAttributes(event) {
 // is measured separately (cctv_accuracy_summary) before anyone tightens this.
 function isReviewQueued(event, kind, options = {}) {
   if (kind === 'animal') return isUsableQuality(event?.quality_state);
+  if (kind === 'person' && event?.appearance_embedding_usable === true
+    && Number(event.appearance_template_frames) >= 2
+    && Array.isArray(event.appearance_embedding) && event.appearance_embedding.length > 0) return isUsableQuality(event.quality_state);
   return isReviewableCandidate(event, options);
 }
 
@@ -1189,17 +1298,17 @@ function buildEntityObservations(summary, context = {}) {
       thumbnail: event.thumbnail || null,
     });
   }
-  const faceEvents = (events.face_events || []).filter((event) => Array.isArray(event.face_embedding) && event.face_embedding.length);
-  const claimedFaces = new Set();
-  for (const event of events.person_events || []) {
-    if (!isUsableQuality(event.quality_state)) continue;
-    // A body track establishes only that a person was at the place. It becomes an identity-review
-    // observation only when a usable face track overlaps it.
-    const face = faceEvents
-      .filter((candidate) => !claimedFaces.has(candidate.event_id) && overlapSeconds(candidate, event) >= 0)
-      .sort((a, b) => overlapSeconds(b, event) - overlapSeconds(a, event))[0] || null;
-    if (!face) continue;
-    claimedFaces.add(face.event_id);
+  const faceEvents = (events.face_events || []).filter((event) => event.usable_for_matching === true
+    && Array.isArray(event.face_embedding) && event.face_embedding.length);
+  const personEvents = (events.person_events || []).filter((event) => isUsableQuality(event.quality_state));
+  const faceByPerson = associateFaceEvents(personEvents, faceEvents);
+  const claimedFaces = new Set([...faceByPerson.values()].map((face) => face.event_id));
+  for (const event of personEvents) {
+    const face = faceByPerson.get(event.event_id) || null;
+    const appearanceUsable = event.appearance_embedding_usable === true
+      && Number(event.appearance_template_frames) >= 2
+      && Array.isArray(event.appearance_embedding) && event.appearance_embedding.length > 0;
+    if (!face && !appearanceUsable) continue;
     observations.push({
       source_event_id: event.event_id,
       entity_kind: 'person',
@@ -1207,7 +1316,7 @@ function buildEntityObservations(summary, context = {}) {
       observed_to: isoAt(base, event.last_seen_seconds),
       candidate_label: face?.subject_label || null,
       candidate_embedding: face?.face_embedding || null,
-      appearance_embedding: event.appearance_embedding || null,
+      appearance_embedding: appearanceUsable ? event.appearance_embedding : null,
       model_confidence: clamp01(event.confidence),
       quality_state: event.quality_state || 'clear',
       attributes: stripNulls({
@@ -1219,7 +1328,7 @@ function buildEntityObservations(summary, context = {}) {
         face_quality_score: face?.face_quality_score, face_template_frames: face?.face_template_frames,
         face_usable_for_matching: face?.usable_for_matching === true,
         face_alignment_basis: face?.face_alignment_basis,
-        appearance_embedding_usable: event.appearance_embedding_usable === true,
+        appearance_embedding_usable: appearanceUsable,
         appearance_quality_score: event.appearance_quality_score,
         appearance_template_frames: event.appearance_template_frames,
         weapon_hint: event.weapon_hint,
@@ -1293,8 +1402,10 @@ function buildInferenceDeviceEvents(summary, context = {}) {
     ...(events.person_events || []).map((event) => ({ ...event, kind: 'person', alert: false })),
     ...(events.animal_events || []).map((event) => ({ ...event, kind: 'animal', alert: event.is_pest === true })),
   ].filter((entity) => isUsableQuality(entity.quality_state));
+  const personEvents = detectedEntities.filter((entity) => entity.kind === 'person');
+  const faceByPerson = associateFaceEvents(personEvents, faceEvents);
   const entities = detectedEntities.filter((entity) => isReviewQueued(entity, entity.kind, {
-    hasFaceEvidence: entity.kind === 'person' && faceEvents.some((face) => overlapSeconds(face, entity) >= 0),
+    hasFaceEvidence: entity.kind === 'person' && faceByPerson.has(entity.event_id),
   }));
   const heldCandidates = detectedEntities.filter((entity) => !entities.includes(entity));
   const marks = (summary.motion_segments || []).map((segment, index) => {
@@ -1435,6 +1546,8 @@ module.exports = {
   consolidateMotionSummary,
   buildEntityObservations,
   buildInferenceDeviceEvents,
+  boxIntersectionOverUnion,
+  associateFaceEvents,
   plateReadsFor,
   clusterPlates,
   ENGINE_VERSION,

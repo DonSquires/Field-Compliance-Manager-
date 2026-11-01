@@ -59,12 +59,14 @@ test('still recognition produces provisional face and ALPR review candidates wit
       people: [{ confidence: 0.91, bbox: { x: 10, y: 20, width: 30, height: 80 } }],
       faces: [{
         confidence: 0.88, bbox: { x: 14, y: 22, width: 20, height: 20 }, embedding: sourceFaceEmbedding,
+        person_bbox: { x: 10, y: 20, width: 30, height: 80 },
         detector_confidence: 0.91, face_crop_width_px: 20, alignment_basis: 'deterministic_upscaled_crop',
         usable_for_matching: true, face_quality_score: 0.91, matching_gate_version: 'face_quality_v1',
         face_detector_model: 'face_detection_yunet_2023mar.onnx', face_embedding_model: 'face_recognition_sface_2021dec.onnx',
       }],
       vehicles: [{ confidence: 0.95, bbox: { x: 100, y: 100, width: 200, height: 120 }, attributes: { vehicle_colour: 'white', vehicle_type: 'ute' } }],
       alpr: { success: true, plate: 'ABC123', confidence: 0.9 },
+      face: { provider: 'laptop_gpu' },
     },
     enhanced: { success: true, faces: [{ embedding: Array(128).fill(0.2) }], alpr: { success: true, plate: 'ABC128', confidence: 0.7 } },
   }, { capturedAt: '2026-09-26T01:02:03.000Z', frameSha256: 'a'.repeat(64), provider: 'laptop_gpu' });
@@ -93,6 +95,21 @@ test('enhanced-only face detection is visible but never emits an identity embedd
   assert.equal(observations[0].entity_kind, 'person');
   assert.equal(observations[0].candidate_embedding, undefined);
   assert.equal(observations[0].attributes.face_basis, 'enhanced_candidate');
+});
+
+test('enhanced-only person detections never supply an appearance identity template', () => {
+  const observations = stillEntityObservations({
+    source: { success: true, people: [], faces: [], vehicles: [], animals: [] },
+    enhanced: { success: true, people: [{
+      confidence: 0.94,
+      bbox: { x: 10, y: 10, width: 80, height: 190 },
+      attributes: { appearance_embedding: Array(256).fill(0.1), appearance_embedding_usable: true },
+    }] },
+  }, { capturedAt: '2026-09-26T01:02:03.000Z' });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].appearance_embedding, undefined);
+  assert.equal(observations[0].attributes.appearance_embedding_usable, false);
+  assert.equal(observations[0].attributes.person_basis, 'enhanced_candidate');
 });
 
 test('watcher skips the full-frame vehicle pass when a detector covered vehicles and found none', () => {
@@ -190,6 +207,7 @@ async function summaryFixture() {
         appearance_embedding_usable: true, appearance_quality_score: 0.82, upper_body_colour: 'blue',
       } }] },
       face: { success: true, faces: [{ embedding: Array(128).fill(0.088), bbox: { x: 610, y: 150, width: 30, height: 30 },
+        person_bbox: { x: 600, y: 150, width: 60, height: 190 },
         usable_for_matching: true, face_quality_score: 0.9 }] } },
     { frame_index: 30, relative_timestamp_seconds: 2.0, sha256_hash: 'v2', quality_state: 'clear',
       alpr: { success: true, plate: 'ABC123', confidence: 0.92 },
@@ -262,7 +280,7 @@ test('buildEntityObservations returns nothing without a time base and uses captu
   assert.equal(fallback.find((item) => item.candidate_plate === 'ABC123').observed_at, '2026-09-10T09:00:01.000Z');
 });
 
-test('body-only detection remains place activity and is not persisted as a person observation', () => {
+test('body-only detection without a usable appearance template remains timeline activity only', () => {
   const summary = {
     consolidated_events: {
       vehicle_events: [],
@@ -275,6 +293,52 @@ test('body-only detection remains place activity and is not persisted as a perso
   assert.deepEqual(buildEntityObservations(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' }), []);
   const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
   assert.deepEqual(marks.find((mark) => mark.metadata.kind === 'motion_window')?.metadata.entity_counts, { person: 1 });
+});
+
+test('a usable body-only template creates a review observation and timeline mark but no face identity', () => {
+  const summary = {
+    consolidated_events: {
+      vehicle_events: [],
+      person_events: [{
+        event_id: 'person-body-template', first_seen_seconds: 1, last_seen_seconds: 4, frame_count: 12, confidence: 0.98,
+        quality_state: 'clear', best_frame_hash: 'body-frame', best_bbox: { x: 1, y: 1, width: 50, height: 170 },
+        appearance_embedding: Array(256).fill(0.0625), appearance_embedding_usable: true, appearance_template_frames: 3,
+        appearance_embedding_model: 'person-reidentification-retail-0288.xml',
+      }],
+      face_events: [],
+      animal_events: [],
+    },
+    motion_segments: [{ start_time_seconds: 0, end_time_seconds: 5, frames: [] }],
+  };
+  const observations = buildEntityObservations(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].candidate_embedding, undefined);
+  assert.deepEqual(observations[0].appearance_embedding, Array(256).fill(0.0625));
+  assert.equal(observations[0].attributes.appearance_embedding_usable, true);
+  const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  assert.deepEqual(marks.find((mark) => mark.metadata.kind === 'motion_window')?.metadata.entity_counts, { person: 1 });
+});
+
+test('face identity is associated by same-frame body-box overlap, not by time or array order', () => {
+  const base = {
+    vehicle_events: [],
+    animal_events: [],
+    person_events: [
+      { event_id: 'body-left', first_seen_seconds: 1, last_seen_seconds: 3, frame_count: 3, confidence: 0.9, quality_state: 'clear',
+        person_boxes_by_frame: [{ frame_index: 1, bbox: { x: 10, y: 10, width: 100, height: 200 } }] },
+      { event_id: 'body-right', first_seen_seconds: 1, last_seen_seconds: 3, frame_count: 3, confidence: 0.9, quality_state: 'clear',
+        person_boxes_by_frame: [{ frame_index: 1, bbox: { x: 300, y: 10, width: 100, height: 200 } }] },
+    ],
+    face_events: [{
+      event_id: 'face-right', subject_label: 'Person #1', first_seen_seconds: 1, last_seen_seconds: 3,
+      usable_for_matching: true, face_embedding: Array(128).fill(0.1),
+      person_boxes_by_frame: [{ frame_index: 1, bbox: { x: 300, y: 10, width: 100, height: 200 } }],
+    }],
+  };
+  const observations = buildEntityObservations({ consolidated_events: base }, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].source_event_id, 'body-right');
+  assert.equal(observations[0].attributes.face_event_id, 'face-right');
 });
 
 test('buildInferenceDeviceEvents grades each motion window and marks camera disturbances', async () => {
