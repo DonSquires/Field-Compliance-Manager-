@@ -24,6 +24,14 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Location house 360');
   });
 
+  it('allows a separate account house for a place already linked by another account', () => {
+    expect(source).toMatch(/candidate\.match_reason === 'Exact address match' && candidate\.belongs_to_account/);
+    expect(source).toMatch(/\{\s*!hasExactAddressInAccount\s*&&\s*<button[\s\S]*?>Create location for this account<\/button>\s*\}/);
+    expect(source).toContain('shared canonical place');
+    expect(source).toContain('their house and records stay separate');
+    expect(source).toContain('setLocationCandidates([])');
+  });
+
   it('keeps schedules in the portfolio while handing staff assignment to roster', () => {
     expect(source).toContain('Operations <strong>{deliverySchedules.length}</strong>');
     expect(source).toContain('Schedules and roster readiness stay in the portfolio context');

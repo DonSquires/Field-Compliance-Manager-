@@ -246,6 +246,24 @@ Owner-directed client/place simplification, 2026-10-28:
   on field capture; ordinary profile edits do not infer agreements or pricing.
   Administrators can explicitly confirm their own current pending engagement
   without accepting a client invitation, and recapture restores inactive markers.
+- **Cross-organisation place reuse finding, 2026-11-02:** Before, CRM search
+  showed an exact-address match owned by another account but hid the create
+  action, directing the operator to arrange access to that account's house.
+  That contradicted the house model: each organisation needs its own house,
+  while the address key links both houses to one canonical place. During, an
+  exact match in the selected account still opens its existing house; a match
+  in another account permits creation of a separate house for the selected
+  account. The existing `manage_crm_location` writer and place-identity trigger
+  create the account-scoped house and reuse the canonical address identity;
+  they do not grant access to the other account's house or records. Editing
+  either search field clears stale results before the operator acts. After,
+  the two houses remain separate while their `canonical_place_id` is shared.
+  This is covered by the CRM workspace guard and the place-model convergence
+  database fixture. The local Atlas manifest confirms the existing component
+  calls to `find_crm_location_candidates` and `manage_crm_location` and its
+  read of `locations`; no live Atlas write was made because the session has no
+  authorized Atlas credentials. The protected main-branch refresh remains the
+  release path.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,
   actual constraints and place/agreement/financial triggers, stale fix/version
   rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
