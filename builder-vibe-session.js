@@ -355,6 +355,14 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`execution history read failed: ${error.message}`);
       return (data || []).reverse();
     },
+    // Session-wide, not the history window: replies and execution logs can paraphrase an attachment
+    // long after its owner message has scrolled out of the last HISTORY_MESSAGES.
+    async hasEarlierAttachments(sessionId, beforeSeq) {
+      const { data, error } = await supabase.from('builder_vibe_messages').select('seq').eq('session_id', sessionId).eq('role', 'owner')
+        .lt('seq', beforeSeq).not('payload->attachment_ids', 'is', null).neq('payload->attachment_ids', '[]').limit(1);
+      if (error) throw new Error(`attachment history read failed: ${error.message}`);
+      return Boolean(data && data.length);
+    },
     async attachments(sessionId, attachmentIds) {
       if (!attachmentIds.length) return [];
       const { data, error } = await supabase.from('builder_vibe_attachments')
@@ -653,22 +661,31 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const history = await store.history(session.id, message.seq);
   const execution = typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, message.seq) : [];
   const attachmentContext = await prepareVibeAttachmentContext({ store, session, message, supabase, deps });
-  const discoveryTask = [message.content, ...history.filter(entry => entry.role === 'owner').slice(-3).map(entry => entry.content)].join('\n');
-  const startingFiles = resolveStartingFiles({ workspacePath, lane: 'fullstack', job: { task_description: discoveryTask } });
-  const atlas = await atlasMapForFiles({ supabase, workspacePath, lane: 'fullstack', startingFiles });
-  const sourceCandidates = [...startingFiles.confirmed, ...startingFiles.discovered.map(entry => entry.file), ...(atlas.suggested_files || [])];
-  const startingOutlines = sourceCandidates.filter(file => !/\.(?:css|json|md)$/.test(file)).slice(0, 3)
-    .map(file => {
-      const outline = tools.outline({ path: file });
-      const entries = outline.entries || [];
-      return {
-        ...outline, path: file,
-        entries: entries.slice(0, 16).map(entry => clip(entry, 200)),
-        truncated: entries.length > 16 || entries.some(entry => String(entry).length > 200),
-      };
-    });
+  const historyHasAttachments = history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length)
+    || (typeof store.hasEarlierAttachments === 'function' && await store.hasEarlierAttachments(session.id, message.seq));
+  const attachmentCloudConsent = message.payload?.external_attachment_consent === true;
+  const cloudPermitted = (deps.allowCloud ?? vibeCloudAllowed()) && (!attachmentContext.length || attachmentCloudConsent);
+  const discover = async task => {
+    const startingFiles = resolveStartingFiles({ workspacePath, lane: 'fullstack', job: { task_description: task } });
+    const atlas = await atlasMapForFiles({ supabase, workspacePath, lane: 'fullstack', startingFiles });
+    const sourceCandidates = [...startingFiles.confirmed, ...startingFiles.discovered.map(entry => entry.file), ...(atlas.suggested_files || [])];
+    const outlines = sourceCandidates.filter(file => !/\.(?:css|json|md)$/.test(file)).slice(0, 3)
+      .map(file => {
+        const outline = tools.outline({ path: file });
+        const entries = outline.entries || [];
+        return {
+          ...outline, path: file,
+          entries: entries.slice(0, 16).map(entry => clip(entry, 200)),
+          truncated: entries.length > 16 || entries.some(entry => String(entry).length > 200),
+        };
+      });
+    return { startingFiles, atlas, sourceCandidates, outlines };
+  };
+  const discovery = await discover([message.content, ...history.filter(entry => entry.role === 'owner').slice(-3).map(entry => entry.content)].join('\n'));
+  // Search terms from earlier owner messages would leak the withheld conversation, so the cloud map uses this message only.
+  const cloudDiscovery = historyHasAttachments && cloudPermitted ? await discover(message.content) : discovery;
+  const { sourceCandidates } = discovery;
   const state = branchState(workspacePath, baseSha);
-  const historyHasAttachments = history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length);
   const transcript = history.map(entry => {
     const pastAttachments = !Array.isArray(entry.payload?.attachment_context) || !entry.payload.attachment_context.length ? ''
       : `\n${entry.payload.attachment_context.map(item => clip(item.context, 4000)).join('\n')}`;
@@ -686,11 +703,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
       return `#${entry.seq} ${status} ${payload.tool || entry.kind}: ${clip(String(entry.content || ''), 160)}${args}${files}${preview}`;
     })
     .join('\n');
-  const attachmentCloudConsent = message.payload?.external_attachment_consent === true;
-  const buildTask = (transcript, includeCurrentAttachmentContext = true, includeExecution = true) => [
+  const buildTask = (transcript, includeCurrentAttachmentContext = true, includeExecution = true, map = discovery) => [
     `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
     state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.',
-    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...startingFiles, atlas, outlines: startingOutlines })}`,
+    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...map.startingFiles, atlas: map.atlas, outlines: map.outlines })}`,
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (this is the first message)',
     executionSummary && includeExecution ? `RECENT EXECUTION LOGS (avoid repeating failed/refused steps):\n${executionSummary}` : null,
     `OWNER NOW SAYS:\n${message.content}`,
@@ -699,7 +715,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const task = buildTask(transcript);
   // Earlier replies and tool output can paraphrase private attachments, so do not forward them either.
   const cloudTask = historyHasAttachments
-    ? buildTask('[earlier attachment analysis withheld from external models, including prior conversation and execution logs; inspect the current branch before editing]', attachmentCloudConsent, false)
+    ? buildTask('[earlier attachment analysis withheld from external models, including prior conversation and execution logs; inspect the current branch before editing]', attachmentCloudConsent, false, cloudDiscovery)
     : buildTask(transcript, attachmentCloudConsent);
   const messages = [{ role: 'system', content: vibeSystemPrompt(limits) }, { role: 'user', content: task }];
   const baseRequest = buildModelRunRequest({
@@ -707,9 +723,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task,
     outputSchema: vibeToolSchema(tools),
   });
-  const modelRequest = applyVibeRouting(baseRequest, {
-    allowCloud: (deps.allowCloud ?? vibeCloudAllowed()) && (!attachmentContext.length || attachmentCloudConsent),
-  });
+  const modelRequest = applyVibeRouting(baseRequest, { allowCloud: cloudPermitted });
   const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
@@ -750,16 +764,24 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (payload.tool === 'human_test') {
       if (payload.source_fingerprint) humanFingerprint = payload.source_fingerprint;
       if (payload.infrastructure) continue;
-      if (payload.ok === false) failedVerifications.set('human_test', { command: 'human_test', failed: true, preview: clip(payload.preview, 3000) });
+      if (payload.ok === false) failedVerifications.set('human_test', { command: 'human_test', failed: true, preview: clip(payload.preview, 3000), historical: true });
       else if (payload.ok === true) failedVerifications.delete('human_test');
       continue;
     }
     const command = String(payload.args?.command || '');
     if (payload.tool !== 'run' || !isVerificationCommand(command)) continue;
-    if (payload.ok === false) failedVerifications.set(verificationKey(command), { command, failed: true, preview: clip(payload.preview, 3000) });
+    if (payload.ok === false) failedVerifications.set(verificationKey(command), { command, failed: true, preview: clip(payload.preview, 3000), historical: true });
     else if (payload.ok === true) failedVerifications.delete(verificationKey(command));
   }
   lastVerification = [...failedVerifications.values()].at(-1) || null;
+  // Earlier output can quote a private attachment: external models get the failed command, not its output.
+  const cloudSafeVerification = verification => historyHasAttachments && verification?.historical
+    ? { command: verification.command, failed: verification.failed, historical: true, preview: '[earlier output withheld from external models; rerun this check to see its current result]' }
+    : verification;
+  const pushModelFeedback = (payload, cloudPayload) => messages.push({
+    role: 'user', content: JSON.stringify(payload),
+    ...(cloudPayload ? { cloudContent: JSON.stringify(cloudPayload) } : {}),
+  });
   const recordVerification = (command, result) => {
     const verification = {
       command,
@@ -884,9 +906,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
     if (candidate.provider === 'ollama_cloud' && historyHasAttachments && cloudStartIndex === null) cloudStartIndex = messages.length;
-    const providerMessages = candidate.provider !== 'ollama_cloud' ? messages
+    const providerMessages = (candidate.provider !== 'ollama_cloud' ? messages
       : cloudStartIndex !== null ? [messages[0], { role: 'user', content: cloudTask }, ...messages.slice(cloudStartIndex)]
-        : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudTask } : entry);
+        : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudTask } : entry))
+      .map(({ cloudContent, ...entry }) => candidate.provider === 'ollama_cloud' && cloudContent !== undefined ? { ...entry, content: cloudContent } : entry);
     const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(providerMessages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     if (candidate.provider === 'ollama_cloud' && !cloudEgressReceipts.has(candidate.model)) {
       await store.post(session.id, {
@@ -1040,10 +1063,12 @@ async function runConversation({ store, session, message, workspacePath, branch,
       await ensureHumanTest();
       if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
         verificationCorrectionSent = true;
-        messages.push({ role: 'user', content: JSON.stringify({
+        const correction = {
           error: 'Handoff refused: the latest verification failed. Fix the failure and rerun the check, or reply with args.blocked_reason explaining why this remains unverified.',
           verification: lastVerification,
-        }) });
+        };
+        const cloudVerification = cloudSafeVerification(lastVerification);
+        pushModelFeedback(correction, cloudVerification !== lastVerification ? { ...correction, verification: cloudVerification } : null);
         continue;
       }
       return handoff(args.blocked_reason || args.no_change_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
@@ -1121,7 +1146,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
           verification: lastVerification,
           next_candidates: sourceCandidates,
         };
-        messages.push({ role: 'user', content: JSON.stringify(recovery) });
+        const cloudVerification = cloudSafeVerification(lastVerification);
+        pushModelFeedback(recovery, cloudVerification !== lastVerification || cloudDiscovery !== discovery
+          ? { ...recovery, verification: cloudVerification, next_candidates: cloudDiscovery.sourceCandidates }
+          : null);
         await store.post(session.id, {
           role: 'system', kind: 'status',
           content: `Repeated tool call blocked; recovering once with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model || 'configured model'}. Existing work and evidence are retained.`,

@@ -489,6 +489,67 @@ test('owner-approved Ollama Cloud recovers loops in JSON mode and redacts earlie
   assert.match(sent, /earlier attachment analysis withheld/);
 });
 
+test('cloud packets withhold attachment history beyond the window, earlier search terms and earlier check output', async () => {
+  const cloudOnly = async () => ({ ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' } });
+
+  // The attachment-bearing owner message has scrolled out of the history window; Bob's paraphrase has not.
+  const scrolled = setup([{ thought: 'answer', tool: 'reply', args: { message: 'ok' } }], { fetchHealth: cloudOnly, allowCloud: true });
+  const lookups = [];
+  scrolled.store.hasEarlierAttachments = async (sessionId, beforeSeq) => { lookups.push([sessionId, beforeSeq]); return true; };
+  scrolled.store.history = async () => [
+    { seq: 40, role: 'owner', kind: 'message', content: 'Compare the quokkaledger figures', payload: {} },
+    { seq: 41, role: 'bob', kind: 'message', content: 'The scrolled-out document lists quokkaledger totals.', payload: {} },
+  ];
+  await vibe.processVibeMessage({ store: scrolled.store, message: ownerMessage('Why is the greeting clipped?'), deps: scrolled.deps });
+  assert.deepEqual(lookups, [[SESSION_ID, 10]]);
+  assert.equal(scrolled.model.calls[0].provider, 'ollama_cloud');
+  const opening = scrolled.model.calls[0].request.messages[1].content;
+  assert.doesNotMatch(JSON.stringify(scrolled.model.calls[0].request.messages), /quokkaledger/);
+  assert.match(opening, /earlier attachment analysis withheld/);
+  assert.match(opening, /"search_terms":\[[^\]]*"greeting"/);
+
+  // A failed check recorded before this message is still enforced, but its output stays private.
+  const checked = setup([
+    { thought: 'answer', tool: 'reply', args: { message: 'It looks fixed.' } },
+    { thought: 'blocked', tool: 'reply', args: { blocked_reason: 'The earlier failing check must be rerun first.' } },
+  ], { fetchHealth: cloudOnly, allowCloud: true });
+  checked.store.hasEarlierAttachments = async () => true;
+  checked.store.recentExecution = async () => [{
+    seq: 42, role: 'tool', kind: 'test', content: 'Running npm test',
+    payload: { tool: 'run', args: { command: 'npm test' }, ok: false, preview: 'exit 1: expected quokkaledger invoice 4417' },
+  }];
+  const outcome = await vibe.processVibeMessage({ store: checked.store, message: ownerMessage('Is the greeting fixed now?'), deps: checked.deps });
+  assert.equal(checked.model.calls.length, 2);
+  assert.ok(checked.model.calls.every(call => call.provider === 'ollama_cloud'));
+  const followUp = JSON.stringify(checked.model.calls[1].request.messages);
+  assert.match(followUp, /Handoff refused: the latest verification failed/);
+  assert.match(followUp, /npm test/);
+  assert.match(followUp, /earlier output withheld from external models/);
+  assert.doesNotMatch(followUp, /quokkaledger|4417/);
+  assert.equal(outcome.error, true);
+  assert.match(outcome.reply, /Changes are not verified: npm test failed/);
+});
+
+test('the Vibe store detects attachment history across the whole session', async () => {
+  const filters = [];
+  const query = {
+    select(columns) { filters.push(['select', columns]); return this; },
+    eq(column, value) { filters.push(['eq', column, value]); return this; },
+    lt(column, value) { filters.push(['lt', column, value]); return this; },
+    not(column, operator, value) { filters.push(['not', column, operator, value]); return this; },
+    neq(column, value) { filters.push(['neq', column, value]); return this; },
+    limit(count) { filters.push(['limit', count]); return Promise.resolve({ data: [{ seq: 3 }], error: null }); },
+  };
+  const store = vibe.createVibeStore({ from(table) { filters.push(['from', table]); return query; } });
+  assert.equal(await store.hasEarlierAttachments(SESSION_ID, 90), true);
+  assert.deepEqual(filters, [
+    ['from', 'builder_vibe_messages'], ['select', 'seq'], ['eq', 'session_id', SESSION_ID], ['eq', 'role', 'owner'], ['lt', 'seq', 90],
+    ['not', 'payload->attachment_ids', 'is', null], ['neq', 'payload->attachment_ids', '[]'], ['limit', 1],
+  ]);
+  query.limit = () => Promise.resolve({ data: null, error: { message: 'permission denied' } });
+  await assert.rejects(store.hasEarlierAttachments(SESSION_ID, 90), /attachment history read failed: permission denied/);
+});
+
 test('current attachment context reaches Ollama Cloud only after per-message owner opt-in', async () => {
   const health = async () => ({
     gpu_workstation: { configured: true, healthy: true, models: ['local-primary'], installed: ['local-primary'], ready_model: 'local-primary' },
