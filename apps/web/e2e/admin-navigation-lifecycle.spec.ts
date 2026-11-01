@@ -26,16 +26,26 @@ test('admin navigation keeps client setup simple and follow-up work optional', a
     await navigation.getByRole('button', { name: 'CRM & Clients', exact: true }).click();
   }
   await expect(page.getByRole('heading', { name: 'Client directory' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Account operations workflow' })).toHaveCount(0);
+  await expect(page.locator('.workflow-rail, .workflow-rail-select')).toHaveCount(0);
+  const followUp = page.getByRole('navigation', { name: 'Client follow-up work' });
+  const viewportWidth = page.viewportSize()?.width ?? 0;
+  for (const name of ['Agreements & services', 'Activation checklist', 'Service handoffs']) {
+    const link = followUp.getByRole('button', { name });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect((box?.x ?? 0) + (box?.width ?? 0), `${name} stays inside the viewport`).toBeLessThanOrEqual(viewportWidth);
+  }
   await page.getByRole('button', { name: 'Set up a new client' }).click();
   await expect(page.getByRole('heading', { name: 'Add client' })).toBeVisible();
   await expect(page.getByRole('form', { name: 'Client details' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Locations' })).toBeVisible();
 
-  await page.goto('/admin/onboarding');
+  await page.goto('/admin/crm');
+  await expect(page.getByRole('heading', { name: 'Client directory' })).toBeVisible();
+  await followUp.getByRole('button', { name: 'Activation checklist' }).click();
   await expect(page.getByRole('heading', { name: 'Clients being set up' })).toBeVisible();
   const sections = page.getByRole('navigation', { name: 'Workspace sections' });
-  await expect(page.getByRole('navigation', { name: 'Account operations workflow' })).toHaveCount(0);
+  await expect(page.locator('.workflow-rail, .workflow-rail-select')).toHaveCount(0);
   if (isMobile) {
     const destinations = page.getByRole('combobox', { name: 'Workspace destination' });
     await expect(destinations.locator('option', { hasText: 'Activation checklist' })).toHaveCount(1);

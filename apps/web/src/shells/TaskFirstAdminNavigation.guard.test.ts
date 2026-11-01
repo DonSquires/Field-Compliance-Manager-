@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+const crm = readFileSync(resolve(process.cwd(), 'src/pages/CRMPage.tsx'), 'utf8');
+const crmStyles = readFileSync(resolve(process.cwd(), 'src/pages/CRMPage.css'), 'utf8');
 const site = readFileSync(resolve(process.cwd(), 'src/pages/SiteDetailPage.tsx'), 'utf8');
 
 describe('task-first client delivery navigation', () => {
@@ -11,6 +13,19 @@ describe('task-first client delivery navigation', () => {
     expect(shell).toContain("label: 'Activation checklist'");
     expect(shell).toContain("label: 'Service handoffs'");
     expect(shell).not.toContain('WorkflowRail');
+  });
+
+  it('links follow-up work from the client directory, where the workspace toolbar is hidden', () => {
+    expect(shell).toMatch(/showWorkspaceNavigation = ![^;]*'crm'/);
+    expect(crm).toContain('aria-label="Client follow-up work"');
+    expect(crm).toContain("{ page: 'relationships', label: 'Agreements & services' }");
+    expect(crm).toContain("{ page: 'onboarding', label: 'Activation checklist' }");
+    expect(crm).toContain("{ page: 'handoffs', label: 'Service handoffs' }");
+    expect(crm).toContain('onNavigate(link.page)');
+  });
+
+  it('keeps the phone directory inside the viewport so follow-up links are not clipped', () => {
+    expect(crmStyles).toMatch(/@media\(max-width:720px\)\{\.crm-page\.is-directory-workbench\{[^}]*width:100%/);
   });
 
   it('preserves explicit URL context at the shell routing boundary', () => {
