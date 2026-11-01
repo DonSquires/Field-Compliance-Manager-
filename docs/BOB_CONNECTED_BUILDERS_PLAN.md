@@ -824,6 +824,12 @@ why lexical completion guards must not become the future semantic tool/model
 selector. They remain a bounded compatibility correction, not the proposed
 Conductor/Caddie/Oracle architecture.
 
+Release review also preserves an independent ", however, propose" after a
+file-edit prohibition, keeps ", just as an example," inside an informational
+question, and recognizes "explain the issue and [then] propose" plus "please do
+propose". Regression cases check both classification and the real model opening
+packet, alongside coordinated prohibitions and explanatory "how to" negatives.
+
 Next measured slice, reusing the existing delivery lanes rather than adding
 another product or a model call before every answer:
 
