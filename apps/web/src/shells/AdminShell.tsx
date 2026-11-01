@@ -18,7 +18,7 @@
 import { isAdminTierRole } from '../lib/roles';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PEOPLE_SECTIONS, ROSTER_SECTIONS, ROSTER_SETUP_PATH, isRosteringHrView, workforceSectionFor } from '../lib/workforceSections';
+import { PEOPLE_SECTIONS, ROSTER_SECTIONS, ROSTER_SETUP_PATH, isRosteringHrView, shouldShowRosterSetupFallback, workforceSectionFor } from '../lib/workforceSections';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
@@ -692,11 +692,22 @@ const AdminShell: React.FC = () => {
     if (activePage === 'bob') return;
     setBobOpen(true);
   }, [activePage]);
+  const rosterSetupFallback = shouldShowRosterSetupFallback(
+    isPageEnabled('roster'),
+    isPageEnabled('people-hr'),
+    canAccessAdminPage('roster', profile?.role, () => true),
+  );
+  const openRosterSetup = () => {
+    setActivePage('people-hr');
+    setMobileMenuOpen(false);
+    const contextQuery = workflowContextQuery(workflowContext);
+    navigate(`${ROSTER_SETUP_PATH}${contextQuery ? `&${contextQuery.slice(1)}` : ''}`);
+  };
 
   // Without the HR module, People still opens logins and access.
   const enabledNavItems = (items: WorkspaceItem[]) => items
     .map((item) => (item.id === 'people-hr' && !isPageEnabled('people-hr') ? { ...item, id: 'users' as AdminPage, also: [] } : item))
-    .filter((item) => isPageEnabled(item.id) && (!item.area || isFieldOpsAreaEnabled(item.area)));
+    .filter((item) => (isPageEnabled(item.id) || (item.id === 'roster' && rosterSetupFallback)) && (!item.area || isFieldOpsAreaEnabled(item.area)));
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
     .map(([group, items]) => ({ group, items: enabledNavItems(items) }));
@@ -705,6 +716,7 @@ const AdminShell: React.FC = () => {
     ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
     if (item.id === 'bob') openBobCommandCenter();
+    else if (item.id === 'roster' && rosterSetupFallback) openRosterSetup();
     else if (item.area) navigateToFieldOps(item.area);
     else navigateToPage(item.id, workflowContext);
   };
@@ -717,10 +729,8 @@ const AdminShell: React.FC = () => {
     ? (workforceSection.startsWith('roster-') ? ROSTER_SECTIONS : PEOPLE_SECTIONS).filter((section) => isPageEnabled(sectionPage[section.key]))
     : [];
   const openWorkforceSection = (key: keyof typeof sectionPage) => {
-    if (key !== 'roster-setup') { navigateToPage(sectionPage[key], workflowContext); return; }
-    setActivePage('people-hr');
-    setMobileMenuOpen(false);
-    navigate(ROSTER_SETUP_PATH);
+    if (key === 'roster-setup') { openRosterSetup(); return; }
+    navigateToPage(sectionPage[key], workflowContext);
   };
   const workforceSectionNav = workforceSections.length > 1
     && <nav className="admin-workforce-sections" aria-label={workforceSection?.startsWith('roster-') ? 'Roster sections' : 'People sections'}>

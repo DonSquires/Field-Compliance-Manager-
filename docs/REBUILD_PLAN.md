@@ -295,14 +295,18 @@ simplification; owner chose "consolidate to 2" and "leave roster_templates"):
   (`/admin/people-hr?section=rostering`). People: Staff, pay & HR
   (`/admin/people-hr`), Logins & access (`/admin/users`). The HR page shows only
   its own view's groups (Staff, HR, Pay & Assets, or the rostering tabs).
-  Without the HR module, People opens Logins & access. No route, permission,
-  module gate or data path changed; old links and `?tab=` deep links to rostering
-  tabs still land in the right view.
+  Without the HR module, People opens Logins & access. If Rostering is disabled
+  while HR remains enabled, Rosters falls back to the existing HR-gated setup
+  view; the roster board and work-unit coverage stay behind their Rostering
+  gates. Section navigation preserves the handoff and work-unit context.
+  No route, permission or data path changed; old links and `?tab=` deep links to
+  rostering tabs still land in the right view.
 - **After:** `roster_templates` stays legacy-only (no screen, no writer). Its
   retirement needs its own migration and evidence.
 - **Evidence gate:** vitest guards and the section helper pass. Desktop/mobile
-  synthetic Playwright runs pass for HR administration and credential renewal,
-  with win32 baselines regenerated. `roster-operations` week-board/publish and
+  synthetic Playwright runs cover HR administration, credential renewal,
+  HR-only Rosters fallback and mobilisation-context preservation, with win32
+  baselines regenerated. `roster-operations` week-board/publish and
   `geofence-spine-map` screenshot failures also fail on `main` before this
   change. No human walkthrough has been done yet.
 

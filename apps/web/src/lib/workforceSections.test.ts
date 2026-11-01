@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isRosteringHrView, workforceSectionFor } from './workforceSections';
+import { isRosteringHrView, shouldShowRosterSetupFallback, workforceSectionFor } from './workforceSections';
 
 describe('workforce sections', () => {
   it('places roster pages and the HR rostering view under Rosters', () => {
@@ -23,5 +23,12 @@ describe('workforce sections', () => {
     expect(workforceSectionFor('people-hr', '?profile=s1&tab=coverage')).toBeNull();
     expect(isRosteringHrView('?profile=s1&section=rostering')).toBe(false);
     expect(workforceSectionFor('crm', '')).toBeNull();
+  });
+
+  it('offers HR-gated roster setup only when roster access is otherwise permitted', () => {
+    expect(shouldShowRosterSetupFallback(false, true, true)).toBe(true);
+    expect(shouldShowRosterSetupFallback(true, true, true)).toBe(false);
+    expect(shouldShowRosterSetupFallback(false, false, true)).toBe(false);
+    expect(shouldShowRosterSetupFallback(false, true, false)).toBe(false);
   });
 });

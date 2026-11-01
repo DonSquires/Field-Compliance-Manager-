@@ -34,4 +34,12 @@ export function workforceSectionFor(page: string, search: string): WorkforceSect
   }
 }
 
+export function shouldShowRosterSetupFallback(
+  rosterPageEnabled: boolean,
+  peoplePageEnabled: boolean,
+  roleCanAccessRosters: boolean,
+): boolean {
+  return !rosterPageEnabled && peoplePageEnabled && roleCanAccessRosters;
+}
+
 export const ROSTER_SETUP_PATH = '/admin/people-hr?section=rostering';

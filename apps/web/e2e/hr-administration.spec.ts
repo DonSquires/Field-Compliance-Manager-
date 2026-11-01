@@ -236,6 +236,33 @@ test('admin officer has the same People and Rosters work as an administrator', a
   await expect(page.getByLabel('People and HR workspace')).toHaveCount(0);
 });
 
+test('Rosters opens its HR-gated setup view when the Rostering module is disabled', async ({ page }) => {
+  await page.route('**/rest/v1/organization_modules**', async (route) => await route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: false },
+      { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'welfare', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'crm', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'rostering', enabled: false },
+      { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'hr', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'finance', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'workshop', enabled: true },
+    ]),
+  }));
+  await signInAsAdmin(page, '/admin/people-hr');
+
+  const rosters = page.getByRole('button', { name: 'Rosters', exact: true });
+  const viewport = page.viewportSize();
+  if (viewport && viewport.width < 768) {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+  }
+  await expect(rosters).toBeVisible();
+  await rosters.click();
+  await expect(page).toHaveURL(/\/admin\/people-hr\?section=rostering/);
+  await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rest & hours rules', exact: true })).toBeVisible();
+});
+
 test('administrator registers and corrects equipment before officer sign-out', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/people-hr');
