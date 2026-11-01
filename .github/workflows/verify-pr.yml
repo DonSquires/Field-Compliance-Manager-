@@ -31,8 +31,8 @@ jobs:
       - run: npm run calibrate
       - run: node scripts/check-migration-versions.js
       - run: node --test --test-concurrency=4 test/*.test.js
-      - name: PostgreSQL authorization, notice quarantine, permit holders, vehicle notes, places and organisation reach
-        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js test/notice-template-quarantine-migration.test.js test/permit-holder-person-search-migration.test.js test/permit-holder-identity-repair-migration.test.js test/officer-person-search-access.test.js test/admin-officer-parity.test.js test/manage-identity-vehicle-notes-migration.test.js test/rm-simple-place-workflows.test.js test/org-access-policy-initplan.test.js
+      - name: PostgreSQL authorization, biometrics, notice quarantine, permit holders, vehicle notes, places and organisation reach
+        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js test/notice-template-quarantine-migration.test.js test/permit-holder-person-search-migration.test.js test/permit-holder-identity-repair-migration.test.js test/officer-person-search-access.test.js test/admin-officer-parity.test.js test/manage-identity-vehicle-notes-migration.test.js test/rm-simple-place-workflows.test.js test/org-access-policy-initplan.test.js test/staff-biometrics-read.test.js
 
   web:
     name: Web types, build and unit tests
