@@ -340,6 +340,43 @@ present-but-unwired entities; live schema and migration ledger match the repo):
   apart from `officer-timesheet.spec.ts:22`, which assumes a UTC browser and
   fails only on an NZ-time machine. No human walkthrough has been done yet.
 
+Website enquiry intake, 2026-11-03 (live Atlas has no website or enquiry
+entities; the live migration ledger ends at `20261103100000`):
+
+- **Before:** the R&M public website had no governed way to send a lead into
+  FCM. Enquiries arrived outside the record, with no reference, no owner, no
+  status and no audit trail, so nobody could show who replied or why an enquiry
+  was dropped.
+- **During:** migration `20261103110000` adds `website_enquiries`. RLS is on;
+  only grand masters and administrators of the provider organisation can read
+  rows, and no client role can write them. `submit_website_enquiry` is
+  service-role only: it takes the provider from `private.platform_tenancy`,
+  checks every field again, allows five enquiries an hour per salted IP hash
+  and returns an `ENQ-XXXXXX` reference. It also notifies R&M admins and
+  masters. `review_website_enquiry` needs a signed-in administrator, the row
+  version and a note for converted, closed, spam or reopen, and writes
+  `audit_log`. The public `website-enquiry` edge function (`verify_jwt =
+  false`) checks the origin allowlist, size, honeypot and timing, then calls
+  the RPC with the service-role key. It stores only the IP hash, never the IP.
+  CRM gains one "Website enquiries" page (CRM toolbar and directory follow-up
+  link) to filter, search, mark contacted, convert, close or mark spam.
+  Converting never creates an organisation; the page sends the user to client
+  setup.
+- **Left as is, with reasons:** no organisation, contact or agreement is created
+  from an enquiry; a person decides that in client setup. Retention of
+  enquiries and IP hashes is not yet set. `WEBSITE_ENQUIRY_SALT` must be set as
+  a function secret; until then the salt falls back to a hash of the
+  service-role key. `enqueue_notification` keeps its existing anon EXECUTE
+  grant; that is outside this change. Grand masters see enquiries but not the
+  role-addressed notifications.
+- **Evidence gate:** a rolled-back DO-block dry run on the live catalog
+  confirmed RLS, grants, the rate limit, review rules, stale-version rejection,
+  notifications and the audit row, and left the catalog unchanged. The root
+  contract test, `deno check`, web guards, the web build and serial offline
+  Playwright runs of the enquiry page pass. `schema.sql` and Atlas must be
+  refreshed after the release lane applies the migration. No human walkthrough
+  has been done yet.
+
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
 diagnostics/capability discovery, then shared knowledge/evidence, investigation

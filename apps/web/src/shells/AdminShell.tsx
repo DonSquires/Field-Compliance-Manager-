@@ -38,6 +38,7 @@ import {
   FlaskConical,
   Grid3X3,
   Handshake,
+  Inbox,
   KeyRound,
   Landmark,
   LogOut,
@@ -85,6 +86,7 @@ const ClientSetupPage = React.lazy(() => import('../pages/ClientSetupPage'));
 const ServiceClientPage = React.lazy(() => import('../components/ServiceClientWorkspace').then(module => ({ default: module.ServiceClientWorkspace })));
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
+const WebsiteEnquiriesPage = React.lazy(() => import('../pages/WebsiteEnquiriesPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
@@ -146,7 +148,7 @@ type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'nzta-register' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop';
+  | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop' | 'website-enquiries';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
@@ -157,7 +159,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites', 'website-enquiries',
 ]);
 
 const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets']);
@@ -166,7 +168,7 @@ const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets'])
 // that must be enabled for the caller's org to reach it. Pages absent here
 // have no module gate (role checks below still apply).
 const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
-  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm', 'client-setup': 'crm',
+  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm', 'client-setup': 'crm', 'website-enquiries': 'crm',
   roster: 'rostering', 'roster-targets': 'rostering',
   'people-hr': 'hr',
   'finance-bureau': 'finance', 'finance-connections': 'finance', 'finance-money': 'finance', 'finance-costing': 'finance', 'finance-pricing': 'finance', 'rate-rules': 'finance',
@@ -309,6 +311,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'relationships', label: 'Agreements & services', icon: Handshake },
     { id: 'onboarding', label: 'Activation checklist', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Service handoffs', icon: Handshake },
+    { id: 'website-enquiries', label: 'Website enquiries', icon: Inbox },
   ],
   Finance: [
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
@@ -796,6 +799,8 @@ const AdminShell: React.FC = () => {
         return <AccountOnboardingPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'handoffs':
         return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'website-enquiries':
+        return <WebsiteEnquiriesPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'client-setup':

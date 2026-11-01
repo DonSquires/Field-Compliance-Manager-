@@ -52,6 +52,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (notification.category === 'report_ready') return { kind: 'admin_page', page: 'reports' };
     if (notification.category === 'schema_change_request' || notification.category === 'bob_self_memory') return { kind: 'admin_page', page: 'approvals' };
     if (notification.category === 'document_review' || link === 'approvals' || link === 'document-studio') return { kind: 'admin_page', page: link === 'document-studio' ? 'document-studio' : 'approvals' };
+    if (link === 'website-enquiries') return { kind: 'admin_page', page: 'website-enquiries' };
     if (notification.category === 'crm_client' || link === 'crm') return { kind: 'admin_crm_account', accountId };
     return null;
   }

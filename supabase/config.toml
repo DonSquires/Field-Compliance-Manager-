@@ -412,3 +412,9 @@ enabled = true
 # declarative_schema_path = "./schemas"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# Public intake for the R&M website. No user JWT: the function checks the origin,
+# validates the body, rate-limits by salted IP hash and writes only through the
+# service-role RPC submit_website_enquiry.
+[functions.website-enquiry]
+verify_jwt = false

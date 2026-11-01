@@ -211,6 +211,7 @@ const FOLLOW_UP_LINKS = [
   { page: 'relationships', label: 'Agreements & services' },
   { page: 'onboarding', label: 'Activation checklist' },
   { page: 'handoffs', label: 'Service handoffs' },
+  { page: 'website-enquiries', label: 'Website enquiries' },
 ] as const;
 
 const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
