@@ -92,6 +92,15 @@ function acceptanceSummary(value: unknown) {
   };
 }
 
+// Only the identifiers the owner retry needs; the rest of the author's input context stays private.
+function savedPatchContext(value: unknown) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const patch = typeof input.patch_artifact_id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.patch_artifact_id) ? input.patch_artifact_id : null;
+  const target = typeof input.target_sha === 'string' && /^[a-f0-9]{40}$/.test(input.target_sha) ? input.target_sha : null;
+  return patch && target ? { patch_artifact_id: patch, target_sha: target } : undefined;
+}
+
 function safeSnapshot(value: Record<string, unknown>) {
   const rows = (input: unknown) => Array.isArray(input) ? input as Array<Record<string, unknown>> : [];
   return {
@@ -102,6 +111,7 @@ function safeSnapshot(value: Record<string, unknown>) {
       result_summary: step.result_summary, error: step.error, retryable: step.retryable,
       started_at: step.started_at, completed_at: step.completed_at,
       ...(step.step_id === 'test_suite' ? { input_context: acceptanceSummary(step.input_context) } : {}),
+      ...(step.step_id === 'frontend_implementation' ? { input_context: savedPatchContext(step.input_context) } : {}),
     })),
     artifacts: rows(value.artifacts).map(artifact => ({
       id: artifact.id, step_id: artifact.step_id, artifact_type: artifact.artifact_type,
@@ -110,8 +120,8 @@ function safeSnapshot(value: Record<string, unknown>) {
     })),
     workerRuns: rows(value.workerRuns).map(run => ({
       id: run.id, step_id: run.step_id, profile: run.profile, status: run.status,
-      target_sha: run.target_sha, exit_code: run.exit_code, started_at: run.started_at,
-      completed_at: run.completed_at, heartbeat_at: run.heartbeat_at,
+      target_sha: run.target_sha, patch_artifact_id: run.patch_artifact_id, exit_code: run.exit_code,
+      started_at: run.started_at, completed_at: run.completed_at, heartbeat_at: run.heartbeat_at,
     })),
     modelRuns: rows(value.modelRuns).map(run => ({
       id: run.id, step_id: run.step_id, provider: run.provider, model_name: run.model_name,

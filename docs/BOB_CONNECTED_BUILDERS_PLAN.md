@@ -39,6 +39,63 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Owner-confirmed saved-patch verifier retry (2026-11-02)
+
+Before: successor job `402bfd7e-17f6-4b82-83c2-0a2048ec1722` is blocked after
+the frontend verifier failed twice with infrastructure or attribution errors.
+Its exact final frontend patch and target SHA remain recorded, while downstream
+gates are untouched. The job has not been changed or resumed in production.
+
+During: the Builder Control Room now shows a two-stage retry only to the
+original job requester after matching the authenticated identity. The owner
+sees the saved patch checksum and target SHA before confirmation. An
+owner-authorized RPC rechecks job freshness, patch identity, latest failed or
+timed-out verifier run, active work, publication state, approvals and downstream
+gates. An optional backend lane may be skipped with its normal completion
+timestamp, but any started work remains ineligible. The RPC writes an audit
+receipt and preserves the patch and attempt history. Each verifier claim
+retains that receipt and gets an attempt-specific idempotency key, so repeated
+failures do not overwrite earlier evidence. At the persisted attempt ceiling,
+the receipt authorizes exactly one verifier-only attempt on the saved patch;
+it does not reset attempts or permit another author run. The retry does not
+approve or publish the work. Before verification proceeds, the worker also
+rejects a saved patch that removes pinned ordinary or `.each`-parameterized
+regression-test titles and records actionable failure evidence for Bob to
+repair.
+
+Two seams found during acceptance and closed in the same change:
+
+- The real `bob-builder-control-room` projection stripped the step's
+  `patch_artifact_id`/`target_sha` and the worker run's `patch_artifact_id`, so
+  the retry could never appear for the real job even though mocked page tests
+  passed (the same class of gap as #251). The projection now exposes only those
+  validated identifiers; prompts, other input context, idempotency keys and
+  storage locations stay private. A test drives a database-shaped failed job
+  through the real projection into the real page eligibility function.
+- The verifier container mounts a read-only branch worktree whose Git metadata
+  stays on the host, and its work copy excludes `.git`, so a `git rev-parse`
+  baseline would fail every verification. The test-preservation check now
+  uses the mounted pre-patch source (the exact tree `git apply --check`
+  accepted) as its baseline, takes touched paths from Git's own patch parser
+  (rename/copy sources included), and fails closed if the patch cannot be
+  parsed. `Dockerfile.worker` copies the shared `builder-test-preservation.js`.
+- The full concurrent root suite also exposed a load-sensitive 1.5-second
+  control-plane test startup window. Its readiness probe now waits up to 15
+  seconds and reports only the bounded process-exit or last health error.
+
+After: local acceptance on current main (`65ab2f9e`, protected main CI green,
+governed release healthy) passes the full root suite (2,000 passed, 23 skipped,
+0 failed), Atlas calibration, the migration-version check (735 migrations),
+the actual PostgreSQL retry tests, the full web unit suite (1,979 tests), web
+TypeScript/lint and production build, and all ten Control Room browser tests on
+desktop and mobile Chromium. The new browser test opens the real page, cancels
+once, confirms, and checks the exact RPC payload and single `run` request.
+Three older Control Room browser tests were stale only because they skipped the
+current **Jobs & approvals** navigation; they now pass unchanged otherwise.
+The migration is not applied to production, the live job remains untouched,
+and this work still requires the protected PR and governed release before any
+retry can be offered against production state.
+
 ### Author verification loop and browser attribution (2026-10-27)
 
 Before: successor job `402bfd7e-17f6-4b82-83c2-0a2048ec1722` (created when

@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 /** Fixture rows are mutated by the stubbed RPCs below; fields seeded as null accept strings later. */
 const mutable = <T extends object>(rows: T[]) => rows as Array<{ [K in keyof T]: T[K] extends null ? string | null : T[K] }>;
-const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
+export const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const OFFICER_ID = '22222222-2222-4222-8222-222222222222';
 const SECOND_OFFICER_ID = '2f2f2f2f-2222-4222-8222-222222222222';
 const ORG_ID = '33333333-3333-4333-8333-333333333333';

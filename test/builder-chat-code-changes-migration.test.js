@@ -9,6 +9,7 @@ const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/2
 const cycleMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026103000_builder_correction_verification_cycles.sql'), 'utf8');
 const recoveryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261026110000_builder_chat_implementation_recovery.sql'), 'utf8');
 const requiredLaneMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101090000_builder_reopen_required_implementation_lanes.sql'), 'utf8');
+const savedPatchRetryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261102100000_builder_retry_failed_frontend_patch.sql'), 'utf8');
 const skipSql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260830181000_builder_implementation_skip.sql'), 'utf8');
 const skipFunction = skipSql.slice(skipSql.indexOf('CREATE OR REPLACE FUNCTION'), skipSql.indexOf('$$;') + 3);
 
@@ -22,6 +23,15 @@ test('code corrections preserve immutable task/target/attempts and have owner-on
   assert.match(requiredLaneMigration, /v_job\.backend_required/);
   assert.match(requiredLaneMigration, /reopened_required_lanes/);
   assert.match(requiredLaneMigration, /FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(savedPatchRetryMigration, /saved_frontend_patch_retry/);
+  assert.match(savedPatchRetryMigration, /owner_patch_retry::/);
+  assert.match(savedPatchRetryMigration, /owner_patch_retry_attempt_count/);
+  assert.match(savedPatchRetryMigration, /attempt::/);
+  assert.match(savedPatchRetryMigration, /v_run\.status NOT IN \('failed', 'timeout'\)/);
+  assert.match(savedPatchRetryMigration, /attempt_count/);
+  assert.match(savedPatchRetryMigration, /p_job_updated_at/);
+  assert.match(savedPatchRetryMigration, /FROM PUBLIC, anon, service_role/);
+  assert.doesNotMatch(savedPatchRetryMigration, /approval_status\s*=\s*'approved'|workspace_published_at\s*=/);
 });
 
 test('actual PostgreSQL enforces same-job correction authorization, stale/active guards, retained seeds and replay', {
@@ -174,7 +184,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
       CREATE TABLE builder_model_runs(job_id uuid,status text);
       CREATE TABLE builder_audit_events(id uuid DEFAULT gen_random_uuid(),organization_id uuid,job_id uuid,
         event_type text,actor_user_id uuid,actor_type text,previous_value jsonb,new_value jsonb,change_summary text,
-        related_artifact_ids uuid[],related_approval_id uuid);
+        related_artifact_ids uuid[],related_approval_id uuid,created_at timestamptz DEFAULT now());
       CREATE FUNCTION expect_error(command text,expected text) RETURNS void LANGUAGE plpgsql AS $f$
       BEGIN BEGIN EXECUTE command; EXCEPTION WHEN OTHERS THEN
         IF position(expected in SQLERRM)=0 THEN RAISE EXCEPTION 'Unexpected: %',SQLERRM; END IF; RETURN;
@@ -433,10 +443,149 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         THEN RAISE EXCEPTION 'Wrong execute grants'; END IF;
       END $f$;
     `;
+    const savedPatchRetrySchema = `
+      ALTER TABLE builder_jobs ADD COLUMN workspace_pull_request_head_sha text;
+      ALTER TABLE builder_worker_runs ADD COLUMN exit_code integer, ADD COLUMN created_at timestamptz DEFAULT now();
+    `;
+    const savedPatchRetryChecks = `
+      SELECT set_config('test.role','authenticated',false);
+      DO $f$
+      #variable_conflict use_variable
+      DECLARE job_id uuid:=gen_random_uuid(); org_id uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid();
+        step_id uuid:=gen_random_uuid(); backend_id uuid:=gen_random_uuid(); patch_id uuid:=gen_random_uuid();
+        ux_step_id uuid:=gen_random_uuid(); ux_artifact_id uuid:=gen_random_uuid();
+        run_id uuid:=gen_random_uuid(); receipt uuid; repeated uuid; worker_result jsonb;
+        request_time timestamptz:=now(); original_key text;
+        command text; original_error text:='Verifier recovery paused after two infrastructure or attribution failures; patch preserved; inspect the runner and evidence before resuming';
+      BEGIN
+        INSERT INTO builder_jobs(id,organization_id,status,target_sha,code_review_mode,autopilot_requested_by,
+          autopilot_state,updated_at,frontend_required,backend_required)
+          VALUES(job_id,org_id,'failed',repeat('a',40),'human',owner_id,'blocked',request_time,true,true);
+        INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status,attempt_count,ordinal_position,
+          retryable,error,input_context)
+          VALUES(gen_random_uuid(),job_id,'product_analysis','product_analyst','completed',2,1,false,NULL,'{}'),
+            (ux_step_id,job_id,'ui_design','ux_designer','completed',1,2,false,NULL,'{}'),
+            (step_id,job_id,'frontend_implementation','frontend_engineer','failed',3,3,false,original_error,
+              jsonb_build_object('target_sha',repeat('a',40),'patch_artifact_id',patch_id)),
+            (backend_id,job_id,'backend_implementation','backend_engineer','pending',0,4,false,NULL,'{}'),
+            (gen_random_uuid(),job_id,'test_suite','qa_security_reviewer','pending',0,5,false,NULL,'{}'),
+            (gen_random_uuid(),job_id,'security_review','qa_security_reviewer','pending',0,6,false,NULL,'{}'),
+            (gen_random_uuid(),job_id,'code_review','code_reviewer','pending',0,7,false,NULL,'{}'),
+            (gen_random_uuid(),job_id,'release_prep','release_engineer','pending',0,8,false,NULL,'{}');
+        INSERT INTO builder_artifacts(id,job_id,step_id,artifact_type,status,checksum)
+          VALUES(patch_id,job_id,step_id,'code_implementation','final',repeat('b',64)),
+            (ux_artifact_id,job_id,ux_step_id,'ui_design_plan','final',repeat('c',64));
+        original_key:=job_id::text||'::'||step_id::text||'::'||repeat('a',40)||'::'||repeat('b',64);
+        INSERT INTO builder_model_runs(job_id,step_id,status,input_artifact_ids,output_artifact_ids)
+          VALUES(job_id,step_id,'completed',ARRAY[ux_artifact_id],ARRAY[patch_id]);
+        INSERT INTO builder_worker_runs(id,job_id,step_id,organization_id,status,target_sha,profile,patch_artifact_id,exit_code,idempotency_key)
+          VALUES(run_id,job_id,step_id,org_id,'failed',repeat('a',40),'frontend-verify',patch_id,1,original_key);
+        command:=format('SELECT builder_retry_failed_frontend_patch(%L,%L,%L,%L,%L::timestamptz)',
+          job_id,step_id,patch_id,repeat('a',40),request_time);
+        PERFORM set_config('test.actor',gen_random_uuid()::text,false);
+        PERFORM set_config('test.authorized','yes',false);
+        PERFORM expect_error(command,'not authorized');
+        PERFORM set_config('test.actor',owner_id::text,false);
+        PERFORM set_config('test.authorized','no',false);
+        PERFORM expect_error(command,'not authorized');
+        PERFORM set_config('test.authorized','yes',false);
+        PERFORM expect_error(format('SELECT builder_retry_failed_frontend_patch(%L,%L,%L,%L,%L::timestamptz)',
+          job_id,step_id,patch_id,repeat('a',40),request_time+interval '1 second'),'changed, is published');
+        UPDATE builder_job_steps SET error='Verifier recovery paused for another reason' WHERE id=step_id;
+        PERFORM expect_error(command,'untouched downstream gates');
+        UPDATE builder_job_steps SET error=original_error WHERE id=step_id;
+        UPDATE builder_worker_runs SET profile='backend-verify' WHERE id=run_id;
+        PERFORM expect_error(command,'latest frontend verifier');
+        UPDATE builder_worker_runs SET profile='frontend-verify', status='failed', exit_code=NULL WHERE id=run_id;
+        PERFORM expect_error(command,'latest frontend verifier');
+        UPDATE builder_worker_runs SET status='timeout', exit_code=NULL WHERE id=run_id;
+        UPDATE builder_jobs SET workspace_pull_request_url='https://example.invalid/pr' WHERE id=job_id;
+        PERFORM expect_error(command,'changed, is published');
+        UPDATE builder_jobs SET workspace_pull_request_url=NULL WHERE id=job_id;
+        UPDATE builder_job_steps s SET started_at=now() WHERE s.job_id=job_id AND s.step_id='test_suite';
+        PERFORM expect_error(command,'untouched downstream gates');
+        UPDATE builder_job_steps s SET started_at=NULL WHERE s.job_id=job_id AND s.step_id='test_suite';
+        DELETE FROM builder_job_steps WHERE id=backend_id;
+        PERFORM expect_error(command,'untouched downstream gates');
+        INSERT INTO builder_job_steps(id,job_id,step_id,builder_mode,status,attempt_count,ordinal_position,retryable,error,input_context)
+          VALUES(backend_id,job_id,'backend_implementation','backend_engineer','pending',0,4,false,NULL,'{}');
+        UPDATE builder_job_steps SET started_at=now() WHERE id=backend_id;
+        PERFORM expect_error(command,'untouched downstream gates');
+        UPDATE builder_job_steps SET started_at=NULL WHERE id=backend_id;
+        UPDATE builder_worker_runs SET status='running' WHERE id=run_id;
+        PERFORM expect_error(command,'active worker, model run, or approval');
+        UPDATE builder_worker_runs SET status='timeout' WHERE id=run_id;
+        INSERT INTO builder_model_runs(job_id,status) VALUES(job_id,'running');
+        PERFORM expect_error(command,'active worker, model run, or approval');
+        DELETE FROM builder_model_runs WHERE builder_model_runs.job_id=job_id AND status='running';
+        INSERT INTO builder_approvals(job_id,organization_id,status,approval_type)
+          VALUES(job_id,org_id,'pending','implementation_review');
+        PERFORM expect_error(command,'active worker, model run, or approval');
+        DELETE FROM builder_approvals WHERE builder_approvals.job_id=job_id;
+
+        UPDATE builder_jobs SET backend_required=false WHERE id=job_id;
+        UPDATE builder_job_steps SET status='skipped', started_at=now(), completed_at=now() WHERE id=backend_id;
+        PERFORM expect_error(command,'untouched downstream gates');
+        UPDATE builder_job_steps SET started_at=NULL WHERE id=backend_id;
+        UPDATE builder_job_steps SET completed_at=now() WHERE id=backend_id;
+        receipt:=builder_retry_failed_frontend_patch(job_id,step_id,patch_id,repeat('a',40),request_time);
+        repeated:=builder_retry_failed_frontend_patch(job_id,step_id,patch_id,repeat('a',40),request_time);
+        IF receipt IS DISTINCT FROM repeated
+          OR (SELECT status FROM builder_jobs WHERE id=job_id)<>'implementation_pending'
+          OR (SELECT autopilot_state FROM builder_jobs WHERE id=job_id)<>'driving'
+          OR (SELECT status FROM builder_job_steps WHERE id=step_id)<>'failed'
+          OR (SELECT retryable FROM builder_job_steps WHERE id=step_id) IS DISTINCT FROM true
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>3
+          OR (SELECT error FROM builder_job_steps WHERE id=step_id) NOT LIKE 'Verifier recovery pending:%'
+          OR (SELECT input_context->>'patch_artifact_id' FROM builder_job_steps WHERE id=step_id)<>patch_id::text
+          OR (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>1
+          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'timeout'
+          OR (SELECT count(*) FROM builder_audit_events WHERE builder_audit_events.job_id=job_id)<>1
+          OR (SELECT new_value->>'handoff_kind' FROM builder_audit_events WHERE id=receipt)<>'saved_frontend_patch_retry'
+          OR EXISTS(SELECT 1 FROM builder_job_steps s WHERE s.job_id=job_id
+            AND s.step_id IN ('test_suite','security_review','code_review','release_prep')
+            AND status<>'pending')
+          OR EXISTS(SELECT 1 FROM builder_approvals WHERE builder_approvals.job_id=job_id AND status='approved')
+          THEN RAISE EXCEPTION 'Saved-patch handoff changed the patch, attempts, downstream gates or human authority'; END IF;
+
+        PERFORM set_config('test.role','service_role',false);
+        SELECT builder_claim_frontend_worker(job_id,step_id,patch_id,'test-runner',repeat('a',40),900) INTO worker_result;
+        IF (worker_result->>'run_id')::uuid=run_id
+          OR (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>2
+          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'timeout'
+          OR (SELECT idempotency_key FROM builder_worker_runs WHERE id=(worker_result->>'run_id')::uuid)
+            IS DISTINCT FROM original_key||'::owner_patch_retry::'||receipt::text||'::attempt::4'
+          OR (SELECT input_context->>'owner_patch_retry_receipt' FROM builder_job_steps WHERE id=step_id) IS DISTINCT FROM receipt::text
+          OR (SELECT input_context->>'owner_patch_retry_attempt_count' FROM builder_job_steps WHERE id=step_id)<>'3'
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>4
+          THEN RAISE EXCEPTION 'Owner retry overwrote verifier history or failed to start a new attempt'; END IF;
+        UPDATE builder_worker_runs SET status='failed', exit_code=1, completed_at=now(), lease_token_hash=NULL
+          WHERE id=(worker_result->>'run_id')::uuid;
+        UPDATE builder_job_steps SET status='failed', retryable=true, error='Frontend worker verification failed',
+          completed_at=now() WHERE id=step_id;
+        UPDATE builder_jobs SET status='implementation_pending' WHERE id=job_id;
+        SELECT builder_claim_frontend_worker(job_id,step_id,patch_id,'test-runner-2',repeat('a',40),900) INTO worker_result;
+        IF (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>3
+          OR (SELECT status FROM builder_worker_runs WHERE id=(SELECT id FROM builder_worker_runs WHERE job_id=job_id
+            AND idempotency_key=original_key||'::owner_patch_retry::'||receipt::text||'::attempt::4'))<>'failed'
+          OR (SELECT idempotency_key FROM builder_worker_runs WHERE id=(worker_result->>'run_id')::uuid)
+            IS DISTINCT FROM original_key||'::owner_patch_retry::'||receipt::text||'::attempt::5'
+          OR (SELECT input_context->>'owner_patch_retry_receipt' FROM builder_job_steps WHERE id=step_id) IS DISTINCT FROM receipt::text
+          OR (SELECT attempt_count FROM builder_job_steps WHERE id=step_id)<>5
+          THEN RAISE EXCEPTION 'A repeated verification overwrote receipt history or reused its idempotency key'; END IF;
+      END $f$;
+      DO $f$
+      BEGIN
+        IF has_function_privilege('anon','builder_retry_failed_frontend_patch(uuid,uuid,uuid,text,timestamptz)','EXECUTE')
+          OR has_function_privilege('service_role','builder_retry_failed_frontend_patch(uuid,uuid,uuid,text,timestamptz)','EXECUTE')
+          OR NOT has_function_privilege('authenticated','builder_retry_failed_frontend_patch(uuid,uuid,uuid,text,timestamptz)','EXECUTE')
+          THEN RAISE EXCEPTION 'Wrong execute grants for saved-patch retry'; END IF;
+      END $f$;
+    `;
     try {
       execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
         input: fixture + migration + skipFunction + recoveryMigration + requiredLaneMigration + reviewFunctions + checks + requiredLaneChecks + recoveryChecks + cycleFixture
-          + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks,
+          + originalClaimFunctions + cycleMigration + cycleChecks + claimFunctions + cycleChecks + savedPatchRetrySchema + savedPatchRetryMigration + savedPatchRetryChecks,
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) { throw new Error(`PostgreSQL correction checks failed: ${error.stderr || error.message}`); }

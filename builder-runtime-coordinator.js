@@ -50,6 +50,18 @@ function attemptCeilingReached(step) {
   return step?.status === 'failed' && Number(step.attempt_count) >= MAX_STEP_ATTEMPTS;
 }
 
+function ownerConfirmedVerifierRetryAtCeiling(snapshot, step) {
+  const context = step?.input_context;
+  const attempt = Number(context?.owner_patch_retry_attempt_count);
+  return step?.step_id === 'frontend_implementation' && step.status === 'failed' && step.retryable === true
+    && String(step.error || '').startsWith('Verifier recovery pending: owner-confirmed saved patch verification')
+    && typeof context?.owner_patch_retry_receipt === 'string'
+    && Number.isInteger(attempt) && attempt === Number(step.attempt_count)
+    && typeof context?.patch_artifact_id === 'string' && context.target_sha === snapshot?.job?.target_sha
+    && snapshot.artifacts.some(artifact => artifact.id === context.patch_artifact_id
+      && artifact.step_id === step.id && artifact.artifact_type === 'code_implementation' && artifact.status === 'final');
+}
+
 function stepIsRunnable(step) {
   return step?.status === 'pending' || (step?.status === 'failed' && step.retryable === true && !attemptCeilingReached(step) && !/^Evidence conflict:/.test(step.error || ''));
 }
@@ -94,6 +106,7 @@ function planBuilderAction(snapshot) {
   }
   if (job.status === 'implementation_pending') {
     const frontend = byStep(snapshot, 'frontend_implementation');
+    if (ownerConfirmedVerifierRetryAtCeiling(snapshot, frontend)) return { type: 'run_frontend', step: frontend };
     if (stepIsRunnable(frontend)) return { type: 'run_frontend', step: frontend };
     if (attemptCeilingReached(frontend)) return attemptCeilingBlock(job, frontend);
     if (parkedStep(frontend)) return parkedStepBlock(job, frontend);
