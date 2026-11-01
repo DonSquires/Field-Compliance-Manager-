@@ -10,7 +10,7 @@ const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
 const migration = fs.readFileSync(
-  path.join(__dirname, '../supabase/migrations/20261102190000_cctv_recognition_quality_gates.sql'),
+  path.join(__dirname, '../supabase/migrations/20261102190100_cctv_recognition_quality_gates.sql'),
   'utf8',
 );
 const harnessMigration = migration
