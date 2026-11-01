@@ -181,6 +181,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const [locationStage, setLocationStage] = useState<'search' | 'create'>('search');
   const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
   const [locationSearched, setLocationSearched] = useState(false);
+  const [locationSearchPending, setLocationSearchPending] = useState(false);
   const [locationForm, setLocationForm] = useState({ name: '', address: '', suburb: '', postcode: '', notes: '' });
   const [view, setView] = useState<'overview' | 'structure' | 'contacts' | 'activity' | 'agreements' | 'sites' | 'modules' | 'operations' | 'readiness' | 'jobs' | 'reports' | 'finance'>(initialView);
   const [contactForm, setContactForm] = useState(emptyContact);
@@ -203,6 +204,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const [notice, setNotice] = useState<string | null>(null);
   const contactRequestId = useRef(crypto.randomUUID());
   const activityRequestId = useRef(crypto.randomUUID());
+  const locationSearchRequestId = useRef(0);
   // the headline is the live operational agreement (accepted first); an ended or cancelled one never leads
   const liveOperational = agreements.filter((agreement) => agreement.agreement_type === 'operational' && ['live', 'ending'].includes(agreementTermState(agreement)));
   const headlineAgreement = liveOperational.find((agreement) => agreement.invitation_status === 'accepted') ?? liveOperational[0] ?? agreements.find((agreement) => agreement.agreement_type === 'operational') ?? agreements[0] ?? null;
@@ -452,25 +454,47 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   };
 
   const searchLocations = async (event: FormEvent) => {
-    event.preventDefault(); setSaving(true); setError(null); setLocationSearched(false);
-    const { data, error: searchError } = await supabase.rpc('find_crm_location_candidates', {
-      p_account_organization_id: account.id,
-      p_query: locationForm.name.trim() || null,
-      p_address: locationForm.address.trim() || null,
-    });
-    if (searchError) setError(searchError.message);
-    else { setLocationCandidates((data as LocationCandidate[]) ?? []); setLocationSearched(true); }
-    setSaving(false);
+    event.preventDefault();
+    const requestId = ++locationSearchRequestId.current;
+    setLocationSearchPending(true);
+    setError(null);
+    setLocationCandidates([]);
+    setLocationSearched(false);
+    try {
+      const { data, error: searchError } = await supabase.rpc('find_crm_location_candidates', {
+        p_account_organization_id: account.id,
+        p_query: locationForm.name.trim() || null,
+        p_address: locationForm.address.trim() || null,
+      });
+      if (requestId !== locationSearchRequestId.current) return;
+      if (searchError) setError(searchError.message);
+      else { setLocationCandidates((data as LocationCandidate[]) ?? []); setLocationSearched(true); }
+    } catch (searchRequestError) {
+      if (requestId !== locationSearchRequestId.current) return;
+      setError(searchRequestError instanceof Error ? searchRequestError.message : 'Location search failed. Please try again.');
+    } finally {
+      if (requestId === locationSearchRequestId.current) setLocationSearchPending(false);
+    }
   };
 
   const updateLocationForm = (update: Partial<typeof locationForm>) => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
     setLocationForm((current) => ({ ...current, ...update }));
     setLocationCandidates([]);
     setLocationSearched(false);
     setError(null);
   };
 
+  const closeLocationLookup = () => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
+    setLocationDialogOpen(false);
+  };
+
   const openLocationLookup = () => {
+    locationSearchRequestId.current += 1;
+    setLocationSearchPending(false);
     setLocationDialogOpen(true); setLocationStage('search'); setLocationCandidates([]); setLocationSearched(false); setError(null);
   };
 
@@ -535,15 +559,15 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
         {siteDialogOpen && <CrmSiteDialog account={{ id: account.id, name: account.name }} locationId={siteDialogLocationId ?? undefined} onClose={() => setSiteDialogOpen(false)} onCreated={() => { setSiteDialogOpen(false); setNotice('Site created. Continue with its zones and boundary inside Places.'); void loadWorkspace(); }} />}
         {locationDialogOpen && locationStage === 'search' && (
           <form className="crm-workspace-form" onSubmit={searchLocations}>
-            <header><strong>Find location / place</strong><button type="button" onClick={() => setLocationDialogOpen(false)}><X size={16} /></button></header>
+            <header><strong>Find location / place</strong><button type="button" onClick={closeLocationLookup}><X size={16} /></button></header>
             <p>Search physical place records before creating a Location House. Results never expose another account's organization, finance, contacts, jobs, safety notes, or agreements.</p>
             <div className="crm-form-grid">
               <label><span>Location name</span><input value={locationForm.name} onChange={(event) => updateLocationForm({ name: event.target.value })} placeholder="e.g. Nelson Civic Centre" /></label>
               <label><span>Street address</span><input value={locationForm.address} onChange={(event) => updateLocationForm({ address: event.target.value })} placeholder="Full physical address" /></label>
             </div>
             <footer>
-              <button type="button" onClick={() => setLocationDialogOpen(false)}>Cancel</button>
-              <button type="submit" disabled={saving || (locationForm.name.trim().length < 2 && locationForm.address.trim().length < 4)}>{saving ? 'Searching' : 'Search places'}</button>
+              <button type="button" onClick={closeLocationLookup}>Cancel</button>
+              <button type="submit" disabled={saving || locationSearchPending || (locationForm.name.trim().length < 2 && locationForm.address.trim().length < 4)}>{locationSearchPending ? 'Searching' : saving ? 'Saving' : 'Search places'}</button>
             </footer>
             {locationSearched && <section className="crm-location-lookup-results">
               <strong>{locationCandidates.length ? 'Possible physical place matches' : 'No matching physical places found'}</strong>
