@@ -76,7 +76,7 @@ BEGIN
       AND ((v_job.backend_required AND (status <> 'pending' OR started_at IS NOT NULL OR completed_at IS NOT NULL))
         OR (NOT v_job.backend_required AND NOT (
           (status = 'pending' AND started_at IS NULL AND completed_at IS NULL)
-          OR (status = 'skipped' AND started_at IS NULL)))) THEN
+          OR (status = 'skipped' AND started_at IS NULL))))) THEN
     RAISE EXCEPTION 'Saved-patch retry requires one paused frontend verifier and untouched downstream gates';
   END IF;
 

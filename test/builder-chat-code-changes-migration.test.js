@@ -514,7 +514,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
         UPDATE builder_job_steps SET started_at=NULL WHERE id=backend_id;
         UPDATE builder_worker_runs SET status='running' WHERE id=run_id;
         PERFORM expect_error(command,'active worker, model run, or approval');
-        UPDATE builder_worker_runs SET status='failed' WHERE id=run_id;
+        UPDATE builder_worker_runs SET status='timeout' WHERE id=run_id;
         INSERT INTO builder_model_runs(job_id,status) VALUES(job_id,'running');
         PERFORM expect_error(command,'active worker, model run, or approval');
         DELETE FROM builder_model_runs WHERE builder_model_runs.job_id=job_id AND status='running';
@@ -539,7 +539,7 @@ test('actual PostgreSQL enforces same-job correction authorization, stale/active
           OR (SELECT error FROM builder_job_steps WHERE id=step_id) NOT LIKE 'Verifier recovery pending:%'
           OR (SELECT input_context->>'patch_artifact_id' FROM builder_job_steps WHERE id=step_id)<>patch_id::text
           OR (SELECT count(*) FROM builder_worker_runs WHERE builder_worker_runs.job_id=job_id)<>1
-          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'failed'
+          OR (SELECT status FROM builder_worker_runs WHERE id=run_id)<>'timeout'
           OR (SELECT count(*) FROM builder_audit_events WHERE builder_audit_events.job_id=job_id)<>1
           OR (SELECT new_value->>'handoff_kind' FROM builder_audit_events WHERE id=receipt)<>'saved_frontend_patch_retry'
           OR EXISTS(SELECT 1 FROM builder_job_steps s WHERE s.job_id=job_id
