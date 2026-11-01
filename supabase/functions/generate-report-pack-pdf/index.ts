@@ -7,11 +7,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, rgb, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfTextFontRuns } from '../_shared/pdf-text-fonts.ts';
+import { activityAccountingStatement, itemisedActivityBlocks, monthlyActivityBlocks, type ReportBlock } from '../_shared/report-activity-sections.ts';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v10';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v11';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -28,6 +29,7 @@ interface PdfReportPack {
   template_code: string;
   status: string;
   data: Record<string, unknown> | null;
+  activity_lines: Record<string, unknown> | null;
   editorial: Record<string, unknown> | null;
   generated_at: string | null;
   report_kind: string;
@@ -139,6 +141,7 @@ interface ReportRenderInput {
   snapshotGeneratedAt: string | null;
   editorial: Record<string, unknown>;
   data: unknown;
+  activityLines: unknown;
   reportKind: string;
   reportScope: unknown;
   status: string;
@@ -156,7 +159,7 @@ function reportAgreementName(pack: PdfReportPack) {
   return (Array.isArray(pack.agreement) ? pack.agreement[0]?.name : pack.agreement?.name) ?? 'Service agreement';
 }
 
-async function renderPdf({ templateTitle, agreementName, period, packId, snapshotGeneratedAt, editorial, data, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
+export async function renderPdf({ templateTitle, agreementName, period, packId, snapshotGeneratedAt, editorial, data, activityLines, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.setLanguage('en-NZ');
   const { normal, bold } = await embedPdfNotoFonts(pdf);
@@ -168,17 +171,49 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
   pdf.setCreator('Field Compliance Manager');
   let page = pdf.addPage([595, 842]);
   let y = 780;
+  const drawRuns = (line: string, x: number, baseline: number, fonts: PdfFontPair, size: number) => {
+    let cursor = x;
+    for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
+      page.drawText(run.text, { x: cursor, y: baseline, size, font: run.font, color: rgb(0.08, 0.12, 0.13) });
+      cursor += run.font.widthOfTextAtSize(run.text, size);
+    }
+  };
   const draw = (text: string, fonts = normal, size = 10) => {
     for (const line of wrapText(text, fonts, size, 487)) {
       if (y < 64) { page = pdf.addPage([595, 842]); y = 780; }
-      let x = 54;
-      const runs = pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints);
-      for (const run of runs) {
-        page.drawText(run.text, { x, y, size, font: run.font, color: rgb(0.08, 0.12, 0.13) });
-        x += run.font.widthOfTextAtSize(run.text, size);
-      }
+      drawRuns(line, 54, y, fonts, size);
       y -= size + 6;
     }
+  };
+  const drawTable = (block: Extract<ReportBlock, { kind: 'table' }>) => {
+    const size = block.size ?? 8.5;
+    const leading = size + 3;
+    const padding = 3;
+    let top = y + 10;
+    const drawRow = (cells: string[], fonts: PdfFontPair, fill: ReturnType<typeof rgb> | null, isHeader: boolean) => {
+      const wrapped = block.columns.map((column, index) => wrapText(cells[index] ?? '', fonts, size, column.width - padding * 2));
+      const height = Math.max(1, ...wrapped.map((lines) => lines.length)) * leading + padding * 2;
+      if (top - height < 56) {
+        page = pdf.addPage([595, 842]);
+        top = 790;
+        if (!isHeader) drawRow(block.columns.map((column) => column.label), bold, rgb(0.9, 0.95, 0.94), true);
+      }
+      if (fill) page.drawRectangle({ x: 54, y: top - height, width: 487, height, color: fill });
+      let x = 54;
+      block.columns.forEach((column, index) => {
+        wrapped[index].forEach((line, lineIndex) => {
+          const baseline = top - padding - size - lineIndex * leading + 1;
+          const offset = column.align === 'right' ? column.width - padding - textWidth(line, fonts, size) : padding;
+          drawRuns(line, x + offset, baseline, fonts, size);
+        });
+        x += column.width;
+      });
+      page.drawLine({ start: { x: 54, y: top - height }, end: { x: 541, y: top - height }, thickness: isHeader ? 0.8 : 0.3, color: rgb(0.72, 0.82, 0.80) });
+      top -= height;
+    };
+    drawRow(block.columns.map((column) => column.label), bold, rgb(0.9, 0.95, 0.94), true);
+    block.rows.forEach((row, index) => drawRow(row, normal, index % 2 ? rgb(0.97, 0.98, 0.98) : null, false));
+    y = top - 16;
   };
   const drawSection = (title: string) => {
     y -= 8;
@@ -187,6 +222,13 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
     y -= 10;
     page.drawLine({ start: { x: 54, y }, end: { x: 541, y }, thickness: 0.7, color: rgb(0.72, 0.82, 0.80) });
     y -= 14;
+  };
+  const drawBlocks = (blocks: ReportBlock[]) => {
+    for (const block of blocks) {
+      if (block.kind === 'section') drawSection(block.title);
+      else if (block.kind === 'table') drawTable(block);
+      else draw(block.text, block.bold ? bold : normal, block.size ?? 10);
+    }
   };
   const drawMonthlySections = () => {
     const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
@@ -204,11 +246,16 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
       draw(editorial.client_notes);
     }
 
-    drawSection('Patrol and Activity Summary');
-    draw(`Patrol visits: ${format(number('patrolVisits'))}`);
-    draw(`Camera activations: ${format(number('cameraActivations'))}`);
-    draw(`Vehicle observations: ${format(number('vehicleObservations'))}`);
-    draw(`Patrol travel: ${format(number('patrolTravelKm'), 1)} km`);
+    const activityBlocks = monthlyActivityBlocks(snapshot);
+    if (activityBlocks) {
+      drawBlocks(activityBlocks);
+    } else {
+      drawSection('Patrol and Activity Summary');
+      draw(`Patrol visits: ${format(number('patrolVisits'))}`);
+      draw(`Camera activations: ${format(number('cameraActivations'))}`);
+      draw(`Vehicle observations: ${format(number('vehicleObservations'))}`);
+      draw(`Patrol travel: ${format(number('patrolTravelKm'), 1)} km`);
+    }
 
     const facilities = Array.isArray(snapshot.facilities)
       ? snapshot.facilities.filter((value): value is Record<string, unknown> => {
@@ -237,6 +284,13 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
     if (typeof editorial.follow_up === 'string' && editorial.follow_up) {
       drawSection('Follow-up');
       draw(editorial.follow_up);
+    }
+
+    const accounting = activityAccountingStatement(snapshot);
+    if (accounting.length) {
+      drawSection('Activity Accounting');
+      for (const line of accounting) draw(line, normal, 9);
+      drawBlocks(itemisedActivityBlocks(snapshot, activityLines));
     }
   };
   draw('Field Compliance Manager', bold, 15);
@@ -278,7 +332,7 @@ async function loadRenderContext(req: Request, packId: string): Promise<{ admin:
   const admin = createClient(url, serviceKey);
   const { data: profile } = await admin.from('user_profiles').select('role,organization_id,deactivated_at').eq('id', user.id).single();
   if (!profile || profile.deactivated_at || !canRender.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
-  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name)').eq('id', packId).single();
+  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name)').eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayRender } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayRender !== true) throw new RequestError('Forbidden', 403);
@@ -331,6 +385,7 @@ async function handlePdfGeneration(req: Request) {
     snapshotGeneratedAt: pack.generated_at,
     editorial: pack.editorial ?? {},
     data: pack.data ?? {},
+    activityLines: pack.activity_lines ?? null,
     reportKind: pack.report_kind ?? 'monthly',
     reportScope: pack.report_scope ?? {},
     status: pack.status,

@@ -71,6 +71,49 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await testInfo.attach('report-review-published', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 });
 
+test('administrator reviews month-end activity, itemised lines and the live accounting check', async ({ page }, testInfo) => {
+  const browserErrors = monitorBrowserErrors(page);
+  const lineReads: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/monthly_report_packs')) lineReads.push(url.searchParams.get('select') ?? '');
+  });
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+
+  const activity = page.getByRole('region', { name: 'Month-end activity' });
+  await expect(activity.getByText('All 5 entries accounted for')).toBeVisible();
+  const totals = activity.getByRole('group', { name: 'Month-end activity totals' });
+  await expect(totals.getByText('4.25', { exact: true })).toBeVisible();
+  await expect(activity.getByRole('region', { name: 'Activity by category' }).getByText('Pest control')).toBeVisible();
+  expect(lineReads.filter((select) => select === 'activity_lines')).toEqual([]);
+  expect(lineReads.every((select) => select === 'activity_lines' || !select.includes('activity_lines'))).toBe(true);
+
+  await activity.locator('summary', { hasText: /^Pest control/ }).click();
+  await expect(activity.getByRole('region', { name: 'Pest control by species' }).getByText('Feral goat')).toBeVisible();
+
+  await activity.locator('summary', { hasText: 'Itemised activity' }).click();
+  const lines = activity.getByRole('region', { name: 'Itemised activity lines' });
+  await expect(lines.getByText('WO-0042')).toBeVisible();
+  await expect(lines.getByText('Shooting · Feral goat · Ammunition .223 × 12 · 1 photo')).toBeVisible();
+  await activity.getByLabel('Category', { exact: true }).selectOption('maintenance');
+  await expect(activity.getByText('Showing 1 of 1')).toBeVisible();
+  await expect(lines.getByText('WO-0042')).toHaveCount(0);
+  expect(lineReads.filter((select) => select === 'activity_lines')).toHaveLength(1);
+
+  await activity.getByRole('button', { name: 'Check against live records' }).click();
+  await expect(activity.getByText(/This pack matches live records: 5 entries/)).toBeVisible();
+  await expect(activity.getByRole('region', { name: 'Import source files' }).getByText('Civic patrol log August.xlsx')).toBeVisible();
+  await expect(activity.getByRole('region', { name: 'Unlinked places with client records' }).getByText('Harbour Overflow Carpark')).toBeVisible();
+  await expect(activity.getByRole('button', { name: 'Check again' })).toBeVisible();
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+  await testInfo.attach('report-month-end-activity', { body: await activity.screenshot(), contentType: 'image/png' });
+});
+
 test('administrator builds a mixed-scope custom report and reviews the frozen snapshot', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/reports');

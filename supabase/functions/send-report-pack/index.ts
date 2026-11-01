@@ -17,6 +17,7 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
+import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -25,7 +26,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v10';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v11';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -124,10 +125,19 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     const pct = expected > 0 ? Math.round(completed / expected * 100) : 0;
     return `<tr><td>${escapeHtml(facility.siteName)}</td><td align="right">${expected}</td><td align="right">${completed}</td><td align="right">${pct}%</td></tr>`;
   }).join('');
+  const activity = activityEmailSummary(d);
+  const activityHtml = activity ? `<h3>Month-end Activity</h3>
+    <p>${escapeHtml(activity.headline)}</p>
+    ${activity.categories.length ? `<table border="1" cellpadding="4" cellspacing="0">
+      <tr><th align="left">Category</th><th>Entries</th><th>Hours</th></tr>
+      ${activity.categories.map(([category, entries, hours]) => `<tr><td>${escapeHtml(category)}</td><td align="right">${escapeHtml(entries)}</td><td align="right">${escapeHtml(hours)}</td></tr>`).join('')}
+    </table>` : ''}
+    <p>The PDF report itemises every recorded entry and states how the totals reconcile.</p>` : '';
   return `
     <h2>${escapeHtml(editorial.title || 'Monthly Report Pack')}</h2>
     <p>Period: ${escapeHtml(pack.period_start)} to ${escapeHtml(pack.period_end)}</p>
     ${editorialHtml(editorial)}
+    ${activityHtml}
     <h3>SLA Performance</h3>
     <p>${escapeHtml(d.slaMet ?? 0)} met · ${escapeHtml(d.slaBreached ?? 0)} breached · ${escapeHtml(d.slaRunning ?? 0)} running</p>
     <h3>Patrol &amp; Activity Summary</h3>

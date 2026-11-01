@@ -3354,3 +3354,98 @@ passes live. 23 client rules, each audited with its workbook, all excl. GST:
 **Still to confirm or build.** GL codes and financial year from the
 statements; the 28 TYPE/code conflicts; crew (per-person) billing lines; the
 $166.60 rate; site addresses for the private camera clients.
+
+## Month-end activity report (2026-11-02, migration 20261102210000)
+
+The owner asked that everything imported from the R&M spreadsheets is
+accounted for in a proper end-of-month report with a summary and itemised
+activity, including pest control with statistics, maintenance and
+manufacture. Not applied live yet: it ships through a pull request.
+
+- **Before:** monthly report packs showed only SLA, patrol-visit, camera and
+  vehicle counts. Pest-control, maintenance and manufacture work was already
+  stored as coded `location_events` (from the patrol-log importer), observations
+  and workshop work orders, but no report used those codes. No new
+  observation tables were needed.
+- **During:** `build_agreement_activity_report` puts every entry at an
+  agreement's places in the period into one category. The first match wins:
+  pest control, manufacture, maintenance, installation/removal, securing,
+  inspection, travel/admin, vehicle observation, camera activation, other
+  work, patrol visit, then "Not yet classified". Automatic patrol-log copies
+  of observations (`source = 'observation_trigger'`) are left out so nothing
+  is counted twice. Dates use New Zealand time. Code labels come only from the
+  provider's own reference codes; another organisation's labels are never
+  used.
+- **After:** `generate_due_report_packs` stores the summary in
+  `data.activityReport` and up to 2,000 itemised lines in the separate
+  `activity_lines` column. List screens never load that column. Each pack
+  shows:
+  - totals, by category and by place;
+  - pest control by species (culls, sightings, other), activity, traps and
+    equipment, and ammunition calibre with rounds;
+  - maintenance and manufacture by item worked on, with work-order status;
+  - observations and photos by type;
+  - an "accounted for" check: patrol-log entries + observations + work orders
+    must equal the category total and the place total.
+- **Review screen:** the Reports review panel shows these sections. It loads
+  the itemised lines only when opened, with a category filter. A provider
+  administrator can run "Check against live records"
+  (`get_report_pack_activity_accounting`). The check shows whether the pack
+  still matches live data and how many entries trace back to an import file
+  and sheet. It also shows the client's records at this agreement's places,
+  at other agreements' places and at unlinked places, plus date and duplicate
+  exceptions. The check is never stored or shown to the client.
+- **PDF and email:** renderer `fcm-report-pack-pdf-lib-a4-v11` adds the
+  activity sections, an "Activity Accounting" statement and an itemised
+  appendix. Older packs keep their earlier layout. The email adds a short
+  activity summary. The PDF, send function and web app share one renderer
+  version, and a test keeps them equal.
+- **PDF text fix (all PDFs):** pdf-lib drew the "fi" ligature with the wrong
+  width, so words like "classified" showed a gap and copied as "classifi ed".
+  Ligatures are now turned off in `_shared/pdf-noto-fonts.ts`. Letter widths
+  are unchanged.
+- **Portal and CRM fix:** both still checked for the v9 renderer, so a
+  published PDF made by v10 never showed there. Both now use the shared check
+  in `apps/web/src/lib/reportPackRenderer.ts`.
+
+**Data caveats the report makes visible (not fixed by this change):**
+
+- About 10,857 older imported entries have no work-type code, so they show as
+  "Not yet classified" until they are re-coded.
+- Dates that look wrong for a client: 16 entries in 2016, 2 in 2028 and 2 in
+  2926.
+- About 2,119 entries and 384 observations have no import-ledger record. They
+  were captured in the app or imported before the ledger existed.
+- Freedom-camping observations have no automatic patrol-log copy, so nothing
+  is excluded for them.
+
+**Deployment order (owner action):**
+
+1. Apply the migration. The v11 PDF function reads `activity_lines`, so it
+   fails if deployed before the column exists.
+2. Deploy `generate-report-pack-pdf` and `send-report-pack` together.
+3. Merge the web change.
+4. Regenerate the PDF for any published but unsent pack. The OneFortyOne
+   September pack (email, v10 PDF) can't be sent until its PDF is regenerated
+   on v11. Only the PDF needs regenerating, not the draft: an older pack keeps
+   its layout and its review. To add the activity sections, regenerate the
+   draft for that period. The pack then goes back to draft and must be
+   reviewed again. Sent packs never change.
+
+Validation: PostgreSQL behaviour test `test/rm-monthly-activity-report.test.js`
+(runs in CI with `BOB_TEST_POSTGRES=1`), report section and renderer tests,
+web unit and component tests, and a local PDF render checked by eye. The
+Reports Hub browser test (`apps/web/e2e/reports-hub.spec.ts`, desktop and
+mobile) covers the review screen end to end:
+- the summary loads without reading itemised lines;
+- opening "Itemised activity" reads the lines exactly once;
+- the category filter works;
+- the live accounting check shows the import provenance and the unlinked
+  places;
+- the page does not scroll sideways on a phone.
+
+Text uses "1 entry", not "1 entries", in the PDF, the email and on screen.
+The `report-pack-review-table` screenshot baselines in that spec were
+captured before the 2026-10-24 dark theme. They have been refreshed: the
+spec is not part of the CI browser lane, so the old baselines had not been
+updated.

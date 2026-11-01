@@ -109,7 +109,9 @@ roles have no direct `INSERT`, `UPDATE`, or `DELETE` privilege or policy on
 report-pack rows.
 
 The PDF renderer embeds pinned Noto Sans fonts so Māori names and macrons remain
-faithful. Its metadata update uses the pack's `updated_at` value as an optimistic
+faithful. Ligatures are disabled at embed time because pdf-lib advances the
+"fi" glyph incorrectly, which split words visually and in copied text. Its
+metadata update uses the pack's `updated_at` value as an optimistic
 lock, wraps text by actual font width without truncating report evidence, and
 removes a newly uploaded artifact if the report changed while rendering.
 The footer states the pack's actual availability: provider-private draft,
@@ -130,3 +132,22 @@ This keeps client-admin restrictions effective at both the database row and
 private object boundaries.
 
 Generating a custom report never creates or sends a scheduled R&M monthly pack.
+
+## Monthly Packs: Month-End Activity
+
+Scheduled monthly packs share this renderer. Since migration
+`20261102210000_rm_monthly_activity_report.sql`, `generate_due_report_packs`
+also freezes a categorised activity report (`data.activityReport`) and up to
+2,000 itemised lines (`activity_lines`, a separate column that list queries do
+not select). The PDF adds activity sections, an accounting statement and an
+itemised appendix; packs without an activity report keep their earlier layout.
+Provider administrators can compare a pack with live records through
+`get_report_pack_activity_accounting`. That result is never persisted to
+client-readable data.
+
+`generate-report-pack-pdf`, `send-report-pack` and
+`apps/web/src/lib/reportPackRenderer.ts` must name the same renderer version;
+`test/report-activity-sections.test.js` enforces it. Raising the version makes
+published but unsent PDFs stale until they are regenerated. See
+`docs/RM_ONBOARDING_TRACKER.md` for categories, data caveats and deployment
+order.

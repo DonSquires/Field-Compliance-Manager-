@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { FileCheck2, ShieldCheck } from 'lucide-react';
 import { CustomReportSnapshot } from './CustomReportSnapshot';
+import { ReportActivityReview } from './ReportActivityReview';
 import { supabase } from '../lib/supabase';
 import './ReportPackReviewPanel.css';
 
@@ -175,6 +176,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       )}
       {typeof subjectSummary?.clientSummary === 'string' && <p className="report-review-source-note">{subjectSummary.clientSummary}</p>}
       <p className="report-review-source-note">These values come from governed operational records and cannot be edited here.</p>
+      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} data={pack.data} status={pack.status} />}
 
       <form className="report-review-form" onSubmit={saveDraft}>
         <label>
