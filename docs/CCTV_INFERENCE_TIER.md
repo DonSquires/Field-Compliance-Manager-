@@ -332,6 +332,19 @@ measurement, reviewer workspace, local VLM); reprocessing of completed jobs keep
   `review_cctv_entity_observation` relies on to keep a machine guess off the canonical vehicle when a plate is
   accepted); which tier answered is recorded separately as `make_model_tier` (`local_vlm` or `ollama_cloud`)
   with `make_model_model` and, for the cloud, `make_model_receipt_id`.
+* **Hint model acceptance (2026-11-01, laptop Ollama 0.40.13, `qwen3-vl:4b`)**: probing with the exact worker
+  request found two defects that would have made every hint "unavailable" in production, both fixed before
+  release. (1) Without a bounded context Ollama sized the KV cache for Qwen3-VL's full window and failed to load
+  the model (36.5 GB allocation); requests now send `num_ctx` 8192 (`VISION_HINT_NUM_CTX`), and the model loads
+  fully on the GPU at 4.3 GB. (2) The model reasons before answering (`think: false` did not stop it), and the
+  old 256-token output budget would have truncated five of six answers; the budget is now 1536
+  (`VISION_HINT_MAX_TOKENS`; the largest answer measured used 738). The prompt also defines the NZ body types,
+  because without them a Hilux pickup was filed as a campervan. On three openly licensed Wikimedia Commons
+  photographs (Toyota HiLux front, Mazda Demio front and rear), each sent clear at crop size and degraded to
+  160 px CCTV quality, make, model, body type and colour were right in 6 of 6; a synthetic drawn car was
+  answered "unknown" at low confidence; the weapon prompt answered no weapon and the scene synopsis read
+  "white ute parked on the street". Warm latency was 3.5–16 s per hint. This is a smoke test of the request
+  contract, not an accuracy measurement — precision comes only from reviewer decisions (§9.3).
 * **Configuration names**: the watcher reads `CCTV_VLM_URL`, `CCTV_VLM_MODEL` and `CCTV_CLOUD_VLM_MODEL` from
   `/opt/fcm/.env` (compose maps them to the watcher's `OLLAMA_VISION_*`); do not set `OLLAMA_VISION_*` there,
   because Bob Vibe reads those names for its own images. `VISION_PINNED_DETECTOR_MODEL` defaults to

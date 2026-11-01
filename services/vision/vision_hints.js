@@ -25,6 +25,11 @@ function log(event, fields = {}) {
 const LOCAL_VLM_URL = (process.env.OLLAMA_VISION_URL || '').replace(/\/+$/, '');
 const LOCAL_VLM_MODEL = process.env.OLLAMA_VISION_MODEL || 'qwen3-vl:4b';
 const VISION_HINT_TIMEOUT_MS = Number(process.env.VISION_HINT_TIMEOUT_MS) || 45_000;
+// Ollama otherwise sizes the KV cache for the model's full context window, which for Qwen3-VL needs ~36 GB and
+// fails to load on the laptop GPU. A 768px crop plus the prompt is under 2k tokens.
+const VISION_HINT_NUM_CTX = Number(process.env.VISION_HINT_NUM_CTX) || 8192;
+// Qwen3-VL reasons before it answers, so the budget has to cover the reasoning and the JSON.
+const VISION_HINT_MAX_TOKENS = Number(process.env.VISION_HINT_MAX_TOKENS) || 1536;
 const CLOUD_VLM_URL = (process.env.OLLAMA_CLOUD_URL || 'https://ollama.com').replace(/\/+$/, '');
 const CLOUD_VLM_TOKEN = process.env.OLLAMA_API_TOKEN || process.env.OLLAMA_API_KEY || '';
 const CLOUD_VLM_DEFAULT_MODEL = process.env.OLLAMA_CLOUD_VISION_MODEL || 'gemma4:31b';
@@ -51,6 +56,10 @@ const VEHICLE_HINT_PROMPT = [
   'badges, grille, headlight and tail-light shape, body lines. Use "unknown" for make or model when the evidence is not',
   'visible; a wrong guess is worse than "unknown". Never read or invent a registration plate. Set confidence to "high"',
   'only when a badge or a distinctive design feature is clearly visible. In "evidence" name the feature you relied on.',
+  'Body types: "ute" is a pickup with an open or canopied rear tray (e.g. Ranger, Navara, Triton); "hatchback" is a',
+  'small or medium car with a short rear and a lift-up tailgate (e.g. Swift, Yaris, Golf); "station_wagon" is',
+  'an estate car whose roof runs flat to a long rear load area; "campervan" is a motorhome or a van fitted out for',
+  'sleeping; "van" is a panel or passenger van.',
 ].join(' ');
 
 const WEAPON_HINT_SCHEMA = {
@@ -130,7 +139,7 @@ async function queryOllama({ baseUrl, model, token, prompt, image, schema }) {
         messages: [{ role: 'user', content: prompt, images: [image] }],
         stream: false,
         format: schema,
-        options: { temperature: 0, num_predict: 256 },
+        options: { temperature: 0, num_predict: VISION_HINT_MAX_TOKENS, num_ctx: VISION_HINT_NUM_CTX },
         keep_alive: '5m',
       }),
       signal: AbortSignal.timeout(VISION_HINT_TIMEOUT_MS),

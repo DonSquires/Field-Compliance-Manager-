@@ -267,7 +267,14 @@ test('the local Qwen3-VL hint uses a JSON schema at temperature 0 and is labelle
   assert.equal(calls[0].url, 'http://local-vlm.test:11434/api/chat');
   assert.equal(calls[0].body.model, 'qwen3-vl:4b');
   assert.equal(calls[0].body.options.temperature, 0);
+  // Without a bounded context Ollama sizes the KV cache for Qwen3-VL's full window and the laptop fails to load
+  // it (36.5 GB allocation, measured 2026-11-01); the model still reasons before answering, so the output budget
+  // must leave room for the JSON after the reasoning.
+  assert.equal(calls[0].body.options.num_ctx, 8192);
+  assert.ok(calls[0].body.options.num_predict >= 768);
   assert.deepEqual(calls[0].body.format, hints.VEHICLE_HINT_SCHEMA);
+  // "ute" is a NZ/AU word: without a definition the model filed a Toyota Hilux pickup as a campervan (2026-11-01).
+  assert.match(calls[0].body.messages[0].content, /"ute" is a pickup/);
   assert.equal(calls[0].headers.Authorization, undefined, 'the local tier never carries the cloud token');
   assert.equal(hint.vehicle_make, 'Toyota');
   assert.equal(hint.vehicle_model, 'Hilux');
