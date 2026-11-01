@@ -41144,6 +41144,7 @@ export type Database = {
         Args: { p_location_id: string }
         Returns: boolean
       }
+      current_account_is_active: { Args: never; Returns: boolean }
       current_user_role: { Args: never; Returns: string }
       custodian_classify_evidence: {
         Args: {
@@ -50563,6 +50564,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_user_deactivation: {
+        Args: { p_action: string; p_reason?: string; p_target_user_id: string }
+        Returns: string
       }
       set_vehicle_owner_access: {
         Args: { p_enabled: boolean; p_reason: string; p_user_id: string }
