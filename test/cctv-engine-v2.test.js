@@ -10,6 +10,8 @@ process.env.VISION_LOCAL_GPU_BACKOFF_MS = '0';
 process.env.VISION_RUNPOD_BACKOFF_MS = '0';
 delete process.env.VISION_INFERENCE_POLICY;
 delete process.env.VISION_PINNED_DETECTOR_MODEL;
+process.env.SUPABASE_URL = 'https://example.invalid';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
