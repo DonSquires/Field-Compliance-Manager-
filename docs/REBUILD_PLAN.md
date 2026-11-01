@@ -78,6 +78,24 @@ Single-provider consolidation acceptance evidence:
   unchanged. Hosted public sign-up was closed and its rejection verified
   separately. Still to exercise after release: the server-side invitation path.
 
+Post-release helper grant finding, 2026-11-02 (follow-up migration pending):
+
+- The live catalog confirmed that `anon` could directly execute six
+  deactivation-aware `SECURITY DEFINER` policy helpers. Atlas confirms the
+  `user_managed_branch_ids` secured-by edges and the
+  `wf_transition_job_state` → `wf_has_role` call; these nodes are wired, not
+  thereby proven exercised. Ten RLS policies that directly call these helpers
+  were also scoped to `public`, so removing anonymous function access alone
+  would turn those anonymous table requests into permission errors.
+- Migration `20261102150000_revoke_anon_execute_from_deactivation_helpers.sql`
+  revokes `PUBLIC`/`anon` execution while preserving authenticated and
+  service-role access, and retargets those ten unchanged policy predicates to
+  `authenticated`. Regression tests assert both changes. Before calling this
+  complete, rehearse the migration in a live rollback transaction, apply it
+  through the release path, regenerate `schema.sql` from the live catalog, and
+  refresh Atlas; verify anon execution is false and authenticated execution is
+  true for all six helpers.
+
 Owner-directed client/place simplification, 2026-10-28:
 
 - **Before:** admin navigation exposed five client-workflow destinations and
