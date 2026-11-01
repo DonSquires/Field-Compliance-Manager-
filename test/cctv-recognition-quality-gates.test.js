@@ -13,6 +13,18 @@ const migration = fs.readFileSync(
   path.join(__dirname, '../supabase/migrations/20261102190000_cctv_recognition_quality_gates.sql'),
   'utf8',
 );
+const harnessMigration = migration
+  .replace(
+    `ALTER TABLE public.cctv_entity_observations
+  ADD COLUMN IF NOT EXISTS vehicle_appearance_vec vector(512);`,
+    '',
+  )
+  .replace(
+    `CREATE INDEX IF NOT EXISTS cctv_entity_observations_vehicle_appearance_vec_idx
+  ON public.cctv_entity_observations USING hnsw (vehicle_appearance_vec vector_cosine_ops)
+  WHERE vehicle_appearance_vec IS NOT NULL;`,
+    '',
+  );
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
 
 function liveFunction(name) {
@@ -33,14 +45,28 @@ test('person and vehicle embeddings are removed before storage and matching unle
   const writer = functionBody('record_cctv_entity_observations');
   assert.match(writer, /face_usable_for_matching}' = 'true'/);
   assert.match(writer, /appearance_embedding_usable}' = 'true'/);
-  assert.match(writer, /v_app_usable := v_kind NOT IN \('person', 'vehicle'\)/);
+  assert.match(writer, /v_app_usable := v_kind = 'animal'/);
   assert.match(writer, /COALESCE\(observation->>'quality_state', 'clear'\) = 'clear'/);
   assert.match(writer, /IF NOT v_face_usable THEN v_face_input := NULL;/);
-  assert.match(writer, /IF NOT v_app_usable THEN v_app_input := NULL;/);
-  assert.match(writer, /IF v_app IS NULL THEN v_app_input := NULL;/);
+  assert.match(writer, /IF NOT v_app_usable AND NOT v_vehicle_app_usable THEN v_app_input := NULL;/);
+  assert.match(writer, /IF v_app IS NULL AND v_vehicle_app IS NULL THEN v_app_input := NULL;/);
   assert.match(writer, /CASE WHEN jsonb_typeof\(v_face_input\) = 'array' THEN v_face_input END/);
   assert.match(writer, /v_face_input, v_app_input/);
   assert.doesNotMatch(writer, /observation->'candidate_embedding',\s+observation->'appearance_embedding'/);
+});
+
+test('portfolio matcher quality-gates CCTV templates and searches the official 512-D vehicle vector separately', () => {
+  const matcher = functionBody('find_cctv_portfolio_matches');
+  assert.match(matcher, /o\.quality_state = 'clear' AND o\.attributes->>'face_usable_for_matching' = 'true'/);
+  assert.match(matcher, /o\.entity_kind = 'animal' OR \(\s*o\.quality_state = 'clear' AND o\.attributes->>'appearance_embedding_usable' = 'true'/);
+  assert.match(matcher, /person_face_templates/);
+  assert.match(matcher, /fo\.review_state = 'accepted'/);
+  assert.match(matcher, /vehicle_appearance_vec <=> v_app/);
+  assert.match(matcher, /appearance_embedding_model' = 'vehicle-reid-0001\.onnx'/);
+  assert.match(matcher, /CASE WHEN p_entity_kind = 'vehicle' THEN 512 ELSE 256 END/);
+  const expiry = functionBody('expire_cctv_biometric_templates');
+  assert.match(expiry, /vehicle_appearance_vec IS NOT NULL/);
+  assert.match(expiry, /vehicle_appearance_vec = NULL/);
 });
 
 test('usable faces may create profiles while usable body matches only join existing profiles', () => {
@@ -57,7 +83,8 @@ test('usable faces may create profiles while usable body matches only join exist
 });
 
 test('both recognition writers are service-only, fail closed and keep the live grants', () => {
-  assert.equal((migration.match(/IF coalesce\(auth\.role\(\), ''\) <> 'service_role' AND session_user NOT IN \('postgres', 'supabase_admin'\) THEN/g) || []).length, 2);
+  assert.equal((migration.match(/IF coalesce\(auth\.role\(\), ''\) <> 'service_role' AND session_user NOT IN \('postgres', 'supabase_admin'\) THEN/g) || []).length, 3);
+  assert.match(functionBody('find_cctv_portfolio_matches'), /auth\.role\(\) IS DISTINCT FROM 'service_role'/);
   assert.doesNotMatch(migration, /IF auth\.role\(\) <> 'service_role'/);
   for (const signature of ['ensure_cctv_person_profile\\(uuid, uuid, uuid, uuid, timestamptz\\)', 'record_cctv_entity_observations\\(uuid, uuid, uuid, jsonb\\)']) {
     assert.match(migration, new RegExp(`REVOKE ALL ON FUNCTION public\\.${signature} FROM PUBLIC, anon, authenticated, service_role;`));
@@ -143,6 +170,7 @@ test('recognition gates hold against disposable PostgreSQL', {
         review_state text NOT NULL DEFAULT 'unreviewed', person_record_id uuid, cctv_import_id uuid, location_id uuid,
         canonical_place_id uuid, quality_state text NOT NULL DEFAULT 'clear', species_confidence real, is_pest boolean,
         attributes jsonb NOT NULL DEFAULT '{}', appearance_embedding jsonb, face_vec public.vector, appearance_vec public.vector,
+        vehicle_appearance_vec public.vector, created_at timestamptz NOT NULL DEFAULT now(),
         portfolio_key uuid, portfolio_state text NOT NULL DEFAULT 'unmatched', portfolio_candidates jsonb NOT NULL DEFAULT '[]',
         reviewed_by uuid, reviewed_at timestamptz, review_notes text,
         UNIQUE (inference_job_id, source_event_id, entity_kind));
@@ -165,7 +193,22 @@ test('recognition gates hold against disposable PostgreSQL', {
       END $fn$;
       ${liveFunction('normalize_plate_number')}
       ${liveFunction('ensure_canonical_person_for_record')}
-      ${migration}
+      ${harnessMigration}
+      CREATE OR REPLACE FUNCTION public.find_cctv_portfolio_matches(p_organization_id uuid, p_entity_kind text, p_face_embedding jsonb DEFAULT NULL,
+        p_appearance_embedding jsonb DEFAULT NULL, p_plate text DEFAULT NULL, p_exclude_observation_id uuid DEFAULT NULL, p_limit integer DEFAULT 10)
+      RETURNS TABLE(match_kind text, match_id uuid, observation_id uuid, portfolio_key uuid, display_name text, score real, basis text,
+        last_seen_at timestamptz, canonical_place_id uuid, plate_number text, person_record_id uuid, canonical_vehicle_id uuid,
+        thumbnail text, evidence_item_id uuid, cctv_import_id uuid)
+      LANGUAGE plpgsql AS $fn$
+      #variable_conflict use_column
+      BEGIN
+        INSERT INTO public.test_match_calls VALUES (p_entity_kind, p_face_embedding, p_appearance_embedding);
+        RETURN QUERY SELECT 'observation'::text, gen_random_uuid(), NULL::uuid, h.portfolio_key, NULL::text, h.score, h.basis,
+          NULL::timestamptz, NULL::uuid, NULL::text, NULL::uuid, NULL::uuid, NULL::text, NULL::uuid, NULL::uuid
+          FROM public.test_match_hits h
+         WHERE h.entity_kind = p_entity_kind
+           AND ((h.basis = 'face' AND p_face_embedding IS NOT NULL) OR (h.basis = 'appearance' AND p_appearance_embedding IS NOT NULL));
+      END $fn$;
       INSERT INTO public.organizations VALUES ('${org}');
       INSERT INTO public.evidence_items VALUES ('${evidence}', NULL);
       INSERT INTO public.inference_jobs VALUES ('${job}', '${org}', '${evidence}', 'video_motion');
@@ -211,14 +254,26 @@ test('recognition gates hold against disposable PostgreSQL', {
     assert.equal(row('body-chain', 'person_record_id IS NULL'), 't', 'a body match to a faceless portfolio mints no profile');
     assert.equal(one('SELECT count(*) FROM public.person_records;'), '1');
 
+    hits([]);
+    assert.equal(record([person('reprocessed', { face: false, bodyUsable: true })]), '1');
+    const oldUnmatchedKey = row('reprocessed', 'portfolio_key');
+    hits([`('person', '${firstKey}', 0.9, 'appearance')`]);
+    assert.equal(record([person('reprocessed', { face: false, bodyUsable: true })]), '1');
+    assert.equal(row('reprocessed', `portfolio_key = '${firstKey}' AND portfolio_key <> '${oldUnmatchedKey}' AND person_record_id = '${firstPerson}'`), 't',
+      'reprocessing clears the old unmatched key and derives the new profile link');
+
     const vehicleKey = randomUUID();
     hits([`('vehicle', '${vehicleKey}', 0.9, 'appearance')`]);
     const vehicle = (id, usable) => ({ source_event_id: id, entity_kind: 'vehicle', observed_at: '2026-11-02T01:00:00Z',
-      appearance_embedding: vec(256), attributes: { appearance_embedding_usable: usable } });
+      appearance_embedding: vec(512), attributes: { appearance_embedding_usable: usable, appearance_embedding_model: 'vehicle-reid-0001.onnx' } });
     const animal = { source_event_id: 'animal', entity_kind: 'animal', observed_at: '2026-11-02T01:00:00Z', appearance_embedding: vec(256) };
-    assert.equal(record([vehicle('vehicle-blurred', false), vehicle('vehicle-clear', true), animal]), '3');
+    const wrongVehicleModel = { ...vehicle('vehicle-wrong-model', true), attributes: { appearance_embedding_usable: true, appearance_embedding_model: 'deterministic_hsv_layout_v1' } };
+    const wrongVehicleDimension = { ...vehicle('vehicle-wrong-dimension', true), appearance_embedding: vec(256) };
+    assert.equal(record([vehicle('vehicle-blurred', false), vehicle('vehicle-clear', true), wrongVehicleModel, wrongVehicleDimension, animal]), '5');
     assert.equal(row('vehicle-blurred', `appearance_embedding IS NULL AND appearance_vec IS NULL AND portfolio_key <> '${vehicleKey}'`), 't');
-    assert.equal(row('vehicle-clear', `appearance_vec IS NOT NULL AND portfolio_key = '${vehicleKey}'`), 't');
+    assert.equal(row('vehicle-clear', `appearance_vec IS NULL AND vehicle_appearance_vec IS NOT NULL AND portfolio_key = '${vehicleKey}'`), 't');
+    assert.equal(row('vehicle-wrong-model', 'appearance_embedding IS NULL AND vehicle_appearance_vec IS NULL'), 't');
+    assert.equal(row('vehicle-wrong-dimension', 'appearance_embedding IS NULL AND vehicle_appearance_vec IS NULL'), 't');
     assert.equal(row('animal', 'appearance_vec IS NOT NULL'), 't', 'animal templates keep their existing path');
 
     psql("UPDATE public.cctv_entity_observations SET review_state = 'accepted' WHERE source_event_id = 'face-1';");

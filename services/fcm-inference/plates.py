@@ -251,9 +251,13 @@ def _read_crop(crop: np.ndarray) -> list[dict[str, Any]]:
         if not predictions:
             continue
         prediction = predictions[0]
-        text = str(getattr(prediction, "plate", "") or "").replace("_", "").strip().upper()
+        raw_text = str(getattr(prediction, "plate", "") or "").upper()
+        character_indexes = [index for index, character in enumerate(raw_text) if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"]
+        text = "".join(raw_text[index] for index in character_indexes)
         probs = np.asarray(getattr(prediction, "char_probs", None) if getattr(prediction, "char_probs", None) is not None else [], dtype=np.float32).reshape(-1)
-        used = probs[: len(text)] if text and probs.size >= len(text) else probs
+        used = probs[character_indexes] if character_indexes and probs.size == len(raw_text) else (
+            probs if raw_text == text and probs.size == len(text) else np.asarray([], dtype=np.float32)
+        )
         char_min = float(used.min()) if used.size else 0.0
         char_mean = float(used.mean()) if used.size else 0.0
         region = getattr(prediction, "region", None)

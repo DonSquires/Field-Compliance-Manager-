@@ -6,7 +6,13 @@ const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createClient } = require('@supabase/supabase-js');
 const { signJobToken } = require('./local_jwt_signer');
-const { consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, ENGINE_VERSION } = require('./motion_consolidator');
+const {
+  consolidateMotionSummary,
+  buildEntityObservations,
+  buildInferenceDeviceEvents,
+  associateFaceEvents,
+  ENGINE_VERSION,
+} = require('./motion_consolidator');
 const { MAX_JOB_DERIVATIVES, candidateFramesForEvent, derivativeStoragePaths, recognitionComparison } = require('./observation_derivatives');
 
 const execFileAsync = promisify(execFile);
@@ -845,20 +851,31 @@ function stillEntityObservations(recognition, context = {}) {
 
   const faces = choose('faces');
   const people = choose('people');
-  const personCount = Math.max(faces.items.length, people.items.length);
-  for (let index = 0; index < personCount; index += 1) {
+  const personEvents = people.items.map((person, index) => ({
+    event_id: `still-person-${index + 1}`,
+    bbox: person?.bbox || null,
+    person_boxes_by_frame: [{ frame_sha256: frameSha256 || 'still-frame', bbox: person?.bbox || null }],
+  }));
+  const sourceFaces = (faces.basis === 'authoritative_source' ? faces.items : []).map((face, index) => ({
+    ...face,
+    event_id: `still-face-${index + 1}`,
+    person_boxes_by_frame: [{ frame_sha256: frameSha256 || 'still-frame', bbox: face?.person_bbox || null }],
+  }));
+  const faceByPerson = associateFaceEvents(personEvents, sourceFaces);
+  const claimedFaces = new Set([...faceByPerson.values()].map((face) => face.event_id));
+  for (let index = 0; index < people.items.length; index += 1) {
     const person = people.items[index] || {};
-    const face = faces.items[index] || {};
-    const sourceFace = faces.basis === 'authoritative_source' ? face : null;
-    const faceUsable = sourceFace?.usable_for_matching === true;
-    const appearanceUsable = person?.attributes?.appearance_embedding_usable === true;
+    const face = faceByPerson.get(`still-person-${index + 1}`) || {};
+    const faceUsable = face.usable_for_matching === true;
+    const appearanceUsable = people.basis === 'authoritative_source'
+      && person?.attributes?.appearance_embedding_usable === true;
     observations.push({
       source_event_id: `still-person-${index + 1}`,
       entity_kind: 'person',
       observed_at: observedAt,
       observed_to: observedAt,
-      candidate_label: sourceFace?.subject_label || null,
-      candidate_embedding: faceUsable && Array.isArray(sourceFace?.embedding) ? sourceFace.embedding : undefined,
+      candidate_label: faceUsable ? face.subject_label || null : null,
+      candidate_embedding: faceUsable && Array.isArray(face.embedding) ? face.embedding : undefined,
       appearance_embedding: appearanceUsable && Array.isArray(person?.attributes?.appearance_embedding)
         ? person.attributes.appearance_embedding : undefined,
       model_confidence: confidence(person.confidence ?? face.confidence ?? face.det_score),
@@ -867,7 +884,7 @@ function stillEntityObservations(recognition, context = {}) {
         bbox: person.bbox || face.bbox || null,
         face_detected: Boolean(Object.keys(face).length),
         face_basis: Object.keys(face).length ? faces.basis : null,
-        face_provider: Object.keys(face).length ? (face.provider || (faces.basis === 'authoritative_source' ? source.face?.provider : enhanced.face?.provider) || context.provider || null) : null,
+        face_provider: Object.keys(face).length ? (face.provider || source.face?.provider || context.provider || null) : null,
         face_detector_model: face.face_detector_model || null,
         face_embedding_model: face.face_embedding_model || null,
         face_detector_confidence: confidence(face.detector_confidence),
@@ -889,6 +906,59 @@ function stillEntityObservations(recognition, context = {}) {
       },
       frame_sha256: frameSha256,
     });
+  }
+  for (const face of sourceFaces) {
+    if (claimedFaces.has(face.event_id)) continue;
+    observations.push({
+      source_event_id: face.event_id,
+      entity_kind: 'person',
+      observed_at: observedAt,
+      observed_to: observedAt,
+      candidate_label: face.subject_label || null,
+      candidate_embedding: face.usable_for_matching === true && Array.isArray(face.embedding) ? face.embedding : undefined,
+      model_confidence: confidence(face.confidence ?? face.det_score),
+      quality_state: 'clear',
+      attributes: {
+        bbox: face.person_bbox || face.bbox || null,
+        face_detected: true,
+        face_basis: faces.basis,
+        face_provider: face.provider || source.face?.provider || context.provider || null,
+        face_detector_model: face.face_detector_model || null,
+        face_embedding_model: face.face_embedding_model || null,
+        face_detector_confidence: confidence(face.detector_confidence),
+        face_crop_width_px: Number.isFinite(Number(face.face_crop_width_px)) ? Number(face.face_crop_width_px) : null,
+        face_quality_score: confidence(face.face_quality_score),
+        face_usable_for_matching: face.usable_for_matching === true,
+        face_matching_gate_version: face.matching_gate_version || null,
+        face_alignment_basis: face.alignment_basis || null,
+        authority: 'provisional',
+        review_required: true,
+      },
+      frame_sha256: frameSha256,
+    });
+  }
+  if (faces.basis === 'enhanced_candidate') {
+    for (const [index, face] of faces.items.entries()) {
+      observations.push({
+        source_event_id: `still-face-enhanced-${index + 1}`,
+        entity_kind: 'person',
+        observed_at: observedAt,
+        observed_to: observedAt,
+        candidate_label: null,
+        model_confidence: confidence(face?.confidence ?? face?.det_score),
+        quality_state: 'clear',
+        attributes: {
+          bbox: face?.person_bbox || face?.bbox || null,
+          face_detected: true,
+          face_basis: 'enhanced_candidate',
+          face_provider: face?.provider || enhanced.face?.provider || context.provider || null,
+          face_usable_for_matching: false,
+          authority: 'provisional',
+          review_required: true,
+        },
+        frame_sha256: frameSha256,
+      });
+    }
   }
 
   const vehicles = choose('vehicles');

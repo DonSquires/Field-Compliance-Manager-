@@ -18,6 +18,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from openvino import Core
+import onnxruntime as ort
 
 import detector as entity_detector
 import plates as plate_reader
@@ -51,8 +52,9 @@ FACE_CROP_MAX_UPSCALE = 3.0
 VEHICLE_MODEL_PATH = Path(os.getenv("VEHICLE_MODEL_PATH", MODELS_DIR / "vehicle-attributes-recognition-barrier-0039.xml"))
 PERSON_MODEL_PATH = Path(os.getenv("PERSON_MODEL_PATH", MODELS_DIR / "person-detection-retail-0013.xml"))
 PERSON_REID_MODEL_PATH = Path(os.getenv("PERSON_REID_MODEL_PATH", MODELS_DIR / "person-reidentification-retail-0288.xml"))
-VEHICLE_REID_MODEL_PATH = Path(os.getenv("VEHICLE_REID_MODEL_PATH", MODELS_DIR / "vehicle-reid-0001.xml"))
+VEHICLE_REID_MODEL_PATH = Path(os.getenv("VEHICLE_REID_MODEL_PATH", MODELS_DIR / "vehicle-reid-0001.onnx"))
 APPEARANCE_EMBEDDING_DIMENSION = 256
+VEHICLE_REID_EMBEDDING_DIMENSION = 512
 _face_detector: cv2.FaceDetectorYN | None = None
 _face_recognizer: cv2.FaceRecognizerSF | None = None
 _face_lock = threading.Lock()
@@ -60,7 +62,7 @@ _vehicle_model: Any = None
 _vehicle_compiled: Any = None
 _person_compiled: Any = None
 _person_reid_compiled: Any = None
-_vehicle_reid_compiled: Any = None
+_vehicle_reid_session: Any = None
 VEHICLE_COLOURS = ("white", "gray", "yellow", "red", "green", "blue", "black")
 VEHICLE_TYPES = ("car", "van", "truck", "bus")
 
@@ -171,14 +173,18 @@ def _vehicle_embedding(image: np.ndarray) -> list[float]:
 
 
 def _vehicle_reid_runtime() -> Any:
-    global _vehicle_reid_compiled
-    if _vehicle_reid_compiled is not None:
-        return _vehicle_reid_compiled
-    if not entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) or not entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH.with_suffix('.bin')):
+    global _vehicle_reid_session
+    if _vehicle_reid_session is not None:
+        return _vehicle_reid_session
+    if not entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH):
         raise FileNotFoundError("vehicle re-identification model is not staged")
-    core = Core()
-    _vehicle_reid_compiled = core.compile_model(core.read_model(str(VEHICLE_REID_MODEL_PATH)), "CPU")
-    return _vehicle_reid_compiled
+    providers = ort.get_available_providers()
+    execution_providers = (
+        ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if "CUDAExecutionProvider" in providers else ["CPUExecutionProvider"]
+    )
+    _vehicle_reid_session = ort.InferenceSession(str(VEHICLE_REID_MODEL_PATH), providers=execution_providers)
+    return _vehicle_reid_session
 
 
 def _hsv_layout_embedding(crop: np.ndarray) -> list[float]:
@@ -232,9 +238,9 @@ def _vehicle_appearance_embedding(crop: np.ndarray) -> tuple[list[float], str]:
     try:
         runtime = _vehicle_reid_runtime()
         blob = cv2.dnn.blobFromImage(crop, 1.0, (208, 208), swapRB=False)
-        vector = np.asarray(runtime([blob])[runtime.outputs[0]], dtype=np.float32).reshape(-1)
+        vector = np.asarray(runtime.run(None, {runtime.get_inputs()[0].name: blob})[0], dtype=np.float32).reshape(-1)
         norm = float(np.linalg.norm(vector))
-        if vector.shape[0] == APPEARANCE_EMBEDDING_DIMENSION and np.isfinite(vector).all() and norm > 0:
+        if vector.shape[0] == VEHICLE_REID_EMBEDDING_DIMENSION and np.isfinite(vector).all() and norm > 0:
             return [round(float(value / norm), 7) for value in vector], VEHICLE_REID_MODEL_PATH.name
     except (FileNotFoundError, RuntimeError, cv2.error):
         pass
@@ -535,21 +541,36 @@ def _infer_vehicle_attributes(
     image: np.ndarray,
     detector_crop: bool = False,
     detection_confidence: float | None = None,
+    quality_image: np.ndarray | None = None,
 ) -> dict[str, Any]:
-    height, width = image.shape[:2]
-    trained = _trained_vehicle_attributes(image, detector_crop)
+    quality_crop = image if quality_image is None else quality_image
+    height, width = quality_crop.shape[:2]
+    try:
+        trained = _trained_vehicle_attributes(image, detector_crop)
+    except (FileNotFoundError, RuntimeError, cv2.error) as error:
+        trained = {
+            "vehicle_colour": None,
+            "vehicle_type": None,
+            "vehicle_attribute_confidence": None,
+            "vehicle_colour_confidence": None,
+            "vehicle_type_confidence": None,
+            "vehicle_model_name": None,
+            "vehicle_attribute_status": "vehicle_attribute_model_unavailable",
+            "vehicle_attribute_error": type(error).__name__,
+        }
     colour, heuristic_confidence = _vehicle_colour(image)
     if trained["vehicle_colour"] is None and colour is not None:
         trained["vehicle_colour"] = colour
         trained["vehicle_colour_confidence"] = round(heuristic_confidence, 3)
-    appearance_embedding, appearance_model = _vehicle_appearance_embedding(image)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.size else np.empty((0, 0), dtype=np.uint8)
+    appearance_embedding, appearance_model = _vehicle_appearance_embedding(quality_crop)
+    gray = cv2.cvtColor(quality_crop, cv2.COLOR_BGR2GRAY) if quality_crop.size else np.empty((0, 0), dtype=np.uint8)
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var()) if gray.size else 0.0
     brightness = float(gray.mean()) if gray.size else 0.0
     detector_confidence_ok = detection_confidence is None or detection_confidence >= 0.65
     appearance_usable = (
         detector_crop
         and appearance_model == VEHICLE_REID_MODEL_PATH.name
+        and len(appearance_embedding) == VEHICLE_REID_EMBEDDING_DIMENSION
         and width >= MIN_VEHICLE_REID_WIDTH
         and height >= MIN_VEHICLE_REID_HEIGHT
         and sharpness >= 8.0
@@ -592,6 +613,9 @@ def _infer_vehicle_attributes(
         "vehicle_colour_confidence": trained["vehicle_colour_confidence"],
         "vehicle_type_confidence": trained["vehicle_type_confidence"],
         "vehicle_model_name": trained["vehicle_model_name"],
+        "vehicle_attribute_status": trained.get("vehicle_attribute_status")
+        or ("ready" if trained["vehicle_model_name"] else "not_staged"),
+        "vehicle_attribute_error": trained.get("vehicle_attribute_error"),
         "inference_provider": "openvino_vehicle_attributes_0039",
         "review_required": True,
         "attribute_status": "trained_colour_type_identity_manual_review",
@@ -690,7 +714,8 @@ def _face_quality(region: np.ndarray, detection: np.ndarray) -> dict[str, Any]:
     x1, y1 = min(region.shape[1], int(x + box_width)), min(region.shape[0], int(y + box_height))
     crop = region[y0:y1, x0:x1]
     if crop.size == 0:
-        return {"face_quality_score": 0.0, "face_crop_sharpness": 0.0, "face_crop_brightness": 0.0, "face_frontality_score": 0.0, "usable_for_matching": False}
+        return {"face_quality_score": 0.0, "face_crop_sharpness": 0.0, "face_crop_brightness": 0.0, "face_frontality_score": 0.0, "face_crop_width_px": 0, "face_crop_height_px": 0, "usable_for_matching": False}
+    crop_width, crop_height = crop.shape[1], crop.shape[0]
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     brightness = float(gray.mean())
@@ -710,13 +735,13 @@ def _face_quality(region: np.ndarray, detection: np.ndarray) -> dict[str, Any]:
     else:
         frontality = 0.0
     detector_confidence = max(0.0, min(1.0, float(detection[-1])))
-    size_score = min(1.0, box_width / 112) * min(1.0, box_height / 112)
+    size_score = min(1.0, crop_width / 112) * min(1.0, crop_height / 112)
     sharpness_score = min(1.0, sharpness / 100)
     brightness_score = max(0.0, 1.0 - abs(brightness - 127.5) / 127.5)
     quality_score = round(detector_confidence * size_score * sharpness_score * brightness_score * frontality, 3)
     usable = (
-        box_width >= MIN_FACE_MATCH_WIDTH
-        and box_height >= MIN_FACE_MATCH_HEIGHT
+        crop_width >= MIN_FACE_MATCH_WIDTH
+        and crop_height >= MIN_FACE_MATCH_HEIGHT
         and detector_confidence >= 0.85
         and sharpness >= MIN_FACE_MATCH_SHARPNESS
         and 25.0 <= brightness <= 235.0
@@ -727,6 +752,8 @@ def _face_quality(region: np.ndarray, detection: np.ndarray) -> dict[str, Any]:
         "face_crop_sharpness": round(sharpness, 2),
         "face_crop_brightness": round(brightness, 2),
         "face_frontality_score": round(frontality, 3),
+        "face_crop_width_px": crop_width,
+        "face_crop_height_px": crop_height,
         "usable_for_matching": usable,
     }
 
@@ -735,12 +762,14 @@ def _crop_to_bbox(image: np.ndarray, bbox: dict[str, Any], padding: float = 0.1)
     try:
         x, y, width, height = (int(bbox[key]) for key in ('x', 'y', 'width', 'height'))
     except (KeyError, TypeError, ValueError):
-        return image
+        return image[:0, :0]
+    if width <= 0 or height <= 0:
+        return image[:0, :0]
     pad_x, pad_y = int(width * padding), int(height * padding)
     x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
     x1, y1 = min(image.shape[1], x + width + pad_x), min(image.shape[0], y + height + pad_y)
     crop = image[y0:y1, x0:x1]
-    return crop if crop.size else image
+    return crop if crop.size else image[:0, :0]
 
 
 def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
@@ -762,11 +791,13 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
             triage["people_provider"] = None
     for vehicle in triage["vehicles"]:
         crop = _crop_to_bbox(image, vehicle["bbox"])
-        try:
-            attributes = _infer_vehicle_attributes(crop, detector_crop=True, detection_confidence=vehicle.get("confidence"))
-        except (FileNotFoundError, RuntimeError, cv2.error):
-            embedding, model_name = _vehicle_appearance_embedding(crop)
-            attributes = {"appearance_embedding": embedding, "appearance_embedding_model": model_name, "attribute_status": "vehicle_attribute_model_not_staged"}
+        quality_crop = _crop_to_bbox(image, vehicle["bbox"], padding=0)
+        attributes = _infer_vehicle_attributes(
+            crop,
+            detector_crop=True,
+            detection_confidence=vehicle.get("confidence"),
+            quality_image=quality_crop,
+        )
         attributes["detection"] = {"bbox": vehicle["bbox"], "confidence": vehicle["confidence"]}
         attributes["vehicle_crop_status"] = "detector_crop"
         vehicle["attributes"] = attributes
@@ -785,7 +816,7 @@ def _health_payload() -> dict[str, Any]:
         "vehicle_model": "ready" if entity_detector.path_is_file(VEHICLE_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "person_model": "ready" if entity_detector.path_is_file(PERSON_MODEL_PATH) and entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "person_reidentification_model": "ready" if entity_detector.path_is_file(PERSON_REID_MODEL_PATH) and entity_detector.path_is_file(PERSON_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
-        "vehicle_reidentification_model": "ready" if entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
+        "vehicle_reidentification_model": "ready" if entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) else "not_staged",
         "detector_model": detector_state["detector"],
         "detector_name": detector_state.get("detector_model"),
         "detector_kind": detector_state.get("detector_kind"),
@@ -1051,7 +1082,7 @@ def _face_sync_locked(image: np.ndarray, person_bboxes: list[dict[str, Any]] | N
     person_boxes = _face_person_boxes(image, person_bboxes)
     results: list[dict[str, Any]] = []
     index = 0
-    for person in person_boxes:
+    for person_index, person in enumerate(person_boxes):
         pad_x, pad_y = round(person["width"] * 0.08), round(person["height"] * 0.02)
         x0 = max(0, person["x"] - pad_x)
         y0 = max(0, person["y"] - pad_y)
@@ -1089,11 +1120,11 @@ def _face_sync_locked(image: np.ndarray, person_bboxes: list[dict[str, Any]] | N
                     "x": round(x0 + face_x, 3), "y": round(y0 + face_y, 3),
                     "width": round(box_width, 3), "height": round(box_height, 3),
                 },
+                "person_bbox": person,
+                "person_index": person_index,
                 "embedding": [round(float(value), 7) for value in vector],
                 "embedding_dimension": int(vector.size),
                 "detector_confidence": round(float(detection[-1]), 6),
-                "face_crop_width_px": round(box_width, 3),
-                "face_crop_height_px": round(box_height, 3),
                 "alignment_basis": alignment_basis,
                 "face_detector_model": YUNET_MODEL_PATH.name,
                 "face_embedding_model": SFACE_MODEL_PATH.name,

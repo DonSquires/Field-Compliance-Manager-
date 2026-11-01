@@ -86,8 +86,8 @@ test('the enhancement model is pinned, checksummed, GPU-aware and explicitly gen
 
 test('face candidates carry model and crop provenance on both inference paths', () => {
   assert.match(inference, /"detector_confidence": round\(float\(detection\[-1\]\), 6\)/);
-  assert.match(inference, /"face_crop_width_px": round\(box_width, 3\)/);
-  assert.match(inference, /"face_crop_height_px": round\(box_height, 3\)/);
+  assert.match(inference, /"face_crop_width_px": crop_width/);
+  assert.match(inference, /"face_crop_height_px": crop_height/);
   assert.match(inference, /"matching_gate_version": "face_quality_v1"/);
   assert.match(inference, /"alignment_basis": alignment_basis/);
   assert.match(inference, /"face_detector_model": YUNET_MODEL_PATH\.name/);

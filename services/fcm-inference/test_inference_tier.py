@@ -3,6 +3,7 @@ replaced with fakes, so these run in CI and on machines without the models stage
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,10 @@ import plates  # noqa: E402
 spec = importlib.util.spec_from_file_location('appmod', HERE / 'app.py')
 appmod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(appmod)
+
+download_spec = importlib.util.spec_from_file_location('download_models', HERE / 'download_models.py')
+download_models = importlib.util.module_from_spec(download_spec)
+download_spec.loader.exec_module(download_models)
 
 
 def _result(label: str, confidence: float, x1: float, y1: float, x2: float, y2: float) -> SimpleNamespace:
@@ -119,6 +124,48 @@ def test_animal_without_species_model_carries_the_detector_label_honestly(monkey
     assert payload['species'] == 'cattle' and payload['species_status'] == 'detector_coarse_label'
     payload = detector.classify_species(np.zeros((100, 100, 3), dtype=np.uint8), {'x': 0, 'y': 0, 'width': 10, 'height': 10}, None, None, None)
     assert payload['species_status'] == 'model_not_staged'
+
+
+def test_official_vehicle_reid_artifact_is_pinned_and_sha384_verified(tmp_path, monkeypatch):
+    filename = 'vehicle-reid-0001.onnx'
+    assert download_models.FILES[filename].endswith('/osnet_ain_x1_0_vehicle_reid.onnx')
+    expected = download_models.EXPECTED_SHA384[filename]
+    assert len(expected) == 96
+    artifact = tmp_path / filename
+    artifact.write_bytes(b'official model fixture')
+    monkeypatch.setitem(download_models.EXPECTED_SHA384, filename, hashlib.sha384(artifact.read_bytes()).hexdigest())
+    assert download_models.has_expected_checksum(artifact, filename)
+    artifact.write_bytes(b'altered model fixture')
+    assert not download_models.has_expected_checksum(artifact, filename)
+
+
+def test_vehicle_attribute_model_failure_does_not_clear_quality_gated_reid(monkeypatch):
+    class FakeSession:
+        def get_inputs(self):
+            return [SimpleNamespace(name='input')]
+
+        def run(self, _outputs, _inputs):
+            return [np.ones((1, appmod.VEHICLE_REID_EMBEDDING_DIMENSION), dtype=np.float32)]
+
+    image = np.random.default_rng(42).integers(20, 230, size=(120, 200, 3), dtype=np.uint8)
+    monkeypatch.setattr(appmod, '_vehicle_reid_runtime', lambda: FakeSession())
+
+    def unavailable_attributes(_image, _detector_crop):
+        raise FileNotFoundError('optional attribute weights missing')
+
+    monkeypatch.setattr(appmod, '_trained_vehicle_attributes', unavailable_attributes)
+    result = appmod._infer_vehicle_attributes(image, detector_crop=True, detection_confidence=0.9, quality_image=image)
+    assert result['vehicle_attribute_status'] == 'vehicle_attribute_model_unavailable'
+    assert result['appearance_embedding_model'] == 'vehicle-reid-0001.onnx'
+    assert len(result['appearance_embedding']) == 512
+    assert result['appearance_embedding_usable'] is True
+
+
+def test_vehicle_quality_crop_is_clipped_and_invalid_boxes_never_fall_back_to_full_frame():
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    crop = appmod._crop_to_bbox(image, {'x': -10, 'y': 10, 'width': 30, 'height': 30}, padding=0)
+    assert crop.shape == (30, 20, 3)
+    assert appmod._crop_to_bbox(image, {'x': 150, 'y': 150, 'width': 10, 'height': 10}, padding=0).size == 0
 
 
 # --------------------------------------------------------------------------------------------- species (SpeciesNet rules)
@@ -283,6 +330,15 @@ def test_read_plates_anchors_on_vehicle_crop_and_scores_from_character_confidenc
     assert fake_detector.calls[1][1] == 480  # the vehicle crop was upscaled to the detector's target width
     assert result['plate_bbox'] == best['box'] and result['box'] == best['box']
     assert result['alpr_provider'] == plates.PLATE_PROVIDER
+
+
+def test_read_plates_keeps_character_confidences_aligned_across_internal_underscores(monkeypatch):
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    monkeypatch.setattr(plates, '_load_plate_detector', lambda: FakePlateDetector([[(0.9, 600, 400, 760, 450)]]))
+    monkeypatch.setattr(plates, '_load_plate_ocr', lambda: FakeOcr('AB_C123', [0.99, 0.98, 0.01, 0.97, 0.96, 0.95, 0.94]))
+    result = plates.read_plates(image, None)
+    assert result['plate'] == 'ABC123'
+    assert result['results'][0]['char_confidences'] == [0.99, 0.98, 0.97, 0.96, 0.95, 0.94]
 
 
 def test_read_plates_reports_unreadable_when_the_plate_is_located_but_the_reading_is_weak(monkeypatch):

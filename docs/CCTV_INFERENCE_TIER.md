@@ -442,20 +442,27 @@ time window before using either as a fragmentation rate.
 The current quality gate only runs face detection inside detected person head regions. Face matching requires
 a clear source frame, sufficient original face size, detector confidence, sharpness and approximate frontal
 landmarks; upscaling does not make an originally tiny face eligible. A face outside every detected person box
-is not searched. Video person and vehicle appearance templates are quality-weighted and require at least two
-eligible detector crops; a still photo emits a single-frame template only when that crop passes the same gate.
-Deterministic fallback descriptors may help local track continuity but are not persisted as cross-clip
-identity templates. These thresholds are conservative engineering gates, not calibrated accuracy claims, and
-must be revisited against a governed labeled set. Plate reads are constrained to NZ formats, voted per
-character position with OCR character confidence where it still aligns with the normalised plate, and retain
-conflicting strings for human review.
+is not searched. Face-to-body links require spatial overlap of the face's owning person box and the tracked body
+box on shared source frames; time overlap or list order alone is not evidence of association. Video person and
+vehicle appearance templates are quality-weighted and require at least two distinct eligible frames from one
+compatible track; vehicle quality is measured from the clipped, unpadded detector crop. Vehicle re-identification
+uses the official Open Model Zoo `vehicle-reid-0001` ONNX model (512 dimensions) in its own
+`vehicle_appearance_vec` column, not a truncated or projected 256-dimensional person/animal vector. A still
+photo emits a single-frame template only when that crop passes the same gate. Deterministic fallback descriptors
+may help local track continuity but are not persisted as cross-clip identity templates. These thresholds are
+conservative engineering gates, not calibrated accuracy claims, and must be revisited against a governed labeled
+set. Plate reads are constrained to NZ formats, voted per character position with OCR character confidence
+where it still aligns with the normalised plate, and retain conflicting strings for human review.
 
-`record_cctv_entity_observations` (migration `20261102190000`) enforces the same gates in the database:
-person and vehicle templates are neither stored nor matched unless the observation is `clear` and carries
-its explicit usability flag. Only a stored, clear, usable face may create a new provisional Unknown Person
-profile. A usable body template may join a portfolio that already has a profile but never creates one, and
-low-quality sightings stay unlinked. The legacy workload-token motion ingest (`complete_motion_inference`)
-therefore keeps its face rows in manual review without minting profiles. Laptop GPU workers must run
+`record_cctv_entity_observations` and `find_cctv_portfolio_matches` (migration `20261102190000`) enforce the
+same gates in the database: person and vehicle templates are neither stored nor matched unless the observation
+is `clear` and carries its explicit usability flag. Approved identity templates and accepted legacy face
+observations remain searchable; animal matching keeps its existing path. Only a stored, clear, usable face may
+create a new provisional Unknown Person profile. A usable body template may join a portfolio that already has a
+profile but never creates one, and low-quality sightings stay unlinked. Reprocessing an unreviewed observation
+clears and recomputes machine-derived links; reviewed rows are left intact. The legacy workload-token motion
+ingest (`complete_motion_inference`) therefore keeps its face rows in manual review without minting profiles.
+Laptop GPU workers must run
 `deploy/laptop-worker/update-watcher.ps1` after release; until they do, their faces and appearance templates
 lack the usability flags and are dropped from matching (fail safe, lower recall).
 

@@ -11,6 +11,7 @@ const {
   getVehicleVisionHint,
   getWeaponHint,
   getSceneSynopsis,
+  clusterPlates,
 } = require('../services/vision/motion_consolidator');
 
 test('cosineSimilarity computes expected vector similarity', () => {
@@ -72,6 +73,17 @@ test('consolidateFaces clusters continuous frames into one subject and handles r
   assert.equal(events[0].usable_for_matching, true);
   assert.equal(events[0].face_template_frames, 5);
 
+});
+
+test('face template mean accumulates weighted samples without normalizing between updates', async () => {
+  const { events } = await consolidateFaces([
+    { frame_index: 1, relative_timestamp_seconds: 1, face: { success: true, faces: [{ embedding: [1, 0], usable_for_matching: true, face_quality_score: 1 }] } },
+    { frame_index: 2, relative_timestamp_seconds: 2, face: { success: true, faces: [{ embedding: [0.8, 0.6], usable_for_matching: true, face_quality_score: 1 }] } },
+    { frame_index: 3, relative_timestamp_seconds: 3, face: { success: true, faces: [{ embedding: [0.9, 0.43589], usable_for_matching: true, face_quality_score: 9 }] } },
+  ]);
+  assert.equal(events.length, 1);
+  assert.ok(Math.abs(events[0].face_embedding[0] - 0.9) < 0.002);
+  assert.ok(Math.abs(events[0].face_embedding[1] - 0.4112) < 0.002);
 });
 
 test('face observations without a passed quality gate cannot form identity clusters', async () => {
@@ -140,22 +152,71 @@ test('plate character votes ignore OCR confidences that no longer align with the
   assert.deepEqual(events[0].plate_character_votes[5].votes, { '8': 1.215, '3': 0.8 });
 });
 
+test('plate pattern conflict compares accumulated losing-pattern weight with the winner', () => {
+  const [cluster] = clusterPlates([
+    { plate: 'ABC123', weight: 0.7 },
+    { plate: 'ABC1A3', weight: 0.2 },
+    { plate: 'ABC12A', weight: 0.2 },
+  ]);
+  assert.equal(cluster.plate, 'ABC123');
+  assert.equal(cluster.patternConflict, true);
+});
+
 test('vehicle re-identification templates aggregate only quality-gated detector crops across frames', async () => {
   const attributes = {
-    appearance_embedding: Array(256).fill(1 / 16),
-    appearance_embedding_model: 'vehicle-reid-0001.xml',
+    appearance_embedding: Array(512).fill(1 / Math.sqrt(512)),
+    appearance_embedding_model: 'vehicle-reid-0001.onnx',
     appearance_embedding_usable: true,
     appearance_quality_score: 0.8,
     vehicle_crop_status: 'detector_crop',
   };
   const { events } = await consolidateVehicles([
-    { relative_timestamp_seconds: 1, triage: { vehicles: [{ bbox: { x: 100, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes }] } },
-    { relative_timestamp_seconds: 2, triage: { vehicles: [{ bbox: { x: 104, y: 82, width: 180, height: 90 }, confidence: 0.95, attributes }] } },
+    { frame_index: 1, relative_timestamp_seconds: 1, triage: { vehicles: [{ bbox: { x: 100, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes }] } },
+    { frame_index: 2, relative_timestamp_seconds: 2, triage: { vehicles: [{ bbox: { x: 104, y: 82, width: 180, height: 90 }, confidence: 0.95, attributes }] } },
   ]);
   assert.equal(events.length, 1);
   assert.equal(events[0].appearance_embedding_usable, true);
   assert.equal(events[0].appearance_template_frames, 2);
-  assert.equal(events[0].appearance_embedding.length, 256);
+  assert.equal(events[0].appearance_embedding.length, 512);
+});
+
+test('repeated vehicle samples from one source frame count only once toward the template minimum', async () => {
+  const attributes = {
+    appearance_embedding: Array(512).fill(1 / Math.sqrt(512)),
+    appearance_embedding_model: 'vehicle-reid-0001.onnx',
+    appearance_embedding_usable: true,
+    appearance_quality_score: 0.8,
+  };
+  const { events } = await consolidateVehicles([
+    { frame_index: 1, relative_timestamp_seconds: 1, triage: { vehicles: [{ bbox: { x: 100, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes }] } },
+    { frame_index: 1, relative_timestamp_seconds: 2, triage: { vehicles: [{ bbox: { x: 104, y: 82, width: 180, height: 90 }, confidence: 0.95, attributes }] } },
+  ]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].appearance_template_frames, 1);
+  assert.equal(events[0].appearance_embedding_usable, false);
+});
+
+test('vehicle templates require two distinct frames from one compatible track', async () => {
+  const attributes = {
+    appearance_embedding: Array(512).fill(1 / Math.sqrt(512)),
+    appearance_embedding_model: 'vehicle-reid-0001.onnx',
+    appearance_embedding_usable: true,
+    appearance_quality_score: 0.8,
+  };
+  const secondAttributes = {
+    ...attributes,
+    appearance_embedding: [0, ...Array(511).fill(1 / Math.sqrt(511))],
+  };
+  const firstAttributes = {
+    ...attributes,
+    appearance_embedding: [1, ...Array(511).fill(0)],
+  };
+  const { events } = await consolidateVehicles([
+    { frame_index: 1, relative_timestamp_seconds: 1, triage: { vehicles: [{ bbox: { x: 100, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes: firstAttributes }] } },
+    { frame_index: 2, relative_timestamp_seconds: 2, triage: { vehicles: [{ bbox: { x: 800, y: 80, width: 180, height: 90 }, confidence: 0.9, attributes: secondAttributes }] } },
+  ]);
+  assert.equal(events.length, 2);
+  assert.ok(events.every((event) => event.appearance_embedding_usable === false && event.appearance_embedding === null));
 });
 
 test('consolidateMotionSummary wraps events and counts into summary', async () => {
