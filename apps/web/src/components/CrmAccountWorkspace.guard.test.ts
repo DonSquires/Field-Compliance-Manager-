@@ -25,6 +25,24 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Location house 360');
   });
 
+  it('allows a separate account house for a place already linked by another account', () => {
+    expect(source).toMatch(/candidate\.match_reason === 'Exact address match' && candidate\.belongs_to_account/);
+    expect(source).toMatch(/\{\s*!hasExactAddressInAccount\s*&&\s*<button[\s\S]*?>Create location for this account<\/button>\s*\}/);
+    expect(source).toContain('shared canonical place');
+    expect(source).toContain('their house and records stay separate');
+    expect(source).toContain('setLocationCandidates([])');
+  });
+
+  it('ignores location lookup results and errors after the search fields change', () => {
+    const search = source.slice(source.indexOf('const searchLocations'), source.indexOf('const updateLocationForm'));
+    const update = source.slice(source.indexOf('const updateLocationForm'), source.indexOf('const closeLocationLookup'));
+    expect(search).toContain('const requestId = ++locationSearchRequestId.current;');
+    expect(search.match(/if \(requestId !== locationSearchRequestId\.current\) return;/g)).toHaveLength(2);
+    expect(search).toMatch(/finally[\s\S]*if \(requestId === locationSearchRequestId\.current\) setLocationSearchPending\(false\)/);
+    expect(update).toContain('locationSearchRequestId.current += 1;');
+    expect(update).toContain('setLocationSearchPending(false);');
+  });
+
   it('keeps schedules in the portfolio while handing staff assignment to roster', () => {
     expect(source).toContain('Operations <strong>{deliverySchedules.length}</strong>');
     expect(source).toContain('Schedules and roster readiness stay in the portfolio context');

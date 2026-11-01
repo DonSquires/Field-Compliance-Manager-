@@ -216,24 +216,51 @@ test('missing employment start date blocks the work-readiness review flow', asyn
   expect(readinessPayload).toMatchObject({ p_staff_id: '2f2f2f2f-2222-4222-8222-222222222222', p_expected_work_ready: false, p_work_ready: true, p_review_notes: 'Synthetic test: employment start date is missing.' });
 });
 
-test('admin officer sees only the People & HR work needed for daily service administration', async ({ page }) => {
+test('admin officer has the same People and Rosters work as an administrator', async ({ page }) => {
   await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'admin'));
   await installSupabaseFixtures(page, { adminRole: 'admin_officer' });
   await signInAsAdmin(page, '/admin/people-hr');
-  await expect(page.getByRole('button', { name: 'Workforce', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'People', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Rostering', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pay & Assets', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'People', exact: true }).click();
+  const groups = page.getByLabel('People and HR workspace');
+  await expect(groups.getByRole('button', { name: 'Staff', exact: true })).toBeVisible();
+  await expect(groups.getByRole('button', { name: 'HR', exact: true })).toBeVisible();
+  await expect(groups.getByRole('button', { name: 'Pay & Assets', exact: true })).toBeVisible();
+  await expect(groups.getByRole('button', { name: 'Rostering', exact: true })).toHaveCount(0);
+  await groups.getByRole('button', { name: 'HR', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Leave', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Recruitment', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Performance', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'HR Cases', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Recruitment', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Timesheets', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pay Review', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Court', exact: true })).toHaveCount(0);
+  await page.goto('/admin/people-hr?section=rostering');
+  await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Court', exact: true })).toBeVisible();
+  await expect(page.getByLabel('People and HR workspace')).toHaveCount(0);
+});
+
+test('Rosters opens its HR-gated setup view when the Rostering module is disabled', async ({ page }) => {
+  await page.route('**/rest/v1/organization_modules**', async (route) => await route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: false },
+      { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'welfare', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'crm', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'rostering', enabled: false },
+      { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'hr', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'finance', enabled: true },
+      { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'workshop', enabled: true },
+    ]),
+  }));
+  await signInAsAdmin(page, '/admin/people-hr');
+
+  const rosters = page.getByRole('button', { name: 'Rosters', exact: true });
+  const viewport = page.viewportSize();
+  if (viewport && viewport.width < 768) {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+  }
+  await expect(rosters).toBeVisible();
+  await rosters.click();
+  await expect(page).toHaveURL(/\/admin\/people-hr\?section=rostering/);
+  await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rest & hours rules', exact: true })).toBeVisible();
 });
 
 test('administrator registers and corrects equipment before officer sign-out', async ({ page }) => {
@@ -267,7 +294,7 @@ test('administrator registers and corrects equipment before officer sign-out', a
 
 test('people and HR decisions are governed and operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/people-hr');
-  await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'People, pay & HR' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Prepare someone to work' })).toBeVisible();
   await expect(page).toHaveScreenshot('hr-staff-overview.png');
@@ -288,7 +315,7 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(staffProfile.getByText('Ana Ngata readiness updated and audited.')).toBeVisible();
 
   await page.goto('/admin/people-hr');
-  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await page.getByRole('button', { name: 'HR', exact: true }).click();
   await page.getByRole('button', { name: 'Leave', exact: true }).click();
   await page.getByRole('button', { name: 'Branch check' }).click();
   const leaveDialog = page.getByRole('dialog', { name: 'Branch check leave request?' });
@@ -303,8 +330,10 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await page.getByRole('dialog', { name: 'Branch check timesheet?' }).getByRole('button', { name: 'Confirm decision' }).click();
   await expect(page.getByText('Timesheet branch check recorded for corporate payroll approval.')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
-  await page.getByRole('button', { name: 'Open Shifts' }).click();
+  await page.goto('/admin/roster');
+  await page.getByRole('navigation', { name: 'Roster sections' }).getByRole('button', { name: 'Shift setup & open shifts' }).click();
+  await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
+  await page.locator('.roster-hr-tab-list').getByRole('button', { name: 'Open Shifts', exact: true }).click();
   await page.getByRole('button', { name: '+ New Coverage Request' }).click();
   await page.getByLabel('Date').fill('2026-09-20'); await page.getByLabel('Required Staff').fill('3');
   await page.getByLabel('Start Time').fill('18:00'); await page.getByLabel('End Time').fill('23:00');
@@ -315,9 +344,10 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
 });
 
 test('administrator finalizes an officer coverage claim into roster ownership', async ({ page }) => {
-  const errors=monitorBrowserErrors(page);await signInAsAdmin(page,'/admin/people-hr');
-  await page.locator('.crm-branch-filter').getByRole('button',{name:'Rostering', exact:true}).click();
-  await page.locator('.roster-hr-tab-list').getByRole('button',{name:'Open Shifts', exact:true}).click();
+  // Legacy deep link: an old ?tab= rostering link still lands in the shift-setup view.
+  const errors=monitorBrowserErrors(page);await signInAsAdmin(page,'/admin/people-hr?tab=coverage');
+  await expect(page.getByRole('navigation',{name:'Roster sections'}).getByRole('button',{name:'Shift setup & open shifts'})).toHaveAttribute('aria-current','page');
+  await expect(page.locator('.roster-hr-tab-list').getByRole('button',{name:'Open Shifts', exact:true})).toHaveClass(/btn-primary/);
   const claim=page.getByText('Claimed festival patrol').locator('..').locator('..');
   await expect(claim).toContainText('claimed by Ana Ngata');
   await claim.getByRole('button',{name:'Finalize assignment'}).click();
@@ -408,7 +438,7 @@ test('an offered candidate can be hired later, which creates the login and staff
   await page.route('**/functions/v1/create-user', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); calls.push('create-user'); expect(payload.role).toBe('officer'); expect(payload.branch_authorisations?.[0]?.can_be_rostered).toBe(true); await route.fulfill(json({ success: true, user_id: '73737373-7373-4373-8373-737373737373', staff_id: '74747474-7474-4474-8474-747474747474' })); });
   await page.route('**/rest/v1/rpc/convert_recruitment_candidate_to_staff', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); calls.push('convert'); expect(payload.p_staff_id).toBe('74747474-7474-4474-8474-747474747474'); await route.fulfill(json([{ candidate_id: payload.p_candidate_id, status: 'hired' }])); });
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await page.getByRole('button', { name: 'HR', exact: true }).click();
   await page.getByRole('button', { name: 'Recruitment', exact: true }).click();
   const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Tama Rangi' }) });
   await expect(card.getByText('Offer made', { exact: true })).toBeVisible();
@@ -522,7 +552,7 @@ test('HR can mark an applicant not suitable with an audited job-related reason',
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await page.getByRole('button', { name: 'HR', exact: true }).click();
   await page.getByRole('button', { name: 'Recruitment', exact: true }).click();
   const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Tama Rangi' }) });
   await card.getByRole('button', { name: 'Mark as not suitable' }).click();
@@ -548,8 +578,7 @@ test('administrator sets the rest and hours rules the roster enforces, in plain 
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ organization_id: payload.p_organization_id, min_rest_hours_between_shifts: payload.p_min_rest_hours_between_shifts, max_hours_per_week: payload.p_max_hours_per_week, max_consecutive_days: payload.p_max_consecutive_days, enforced: payload.p_enforced, updated_at: '2026-08-30T09:31:00.000Z' }) });
   });
 
-  await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
+  await signInAsAdmin(page, '/admin/people-hr?section=rostering');
   await page.getByRole('button', { name: 'Rest & hours rules' }).click();
   const panel = page.locator('.roster-rules');
   await expect(panel.getByRole('heading', { name: 'Rest & hours rules' })).toBeVisible();

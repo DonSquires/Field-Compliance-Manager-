@@ -64,6 +64,17 @@ test('roster context lands on the exact work unit and assignment action', async 
   await expect(page.getByRole('heading', { name: 'Civic Events Limited' })).toBeVisible();
   await page.getByRole('button', { name: 'Open roster' }).click();
 
+  await page.getByRole('button', { name: 'Shift setup & open shifts' }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/people-hr\\?.*section=rostering`));
+  await expect(page).toHaveURL(new RegExp(`work_unit=${WORK_UNIT}`));
+  await expect(page).toHaveURL(new RegExp(`handoff=${HANDOFF}`));
+  await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
+  await page.getByRole('button', { name: 'Roster board' }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/roster\\?.*work_unit=${WORK_UNIT}`));
+  await expect(page).toHaveURL(new RegExp(`handoff=${HANDOFF}`));
+  await expect(contextBanner).toContainText('Mobilisation handoff · roster evidence');
+  await expect(contextBanner.getByRole('button', { name: 'Return to handoff' })).toBeVisible();
+
   await contextBanner.getByRole('button', { name: 'Open work unit' }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/roster-targets.*work_unit=${WORK_UNIT}`));
   const requestedUnit = page.locator(`#work-unit-${WORK_UNIT}`);

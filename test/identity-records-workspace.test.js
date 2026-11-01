@@ -362,11 +362,11 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /Reject evidence/);
   assert.match(workspace, /contain one source face that can become a candidate after approval/);
   assert.match(workspace, /Security licence \/ CoA/);
-  assert.match(workspace, /People &amp;\s*HR → Credentials/);
+  assert.match(workspace, /People → Credentials/);
   assert.match(workspace, /multiple/);
   assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
   assert.match(workspace, /review_canonical_identity_evidence/);
-  assert.match(workspace, /unverified credential handoff is ready in People & HR → Credentials/);
+  assert.match(workspace, /unverified credential handoff is ready in People → Credentials/);
   assert.match(workspace, /Reject it, then upload it under the matching evidence type/);
   assert.match(workspace, /Historical licence retained without replacing current details/);
   assert.match(workspace, /Historical evidence · Current details unchanged/);

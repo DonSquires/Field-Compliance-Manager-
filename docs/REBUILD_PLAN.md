@@ -246,6 +246,28 @@ Owner-directed client/place simplification, 2026-10-28:
   on field capture; ordinary profile edits do not infer agreements or pricing.
   Administrators can explicitly confirm their own current pending engagement
   without accepting a client invitation, and recapture restores inactive markers.
+- **Cross-organisation place reuse finding, 2026-11-02:** Before, CRM search
+  showed an exact-address match owned by another account but hid the create
+  action, directing the operator to arrange access to that account's house.
+  That contradicted the house model: each organisation needs its own house,
+  while the address key links both houses to one canonical place. During, an
+  exact match in the selected account still opens its existing house; a match
+  in another account permits creation of a separate house for the selected
+  account. The existing `manage_crm_location` writer and place-identity trigger
+  create the account-scoped house and reuse the canonical address identity;
+  they do not grant access to the other account's house or records. Editing
+  either search field invalidates the pending lookup generation, clears stale
+  results and errors, and causes any late success or failure response to be
+  ignored. Closing or reopening the lookup also invalidates pending requests.
+  After, the two houses remain separate while their `canonical_place_id` is
+  shared. The CRM workspace guard and browser regressions cover cross-account
+  creation plus stale success/error responses; the place-model convergence
+  database fixture verifies the shared canonical identity. The local Atlas
+  manifest confirms the existing component calls to
+  `find_crm_location_candidates` and `manage_crm_location` and its read of
+  `locations`; no live Atlas write was made because the session has no
+  authorized Atlas credentials. The protected main-branch refresh remains the
+  release path.
 - **Evidence gate:** real disposable PostGIS tests include role isolation,
   actual constraints and place/agreement/financial triggers, stale fix/version
   rejection, unchanged perimeters, 10 m geometry and receipts. Desktop/mobile
@@ -256,6 +278,37 @@ Owner-directed client/place simplification, 2026-10-28:
   field audit of HR, finance, every specialist module, every role and every
   viewport. Further consolidation should follow observed tasks, not hide
   necessary safety, NZTA, client disclosure or commercial decisions.
+
+Owner-directed Workforce consolidation, 2026-11-03 (follows the 2026-10-28
+simplification; owner chose "consolidate to 2" and "leave roster_templates"):
+
+- **Before:** the HR & Rostering workspace had four peer destinations
+  (Schedules & Rosters, People Pay & HR, Work Units & Coverage, People &
+  Access). The HR page also held a Rostering group, so shift setup lived in a
+  different destination from the roster board. Atlas (dry-run refresh, 1,616
+  capabilities / 9,685 edges) showed every HR/roster table reaching a screen
+  except `roster_templates` (FK-only, privileges revoked from app roles, 0 live
+  rows) and `staff_biometrics` (reads tightened separately in #311).
+- **During:** two destinations, **Rosters** and **People**, each with a section
+  strip. Rosters: Roster board (`/admin/roster`), Work units & coverage
+  (`/admin/roster-targets`), Shift setup & open shifts
+  (`/admin/people-hr?section=rostering`). People: Staff, pay & HR
+  (`/admin/people-hr`), Logins & access (`/admin/users`). The HR page shows only
+  its own view's groups (Staff, HR, Pay & Assets, or the rostering tabs).
+  Without the HR module, People opens Logins & access. If Rostering is disabled
+  while HR remains enabled, Rosters falls back to the existing HR-gated setup
+  view; the roster board and work-unit coverage stay behind their Rostering
+  gates. Section navigation preserves the handoff and work-unit context.
+  No route, permission or data path changed; old links and `?tab=` deep links to
+  rostering tabs still land in the right view.
+- **After:** `roster_templates` stays legacy-only (no screen, no writer). Its
+  retirement needs its own migration and evidence.
+- **Evidence gate:** vitest guards and the section helper pass. Desktop/mobile
+  synthetic Playwright runs cover HR administration, credential renewal,
+  HR-only Rosters fallback and mobilisation-context preservation, with win32
+  baselines regenerated. `roster-operations` week-board/publish and
+  `geofence-spine-map` screenshot failures also fail on `main` before this
+  change. No human walkthrough has been done yet.
 
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
