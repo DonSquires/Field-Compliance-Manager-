@@ -608,7 +608,10 @@ approve anything for service to be given."
   limits direct audit inserts to the caller's own action in an organisation it
   can access, and makes the invite rate-limit RPC callable by the service role
   only. `test/anonymous-rls-exposure.test.js` fails if any such PUBLIC policy
-  returns.
+  returns. Owner ruling 2026-11-01: org-less audit rows are platform records,
+  so `20261102190000_platform_only_orgless_audit_rows.sql` lets only the grand
+  master and a platform owner read them; organisation rows keep
+  `org_access_allowed`.
   The remaining exposure, until the access token expires (at most one hour),
   is a deactivated user's own self-row data and any definer RPC that reads
   `user_profiles` directly instead of using the deactivation-aware helpers.

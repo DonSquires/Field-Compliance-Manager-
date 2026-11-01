@@ -491,7 +491,7 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Conductor — turn gate, tool dispatch, egress, task/memory state | `onspace-ai-chat` + `resolveUserCapabilities`/`gateTool`/`redactOutgoing` | `supabase/functions/onspace-ai-chat/index.ts` (`isToolEffectPermitted`, `applyEgressSweep`, `persist`, `emitEvent`) |
 | Caddie — tool catalogue from Atlas-wired capability; describes, never selects | `caddie.ts` `TOOL_REGISTRY` + caddie cards | `supabase/functions/onspace-ai-chat/caddie.ts` (`generateToolCatalogue`) |
 | Oracle — truth-state of turn, caller, candidate effect, proof grade, safety | welfare seam | `conductor-oracle.ts`, `conductor-welfare-seam.ts` |
-| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (admiral/captain/commander; read-only) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
+| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (every active signed-in rank; read-only; Conductor egress redacts per caller) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
 | Planner | `apps/api/src/bobPlan.ts` (23 routes) → conductor cross-checks | VPS `/api/bob/plan` via `callPlan` → `services/fcm-api/src/bob/plan.js` (prompt `planPrompt.js`, model routing `modelGateway.js`); `bob-inference` fallback |
 | Verifier (chat lane) | — | `services/fcm-api/src/bob/verify.js`: deterministic checks + independent critic (different model), recommend-only; author repairs once |
 | Working subagents | Duo flows (GitLab) | planner `delegate` → conductor `runSubagents` (read-only tools via `dispatchTool`) + VPS `/api/bob/subagent` |
@@ -499,11 +499,20 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
 | Local document source | — | approved tenant-bound `document_reference_sources` alias → durable `document_source_ingestion_runs` → read-only laptop worker manifest → governed extraction/comparison/promotion tools |
 
-Owner ruling 2026-10-13: Atlas is Bob's read-only map of his own build, not a
-tenant business-record disclosure. Admiral, captain, and commander sessions may
-inspect Atlas so Bob can diagnose wiring and gap state. This does not widen
-business-data access, governed effects, Builder merge/deploy authority, or the
-human approval boundary.
+Owner ruling 2026-10-13 (rank limit superseded 2026-11-01): Atlas is Bob's
+read-only map of his own build, not a tenant business-record disclosure. This
+does not widen business-data access, governed effects, Builder merge/deploy
+authority, or the human approval boundary.
+
+Owner ruling 2026-11-01: Bob and Atlas are available at every level. Oracle and
+Conductor exist to restrict and redact per user level, so Atlas is not gated by
+rank: any active signed-in account (admiral through ensign and guest) may have
+Bob inspect Atlas, and admin and admin officer are never blocked. A deactivated
+account is refused. Conductor egress redaction, the welfare hold on diagnostic
+substrate actions, and every business-data, effect, and approval boundary still
+apply. In the same ruling, org-less `audit_log` rows (no `organization_id`) are
+platform-only: only the grand master and the platform owner may read them;
+organisation-scoped rows keep `org_access_allowed`.
 
 Owner ruling 2026-10-13: Bob's agentic conversation and Bob Builder may share
 one chat surface, but they are separate execution lanes. Technical questions,

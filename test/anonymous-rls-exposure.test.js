@@ -215,3 +215,22 @@ test('only the service role can run the invite rate-limit gate', () => {
   assert.match(inviteOrg, /const adminClient = createClient\(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY\)/);
   assert.match(inviteOrg, /adminClient\.rpc\('check_invite_rate_limit'/);
 });
+
+// Owner ruling 2026-11-01: org-less audit rows are platform records. Normalising
+// away quoting, schema prefixes, aliases and parentheses lets the same pin hold
+// for the migration text and for the pg_dump form after the catalog refresh.
+test('org-less audit rows are readable only by the grand master or a platform owner', () => {
+  const policy = effectivePolicies(schema, migrations).get('audit_log.audit_log_select');
+  assert.ok(policy, 'audit_log_select must exist');
+  assert.deepEqual(policy.roles, ['authenticated']);
+  const normalised = policy.using
+    .replace(/\s+AS\s+"?\w+"?/gi, '')
+    .replace(/["()\s]/g, '')
+    .replace(/public\./gi, '')
+    .toLowerCase();
+  assert.equal(
+    normalised,
+    'organization_idisnotnullandorg_access_allowedorganization_id'
+      + 'ororganization_idisnullandselectis_grand_masterorselectis_platform_ownerselectauth.uid',
+  );
+});
