@@ -163,11 +163,15 @@ under these egress controls:
   message. A request-id replay cannot change consent. The worker records the
   attachment-context IDs and `raw_attachments_sent: false` with cloud use.
 - Earlier attachment context is never authorized by the current opt-in.
-  When history contains attachments, earlier conversation, execution logs
-  and pre-cloud model/tool exchanges are withheld from the cloud packet to
-  avoid forwarding paraphrased private analysis. Private models retain that
-  history. Consent does not authorize promoting any source into business
-  records or changing record access.
+  When any earlier owner message in the session carried attachments (checked
+  session-wide, not just within the recent history window), earlier
+  conversation, execution logs, pre-cloud model/tool exchanges and file-search
+  terms drawn from earlier messages are withheld from the cloud packet to
+  avoid forwarding paraphrased private analysis. A failed check recorded
+  before the message still blocks handoff, but the cloud model receives only
+  its command, never its earlier output. Private models retain that history.
+  Consent does not authorize promoting any source into business records or
+  changing record access.
 - Ollama Cloud receives structured JSON requests, never native tool
   definitions, and each escalation posts a session status with
   `external_egress: true`.
