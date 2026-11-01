@@ -576,5 +576,5 @@ approve anything for service to be given."
   because the custodian keeps the record.
 - Several current agreements for one client still need an explicit
   administrative choice; no path silently picks one.
-- Migration `20261102110000_service_without_client_approval.sql` implements
+- Migration `20261102120000_service_without_client_approval.sql` implements
   this part; `test/service-without-client-approval.test.js` holds it.

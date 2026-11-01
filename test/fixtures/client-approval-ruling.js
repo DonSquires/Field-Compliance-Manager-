@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const migrationPath = path.join(__dirname, '..', '..', 'supabase', 'migrations',
-  '20261102110000_service_without_client_approval.sql');
+  '20261102120000_service_without_client_approval.sql');
 
 const literal = String.raw`(\$q\$[\s\S]*?\$q\$|E'(?:[^'\\]|''|\\.)*'|'')`;
 const specRow = new RegExp(String.raw`\((\d+), '([^']+)', ${literal},\s*${literal}, (\d+)\)`, 'g');

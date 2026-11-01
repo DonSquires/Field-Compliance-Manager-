@@ -16,7 +16,7 @@ Owner-directed single provider and service without client approval, 2026-11-01
   invoicing required the client to accept the portal invitation (or a provider
   attestation). Freedom-camping module assignment failed with a 400 for an
   engaged but uninvited client.
-- **During:** migration `20261102110000_service_without_client_approval.sql`
+- **During:** migration `20261102120000_service_without_client_approval.sql`
   rewrites 32 live function bodies in place, with an exact anchor count per
   step, so a current operational agreement is enough.
   `test/service-without-client-approval.test.js` and the PostGIS place
