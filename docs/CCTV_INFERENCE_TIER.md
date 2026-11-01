@@ -15,6 +15,16 @@ VPS could not answer. Observation enhancement follows the same order: laptop GPU
 deterministic worker fallback. `VISION_INFERENCE_POLICY=local_gpu_first` is the platform default; the laptop
 watcher uses its co-located GPU service first and RunPod only for unanswered work.
 
+**Owner ruling 2026-11-01 — one detector per job, accuracy measured from human decisions.** Superseding the
+2026-09-25 default for video: `VISION_INFERENCE_POLICY=gpu_consistent` is the default. Every frame of a job is
+read by one pinned GPU detector (`rf-detr-large-704-coco`; the laptop GPU first, RunPod running the same model
+when the laptop cannot answer); the VPS CPU small model is never mixed into a job, and a frame no GPU answered
+defers the job instead of finishing it. The local vision-language model is Qwen3-VL on the laptop's Ollama;
+Ollama Cloud is permitted only for person-free, plate-masked vehicle crops, per organisation opt-in, with a
+receipt written before the crop leaves. Completed jobs are reprocessed with engine v2 while every human
+decision is kept. Owner scope: accuracy engine, model governance, accuracy measurement, reviewer workspace and
+the local VLM upgrade. Details, the expected-versus-present record and the remaining gaps are in §9.
+
 ## 1. What the tier is for
 
 One motion frame in, one **advisory** answer out: every person, vehicle and animal in the frame, each with a
@@ -264,11 +274,103 @@ registration; the console's enhancement/zoom gets the located box.
 
 ## 8. Open items / honest gaps
 
-* Tracking across frames is still the consolidator's IoU/embedding association; a Kalman/ByteTrack-style
-  tracker on the detector boxes is the next step to cut duplicate observations.
+* ~~Tracking across frames is still the consolidator's IoU/embedding association~~ — replaced by the engine v2
+  tracker (§9, `services/vision/entity_tracker.js`, 2026-11-01).
 * No live plate has yet been read from the TAPO corpus because none is legible at that resolution; the
   reader is proven with fake sessions (`test_inference_tier.py`) and on real frames for location only.
 * Species accuracy on NZ night-IR footage is unmeasured (no labelled NZ corpus in the repo); the first real
   possum/stoat clips should be kept as a regression set with the reviewer's verdicts.
 * RunPod idle timeout is 30 s; each cold start costs ~15–35 s (`delayTime`) — raise `workersMin` to 1 if
   batch latency matters more than idle cost.
+
+## 9. Engine v2 accuracy (owner ruling 2026-11-01)
+
+Owner request: "review cctv and the inference system, we need this to be more accurate … enterprise grade".
+The owner chose: `gpu_consistent` tier policy (defer rather than mix in the VPS small model); Qwen3-VL on the
+laptop as the local vision-language model; Ollama Cloud only for person-free, plate-masked vehicle crops with
+per-organisation opt-in and receipts; all five scope items (accuracy engine, model governance, accuracy
+measurement, reviewer workspace, local VLM); reprocessing of completed jobs keeping human decisions.
+
+### 9.1 What production showed before (read-only aggregates, 2026-11-01)
+
+* 521 sightings (209 animal, 92 person, 220 vehicle); only 18 had a human decision (17 accepted, 1 rejected),
+  so no confidence figure shown to reviewers was calibrated against anything.
+* Single clips were triaged by two detector models (for example 42 frames on the VPS `rf-detr-small-512` and
+  78 on the laptop `rf-detr-large-704`), so sightings inside one clip were not measured on one standard.
+* One camera produced the same parked car 76 times across 70 clips, split into 12 portfolios: stationary
+  coalescing worked only inside a clip.
+* 71 sightings came from a single frame; 98 animals had no species.
+* `classification_truncated` was true for 319 of 364 planned results (120-frame cap); 21 of those sampled as
+  few as 80 frames because the per-segment budget left unused frames behind.
+* Code defects: only the first vehicle per frame reached tracking (`vehicles[0]`); greedy nearest-track
+  assignment with no one-to-one rule (two people walking together merged); a spatial gate that grew to about
+  23 box sizes over a 15 s gap; track confidence was the single maximum; make/model came from moondream
+  with free-form JSON; confidence percentages had no calibration and no box was drawn on the still.
+
+### 9.2 What engine v2 does (expected once released)
+
+* **Tracker** (`services/vision/entity_tracker.js`, `ENGINE_VERSION = 'cctv-engine-v2'`): every detection in a
+  frame is tracked; one-to-one assignment per frame; bounded gate (max 4 box sizes, 2 with a constant-velocity
+  prediction); a detection below 0.4 can extend a track but never start one; weak colour-layout embeddings can
+  veto a match but never rescue one; a track is confirmed at 2 hits, or 1 frame at ≥ 0.85; track confidence is
+  evidence-weighted with the best frame kept separately. Tracks are review candidates, never identities.
+* **One detector per job** (`vision_job_watcher.js`): under `gpu_consistent` an answer counts only when it
+  came from the pinned model; other answers leave the frame unanswered and the job is deferred with a label
+  naming the model it waits for. Each result records `classification_plan.model_manifest` (engine version,
+  policy, pinned model, frames per detector model, rejected answers per model) and `coverage` (frames
+  sampled, examined and unanswered, by machine).
+* **Frame budget**: `selectFramesForClassification` now spends the whole budget in chronological order; budget
+  a short motion segment cannot use passes to longer segments, and with more segments than budget it samples
+  segments across the whole clip, never only the first ones.
+* **Vision-language hints** (`services/vision/vision_hints.js`): Qwen3-VL (`qwen3-vl:4b`) on the laptop Ollama
+  answers against a JSON schema at temperature 0; when it cannot answer the hint is recorded as unavailable,
+  never answered by a weaker model. Ollama Cloud (`gemma4:31b` default) is used for vehicle make/model only
+  when the local model failed, the organisation opted in, the plate reader examined the frame and every
+  located plate is blacked out, the person detector found no person intersecting the crop, and a receipt for
+  that crop's SHA-256 was written first — no receipt, no egress. Person, weapon and scene prompts never leave
+  the local tier. Every make/model hint keeps the governed label `vision_llm_hint_unverified` (the label
+  `review_cctv_entity_observation` relies on to keep a machine guess off the canonical vehicle when a plate is
+  accepted); which tier answered is recorded separately as `make_model_tier` (`local_vlm` or `ollama_cloud`)
+  with `make_model_model` and, for the cloud, `make_model_receipt_id`.
+* **Configuration names**: the watcher reads `CCTV_VLM_URL`, `CCTV_VLM_MODEL` and `CCTV_CLOUD_VLM_MODEL` from
+  `/opt/fcm/.env` (compose maps them to the watcher's `OLLAMA_VISION_*`); do not set `OLLAMA_VISION_*` there,
+  because Bob Vibe reads those names for its own images. `VISION_PINNED_DETECTOR_MODEL` defaults to
+  `rf-detr-large-704-coco`.
+* **Database** (migration `20261102140000_cctv_enterprise_inference.sql`):
+  `reconcile_cctv_reviewed_observations` supersedes a reprocessed unreviewed sighting that duplicates an
+  accepted or rejected one (same footage and kind, overlapping time, and the same plate, box IoU ≥ 0.3 or a
+  stationary position) and records `carried_review_state`; reviewed rows are never changed.
+  `cctv_resident_objects` + `link_cctv_resident_vehicle_observations` give a parked vehicle that recurs in the
+  same place on the same camera one provisional portfolio across clips. `cctv_inference_policies` +
+  `set_cctv_inference_policy` hold the cloud opt-in (administrator only, reason required to enable, audited);
+  `cctv_cloud_inference_receipts` holds the crop hash and privacy checks, never the image.
+  `cctv_missed_detection_reports` with `report_cctv_missed_detection` / `resolve_cctv_missed_detection` measure
+  recall (only a confirmed miss counts; a wrong report is kept as `not_missed`). `cctv_accuracy_summary`
+  reports precision per entity kind, engine, detector, review basis and confidence band from human decisions
+  only, with the Wilson 95 % lower bound; a group is called calibrated at 30 decisions.
+* **Reviewer workspace**: the triage queue draws the detector box on the full frame (only when the sighting
+  carries its frame size — a guessed box is never drawn), lists provenance (engine, detector, basis, track
+  confirmation, motion, resident object, carried decision), and supports J/K to move, A/R to accept or reject,
+  optional move-to-next after deciding, and a receipt with "Back to it". There is deliberately no bulk accept:
+  one attributable decision per sighting is the accountability standard. The console can report a missed
+  sighting at the playhead. The new Detection quality page (`?area=cctv-quality`) shows precision with its
+  lower bound and calibration state per kind, a legacy-engine comparison, the breakdown table, missed reports
+  with administrator resolution, and the cloud vehicle-hint policy with its receipt count. The job review
+  panel shows detector coverage: frames examined against motion frames, unanswered frames as gaps, which
+  machines read them, and a warning when different detector models read one clip.
+* **Reprocessing**: `node scripts/rerun-prefix-cctv-jobs.mjs --scope engine-v2 --limit 25` lists completed
+  jobs whose latest result was not produced by engine v2; `--apply` re-queues one batch (audited
+  `cctv_inference_rerun`). The migration must be live before the watcher is redeployed, and before any batch.
+
+### 9.3 Present state and honest gaps
+
+* Present in the repository on merge; live only after the release lane applies the migration and the watcher
+  is redeployed with Qwen3-VL pulled on the laptop. Nothing in §9.2 is "exercised" until a reprocessed batch
+  writes engine v2 results and reviewers decide them; until 30 decisions exist per group the quality page
+  says so instead of showing a calibrated figure.
+* Recall is only as good as reviewers' missed reports; there is no labelled ground-truth corpus (no CCTV video
+  in the classified sample corpus).
+* 107 "Unknown Person" profiles exist live, 32 of them orphaned. Engine v2 does not create or merge them; this
+  is recorded as a data gap, not fixed here.
+* Sampling is still capped at `VISION_MAX_CLASSIFICATION_FRAMES` (120); motion between samples is not
+  examined, and the review panel says so.

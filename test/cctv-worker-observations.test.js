@@ -6,7 +6,7 @@ const test = require('node:test');
 process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
+const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, triageProviderLabel } = require('../services/vision/vision_job_watcher');
 const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
 const { candidateFramesForEvent, derivativeStoragePaths, enhancementProviderOrder, recognitionComparison } = require('../services/vision/observation_derivatives');
 
@@ -105,8 +105,11 @@ test('watcher takes ALPR and faces from the triage answer and only asks the VPS 
   assert.match(watcherSource, /const runpodAlpr = runpodResult\?\.alpr\?\.success \? runpodResult\.alpr : null;/);
   assert.match(watcherSource, /const runpodFace = runpodResult\?\.face\?\.success && Array\.isArray\(runpodResult\.face\.faces\) \? runpodResult\.face : null;/);
   assert.match(watcherSource, /runpodAlpr \|\| needLocalDetect\s*\?\s*Promise\.resolve\(null\)/);
-  // Provenance follows the machine that answered: a VPS triage is never labelled as the GPU's work.
-  assert.match(watcherSource, /const triageProvider = runpodResult\?\.triage_provider === 'vps' \? 'local_detect' : 'runpod';/);
+  // Provenance follows the machine that answered: a VPS or laptop triage is never labelled as RunPod's work.
+  assert.match(watcherSource, /const triageProvider = triageProviderLabel\(runpodResult\?\.triage_provider\);/);
+  assert.equal(triageProviderLabel('vps'), 'local_detect');
+  assert.equal(triageProviderLabel('local_gpu'), 'laptop_gpu');
+  assert.equal(triageProviderLabel('gpu'), 'runpod');
   assert.match(watcherSource, /frame\.alpr = \{ \.\.\.runpodAlpr, provider: triageProvider \};/);
   assert.match(watcherSource, /frame\.face = \{ \.\.\.runpodFace, provider: triageProvider \};/);
   assert.doesNotMatch(watcherSource, /provider: 'runpod' \}/, 'no answer is hard-labelled as RunPod');
@@ -357,15 +360,17 @@ test('the VPS detector answer takes the shape of a GPU answer, with its own prov
   assert.equal(localTriageResult(null), null);
 });
 
-test('inference runs on the laptop GPU first by default and RunPod is the final fallback', () => {
-  assert.equal(INFERENCE_POLICY, 'local_gpu_first');
+test('inference runs on one GPU detector model by default: the laptop first, RunPod as the fallback, never the VPS', () => {
+  assert.equal(INFERENCE_POLICY, 'gpu_consistent');
+  assert.deepEqual(triageOrderFor('gpu_consistent'), ['local_gpu', 'gpu']);
   assert.deepEqual(triageOrderFor('local_gpu_first'), ['local_gpu', 'vps', 'gpu']);
   assert.deepEqual(triageOrderFor('vps_first'), ['vps', 'gpu']);
   assert.deepEqual(triageOrderFor('vps_only'), ['vps']);
   assert.deepEqual(triageOrderFor('gpu_first'), ['gpu', 'vps']);
   assert.deepEqual(triageOrderFor(undefined), ['vps', 'gpu']);
-  // Recognition follows the same policy: only gpu_first re-reads the best frames on the GPU.
-  assert.match(watcherSource, /const gpuResults = INFERENCE_POLICY === 'gpu_first' \? await classifyWithRunpodBatch\(pendingBatch, undefined, usage\) : new Map\(\);/);
+  // Recognition follows the same policy and the same model pin.
+  assert.match(watcherSource, /const gpuResults = await recognitionAnswers\(pendingBatch, usage, pin\);/);
+  assert.match(watcherSource, /const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE && INFERENCE_POLICY !== 'gpu_consistent';/);
 });
 
 test('observation derivative candidates are bounded, quality-ranked and stored under the evidence identity', () => {

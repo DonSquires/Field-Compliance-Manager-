@@ -60,8 +60,10 @@ services:
       INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
       LOCAL_GPU_INFERENCE_URL: http://fcm-inference:3000
       LOCAL_GPU_INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
-      # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer.
-      VISION_INFERENCE_POLICY: vps_first
+      # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer, and an
+      # answer from any detector other than the pinned model leaves the frame unanswered (gpu_consistent).
+      VISION_INFERENCE_POLICY: gpu_consistent
+      VISION_PINNED_DETECTOR_MODEL: rf-detr-large-704-coco
       RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
       RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
       VISION_LOCAL_DETECT_INFERENCE: "true"
@@ -75,8 +77,10 @@ services:
       VISION_WATCHER_HEALTH_MAX_AGE_MS: "90000"
       # This machine already runs its own Ollama (native, GPU-capable) for other work - reuse it via Docker
       # Desktop's host gateway instead of adding a second dockerized instance or a Tailscale hop to the VPS.
-      OLLAMA_VISION_URL: "${OLLAMA_VISION_URL:-http://host.docker.internal:11434}"
-      OLLAMA_VISION_MODEL: "${OLLAMA_VISION_MODEL:-moondream}"
+      OLLAMA_VISION_URL: "${CCTV_VLM_URL:-http://host.docker.internal:11434}"
+      OLLAMA_VISION_MODEL: "${CCTV_VLM_MODEL:-qwen3-vl:4b}"
+      OLLAMA_API_TOKEN: ${OLLAMA_API_TOKEN:-}
+      OLLAMA_CLOUD_VISION_MODEL: ${CCTV_CLOUD_VLM_MODEL:-gemma4:31b}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -1,8 +1,8 @@
-export type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'person-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+export type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'person-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-quality' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 
 export const FIELD_OPS_AREAS: ReadonlySet<FieldOpsSubArea> = new Set([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search', 'person-search',
-  'field-reports', 'operational-continuity', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'field-reports', 'operational-continuity', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-quality', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
   'debrief-followup',
 ]);
 
@@ -22,6 +22,7 @@ const AREA_MODULE_REQUIREMENTS: Partial<Record<FieldOpsSubArea, ModuleRequiremen
   'observation-search': { anyOf: ['freedom_camping', 'parking_enforcement', 'cctv'] },
   'cctv-console': { anyOf: ['cctv'] },
   'cctv-triage': { anyOf: ['cctv'] },
+  'cctv-quality': { anyOf: ['cctv'] },
   'cctv-review': { anyOf: ['cctv'] },
   'cctv-library': { anyOf: ['cctv'] },
   'cctv-import': { anyOf: ['cctv'] },
