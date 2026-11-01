@@ -43,7 +43,11 @@ test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and 
   assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
   assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
   assert.match(laptopUpdater, /git worktree add --detach \$temporaryWorktree origin\/main/);
-  assert.match(laptopUpdater, /Tracked local changes preserved/);
+  assert.match(laptopUpdater, /git merge-base --is-ancestor HEAD origin\/main/);
+  assert.match(laptopUpdater, /\$ancestryExitCode = \$LASTEXITCODE/);
+  assert.match(laptopUpdater, /\$ancestryExitCode -notin @\(0, 1\)/);
+  assert.match(laptopUpdater, /if \(\$trackedChanges -or \$ancestryExitCode -eq 1\)/);
+  assert.match(laptopUpdater, /Tracked local changes or a non-fast-forward branch preserved/);
   assert.match(laptopUpdater, /LAPTOP_WORKER_ENV_FILE/);
   assert.match(laptopUpdater, /inspectJson \| ConvertFrom-Json/);
   assert.match(laptopUpdater, /Get-DockerContainerInspect/);

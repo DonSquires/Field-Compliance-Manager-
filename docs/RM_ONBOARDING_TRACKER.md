@@ -3497,7 +3497,7 @@ app or how records were matched to imported data, and it must leave out travel,
 start and finish times, hours, kilometres and other operational information.
 It should carry the observations and the comments on events at each location,
 with photos where they belong to a CCTV, patrol, incident or investigation
-entry. This section reworks the unreleased PR #312 design to meet that ruling.
+entry. PR #312 delivers the revised design under that ruling.
 
 - **Before:** the v1 snapshot and v11 PDF showed the import accounting
   statement, an itemised appendix with source detail, and patrol travel
@@ -3537,10 +3537,17 @@ entry. This section reworks the unreleased PR #312 design to meet that ruling.
   patrol travel kilometres tile is gone. Patrol, camera and vehicle source
   tiles are hidden for v2 packs, and SLA tiles show only when one is non-zero.
 - **Unchanged:** the provider must still review every draft before it is
-  published, and sent packs never change. The migration is still not applied
-  live.
+  published, and sent packs never change.
 - **Verification:** the photo-exclusion follow-up passes the isolated
   PostgreSQL report/renderer checks, web unit/guard tests, type checks and build,
   and six offline desktop/mobile browser cases including image failure and
-  recovery. Atlas was regenerated locally only. Live schema inspection still
-  finds no `activity_lines` column; no pack or source record was changed.
+  recovery.
+- **Release verified 2026-11-01 UTC:** #312 is merged. The governed release
+  lane applied and ledgered `20261102210000`, deployed and boot-checked
+  `generate-report-pack-pdf` and `send-report-pack`, and refreshed Atlas.
+  Catalog PR #317 regenerated the schema and database types from live; release
+  `7ce07f99` completed successfully against that catalog. Read-only inspection
+  confirms `monthly_report_packs.activity_lines`, the new report RPC signatures
+  and restricted report grants. No report was generated, published or emailed
+  for deployment acceptance, and no source record was altered. This verifies
+  deployment, not a human-approved report for a particular client/month.

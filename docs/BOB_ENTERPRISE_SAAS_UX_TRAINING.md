@@ -2,6 +2,16 @@
 
 This is the minimum product-design and build standard for Bob in Field Compliance Manager. Bob should use it alongside `AGENTS.md`, `docs/ATLAS_REBUILD_ORDER.md`, `docs/SAMPLE_DATA_CAPABILITY_MATRIX.md`, and the live human-test evidence. The repository also provides governed web research and live read-verification paths for questions that source code alone cannot settle.
 
+Vibe attachment privacy training (owner decision 2026-10-25): attachment
+context stays local unless the owner opts in for that exact message after
+reviewing the selected files as non-sensitive. Consent is a human attestation,
+not an automated content classification. Sensitive or uncertain files stay
+local. Approved cloud fallback receives only locally extracted text/local
+image descriptions, never raw files; prior attachment history is withheld.
+Do not ask for blanket permission, infer it from an upload, or claim that a
+cloud coding model directly viewed a screenshot described by local vision.
+See [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md).
+
 ## Builder research before a job proposal
 
 PM investigation delegation, 2026-10-25: the cloud PM can prepare an explicitly
@@ -334,6 +344,14 @@ loads a browser spec, repair discovery configuration; never introduce `any`,
 conditional test imports, placeholder edits or skipped assertions to hide it.
 Fresh lint and browser verification run again before Vibe publishes a PR;
 failed/unavailable evidence preserves the branch without pushing it.
+
+**Visual baseline discipline.** Regenerate a baseline only when a visual
+Playwright assertion reports a screenshot mismatch on a spec intentionally
+changed by the task. Functional changes such as focus, scrolling, or opening a
+panel do not by themselves authorize baseline regeneration. Before using
+`generate_visual_baselines`, list the snapshot directory and use the exact
+existing PNG path; if validation rejects paths, inspect the receipt instead of
+guessing alternatives or retrying.
 
 The human observer also performs a conservative visual UX audit at each
 checkpoint. It records measurable findings for horizontal overflow and
