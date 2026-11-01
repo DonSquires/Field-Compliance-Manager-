@@ -5930,6 +5930,75 @@ export type Database = {
           },
         ]
       }
+      cctv_cloud_inference_receipts: {
+        Row: {
+          created_at: string
+          crop_bytes: number
+          crop_sha256: string
+          evidence_item_id: string | null
+          id: string
+          inference_job_id: string
+          model: string
+          organization_id: string
+          persons_excluded: boolean
+          plate_boxes_masked: number
+          plate_masked: boolean
+          policy_set_at: string
+          provider: string
+          purpose: string
+          source_event_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          crop_bytes: number
+          crop_sha256: string
+          evidence_item_id?: string | null
+          id?: string
+          inference_job_id: string
+          model: string
+          organization_id: string
+          persons_excluded: boolean
+          plate_boxes_masked: number
+          plate_masked: boolean
+          policy_set_at: string
+          provider: string
+          purpose: string
+          source_event_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          crop_bytes?: number
+          crop_sha256?: string
+          evidence_item_id?: string | null
+          id?: string
+          inference_job_id?: string
+          model?: string
+          organization_id?: string
+          persons_excluded?: boolean
+          plate_boxes_masked?: number
+          plate_masked?: boolean
+          policy_set_at?: string
+          provider?: string
+          purpose?: string
+          source_event_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_cloud_inference_receipts_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_cloud_inference_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cctv_device_events: {
         Row: {
           cctv_import_id: string
@@ -6603,6 +6672,41 @@ export type Database = {
           },
         ]
       }
+      cctv_inference_policies: {
+        Row: {
+          cloud_vehicle_vlm_enabled: boolean
+          cloud_vehicle_vlm_model: string | null
+          organization_id: string
+          reason: string | null
+          set_at: string
+          set_by: string | null
+        }
+        Insert: {
+          cloud_vehicle_vlm_enabled?: boolean
+          cloud_vehicle_vlm_model?: string | null
+          organization_id: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+        }
+        Update: {
+          cloud_vehicle_vlm_enabled?: boolean
+          cloud_vehicle_vlm_model?: string | null
+          organization_id?: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_inference_policies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cctv_media_upload_claims: {
         Row: {
           cctv_import_id: string
@@ -6670,6 +6774,85 @@ export type Database = {
           },
           {
             foreignKeyName: "cctv_media_upload_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_missed_detection_reports: {
+        Row: {
+          bbox: Json | null
+          engine_version: string | null
+          entity_kind: string
+          evidence_item_id: string
+          id: string
+          inference_job_id: string | null
+          notes: string | null
+          observed_at: string | null
+          offset_seconds: number | null
+          organization_id: string
+          reported_at: string
+          reported_by: string
+          resolution_notes: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          state: string
+        }
+        Insert: {
+          bbox?: Json | null
+          engine_version?: string | null
+          entity_kind: string
+          evidence_item_id: string
+          id?: string
+          inference_job_id?: string | null
+          notes?: string | null
+          observed_at?: string | null
+          offset_seconds?: number | null
+          organization_id: string
+          reported_at?: string
+          reported_by: string
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          state?: string
+        }
+        Update: {
+          bbox?: Json | null
+          engine_version?: string | null
+          entity_kind?: string
+          evidence_item_id?: string
+          id?: string
+          inference_job_id?: string | null
+          notes?: string | null
+          observed_at?: string | null
+          offset_seconds?: number | null
+          organization_id?: string
+          reported_at?: string
+          reported_by?: string
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_missed_detection_reports_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_missed_detection_reports_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_missed_detection_reports_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -6851,6 +7034,82 @@ export type Database = {
           },
           {
             foreignKeyName: "cctv_report_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_resident_objects: {
+        Row: {
+          anchor_observation_id: string | null
+          bbox: Json
+          camera_key: string
+          candidate_plate: string | null
+          colour: string | null
+          created_at: string
+          entity_kind: string
+          first_seen_at: string
+          id: string
+          last_observation_id: string | null
+          last_seen_at: string
+          organization_id: string
+          portfolio_key: string
+          sighting_count: number
+          updated_at: string
+        }
+        Insert: {
+          anchor_observation_id?: string | null
+          bbox: Json
+          camera_key: string
+          candidate_plate?: string | null
+          colour?: string | null
+          created_at?: string
+          entity_kind?: string
+          first_seen_at: string
+          id?: string
+          last_observation_id?: string | null
+          last_seen_at: string
+          organization_id: string
+          portfolio_key: string
+          sighting_count?: number
+          updated_at?: string
+        }
+        Update: {
+          anchor_observation_id?: string | null
+          bbox?: Json
+          camera_key?: string
+          candidate_plate?: string | null
+          colour?: string | null
+          created_at?: string
+          entity_kind?: string
+          first_seen_at?: string
+          id?: string
+          last_observation_id?: string | null
+          last_seen_at?: string
+          organization_id?: string
+          portfolio_key?: string
+          sighting_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_resident_objects_anchor_observation_id_fkey"
+            columns: ["anchor_observation_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_entity_observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_resident_objects_last_observation_id_fkey"
+            columns: ["last_observation_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_entity_observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_resident_objects_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -39226,6 +39485,11 @@ export type Database = {
         }
         Returns: Json
       }
+      cctv_accuracy_summary: {
+        Args: { p_organization_id: string; p_since?: string }
+        Returns: Json
+      }
+      cctv_bbox_iou: { Args: { p_left: Json; p_right: Json }; Returns: number }
       cctv_bbox_is_stationary: {
         Args: { p_left: Json; p_right: Json }
         Returns: boolean
@@ -43394,6 +43658,10 @@ export type Database = {
         }[]
       }
       jsonb_object_length: { Args: { p_value: Json }; Returns: number }
+      link_cctv_resident_vehicle_observations: {
+        Args: { p_job_id: string }
+        Returns: number
+      }
       link_investigation_entity: {
         Args: {
           p_entity_id: string
@@ -47068,6 +47336,10 @@ export type Database = {
           staff_id: string
         }[]
       }
+      reconcile_cctv_reviewed_observations: {
+        Args: { p_job_id: string }
+        Returns: number
+      }
       reconcile_downer_linz_vehicle_log: {
         Args: { p_limit?: number }
         Returns: {
@@ -47284,6 +47556,10 @@ export type Database = {
       record_cctv_alpr_perception_envelopes_unchecked: {
         Args: { p_job_id: string }
         Returns: Json
+      }
+      record_cctv_cloud_inference_receipt: {
+        Args: { p_job_id: string; p_receipt: Json }
+        Returns: string
       }
       record_cctv_device_events: {
         Args: { p_events: Json; p_import_id: string }
@@ -48308,6 +48584,17 @@ export type Database = {
           skipped_conflict_count: number
         }[]
       }
+      report_cctv_missed_detection: {
+        Args: {
+          p_bbox?: Json
+          p_entity_kind: string
+          p_evidence_item_id: string
+          p_notes?: string
+          p_observed_at?: string
+          p_offset_seconds?: number
+        }
+        Returns: string
+      }
       report_place_hazard: {
         Args: {
           p_client_request_id: string
@@ -48592,6 +48879,10 @@ export type Database = {
           report_template_code: string
           resolution_status: string
         }[]
+      }
+      resolve_cctv_missed_detection: {
+        Args: { p_notes?: string; p_report_id: string; p_state: string }
+        Returns: string
       }
       resolve_context: {
         Args: {
@@ -50272,6 +50563,28 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "cctv_inference_budgets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_cctv_inference_policy: {
+        Args: {
+          p_cloud_vehicle_vlm_enabled: boolean
+          p_cloud_vehicle_vlm_model?: string
+          p_organization_id: string
+          p_reason?: string
+        }
+        Returns: {
+          cloud_vehicle_vlm_enabled: boolean
+          cloud_vehicle_vlm_model: string | null
+          organization_id: string
+          reason: string | null
+          set_at: string
+          set_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_inference_policies"
           isOneToOne: true
           isSetofReturn: false
         }
