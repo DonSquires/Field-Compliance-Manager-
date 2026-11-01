@@ -38666,6 +38666,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_retry_failed_frontend_patch: {
+        Args: {
+          p_job_id: string
+          p_job_updated_at: string
+          p_patch_artifact_id: string
+          p_step_id: string
+          p_target_sha: string
+        }
+        Returns: string
+      }
       builder_set_code_review_policy: {
         Args: { _job_id: string; _mode: string }
         Returns: {
