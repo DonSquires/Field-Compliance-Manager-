@@ -10,8 +10,10 @@ const {
   runFrontendHandoff,
   downloadVerifiedArtifact,
   uploadAndRegisterOutput,
+  finishFrontendWorker,
   recordWorkerHandoffFailure
 } = require('../builder-frontend-handoff');
+const { finishBackendWorker } = require('../builder-backend-handoff');
 const { executeFrontendPatch } = require('../frontend-worker');
 const { patchTestPreservationFailures } = require('../builder-test-preservation');
 
@@ -105,6 +107,93 @@ test('worker output objects are isolated by lease even when a run is retried', a
     assert.ok(objectPaths.every(objectPath => !objectPath.includes('lease-secret')));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('artifact storage and registration errors keep codes through the recovery receipt', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-error-codes-'));
+  const file = path.join(root, 'verification.json');
+  const bytes = Buffer.from('{"succeeded":true}');
+  const lease = { organization_id: 'org-1', job_id: 'job-1', run_id: 'run-1', lease_token: 'lease' };
+  fs.writeFileSync(file, bytes);
+  try {
+    for (const stage of ['upload', 'download', 'registration']) {
+      await t.test(stage, async () => {
+        const underlying = { code: `E_${stage.toUpperCase()}`, message: 'private diagnostic detail' };
+        const bucket = {
+          async upload() { return { error: stage === 'upload' ? underlying : null }; },
+          async download() {
+            return {
+              data: { arrayBuffer: async () => bytes },
+              error: stage === 'download' ? underlying : null
+            };
+          },
+          async remove() { return { error: null }; }
+        };
+        const supabase = {
+          storage: { from: () => bucket },
+          rpc: async () => ({ data: null, error: underlying })
+        };
+        let wrapped;
+        await assert.rejects(uploadAndRegisterOutput(supabase, lease, file, 'build_logs', 'application/json'), error => {
+          wrapped = error;
+          return error.cause === underlying;
+        });
+        const summaries = [];
+        await recordWorkerHandoffFailure(
+          async (_client, _lease, _succeeded, _exitCode, summary) => summaries.push(summary),
+          supabase, lease, 'Frontend', 'registering build-log evidence', wrapped
+        );
+        assert.deepEqual(summaries, [
+          `Frontend worker handoff failed during registering build-log evidence (Error code=${underlying.code})`
+        ]);
+        assert.doesNotMatch(summaries[0], /private diagnostic detail/);
+      });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('both completion wrappers retain RPC diagnostic codes in failure receipts', async () => {
+  for (const [profile, finish] of [['Frontend', finishFrontendWorker], ['Backend', finishBackendWorker]]) {
+    const underlying = { code: 'P0001', message: 'private RPC detail' };
+    const supabase = { rpc: async () => ({ data: null, error: underlying }) };
+    const lease = { run_id: 'run-1', lease_token: 'lease' };
+    let wrapped;
+    await assert.rejects(finish(supabase, lease, false, 1, 'verification failed'), error => {
+      wrapped = error;
+      return error.cause === underlying;
+    });
+    const summaries = [];
+    await recordWorkerHandoffFailure(
+      async (_client, _lease, _succeeded, _exitCode, summary) => summaries.push(summary),
+      supabase, lease, profile, 'completing verifier run', wrapped
+    );
+    assert.deepEqual(summaries, [`${profile} worker handoff failed during completing verifier run (Error code=P0001)`]);
+    assert.doesNotMatch(summaries[0], /private RPC detail/);
+  }
+});
+
+test('failure summaries validate code length and shape and inspect only the immediate cause', async () => {
+  for (const [error, expectedCode] of [
+    [{ code: 'OUTER', cause: { code: 'INNER' } }, 'OUTER'],
+    [{ code: 'invalid code', cause: { code: 'INNER' } }, 'INNER'],
+    [{ cause: { code: 'A'.repeat(32) } }, 'A'.repeat(32)],
+    [{ cause: { code: 'A'.repeat(33) } }, null],
+    [{ cause: { code: 'private\ncontent' } }, null],
+    [{ cause: { code: 409 } }, null],
+    [{ cause: { cause: { code: 'DEEP' } } }, null],
+    [null, null]
+  ]) {
+    const summaries = [];
+    await recordWorkerHandoffFailure(
+      async (_client, _lease, _succeeded, _exitCode, summary) => summaries.push(summary),
+      {}, {}, 'Frontend', 'registering build-log evidence', error
+    );
+    assert.deepEqual(summaries, [
+      `Frontend worker handoff failed during registering build-log evidence (Error${expectedCode ? ` code=${expectedCode}` : ''})`
+    ]);
   }
 });
 

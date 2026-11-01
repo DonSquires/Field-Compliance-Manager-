@@ -51,10 +51,10 @@ async function uploadAndRegisterOutput(supabase, lease, filePath, artifactType, 
   const objectPath = `${lease.organization_id}/${lease.job_id}/${lease.run_id}/${leaseAttempt}/${path.basename(filePath)}`;
   const bucket = supabase.storage.from('builder-artifacts');
   const { error: uploadError } = await bucket.upload(objectPath, bytes, { contentType, upsert: false });
-  if (uploadError) throw new Error(`worker ${artifactType} upload failed`);
+  if (uploadError) throw new Error(`worker ${artifactType} upload failed`, { cause: uploadError });
   try {
     const { data: stored, error: downloadError } = await bucket.download(objectPath);
-    if (downloadError || !stored) throw new Error(`worker ${artifactType} verification failed`);
+    if (downloadError || !stored) throw new Error(`worker ${artifactType} verification failed`, { cause: downloadError });
     const storedBytes = Buffer.from(await stored.arrayBuffer());
     const storedChecksum = crypto.createHash('sha256').update(storedBytes).digest('hex');
     if (storedBytes.length !== bytes.length || storedChecksum !== checksum) {
@@ -69,7 +69,7 @@ async function uploadAndRegisterOutput(supabase, lease, filePath, artifactType, 
       _sha256: checksum,
       _size_bytes: bytes.length
     });
-    if (rpcError || !artifact?.id) throw new Error(`worker ${artifactType} registration failed`);
+    if (rpcError || !artifact?.id) throw new Error(`worker ${artifactType} registration failed`, { cause: rpcError });
     return artifact;
   } catch (error) {
     await bucket.remove([objectPath]);
@@ -93,9 +93,9 @@ function workerHandoffFailureSummary(profile, stage, error) {
   const name = typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(error.name)
     ? error.name
     : 'Error';
-  const code = typeof error?.code === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(error.code)
-    ? ` code=${error.code}`
-    : '';
+  const errorCode = [error?.code, error?.cause?.code]
+    .find(value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(value));
+  const code = errorCode ? ` code=${errorCode}` : '';
   return `${profile} worker handoff failed during ${stage} (${name}${code})`;
 }
 
