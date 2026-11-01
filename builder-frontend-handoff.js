@@ -47,7 +47,8 @@ async function resetFrontendWorkerRetry(supabase, lease) {
 async function uploadAndRegisterOutput(supabase, lease, filePath, artifactType, contentType) {
   const bytes = fs.readFileSync(filePath);
   const checksum = crypto.createHash('sha256').update(bytes).digest('hex');
-  const objectPath = `${lease.organization_id}/${lease.job_id}/${lease.run_id}/${path.basename(filePath)}`;
+  const leaseAttempt = crypto.createHash('sha256').update(lease.lease_token).digest('hex');
+  const objectPath = `${lease.organization_id}/${lease.job_id}/${lease.run_id}/${leaseAttempt}/${path.basename(filePath)}`;
   const bucket = supabase.storage.from('builder-artifacts');
   const { error: uploadError } = await bucket.upload(objectPath, bytes, { contentType, upsert: false });
   if (uploadError) throw new Error(`worker ${artifactType} upload failed`);
@@ -84,8 +85,27 @@ async function finishFrontendWorker(supabase, lease, succeeded, exitCode, summar
     _exit_code: exitCode,
     _log_summary: summary
   });
-  if (error) throw new Error('frontend worker completion failed');
+  if (error) throw new Error('frontend worker completion failed', { cause: error });
   return data;
+}
+
+function workerHandoffFailureSummary(profile, stage, error) {
+  const name = typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(error.name)
+    ? error.name
+    : 'Error';
+  const code = typeof error?.code === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(error.code)
+    ? ` code=${error.code}`
+    : '';
+  return `${profile} worker handoff failed during ${stage} (${name}${code})`;
+}
+
+async function recordWorkerHandoffFailure(finish, supabase, lease, profile, stage, cause) {
+  const summary = workerHandoffFailureSummary(profile, stage, cause);
+  try {
+    await finish(supabase, lease, false, 1, summary);
+  } catch (recordingError) {
+    throw new AggregateError([cause, recordingError], `${summary}; failure state could not be recorded`);
+  }
 }
 
 async function runFrontendHandoff({
@@ -123,6 +143,7 @@ async function runFrontendHandoff({
   let lease;
   let heartbeatTimer;
   let heartbeatError = null;
+  let failureStage = 'claiming verifier lease';
   try {
     lease = await claim(supabase, {
       jobId: job.id,
@@ -132,12 +153,14 @@ async function runFrontendHandoff({
       targetSha: job.target_sha,
       timeoutSeconds
     });
+    failureStage = 'resetting verifier retry state';
     await resetRetry(supabase, lease);
     heartbeatTimer = setInterval(() => {
       heartbeat(supabase, lease).catch(error => { heartbeatError = error; });
     }, Math.min(60000, Math.max(10000, Math.floor(timeoutSeconds * 500))));
     heartbeatTimer.unref?.();
 
+    failureStage = 'running frontend verification';
     const result = await execute({
       image: workerImage,
       sourceDir,
@@ -153,6 +176,7 @@ async function runFrontendHandoff({
     heartbeatTimer = null;
     if (heartbeatError) throw new Error('frontend worker lost its lease heartbeat');
 
+    failureStage = 'reading frontend verification evidence';
     const verificationPath = path.join(artifactDir, 'verification.json');
     let verification = null;
     if (fs.existsSync(verificationPath)) {
@@ -169,12 +193,16 @@ async function runFrontendHandoff({
           : classifyMissingEvidence(result);
     const artifacts = [];
     if (fs.existsSync(verificationPath)) {
+      failureStage = 'registering build-log evidence';
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));
     }
     if (succeeded) {
+      failureStage = 'registering validated-patch evidence';
       artifacts.push(await registerOutput(supabase, lease, path.join(artifactDir, 'validated.patch'), 'code_implementation', 'text/x-diff'));
+      failureStage = 'registering changed-file evidence';
       artifacts.push(await registerOutput(supabase, lease, path.join(artifactDir, 'changed-files.json'), 'changed_file_manifest', 'application/json'));
     }
+    failureStage = 'completing verifier run';
     const completedJob = await finish(
       supabase,
       lease,
@@ -182,7 +210,10 @@ async function runFrontendHandoff({
       result.exitCode ?? 1,
       succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.baseline ? `Repository is red at the pinned commit (${infrastructure.reason}); not caused by this patch` : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : infrastructure.unresolved ? `Frontend verification attribution unresolved (${infrastructure.reason}); candidate patch preserved` : 'Frontend patch verification failed'
     );
-    if (infrastructure.infrastructure || infrastructure.unresolved || infrastructure.baseline) await accountVerifierRecoveries(supabase, job.id);
+    if (infrastructure.infrastructure || infrastructure.unresolved || infrastructure.baseline) {
+      failureStage = 'recording verifier recovery';
+      await accountVerifierRecoveries(supabase, job.id);
+    }
     return {
       success: succeeded,
       job: completedJob,
@@ -196,9 +227,7 @@ async function runFrontendHandoff({
     };
   } catch (error) {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
-    if (lease) {
-      await finish(supabase, lease, false, 1, 'Frontend worker handoff failed').catch(() => {});
-    }
+    if (lease) await recordWorkerHandoffFailure(finish, supabase, lease, 'Frontend', failureStage, error);
     throw error;
   } finally {
     fs.rmSync(artifactDir, { recursive: true, force: true });
@@ -213,5 +242,6 @@ module.exports = {
   resetFrontendWorkerRetry,
   uploadAndRegisterOutput,
   finishFrontendWorker,
+  recordWorkerHandoffFailure,
   runFrontendHandoff
 };

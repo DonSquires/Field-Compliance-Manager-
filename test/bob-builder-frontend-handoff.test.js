@@ -6,7 +6,12 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const { runFrontendHandoff, downloadVerifiedArtifact } = require('../builder-frontend-handoff');
+const {
+  runFrontendHandoff,
+  downloadVerifiedArtifact,
+  uploadAndRegisterOutput,
+  recordWorkerHandoffFailure
+} = require('../builder-frontend-handoff');
 const { executeFrontendPatch } = require('../frontend-worker');
 const { patchTestPreservationFailures } = require('../builder-test-preservation');
 
@@ -68,6 +73,85 @@ test('frontend handoff claims, executes, registers evidence, and finishes in ord
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }
+});
+
+test('worker output objects are isolated by lease even when a run is retried', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-output-'));
+  const file = path.join(root, 'verification.json');
+  const bytes = Buffer.from('{"succeeded":true}');
+  fs.writeFileSync(file, bytes);
+  const objectPaths = [];
+  const bucket = {
+    async upload(objectPath) { objectPaths.push(objectPath); return { error: null }; },
+    async download() {
+      return { data: { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }, error: null };
+    },
+    async remove() { return { error: null }; }
+  };
+  const supabase = {
+    storage: { from: () => bucket },
+    rpc: async () => ({ data: { id: 'artifact' }, error: null })
+  };
+  try {
+    for (const lease_token of ['first-lease-secret', 'second-lease-secret']) {
+      await uploadAndRegisterOutput(supabase, {
+        organization_id: 'org-1', job_id: 'job-1', run_id: 'reused-run', lease_token
+      }, file, 'build_logs', 'application/json');
+    }
+
+    assert.equal(objectPaths.length, 2);
+    assert.notEqual(objectPaths[0], objectPaths[1]);
+    assert.ok(objectPaths.every(objectPath => objectPath.includes('/reused-run/')));
+    assert.ok(objectPaths.every(objectPath => !objectPath.includes('lease-secret')));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('frontend handoff records its failing stage without replacing the original error', async () => {
+  const repo = fixture();
+  const summaries = [];
+  const registrationError = Object.assign(new Error('private storage detail'), { code: 'E_UPLOAD' });
+  try {
+    await assert.rejects(runFrontendHandoff({
+      supabase: {},
+      job: { id: 'job-1', organization_id: 'org-1', target_sha: repo.sha },
+      step: { id: 'step-1', builder_mode: 'frontend_engineer' },
+      patchArtifact: { id: 'patch-1' },
+      sourceDir: repo.root,
+      workerImage: 'worker:test',
+      runnerId: 'runner-1',
+      loadPatch: async () => ({ bytes: Buffer.from(JSON.stringify({ summary: 'Change', patch, changed_files: ['apps/web/src/example.ts'], tests: [] })) }),
+      claim: async () => ({ run_id: 'run-1', lease_token: 'lease', organization_id: 'org-1', job_id: 'job-1' }),
+      resetRetry: async () => {},
+      execute: async options => {
+        fs.writeFileSync(path.join(options.artifactDir, 'verification.json'), JSON.stringify({ succeeded: false }));
+        return { status: 'failed', exitCode: 1 };
+      },
+      registerOutput: async () => { throw registrationError; },
+      finish: async (_supabase, _lease, _succeeded, _exitCode, summary) => {
+        summaries.push(summary);
+        return { status: 'failed' };
+      }
+    }), error => error === registrationError);
+
+    assert.deepEqual(summaries, ['Frontend worker handoff failed during registering build-log evidence (Error code=E_UPLOAD)']);
+    assert.doesNotMatch(summaries[0], /private storage detail/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('failure-recording errors are surfaced together with the original handoff error', async () => {
+  const original = new Error('registration failed');
+  const recording = new Error('receipt failed');
+  await assert.rejects(
+    recordWorkerHandoffFailure(async () => { throw recording; }, {}, { run_id: 'run-1' }, 'Backend', 'registering build-log evidence', original),
+    error => error instanceof AggregateError
+      && error.errors[0] === original
+      && error.errors[1] === recording
+      && /failure state could not be recorded/.test(error.message)
+  );
 });
 
 test('frontend artifact download rejects checksum mismatch', async () => {
