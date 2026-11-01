@@ -6,6 +6,7 @@ const test = require('node:test');
 const read = (relative) => fs.readFileSync(path.resolve(__dirname, '..', relative), 'utf8');
 const schema = read('supabase/schema.sql');
 const migration = read('supabase/migrations/20261102140000_rm_verified_only_operational_custody_consolidation.sql');
+const helperGrantMigration = read('supabase/migrations/20261102160000_revoke_anon_execute_from_deactivation_helpers.sql');
 
 const policies = [...schema.matchAll(/CREATE POLICY "([^"]+)" ON "public"\."([^"]+)"([\s\S]*?);\n/g)]
   .map(([, name, table, body]) => ({ name, table, body }));
@@ -144,6 +145,42 @@ test('profiles without an Auth user are audited in audit_log, never through the 
     const guarded = [...body.matchAll(/IF EXISTS \(SELECT 1 FROM auth\.users au WHERE au\.id = v_(?:target|profile)\.id\) THEN\s+PERFORM public\.log_user_management_action\(/g)].length;
     assert.equal(guarded, calls, `${label} must check auth.users before logging to user_management_audit`);
     assert.match(body, /ELSE\s+INSERT INTO public\.audit_log \([\s\S]*?'user_profiles',[\s\S]*?'auth_account', 'absent'/, `${label} must audit Auth-less profiles in audit_log`);
+  }
+});
+
+test('anonymous users cannot execute security-definer policy helpers', () => {
+  const expected = [
+    'current_user_role()',
+    'is_master_or_above()',
+    'user_managed_branch_ids()',
+    'wf_has_role(public.wf_app_role)',
+    'user_has_task_entitlement(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid)',
+    'is_platform_owner(uuid)',
+  ];
+  for (const signature of expected) {
+    assert.ok(
+      helperGrantMigration.includes(`REVOKE EXECUTE ON FUNCTION public.${signature} FROM PUBLIC, anon;`),
+      `revoke anonymous execute on ${signature}`,
+    );
+  }
+
+  const authenticatedPolicies = [
+    ['access_presets_write', 'access_presets'],
+    ['bob_self_memory_delete', 'bob_self_memory'],
+    ['bob_self_memory_select', 'bob_self_memory'],
+    ['notifications_select', 'notifications'],
+    ['notifications_update', 'notifications'],
+    ['preset_assignments_select', 'preset_assignments'],
+    ['staff_reporting_select', 'staff_reporting'],
+    ['staff_reporting_write', 'staff_reporting'],
+    ['team_members_write', 'team_members'],
+    ['teams_write', 'teams'],
+  ];
+  for (const [policy, table] of authenticatedPolicies) {
+    assert.ok(
+      helperGrantMigration.includes(`ALTER POLICY "${policy}" ON public.${table} TO authenticated;`),
+      `${table}.${policy} must not invoke account-scoped helpers for anon`,
+    );
   }
 });
 
