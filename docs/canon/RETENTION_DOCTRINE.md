@@ -90,6 +90,20 @@ not hardcoded"). The DOCTRINE is universal; the PERIODS are configured per
 instrument (RMA, Freedom Camping Act, LGA, council bylaw) and MUST be legally
 grounded before they are set.
 
+## Approved scoped period — website page-view aggregates
+
+Owner ruling, 2026-11-02: first-party R&M website page-view aggregates may be
+retained for 12 months, then deleted automatically. The owner confirmed that
+privacy/legal review approved this period. This ruling applies only to daily
+counts grouped by public page path and approximate country/region. It does not
+apply to enquiry records or any visitor-level record, and it does not authorise
+visitor IDs, raw IP addresses, city-level location, user-agent values, or
+inferred names or organisations. Analytics remains disabled until a separate
+notice is issued and its exact version is approved and configured.
+The scoped period is recorded in `retention_policies` for the `website`
+module; its 365-day operational value is a conservative representation of the
+approved 12-month maximum.
+
 ## The staff rule (say it aloud)
 
 > **"What is the live reason for keeping this — and does that reason still exist?

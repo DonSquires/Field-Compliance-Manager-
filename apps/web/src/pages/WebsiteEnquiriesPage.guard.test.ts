@@ -42,7 +42,7 @@ describe('Website enquiries page', () => {
   it('lives inside the CRM area instead of a new top-level destination', () => {
     expect(shell).toContain("{ id: 'website-enquiries', label: 'Website enquiries', icon: Inbox }");
     expect(shell).toContain("'website-enquiries': 'crm'");
-    expect(shell).toContain("'sites', 'website-enquiries',");
+    expect(shell).toContain("'sites', 'website', 'website-statistics', 'website-enquiries',");
     expect(crm).toContain("{ page: 'website-enquiries', label: 'Website enquiries' }");
   });
 });

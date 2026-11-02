@@ -87,6 +87,8 @@ const ServiceClientPage = React.lazy(() => import('../components/ServiceClientWo
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const WebsiteEnquiriesPage = React.lazy(() => import('../pages/WebsiteEnquiriesPage'));
+const WebsiteHubPage = React.lazy(() => import('../pages/WebsiteHubPage'));
+const WebsiteStatisticsPage = React.lazy(() => import('../pages/WebsiteStatisticsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
@@ -148,7 +150,7 @@ type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'nzta-register' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop' | 'website-enquiries';
+  | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop' | 'website' | 'website-statistics' | 'website-enquiries';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
@@ -159,7 +161,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites', 'website-enquiries',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites', 'website', 'website-statistics', 'website-enquiries',
 ]);
 
 const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets']);
@@ -168,7 +170,7 @@ const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets'])
 // that must be enabled for the caller's org to reach it. Pages absent here
 // have no module gate (role checks below still apply).
 const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
-  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm', 'client-setup': 'crm', 'website-enquiries': 'crm',
+  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm', 'client-setup': 'crm', website: 'crm', 'website-statistics': 'crm', 'website-enquiries': 'crm',
   roster: 'rostering', 'roster-targets': 'rostering',
   'people-hr': 'hr',
   'finance-bureau': 'finance', 'finance-connections': 'finance', 'finance-money': 'finance', 'finance-costing': 'finance', 'finance-pricing': 'finance', 'rate-rules': 'finance',
@@ -311,6 +313,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'relationships', label: 'Agreements & services', icon: Handshake },
     { id: 'onboarding', label: 'Activation checklist', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Service handoffs', icon: Handshake },
+    { id: 'website', label: 'Website', icon: BarChart3 },
     { id: 'website-enquiries', label: 'Website enquiries', icon: Inbox },
   ],
   Finance: [
@@ -347,7 +350,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
 const NAVIGABLE_ADMIN_PAGES = new Set<AdminPage>([
   ...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id)),
   ...Object.values(NAVIGATION_MAP).flatMap((items) => items.flatMap((item) => item.also ?? [])),
-  'bob', 'document-studio', 'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites',
+  'bob', 'document-studio', 'client-setup', 'onboarding', 'handoffs', 'site-360', 'zones', 'sites', 'website-statistics',
 ]);
 
 const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
@@ -801,6 +804,10 @@ const AdminShell: React.FC = () => {
         return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'website-enquiries':
         return <WebsiteEnquiriesPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'website':
+        return <WebsiteHubPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'website-statistics':
+        return <WebsiteStatisticsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'client-setup':
