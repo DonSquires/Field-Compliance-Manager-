@@ -43,7 +43,7 @@ function buildVersionManifest(): Plugin {
 // the standard match for a bare main.tsx + BrowserRouter entry; revisit if
 // that assumption is later contradicted by evidence.
 export default defineConfig({
-  plugins: [react(), buildVersionManifest(), mobileTestTransform()],
+  plugins: [react(process.env.VITEST ? { exclude: [/\/node_modules\//, MOBILE_TEST_SOURCE] } : {}), buildVersionManifest(), mobileTestTransform()],
   oxc: process.env.VITEST ? { exclude: MOBILE_TEST_SOURCE } : undefined,
   define: { __APP_BUILD_ID__: JSON.stringify(BUILD_ID) },
   build: {

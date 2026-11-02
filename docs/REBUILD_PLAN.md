@@ -44,8 +44,10 @@ Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
   acceptance; publication and normal post-merge Atlas refresh remain separate.
 - **Local acceptance:** 18 focused Vitest tests and 28 offline Playwright checks
   pass across desktop and phone; web lint/build and the mobile TypeScript check
-  pass. These checks do not replace a human walkthrough or live payroll
-  verification.
+  pass. A clean web-only dependency fixture also passes the 15 native/helper
+  tests without Expo installed; the test transform leaves production mobile
+  settings unchanged. These checks do not replace a human walkthrough or live
+  payroll verification.
 
 Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
 
