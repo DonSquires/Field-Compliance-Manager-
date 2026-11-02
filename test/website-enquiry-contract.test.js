@@ -370,6 +370,7 @@ test('every allowed service has an alert label and the subject never carries vis
   assert.equal(alert.subject, 'Website enquiry ENQ-1A2B3C: Raptor mobile surveillance +1');
   assert.doesNotMatch(alert.subject, /[\r\n]/);
   assert.equal(alert.replyTo, 'ana@example.com');
+  assert.equal(alert.invalidReviewUrl, false);
   assert.match(alert.text, /^Name: Ana Bcc: evil@example\.com$/m);
   assert.doesNotMatch(alert.text, /^Bcc:/m);
   assert.match(alert.text, /^Organisation: Farm Ltd$/m);
@@ -379,6 +380,10 @@ test('every allowed service has an alert label and the subject never carries vis
   assert.match(alert.text, /Message:\nLine one\.\n\.\nQUIT\nLine three\.\n/);
   assert.match(alert.text, /CRM > Website enquiries/);
   assert.match(alert.text, /^https:\/\/fcmanager\.co\.nz$/m);
+  assert.match(alert.html, /Field Compliance Manager/);
+  assert.match(alert.html, /alt="Iron Eagle Security"/);
+  assert.match(alert.html, /Line one\.<br>\.<br>QUIT<br>Line three\./);
+  assert.match(alert.html, /href="https:\/\/fcmanager\.co\.nz\/"/);
 
   const phoneOnly = validateEnquiry(validEnquiry({ email: '', services: [] }));
   assert.equal(phoneOnly.ok, true);
@@ -387,16 +392,83 @@ test('every allowed service has an alert label and the subject never carries vis
   assert.equal(quiet.replyTo, null);
   assert.match(quiet.text, /^Email: Not given$/m);
   assert.match(quiet.text, /^Services: Not chosen$/m);
+  assert.match(quiet.html, /Email<\/th>\s*<td[^>]*>Not given<\/td>/);
+  assert.match(quiet.html, /Services<\/th>\s*<td[^>]*>Not chosen<\/td>/);
+  assert.doesNotMatch(quiet.html, /Replying to this email goes/);
 });
 
-test('alert body is base64 so visitor text can never end the SMTP DATA block', async () => {
-  const { encodeBase64Body } = await loadModules();
+test('branded HTML escapes enquiry values while retaining the plain-text details', async () => {
+  const { buildEnquiryAlert, validateEnquiry } = await loadModules();
+  const parsed = validateEnquiry(validEnquiry());
+  assert.equal(parsed.ok, true);
+  const enquiry = {
+    ...parsed.enquiry,
+    name: `Ana <img src=x onerror="alert('x')">`,
+    email: '"person"@example.com',
+    phone: '+64 <test>',
+    organisation: `R&M "Test" <script>alert('a')</script>`,
+    location: `A & B <svg onload="alert(1)">`,
+    source_page: '/<img src=x>',
+    message: 'Hello <script>alert("x")</script>\r\nNext & last\n.\nQUIT',
+  };
+  const alert = buildEnquiryAlert({
+    reference: 'ENQ-1A2B3C',
+    enquiry,
+    receivedAt: new Date('2026-11-02T01:00:00Z'),
+    reviewUrl: 'https://fcmanager.co.nz/?tab=crm&label=%22safe%22',
+  });
+
+  assert.equal(alert.replyTo, null);
+  assert.match(alert.text, /Name: Ana <img src=x onerror="alert\('x'\)">/);
+  assert.match(alert.text, /Message:\nHello <script>alert\("x"\)<\/script>\nNext & last\n\.\nQUIT/);
+  assert.match(alert.html, /Ana &lt;img src=x onerror=&quot;alert\(&#39;x&#39;\)&quot;&gt;/);
+  assert.match(alert.html, /&quot;person&quot;@example\.com/);
+  assert.match(alert.html, /\+64 &lt;test&gt;/);
+  assert.match(alert.html, /R&amp;M &quot;Test&quot; &lt;script&gt;alert\(&#39;a&#39;\)&lt;\/script&gt;/);
+  assert.match(alert.html, /A &amp; B &lt;svg onload=&quot;alert\(1\)&quot;&gt;/);
+  assert.match(alert.html, /\/&lt;img src=x&gt;/);
+  assert.match(alert.html, /Hello &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;<br>Next &amp; last<br>\.<br>QUIT/);
+  assert.match(alert.html, /href="https:\/\/fcmanager\.co\.nz\/\?tab=crm&amp;label=%22safe%22"/);
+  assert.doesNotMatch(alert.html, /<script\b|<svg\b|<img src=x|onload="|onerror="/i);
+});
+
+test('invalid configured review links are omitted without leaking credentials', async () => {
+  const { buildEnquiryAlert, validateEnquiry } = await loadModules();
+  const parsed = validateEnquiry(validEnquiry());
+  assert.equal(parsed.ok, true);
+  for (const reviewUrl of [
+    'javascript:alert(1)',
+    'https://user:secret@example.com/',
+    'https://fcmanager.co.nz/" onclick="alert(1)',
+    'not a URL',
+  ]) {
+    const alert = buildEnquiryAlert({ reference: 'ENQ-1A2B3C', enquiry: parsed.enquiry, receivedAt: new Date(0), reviewUrl });
+    assert.equal(alert.invalidReviewUrl, true, reviewUrl);
+    assert.match(alert.text, /Review link unavailable; ask an administrator to check SITE_URL\./);
+    assert.match(alert.html, /Review link unavailable; ask an administrator to check SITE_URL\./);
+    assert.ok(!alert.text.includes(reviewUrl));
+    assert.ok(!alert.html.includes(reviewUrl));
+    assert.doesNotMatch(alert.html, /href="(?:javascript:|https:\/\/user:)/);
+    assert.doesNotMatch(alert.text + alert.html, /secret@example\.com/);
+  }
+});
+
+test('both MIME alternatives are base64 so visitor text cannot end SMTP DATA', async () => {
+  const { buildAlertMimeContent, encodeBase64Body } = await loadModules();
   const text = `Kia ora.\n.\n${'x'.repeat(73)}.\nQUIT\n`;
-  const body = encodeBase64Body(text);
-  assert.doesNotMatch(body, /\./);
-  for (const line of body.split('\r\n')) assert.ok(line.length <= 76, line);
-  assert.doesNotMatch(body.replace(/\r\n/g, ''), /[\r\n]/);
-  assert.equal(Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8'), text.replace(/\n/g, '\r\n'));
+  const html = `<html><body>Kia ora &amp; welcome<br>\n.\n${'y'.repeat(73)}.\nQUIT</body></html>`;
+  const parts = buildAlertMimeContent({ text, html });
+  assert.deepEqual(parts.map(({ mimeType, transferEncoding }) => ({ mimeType, transferEncoding })), [
+    { mimeType: 'text/plain; charset="utf-8"', transferEncoding: 'base64' },
+    { mimeType: 'text/html; charset="utf-8"', transferEncoding: 'base64' },
+  ]);
+  for (const [index, original] of [text, html].entries()) {
+    const body = parts[index].content;
+    assert.doesNotMatch(body, /\./);
+    for (const line of body.split('\r\n')) assert.ok(line.length <= 76, line);
+    assert.doesNotMatch(body.replace(/\r\n/g, ''), /[\r\n]/);
+    assert.equal(Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8'), original.replace(/\n/g, '\r\n'));
+  }
   assert.equal(encodeBase64Body(''), '');
 });
 
@@ -470,8 +542,9 @@ test('Deno wiring sends over SMTP on an allowed port and audits every alert outc
   assert.match(indexSource, /resolveAlertRecipients\(Deno\.env\.get\('WEBSITE_ENQUIRY_NOTIFY_TO'\)\)/);
   assert.match(indexSource, /const BLOCKED_SMTP_PORTS = new Set\(\[25, 587\]\);/);
   assert.match(indexSource, /Deno\.env\.get\('SMTP_PORT'\)\?\.trim\(\) \|\| '465'/);
-  assert.match(indexSource, /content: encodeBase64Body\(message\.text\),\s*transferEncoding: 'base64'/);
-  assert.doesNotMatch(indexSource, /\bcontent: message\.text\b|\bhtml:/);
+  assert.match(indexSource, /mimeContent: buildAlertMimeContent\(message\)/);
+  assert.match(indexSource, /if \(message\.invalidReviewUrl\)/);
+  assert.doesNotMatch(indexSource, /\bcontent: message\.(?:text|html)\b|\bhtml:/);
   assert.match(indexSource, /action: 'website_enquiry_email_alert'/);
   assert.match(indexSource, /target_table: 'website_enquiries'/);
   for (const reason of ['smtp_not_configured', 'smtp_port_blocked', 'smtp_timeout', 'smtp_error']) {
