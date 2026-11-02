@@ -2,6 +2,7 @@
 // supabase/config.toml). Contract, rules and HTTP handling live in
 // validate.mjs and handler.mjs; the email alert text lives in notify.mjs;
 // this file only wires the Deno runtime.
+// ATLAS EXTERNAL CALLER: randmsecurity-website-enquiry-form
 //
 // Secrets: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by the
 // platform. WEBSITE_ENQUIRY_SALT salts the client IP hash used for the

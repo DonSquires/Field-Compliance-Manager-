@@ -1,0 +1,146 @@
+.website-hub-page {
+  display: grid;
+  gap: 20px;
+  width: 100%;
+  max-width: 1100px;
+}
+
+.website-hub-page .page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.website-hub-page .page-header > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.website-hub-page .page-header p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.website-hub-page .website-hub-eyebrow {
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.website-hub-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.website-hub-header-actions .btn,
+.website-hub-card .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.website-hub-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.website-hub-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-surface, var(--color-bg-secondary));
+}
+
+.website-hub-card-icon {
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--color-accent);
+  background: var(--color-bg-elevated);
+}
+
+.website-hub-card-content {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.website-hub-card h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.website-hub-card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.website-hub-metric {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.website-hub-metric strong {
+  color: var(--color-text-primary);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.website-hub-metric span,
+.website-hub-card-error {
+  font-size: 13px;
+}
+
+.website-hub-card-error {
+  color: var(--color-danger);
+}
+
+.website-hub-privacy {
+  padding: 12px 14px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.website-hub-privacy strong {
+  color: var(--color-text-primary);
+}
+
+@media (max-width: 720px) {
+  .website-hub-page .page-header {
+    flex-direction: column;
+  }
+
+  .website-hub-header-actions,
+  .website-hub-header-actions .btn {
+    width: 100%;
+  }
+
+  .website-hub-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .website-hub-card {
+    padding: 14px;
+  }
+}

@@ -418,3 +418,9 @@ enabled = true
 # service-role RPC submit_website_enquiry.
 [functions.website-enquiry]
 verify_jwt = false
+
+# Public website analytics intake; verifies a private shared secret before using
+# the service-role-only recording RPC. The database setting remains disabled
+# until the separate notice is approved and configured.
+[functions.website-page-view-analytics]
+verify_jwt = false
