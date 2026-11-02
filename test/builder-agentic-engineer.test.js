@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, gateProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -345,6 +345,118 @@ test('an invalid repair seed stops before any model call instead of silently sta
     }), /continuation could not restore/);
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+function addWebTypecheck(repo) {
+  // A stand-in for `tsc --noEmit`: reports a TS2300 duplicate identifier while the marker is present.
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web', private: true, scripts: { lint: 'node typecheck.js' } }) + '\n');
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'typecheck.js'), [
+    "const fs = require('node:fs');",
+    "if (fs.readFileSync('src/app.tsx', 'utf8').includes('DUPLICATE')) {",
+    "  console.log(\"src/app.tsx(2,14): error TS2300: Duplicate identifier 'a'.\");",
+    '  process.exit(2);',
+    '}',
+    '',
+  ].join('\n'));
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'web typecheck']);
+  return repo.git(['rev-parse', 'HEAD']);
+}
+
+test('the pre-handoff compile gate refuses a type error, the author repairs it, and the receipt records the gate (job 34382d60)', async () => {
+  const repo = makeRepo();
+  const sha = addWebTypecheck(repo);
+  const prepared = [];
+  try {
+    const model = fakeModel([
+      { tool: 'write_file', args: { path: 'apps/web/src/app.tsx', content: 'export const a = 1;\nexport const a = 2; // DUPLICATE\n' } },
+      { tool: 'finish', args: { summary: 'Update the exported value and verify the web type check before handoff.', tests: [] } },
+      { tool: 'write_file', args: { path: 'apps/web/src/app.tsx', content: 'export const a = 2;\n' } },
+      { tool: 'finish', args: { summary: 'Update the exported value once and verify the web type check before handoff.', tests: [] } },
+    ]);
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'compilegate0001', organization_id: 'org', target_sha: sha, task_description: 'Update the exported value' },
+      step: { id: 's' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 8 },
+      prepareWorkspace: async (workspacePath) => { prepared.push(workspacePath); },
+      callModel: model.callModel,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(model.seen.length, 4);
+    const refusal = JSON.stringify(model.seen[2].request.messages.at(-1));
+    assert.match(refusal, /pre-handoff compile gate failed/);
+    assert.match(refusal, /error TS2300: Duplicate identifier/);
+    assert.deepEqual(result.proposal.compile_gate, { ran: ['npm run lint --prefix apps/web'], unavailable: [] });
+    assert.deepEqual(result.proposal.changed_files, ['apps/web/src/app.tsx']);
+    assert.ok(result.proposal.verified_runs.some((entry) => entry.command === 'npm run lint --prefix apps/web' && entry.exit_code === 0));
+    assert.deepEqual(prepared, [path.join(repo.root, 'workspaces', 'bob-job-compilegate0001')], 'the frontend lane provisions web dependencies before the author starts');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test('the compile gate reports a check that could not run instead of blaming the patch, and catches a JavaScript syntax error', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'gategategategategate0001', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  try {
+    fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/src/app.tsx'), 'export const a = 2;\n');
+    const toolchainMissing = await tools.__compileGate(['apps/web/src/app.tsx']);
+    assert.deepEqual(toolchainMissing.ran, ['npm run lint --prefix apps/web']);
+    assert.deepEqual(toolchainMissing.failures, []);
+    assert.equal(toolchainMissing.unavailable.length, 1, 'a missing lint script is the workspace\'s problem, not a code defect');
+    const gated = await gateProposal(tools, { changed_files: ['apps/web/src/app.tsx'] });
+    assert.equal(gated.error, undefined);
+    assert.equal(gated.proposal.compile_gate.unavailable[0].command, 'npm run lint --prefix apps/web');
+
+    const backend = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+    fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), "'use strict';\nmodule.exports = { sum: (a, b) => a + };\n");
+    const broken = await gateProposal(backend, { changed_files: ['lib/sum.js'] });
+    assert.match(broken.error, /pre-handoff compile gate failed/);
+    assert.match(broken.error, /node --check lib\/sum\.js/);
+    assert.match(broken.error, /SyntaxError/);
+    fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n");
+    const fixed = await gateProposal(backend, { changed_files: ['lib/sum.js'] });
+    assert.equal(fixed.error, undefined);
+    assert.deepEqual(fixed.proposal.compile_gate, { ran: ['node --check lib/sum.js'], unavailable: [] });
+    const reused = await backend.__compileGate(['lib/sum.js']);
+    assert.deepEqual(reused.ran, [], 'a check that already passed on this exact tree is not repeated');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test('an evidence-backed scope amendment lets a shared root-cause fix satisfy its requirement; weak or cross-lane amendments are refused (jobs d5f65103/c604b921)', () => {
+  const specification = {
+    delivery_requirements: [
+      { id: 'DR-1', outcome: 'No Leaflet error after leaving the hub', evidence: 'Browser check', source_scope: ['apps/web/src/pages/HubPage.tsx'] },
+    ],
+  };
+  const files = ['apps/web/src/components/FieldPointMap.tsx'];
+  const reason = 'The _leaflet_pos error is thrown by the shared map component after unmount, not by the page.';
+  const evidenceFor = (amendment, evidence = 'apps/web/src/components/FieldPointMap.tsx stops the map before unmount') => ({
+    acceptance_evidence: [{ requirement_id: 'DR-1', status: 'completed', evidence, scope_amendment: amendment }],
+  });
+
+  assert.match(validateAcceptanceEvidence({ args: evidenceFor(undefined), specification, files, lane: 'frontend' }), /did not change any approved source_scope file[\s\S]*scope_amendment/);
+  const accepted = [];
+  assert.equal(validateAcceptanceEvidence({ args: evidenceFor({ file: 'apps/web/src/components/FieldPointMap.tsx', reason }), specification, files, lane: 'frontend', amendments: accepted }), null);
+  assert.deepEqual(accepted, [{ requirement_id: 'DR-1', file: 'apps/web/src/components/FieldPointMap.tsx', reason }]);
+
+  const refused = [
+    ['short reason', evidenceFor({ file: 'apps/web/src/components/FieldPointMap.tsx', reason: 'shared map' }), files, 'frontend'],
+    ['evidence does not name the amended path', evidenceFor({ file: 'apps/web/src/components/FieldPointMap.tsx', reason }, 'Stopped the map before unmount'), files, 'frontend'],
+    ['amended file was not changed', evidenceFor({ file: 'apps/web/src/components/OtherMap.tsx', reason }, 'apps/web/src/components/OtherMap.tsx fixed'), files, 'frontend'],
+    ['cross-lane file', evidenceFor({ file: 'services/fcm-api/server.js', reason }, 'services/fcm-api/server.js fixed'), ['services/fcm-api/server.js'], 'frontend'],
+    ['protected file', evidenceFor({ file: 'apps/web/src/context/AuthContext.tsx', reason }, 'apps/web/src/context/AuthContext.tsx fixed'), ['apps/web/src/context/AuthContext.tsx'], 'frontend'],
+  ];
+  for (const [label, args, changed, lane] of refused) {
+    const amendments = [];
+    assert.match(validateAcceptanceEvidence({ args, specification, files: changed, lane, amendments }) || '', /did not change any approved source_scope file/, label);
+    assert.deepEqual(amendments, [], label);
   }
 });
 
@@ -791,6 +903,9 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
   assert.equal(normalizeRunCommand('npm run test --prefix apps/web -- --run src/a.test.tsx'), 'npm run test --prefix apps/web -- --run src/a.test.tsx', 'an already-allowlisted form is untouched');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint'), 'npm run lint --prefix apps/web');
   assert.equal(normalizeRunCommand('cd apps/web && npx tsc --noEmit'), 'npm run lint --prefix apps/web');
+  assert.equal(normalizeRunCommand('node --check apps/web/src/pages/AdminUsersPage.tsx'), 'npm run lint --prefix apps/web', 'node cannot parse TypeScript; the web type check is the equivalent (job 34382d60)');
+  assert.equal(normalizeRunCommand('cd apps/web && node --check src/main.tsx'), 'npm run lint --prefix apps/web');
+  assert.equal(normalizeRunCommand('node --check lib/types.ts'), 'node --check lib/types.ts', 'a non-web TypeScript file is left for refusal, not routed to the web type check');
   assert.equal(normalizeRunCommand('node --test test/sum.test.js'), 'node --test test/sum.test.js');
   assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'cd apps/web && npm test', 'an unbounded run is not invented into a bounded one');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint && rm -rf src'), 'cd apps/web && npm run lint && rm -rf src', 'a cd chain with any disallowed part is left for refusal');

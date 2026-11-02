@@ -107,6 +107,28 @@ test('frontend/backend coverage is merged, preserving full outcomes and workflow
   assert.match(result.limitation, /not semantic or human acceptance/);
 });
 
+test('an author-recorded root-cause scope amendment covers its own requirement only, for a verified changed file named in evidence', () => {
+  const spec = { delivery_requirements: [requirement('DR-1', 'apps/web/src/pages/HubPage.tsx')] };
+  const shared = 'apps/web/src/components/FieldPointMap.tsx';
+  const reason = 'The _leaflet_pos error is thrown by the shared map component after unmount, not by the page.';
+  const amendedBundle = (amendments) => {
+    const value = bundle('DR-1', shared);
+    value.envelope.scope_amendments = amendments;
+    return value;
+  };
+  assert.equal(reconcileAcceptance(spec, [amendedBundle([])]).passed, false, 'without an amendment the out-of-scope fix stays blocked');
+  const covered = reconcileAcceptance(spec, [amendedBundle([{ requirement_id: 'DR-1', file: shared, reason }])]);
+  assert.equal(covered.passed, true, covered.blockers.join('; '));
+  assert.deepEqual(covered.requirements[0].scope_amendments, [{ file: shared, reason, patch_artifact_id: 'patch-backend' }]);
+  for (const amendment of [
+    { requirement_id: 'DR-2', file: shared, reason },
+    { requirement_id: 'DR-1', file: 'apps/web/src/components/Unchanged.tsx', reason },
+    { requirement_id: 'DR-1', file: shared, reason: 'shared map' },
+  ]) {
+    assert.equal(reconcileAcceptance(spec, [amendedBundle([amendment])]).passed, false, JSON.stringify(amendment));
+  }
+});
+
 test('invented/duplicate ids, absent claims, test omissions and syntax-only workers are blockers', () => {
   for (const mutate of [
     value => { value.envelope.acceptance_evidence[0].requirement_id = 'invented'; },

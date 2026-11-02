@@ -19,10 +19,15 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v18';
+const PROMPT_VERSION = 'vibe-v19';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
+  // Self-repair: a failing check refuses the handoff up to repairRounds times per owner message while the
+  // failure changes or an edit lands, and an exhausted budget with a failing check gets one bounded extension.
+  repairRounds: Math.max(1, Number(process.env.BOB_VIBE_REPAIR_ROUNDS || 3)),
+  repairTurns: Math.max(0, Number(process.env.BOB_VIBE_REPAIR_TURNS || 10)),
+  repairBudgetMs: Math.max(0, Number(process.env.BOB_VIBE_REPAIR_BUDGET_MS || 6 * 60_000)),
   readCapChars: 30_000,
   searchCapLines: 150,
   listCapEntries: 300,
@@ -99,7 +104,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Start with VERIFIED STARTING FILES: these are tracked candidates discovered from the request, not permission to edit blindly. Read the relevant file and existing design tokens before changing it. Do not invent a page filename from a screen label or interpret CSS as a new subsystem. A failed filename lookup disproves that guess; search visible text or use the starting map instead.',
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- You write the code and supply complete tool arguments. A tool validation error is yours to repair, not a reason to ask the owner for source code, filenames or replacement text already discoverable in the worktree. For UI changes, read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md and the existing page CSS/design tokens; do not append a second screen implementation to the application shell.',
-    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair.',
+    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair. A failing check refuses your reply for up to ' + (limits.repairRounds ?? VIBE_LIMITS.repairRounds) + ' repair rounds while each round makes progress, and a step budget that runs out mid-repair is extended once: use those rounds to fix the cause, not to restate the claim.',
     '- Match the runner to the test: npm run test --prefix apps/web runs Vitest with selectors relative to apps/web (src/..., not apps/web/src/...). Playwright specs under e2e/ belong to human_test, not Vitest. A runner-discovery error is not an application defect: fix the runner configuration, never add any-typed imports, VITEST branches, empty placeholder edits or skipped assertions to a Playwright spec. A legitimate source repair allows a fresh check; unchanged failed checks do not justify a retry loop.',
     '- Workflow acceptance: read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md section 8. Define expected BEFORE (role, organisation, route, records), DURING (selection, validation, request/RPC, audit, loading/errors), AFTER (saved record, reload, back/forward, downstream status and next actor). Use Atlas capability/direct edges/flow_reach and schema writers; keep structural fk_reach separate. The generic human_test walk is read-only smoke/UX evidence, not proof of writes or persistence. Add targeted fixture-backed workflow assertions for those outcomes; name untested stages instead of declaring the whole workflow passed.',
     '- Test data: text values start with "Bob Test"; numeric-only values start with "999"; dates may be chosen for the scenario. For constrained fields (email, UUID, enum, phone, bounded number), use a valid dedicated fixture value and record why the prefix cannot apply. Archive/suspend/reactivate only records created by that test, identified by ID, tenant and run provenance, never a real record that happens to share a prefix. Test data labels do not grant live-write, messaging, billing or destructive authority.',
@@ -886,7 +891,13 @@ async function runConversation({ store, session, message, workspacePath, branch,
       payload: { message_id: message.id, args: { automatic: true }, preview, automatic: true, reason: 'web_ui_handoff', ...humanTestPayload(result, fingerprint) },
     });
   };
-  let verificationCorrectionSent = false;
+  const repairRounds = limits.repairRounds ?? VIBE_LIMITS.repairRounds;
+  const repairTurns = limits.repairTurns ?? VIBE_LIMITS.repairTurns;
+  const repairBudgetMs = limits.repairBudgetMs ?? VIBE_LIMITS.repairBudgetMs;
+  let verificationCorrections = 0;
+  let correctedFailure = null;
+  let editsAtCorrection = 0;
+  const failureSignature = () => [...failedVerifications.values()].map(entry => `${entry.command}\0${entry.preview}`).join('\n');
   const reportedProtocols = new Set();
   const handoff = async (reply, model, { browser = true } = {}) => {
     await ensureTypecheck();
@@ -899,7 +910,30 @@ async function runConversation({ store, session, message, workspacePath, branch,
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
       : { reply: `${clip(reply, 8000)}${walked}`, tools, model };
   };
-  for (let turn = 1; turn <= limits.maxTurns && Date.now() - started - pausedMs < limits.wallBudgetMs; turn++) {
+  let turnCeiling = limits.maxTurns;
+  let wallCeiling = limits.wallBudgetMs;
+  let repairExtended = false;
+  for (let turn = 1; ; turn++) {
+    if (turn > turnCeiling || Date.now() - started - pausedMs >= wallCeiling) {
+      if (repairExtended || repairTurns < 1) break;
+      await ensureTypecheck();
+      if (!lastVerification?.failed) break;
+      // The budget ran out mid-repair: one bounded extension to fix the failing check, not an unverified handoff.
+      repairExtended = true;
+      turnCeiling = turn - 1 + repairTurns;
+      wallCeiling = Date.now() - started - pausedMs + repairBudgetMs;
+      await store.post(session.id, {
+        role: 'system', kind: 'status',
+        content: `Bob reached this message's step budget with ${lastVerification.command} failing; continuing for up to ${repairTurns} more steps to repair it.`,
+        payload: { message_id: message.id, reason: 'verification_repair_extension', command: lastVerification.command, repair_turns: repairTurns, repair_budget_ms: repairBudgetMs },
+      });
+      const extension = {
+        error: `Step budget reached while ${lastVerification.command} is failing. You have ${repairTurns} more steps: read the exact failure, fix its cause in source, rerun the same check, then reply. If it cannot be fixed safely, reply with args.blocked_reason.`,
+        verification: lastVerification,
+      };
+      const cloudExtension = cloudSafeVerification(lastVerification);
+      pushModelFeedback(extension, cloudExtension !== lastVerification ? { ...extension, verification: cloudExtension } : null);
+    }
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
     const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
@@ -1061,10 +1095,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
       }
       await ensureTypecheck();
       await ensureHumanTest();
-      if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
-        verificationCorrectionSent = true;
+      const failure = lastVerification?.failed ? failureSignature() : null;
+      const repairProgressed = verificationCorrections === 0 || failure !== correctedFailure || effectiveEdits > editsAtCorrection;
+      if (lastVerification?.failed && !args.blocked_reason && verificationCorrections < repairRounds && repairProgressed) {
+        verificationCorrections += 1;
+        correctedFailure = failure;
+        editsAtCorrection = effectiveEdits;
         const correction = {
-          error: 'Handoff refused: the latest verification failed. Fix the failure and rerun the check, or reply with args.blocked_reason explaining why this remains unverified.',
+          error: `Handoff refused: the latest verification failed (repair round ${verificationCorrections} of ${repairRounds}). Read the exact failure, fix its cause in source, and rerun the check, or reply with args.blocked_reason explaining why this remains unverified. A reply with no new edit and the same failure is handed to the owner as unverified.`,
           verification: lastVerification,
         };
         const cloudVerification = cloudSafeVerification(lastVerification);
@@ -1159,7 +1197,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       }
       return { reply: `I stopped after repeating the same tool call. The last successful progress remains on the branch; blocker: ${clip(result.error, 500)}`, error: true, tools, model: response.data?.model };
     }
-    const remaining = limits.maxTurns - turn;
+    const remaining = turnCeiling - turn;
     const recovery = repeatCount > 1
       ? `This exact call has already run ${repeatCount} times. Use the existing result; do not call it again. For search, narrow path/query or read a matching file. For a missing file, list_dir its parent instead of guessing. The next repeated call may stop this turn.`
       : undefined;

@@ -30,9 +30,11 @@ const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generatio
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
 
-const PROMPT_VERSION = 'agentic-engineer-v17';
+const PROMPT_VERSION = 'agentic-engineer-v18';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
+// Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
+const COMPILE_REPAIR_TURNS = 6;
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
@@ -69,6 +71,9 @@ function isWebTestPath(workspacePath, arg) {
 
 function normalizeRunPart(part, inWeb, workspacePath) {
   if (RUN_ALLOWLIST.some((pattern) => pattern.test(part))) return part;
+  // node cannot syntax-check TypeScript; the web type check is the equivalent (job 34382d60 handed off a duplicate identifier).
+  if (/^node --check (?:\.\/)?(?:apps\/web\/)?[A-Za-z0-9_./-]+\.(?:ts|tsx|mts|cts)$/.test(part)
+    && (inWeb || /^node --check (?:\.\/)?apps\/web\//.test(part))) return 'npm run lint --prefix apps/web';
   const check = part.match(/^(?:npm run (lint|build)|npx tsc --noEmit)( --prefix apps\/web)?$/);
   if (check && (inWeb || check[2])) return `npm run ${check[1] || 'lint'} --prefix apps/web`;
   const runner = part.match(/^(?:npm (?:run )?test|npx vitest(?: run)?|node --test)( --prefix apps\/web)?(?: --)?(?: (.+))?$/);
@@ -293,7 +298,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
-    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; web lint/types "npm run lint --prefix apps/web". Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
+    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; web lint/types "npm run lint --prefix apps/web". Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
     '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; prefer a Vitest test under apps/web/src that you can run yourself. Before adding a Playwright spec, inspect apps/web/e2e/fixtures.ts and a passing authenticated spec, reuse their setup/navigation, and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid or use a bare unauthenticated page for a protected route.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen in this run. After the pull request merges, the release lane applies new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas; report those only from their receipts.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
@@ -329,7 +334,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
       '- firewall_change {op: add|remove, rule: {chain: input|worker_egress, action: allow|deny, protocol?, port?, source? (input), destination? (worker_egress), comment}, purpose}   applies LIVE immediately, outside the patch, and is audited (owner ruling 2026-10-21). Use it only when the task needs it (a test or service must reach / must not reach a host); name every change in your finish summary. SSH/80/443/Tailscale lockouts are refused.',
       ...(firewall.tailnet ? ['- tailnet_status {} | tailnet_acl {op: get|set, policy?, if_match?, purpose?}   Tailscale devices and ACL policy (strict JSON string). set validates first, needs the etag from get as if_match, is LIVE and audited, requires an explicit unrestricted grant to the configured owner, and preserves existing Tailscale SSH rules.'] : []),
     ] : []),
-    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name the full path of a changed file in the approved scope AND a changed regression test proving that outcome. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Whole-job reconciliation blocks review/release for ANY missing requirement, even after a lane skip. Scope conflicts require explicit specification correction, not invented requirement IDs or silently waived outcomes. A complete replacement patch must retain all required behavior from earlier corrections; retained seeds are not acceptance proof. Passing narrow tests does not prove the full workflow: exercise the actual before/during/after path and failure controls. A change that touches tests is refused unless a `node --test` (or `npm test --prefix apps/web -- <file>`) run passed in this session (or tests_not_run_reason says plainly why none could; that reason cannot satisfy whole-job acceptance). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
+    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name the full path of a changed file in the approved scope AND a changed regression test proving that outcome. When the evidence places the root cause in a same-lane file outside that requirement\'s source_scope (for example a shared component or hook every reported page uses), fix it there and add scope_amendment {file, reason} to that entry: file is the full changed path (also named in evidence), reason states the evidence that puts the root cause there. Amendments are shown to reviewers and the owner; never edit an unrelated scope file just to satisfy the gate. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Whole-job reconciliation blocks review/release for ANY missing requirement, even after a lane skip. Scope conflicts require explicit specification correction, not invented requirement IDs or silently waived outcomes. A complete replacement patch must retain all required behavior from earlier corrections; retained seeds are not acceptance proof. Passing narrow tests does not prove the full workflow: exercise the actual before/during/after path and failure controls. A change that touches tests is refused unless a `node --test` (or `npm test --prefix apps/web -- <file>`) run passed in this session (or tests_not_run_reason says plainly why none could; that reason cannot satisfy whole-job acceptance). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -647,6 +652,18 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   const generatedBaselines = new Map();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
   const runs = [];
+  // Content hash of every changed file, so a passing check is only trusted for the exact tree it ran on.
+  const worktreeFingerprint = () => {
+    const hash = crypto.createHash('sha256');
+    let files = [];
+    try { files = changedFiles().sort(); } catch { return null; }
+    for (const file of files) {
+      hash.update(`${file}\0`);
+      try { hash.update(fs.readFileSync(path.join(workspacePath, file))); } catch { hash.update('<absent>'); }
+      hash.update('\0');
+    }
+    return hash.digest('hex');
+  };
   const run = (command) => {
     const text = String(command ?? '').trim();
     if (/^npm (?:run test|test) --prefix apps\/web -- /.test(text) && /(?:^|[\s/])e2e\//.test(text)) {
@@ -658,6 +675,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: RUN_REFUSED };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
+    const fingerprint = worktreeFingerprint();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
     // The child never sees the control plane's own secrets or port.
     const { NODE_TEST_CONTEXT: _testContext, NODE_OPTIONS: _nodeOptions, PORT: _port, BOB_ADMIN_TOKEN: _admin, BOB_RUNNER_TOKEN: _runner, BOB_MODEL_GATEWAY_TOKEN: _gw, SUPABASE_SERVICE_ROLE_KEY: _srk, OPENAI_API_KEY: _oai, GITEA_TOKEN: _gitea, GITHUB_TOKEN: _gh, ...childEnv } = process.env;
@@ -665,9 +683,11 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     // the control plane's own HTTP server (health, model gateway) for that long.
     return new Promise((resolve) => {
       const webTest = /^npm (?:run test|test) --prefix apps\/web -- /.test(text);
+      // `tsc --noEmit` on apps/web needs more than V8's ~1 GB container default (frontend-worker NODE_OPTIONS).
+      const webTypecheck = /^npm run (?:lint|build) --prefix apps\/web$/.test(text);
       const child = spawn(argv[0], argv.slice(1), {
         cwd: workspacePath,
-        env: { ...childEnv, ...(webTest ? { NODE_ENV: 'test' } : {}), CI: '1', FORCE_COLOR: '0' },
+        env: { ...childEnv, ...(webTest ? { NODE_ENV: 'test' } : {}), ...(webTypecheck ? { NODE_OPTIONS: '--max-old-space-size=2048' } : {}), CI: '1', FORCE_COLOR: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
@@ -679,7 +699,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch { /* gone */ } }, limits.runTimeoutMs);
       const finish = (status, spawnError) => {
         clearTimeout(timer);
-        runs.push({ command: text, exit_code: status, at: new Date(started).toISOString(), duration_ms: Date.now() - started });
+        runs.push({ command: text, exit_code: status, at: new Date(started).toISOString(), duration_ms: Date.now() - started, fingerprint, timed_out: timedOut });
         resolve({
           command: text,
           exit_code: status,
@@ -709,7 +729,41 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     return null;
   };
 
-  // Untrimmed, NUL-separated: git()'s trim() would eat the leading space of an unstaged
+  // Pre-handoff compile gate: Bob may not hand the independent verifier a patch that does not type-check
+  // or parse. A check that passed on this exact tree is reused; otherwise it runs here, and its errors go
+  // back to the author as a refused finish (job 34382d60 handed off a duplicate identifier that failed the
+  // verifier). A check that could not run (missing toolchain, timeout, OOM) is reported, not treated as a
+  // code defect; the independent verifier still repeats every check.
+  const compileGate = async (files) => {
+    const current = worktreeFingerprint();
+    const passedOnThisTree = (pattern) => current !== null && runs.some((entry) => entry.exit_code === 0 && entry.fingerprint === current && pattern.test(entry.command));
+    const checks = [];
+    if (files.some((file) => /^apps\/web\/.+\.(?:tsx?|mts|cts)$/.test(file)) && !passedOnThisTree(/^npm run (?:lint|build) --prefix apps\/web$/)) {
+      checks.push('npm run lint --prefix apps/web');
+    }
+    for (const file of files) {
+      if (file.startsWith('apps/web/') || !/^[A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/.test(file)) continue;
+      if (!fs.existsSync(path.join(workspacePath, file))) continue;
+      const command = `node --check ${file}`;
+      if (!passedOnThisTree(new RegExp(`^${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))) checks.push(command);
+    }
+    const failures = [];
+    const unavailable = [];
+    for (const command of checks.slice(0, 25)) {
+      const result = await run(command);
+      if (result.exit_code === 0) continue;
+      const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+      const typeErrors = output.split('\n').filter((line) => /error TS\d+/.test(line));
+      const syntaxError = /^node --check /.test(command) && /SyntaxError/.test(output);
+      // Only recognisable compiler output is the author's to fix; a missing toolchain, timeout or OOM is not.
+      if (!typeErrors.length && !syntaxError) {
+        unavailable.push({ command, reason: clip(redactGitError(result.error || (result.timed_out ? 'timed out' : output.trim().split('\n').slice(-3).join(' ') || `exit ${result.exit_code}`)), 300) });
+        continue;
+      }
+      failures.push({ command, exit_code: result.exit_code, errors: clip(typeErrors.length ? typeErrors.slice(0, 40).join('\n') : output.trim(), 6000) });
+    }
+    return { ran: checks.slice(0, 25), failures, unavailable };
+  };
   // " M path" entry and turn the first changed path into "ath" — which then fed the policy check.
   const changedFiles = () => {
     const raw = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
@@ -1102,6 +1156,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       return { ...result, note: 'Aggregate count only. A column with zero rows_with_value has no live writer yet: report it as a gap, do not wire UI to it as live data.' };
     },
     __changedFiles: changedFiles,
+    __compileGate: compileGate,
     __policyCheck: policyCheck,
     __runs: () => runs.slice(),
     __visualBaselines: () => [...generatedBaselines.values()],
@@ -1212,7 +1267,21 @@ async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }
   }
 }
 
-function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null, lane = null }) {
+// A repair's approved scope is a planner's guess at where the outcome lives; the root cause can sit in a
+// shared same-lane file (jobs d5f65103/c604b921: a Leaflet unmount error reported on two pages lives in
+// the shared map component). An evidence-backed amendment lets the author fix it there instead of making
+// unrelated page edits to satisfy the gate. Protected and cross-lane files never qualify, and every
+// amendment travels in the proposal for code review, acceptance reconciliation and the release report.
+function scopeAmendmentsFor(entry, { files, sourceScope, lane, proof }) {
+  const raw = Array.isArray(entry?.scope_amendment) ? entry.scope_amendment : entry?.scope_amendment ? [entry.scope_amendment] : [];
+  return raw.slice(0, 5)
+    .map((item) => ({ file: normalizeRepoPath(String(item?.file || '').trim()) || '', reason: String(item?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 600) }))
+    .filter((item) => item.file && files.includes(item.file) && !sourceScope.includes(item.file)
+      && (!lane || laneFor(item.file) === lane) && !isProtectedPath(item.file)
+      && item.reason.length >= 30 && proof.includes(item.file));
+}
+
+function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null, lane = null, amendments = null }) {
   const requirements = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements
     : [];
@@ -1241,7 +1310,12 @@ function validateAcceptanceEvidence({ args, specification, files, trackedAtPin =
     }
     const implementedFiles = files.filter(file => sourceScope.includes(file));
     if (!implementedFiles.length) {
-      return `finish refused: delivery requirement ${id} did not change any approved source_scope file (${sourceScope.join(', ')}). Implement the outcome in its approved scope before handoff.`;
+      const amended = scopeAmendmentsFor(entry, { files, sourceScope, lane, proof });
+      if (!amended.length) {
+        return `finish refused: delivery requirement ${id} did not change any approved source_scope file (${sourceScope.join(', ')}). Implement the outcome in its approved scope before handoff. If evidence shows the root cause is in another file you changed in this lane (for example a shared component), add scope_amendment {file: "<full changed path>", reason: "<the evidence that places the root cause there>"} to this requirement's acceptance_evidence entry and name that path in its evidence; never edit unrelated scope files just to pass this check.`;
+      }
+      if (amendments) amendments.push(...amended.map(item => ({ requirement_id: id, ...item })));
+      continue;
     }
     const namesImplementedFile = implementedFiles.some(file => proof.includes(file) || proof.includes(path.basename(file)));
     if (!namesImplementedFile) {
@@ -1249,6 +1323,26 @@ function validateAcceptanceEvidence({ args, specification, files, trackedAtPin =
     }
   }
   return null;
+}
+
+function verifiedRuns(sessionRuns) {
+  return sessionRuns
+    .filter((r) => /^(?:node --(?:test|check)\b|npm (?:test|run (?:test|lint|build)) --prefix apps\/web\b)/.test(r.command))
+    .slice(-20)
+    .map(({ command, exit_code, at, duration_ms }) => ({ command, exit_code, at, duration_ms }));
+}
+
+// Runs the compile gate on a built proposal. Returns a refusal the author can act on, or the proposal with
+// the gate's receipt (including checks that could not run, which the independent verifier must cover).
+async function gateProposal(tools, proposal) {
+  if (typeof tools.__compileGate !== 'function') return { proposal };
+  const gate = await tools.__compileGate(proposal.changed_files);
+  if (gate.failures.length) {
+    const detail = gate.failures.map((failure) => `$ ${failure.command} (exit ${failure.exit_code})\n${failure.errors}`).join('\n\n');
+    return { error: `finish refused: the pre-handoff compile gate failed, so the independent verifier would reject this patch. Fix these errors in your change (read the named file and line; do not delete tests or weaken types to silence them), re-run the check, and finish again.\n${detail}` };
+  }
+  const runsNow = typeof tools.__runs === 'function' ? tools.__runs() : [];
+  return { proposal: { ...proposal, verified_runs: verifiedRuns(runsNow), compile_gate: { ran: gate.ran, unavailable: gate.unavailable } } };
 }
 
 function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], specification = null }) {
@@ -1288,7 +1382,8 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   const scopeFiles = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope.map(String) : [])
     : [];
-  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, lane, trackedAtPin: filesAtPin(workspacePath, scopeFiles) });
+  const scopeAmendments = [];
+  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, lane, trackedAtPin: filesAtPin(workspacePath, scopeFiles), amendments: scopeAmendments });
   if (acceptanceError) return { error: acceptanceError };
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
@@ -1314,8 +1409,10 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
         evidence: String(entry?.evidence || '').trim()
       })).slice(0, 100)
       : [],
+    // Root-cause files outside a requirement's approved scope, each with the author's evidence (see scopeAmendmentsFor).
+    scope_amendments: scopeAmendments,
     // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
-    verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm (?:test|run (?:test|lint|build)) --prefix apps\/web\b)/.test(r.command)).slice(-20),
+    verified_runs: verifiedRuns(sessionRuns),
     visual_baselines: typeof tools.__visualBaselines === 'function' ? tools.__visualBaselines() : [],
     tests_not_run_reason: testsNotRunReason || undefined,
     rollback_notes: Array.isArray(args.rollback_notes) && args.rollback_notes.length ? args.rollback_notes.map(String).slice(0, 10) : [files.some((file) => file.startsWith('supabase/migrations/')) ? 'Before merge: close the pull request; nothing is live. After merge the release lane applies the migration, so undo it with a new forward migration and revert the code.' : 'Revert the pull request; this run applies no live data, migrations, or deployments.'],
@@ -1446,6 +1543,8 @@ async function runAgenticEngineer({
   // In-house first: resume the chain past a provider whose earlier attempt failed verification.
   startAfterProvider = null,
   providerHealth = null,
+  // Installs the lockfile-pinned apps/web dependencies into the worktree (the Vibe dependency cache).
+  prepareWorkspace = null,
   now = Date.now,
   logger = console,
 }) {
@@ -1472,6 +1571,18 @@ async function runAgenticEngineer({
 
   const transcript = saved?.transcript || [];
   const log = (entry) => transcript.push({ at: new Date().toISOString(), ...entry });
+  // Without apps/web dependencies the author could not type-check or run Vitest at all and handed the
+  // verifier unchecked TypeScript (job 34382d60: "tsc is not installed in the runner").
+  if (lane === 'frontend' && typeof prepareWorkspace === 'function') {
+    try {
+      await prepareWorkspace(workspacePath);
+      log({ workspace_dependencies: 'ready' });
+    } catch (error) {
+      log({ workspace_dependencies: 'unavailable', error: clip(redactGitError(error && error.message), 300) });
+    }
+    // The dependency install replaces a directory that holds a tracked placeholder; it is never part of a change.
+    try { git(workspacePath, ['checkout', '--', 'apps/web/node_modules/.gitkeep']); } catch { /* not tracked at this pin */ }
+  }
   const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log });
   if (firewall) {
     const purposeOf = args => `job ${String(job.id).slice(0, 8)}: ${String(args.purpose || '').slice(0, 250)}`;
@@ -1578,6 +1689,7 @@ async function runAgenticEngineer({
   // the strongest model 8-12 turns after weaker ones spent the rest (2026-10: "turn budget exhausted"
   // was the second most common frontend failure). The ceiling keeps one run bounded.
   let turnLimit = limits.maxTurns;
+  let compileRepairExtended = false;
   const freshTurns = Math.max(12, Math.ceil(limits.maxTurns * 0.6));
   const turnCeiling = limits.maxTurns * 2;
   const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
@@ -1720,12 +1832,19 @@ async function runAgenticEngineer({
         requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
         specification
       });
-      if (built.error) {
-        log({ turn: turns, finish_refused: built.error });
-        messages.push({ role: 'user', content: JSON.stringify({ tool_result: { error: built.error } }) });
+      const gated = built.error ? built : await gateProposal(tools, built.proposal);
+      if (gated.error) {
+        log({ turn: turns, finish_refused: gated.error.slice(0, 2000) });
+        // A compile failure found at the last turns gets a bounded repair allowance instead of a dead handoff.
+        if (!built.error && !compileRepairExtended && turnLimit - turns < COMPILE_REPAIR_TURNS && turnLimit < turnCeiling) {
+          compileRepairExtended = true;
+          turnLimit = Math.min(turnCeiling, turns + COMPILE_REPAIR_TURNS);
+          log({ turn: turns, compile_repair_turns: turnLimit - turns });
+        }
+        messages.push({ role: 'user', content: JSON.stringify({ tool_result: { error: gated.error } }) });
         continue;
       }
-      outcome = { ok: true, proposal: built.proposal, model: response.data?.model };
+      outcome = { ok: true, proposal: gated.proposal, model: response.data?.model };
       break;
     }
 
@@ -1794,8 +1913,9 @@ async function runAgenticEngineer({
         requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
         specification
       });
-      if (built.error) log({ turn: turns + 1, finish_refused: built.error });
-      else outcome = { ok: true, proposal: built.proposal, model: response.data?.model };
+      const gated = built.error ? built : await gateProposal(tools, built.proposal);
+      if (gated.error) log({ turn: turns + 1, finish_refused: gated.error.slice(0, 2000) });
+      else outcome = { ok: true, proposal: gated.proposal, model: response.data?.model };
     } else {
       log({ turn: turns + 1, grace_finish: false, error: response.ok ? 'no finish call' : `model unavailable: ${response.error}` });
     }
@@ -1854,4 +1974,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, gateProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };

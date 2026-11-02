@@ -21,6 +21,7 @@ const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, mode
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
+const { planRoutineIntake, routineRepairBrief, routineSignature } = require('./builder-routine-intake');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
 const { createKnowledgeTool } = require('./builder-knowledge');
@@ -638,6 +639,10 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     gitSourceDir: source.gitSourceDir || null,
     workspaceRoot: builderWorkspaceRoot,
     repoRoot: assessmentRoot,
+    // Frontend authors type-check and run Vitest in their own worktree from the shared lockfile cache.
+    prepareWorkspace: (workspacePath) => vibePreview
+      ? vibePreview.ensureWebDependencies(workspacePath)
+      : Promise.reject(new Error('the apps/web dependency cache is disabled on this control plane (BOB_VIBE_ENABLED=0)')),
     workerImage: builderWorkerImage,
     firewall: hostNetworkFor('bob-builder'),
     runnerId: builderRunnerId,
@@ -1103,23 +1108,46 @@ function productionHumanTestStatus() {
   };
 }
 
-function routineRepairBrief(packet) {
-  const envelope = packet.envelope && typeof packet.envelope === 'object' ? packet.envelope : {};
-  const before = envelope.before && typeof envelope.before === 'object' ? envelope.before : {};
-  const during = envelope.during && typeof envelope.during === 'object' ? envelope.during : {};
-  const expected = envelope.expected && typeof envelope.expected === 'object' ? envelope.expected : {};
-  const error = during.error && typeof during.error === 'object' ? during.error : {};
-  const failed = during.failed_request && typeof during.failed_request === 'object' ? during.failed_request : {};
-  return [
-    `Goal: repair the routine monitored defect recorded in friction packet ${packet.id}.`,
-    `Before: page ${String(before.page || 'unknown').slice(0, 500)}; module ${String(before.module || 'unknown').slice(0, 120)}; user intended ${String(expected.user_intent || 'continue the workflow').slice(0, 1000)}.`,
-    `During: ${String(error.kind || 'runtime_error').slice(0, 80)} — ${String(error.message || 'unhandled application error').slice(0, 500)}${failed.status ? `; request ${String(failed.fn || failed.route || 'unknown').slice(0, 200)} returned ${Number(failed.status)}` : ''}.`,
-    `After: ${String(expected.expected_outcome || 'the workflow remains usable and exposes an explicit recoverable state').slice(0, 1000)}.`,
-    'Required investigation: read canon, query Atlas capability/direct edges/blast radius, cross-check supabase/schema.sql, and identify the smallest root-cause fix.',
-    'Required verification: targeted tests, independent review, before/during/after data-path evidence, Atlas refresh, schema/data-path check, and human-glass acceptance for any web change.',
-    'Routine boundary: make the smallest corrective patch only. Do not redesign, add a feature/module/workflow, change architecture, add or alter migrations/schema/RLS/auth, change dependencies/environment/secrets, or touch legal, safety, identity, enforcement, finance, payroll, or evidential truth. If any such work is necessary, stop and escalate for Grandmaster review.',
-    `Triage basis: ${JSON.stringify(packet.basis || {}).slice(0, 1800)}.`,
-  ].join('\n');
+// Open routine repairs keyed by failure signature: a newly claimed packet with the same signature is covered
+// by that job instead of opening a second repair for another page.
+async function openRoutineRepairSignatures() {
+  const { data: jobs, error } = await builderSupabase
+    .from('builder_jobs')
+    .select('id,source_friction_packet_id')
+    .eq('autopilot_source', 'routine_monitor')
+    .not('status', 'in', '("deployed","failed","cancelled")')
+    .not('source_friction_packet_id', 'is', null)
+    .limit(50);
+  if (error) throw new Error(`open routine repairs could not be read: ${error.message}`);
+  if (!Array.isArray(jobs) || !jobs.length) return [];
+  const { data: sources, error: sourceError } = await builderSupabase
+    .from('bob_friction_packets')
+    .select('id,envelope')
+    .in('id', jobs.map((job) => job.source_friction_packet_id));
+  if (sourceError) throw new Error(`open routine repair packets could not be read: ${sourceError.message}`);
+  const byPacket = new Map((sources || []).map((packet) => [packet.id, packet]));
+  return jobs
+    .filter((job) => byPacket.has(job.source_friction_packet_id))
+    .map((job) => ({ jobId: job.id, signature: routineSignature(byPacket.get(job.source_friction_packet_id)) }));
+}
+
+async function coverRoutinePacket(packet, jobId, signature) {
+  const { error } = await builderSupabase.from('bob_friction_packets').update({
+    automation_status: 'builder_started',
+    covered_by_job_id: jobId,
+    automation_error_redacted: null,
+    automation_updated_at: new Date().toISOString(),
+  }).eq('id', packet.id).eq('automation_status', 'claimed');
+  if (error) throw new Error(`routine packet could not be attached to its open repair: ${error.message}`);
+  record('autopilot', 'builder.routine_repair.covered', jobId, { packet_id: packet.id, signature: String(signature).slice(0, 200) });
+}
+
+async function requeueRoutinePacket(packet, detail) {
+  await builderSupabase.from('bob_friction_packets').update({
+    automation_status: packet.automation_attempt_count >= 5 ? 'failed' : 'queued',
+    automation_error_redacted: detail,
+    automation_updated_at: new Date().toISOString(),
+  }).eq('id', packet.id).eq('automation_status', 'claimed');
 }
 
 async function startRoutineRepairs() {
@@ -1130,7 +1158,24 @@ async function startRoutineRepairs() {
   if (claimError) throw new Error(`routine repair queue could not be claimed: ${claimError.message}`);
   if (!Array.isArray(packets) || !packets.length) return [];
   const outcomes = [];
-  for (const packet of packets) {
+  let openRepairs = [];
+  try {
+    openRepairs = await openRoutineRepairSignatures();
+  } catch (error) {
+    record('autopilot', 'builder.routine_repair.dedupe_unavailable', null, { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
+  }
+  const { repairs, covered } = planRoutineIntake(packets, openRepairs);
+  for (const { packet, jobId, signature } of covered) {
+    try {
+      await coverRoutinePacket(packet, jobId, signature);
+      outcomes.push({ packet: packet.id, job: jobId, outcome: 'covered' });
+    } catch (error) {
+      const detail = String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300);
+      await requeueRoutinePacket(packet, detail);
+      outcomes.push({ packet: packet.id, outcome: 'failed', error: detail });
+    }
+  }
+  for (const { packet, signature, followers } of repairs) {
     let createdJobId = null;
     let boundSuccessfully = false;
     try {
@@ -1139,7 +1184,7 @@ async function startRoutineRepairs() {
         _organization_id: project.organization_id,
         _project_id: project.id,
         _title: `Routine repair: ${page}`.slice(0, 200),
-        _task_description: routineRepairBrief(packet).slice(0, 12000),
+        _task_description: routineRepairBrief(packet, { alsoReported: followers }).slice(0, 12000),
         _target_sha: sha,
         _branch_name: 'main',
         _description: `Opened automatically from monitored friction packet ${packet.id}.`,
@@ -1158,8 +1203,18 @@ async function startRoutineRepairs() {
       });
       if (bindError || !boundJob?.id) throw new Error(bindError?.message || 'routine repair could not be bound');
       boundSuccessfully = true;
-      record('autopilot', 'builder.routine_repair.started', boundJob.id, { packet_id: packet.id, page });
+      record('autopilot', 'builder.routine_repair.started', boundJob.id, { packet_id: packet.id, page, covers: followers.length });
       outcomes.push({ packet: packet.id, job: boundJob.id, outcome: 'started' });
+      for (const follower of followers) {
+        try {
+          await coverRoutinePacket(follower, boundJob.id, signature);
+          outcomes.push({ packet: follower.id, job: boundJob.id, outcome: 'covered' });
+        } catch (error) {
+          const detail = String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300);
+          await requeueRoutinePacket(follower, detail);
+          outcomes.push({ packet: follower.id, outcome: 'failed', error: detail });
+        }
+      }
     } catch (error) {
       const detail = String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300);
       if (createdJobId && !boundSuccessfully) {
@@ -1169,11 +1224,7 @@ async function startRoutineRepairs() {
           updated_at: new Date().toISOString(),
         }).eq('id', createdJobId).is('source_friction_packet_id', null);
       }
-      await builderSupabase.from('bob_friction_packets').update({
-        automation_status: packet.automation_attempt_count >= 5 ? 'failed' : 'queued',
-        automation_error_redacted: detail,
-        automation_updated_at: new Date().toISOString(),
-      }).eq('id', packet.id).eq('automation_status', 'claimed');
+      for (const queued of boundSuccessfully ? [] : [packet, ...followers]) await requeueRoutinePacket(queued, detail);
       record('autopilot', 'builder.routine_repair.failed', packet.id, { error: detail });
       outcomes.push({ packet: packet.id, outcome: 'failed', error: detail });
     }
@@ -1499,6 +1550,12 @@ async function autopilotOnce() {
               automation_updated_at: new Date().toISOString(),
             }).eq('id', routineJob.source_friction_packet_id);
             if (packetStatusError) throw new Error(`routine repair status could not be recorded: ${packetStatusError.message}`);
+            // Packets with the same failure signature that this job covers follow its status.
+            const { error: coveredStatusError } = await builderSupabase.from('bob_friction_packets').update({
+              automation_status: automationStatus,
+              automation_updated_at: new Date().toISOString(),
+            }).eq('covered_by_job_id', jobId);
+            if (coveredStatusError) record('autopilot', 'builder.routine_repair.covered_status_failed', jobId, { error: String(coveredStatusError.message).slice(0, 300) });
           }
         },
         fail: async (jobId, reason) => {

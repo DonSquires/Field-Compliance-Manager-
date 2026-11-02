@@ -28,20 +28,38 @@ const SIGNIFICANT_ROUTINE_TERMS = [
   /\bnew (?:build|feature|module|workflow|capability)\b/i,
   /\barchitecture\b/i,
   /\brebuild (?:the )?(?:page|module|system)\b/i,
-  /\b(?:schema|migration|rls|authentication|authorization)\b/i,
+  /\b(?:authentication|authorization)\b/i,
   /\b(?:dependency|environment|credential|secret)\b/i,
 ];
+// A database root cause may be repaired with an additive migration: the spec proceeds and the release holds
+// structurally on any changed migration (below), so a person still approves schema, RLS, or policy changes.
+
+// Guardrail and verification lines of the routine brief name exactly the things a basic fix must NOT do
+// ("Do not redesign … migrations/schema/RLS/auth …", "cross-check supabase/schema.sql"). Scanning them
+// held every routine repair at its own boilerplate (jobs 7c6c68b6, 3aaf56b4), so only the proposed change
+// is scanned, with negated clauses removed.
+const ROUTINE_GUARDRAIL_LINE = /^\s*(?:Required investigation|Required verification|Routine boundary|Triage basis|Known signature|Root-cause guidance|Also reported on):/i;
+const NEGATED_CLAUSE = /\b(?:do not|don't|does not|doesn't|must not|mustn't|should not|shouldn't|will not|won't|never|without|avoid(?:ing)?|no|not|nor)\b[^.;!?\n]*/gi;
+
+function proposedRoutineScope(job, specification) {
+  const brief = String(job?.task_description ?? '').split('\n').filter((line) => !ROUTINE_GUARDRAIL_LINE.test(line));
+  const spec = specification && typeof specification === 'object' ? specification : {};
+  const texts = (list, key) => (Array.isArray(list) ? list : []).map((item) => (item && typeof item === 'object' ? item[key] : item)).filter((value) => typeof value === 'string');
+  // What the repair proposes to change; verification, terrain and acceptance checks describe what to inspect.
+  const proposed = [
+    spec.product_brief?.problem, spec.product_brief?.outcome, ...texts(spec.product_brief?.scope, null),
+    ...texts(spec.functional_requirements, 'requirement'),
+    ...texts(spec.delivery_requirements, 'outcome'),
+  ].filter((value) => typeof value === 'string');
+  return [job?.title ?? '', ...brief, ...proposed].join('\n').replace(NEGATED_CLAUSE, ' ');
+}
 
 function routineRepairHold({ job, approval, evidence }) {
   if (!['routine_monitor', 'main_monitor'].includes(job?.autopilot_source)) return null;
   if (job.repair_risk !== 'routine') {
     return { gate: approval.approval_type, files: [], reasons: ['repair is no longer classified as routine'] };
   }
-  const scopeText = [
-    job.title,
-    job.task_description,
-    evidence?.productSpecification ? JSON.stringify(evidence.productSpecification) : '',
-  ].join('\n');
+  const scopeText = proposedRoutineScope(job, evidence?.productSpecification);
   const significant = job.autopilot_source === 'main_monitor'
     ? null
     : SIGNIFICANT_ROUTINE_TERMS.find((pattern) => pattern.test(scopeText));
@@ -51,6 +69,10 @@ function routineRepairHold({ job, approval, evidence }) {
       files: [],
       reasons: [`repair scope expanded beyond a basic fix (${significant.source})`],
     };
+  }
+  const migrations = (evidence?.changedFiles ?? []).filter((file) => String(file).startsWith('supabase/migrations/'));
+  if (job.autopilot_source === 'routine_monitor' && migrations.length) {
+    return { gate: approval.approval_type, files: migrations, reasons: ['routine repair changed the database schema'] };
   }
   if (approval.approval_type === 'release_approval' && (evidence?.changedFiles?.length ?? 0) > 8) {
     return {
@@ -602,7 +624,8 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         let hold = null;
         let cleared = 0;
         for (const approval of pending) {
-          if (approval.approval_type === 'release_approval' && !evidence) {
+          // Routine repairs are judged on the approved specification's proposed change at the spec gate too.
+          if (!evidence && (approval.approval_type === 'release_approval' || job.autopilot_source === 'routine_monitor')) {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
             evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
           }

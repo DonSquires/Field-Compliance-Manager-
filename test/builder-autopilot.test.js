@@ -118,6 +118,44 @@ test('routine monitor clears a bounded basic fix but holds redesign or broad pat
   assert.match(release.reasons[0], /more than eight files/);
 });
 
+test('routine monitor is not held by its own guardrail boilerplate, only by the proposed change', () => {
+  const { routineRepairBrief } = require('../builder-routine-intake');
+  const packet = {
+    id: 'packet-1',
+    envelope: {
+      before: { page: '/admin/hub', module: 'hub' },
+      during: { error: { kind: 'exception', message: "Cannot read properties of undefined (reading '_leaflet_pos')" } },
+      expected: { user_intent: 'open the hub', expected_outcome: 'the hub stays usable' },
+    },
+    basis: { rule: 'routine' },
+  };
+  const job = { autopilot_source: 'routine_monitor', repair_risk: 'routine', title: 'Routine repair: /admin/hub', task_description: routineRepairBrief(packet) };
+  assert.match(job.task_description, /Do not redesign/);
+  assert.match(job.task_description, /supabase\/schema\.sql/);
+  const specification = {
+    product_brief: { problem: 'The hub throws when its map unmounts.', outcome: 'The hub map unmounts cleanly.', scope: ['Shared Leaflet map cleanup'] },
+    functional_requirements: [{ id: 'FR-1', requirement: 'Stop map animations on unmount without changing schema or RLS.' }],
+    delivery_requirements: [{ id: 'DR-1', outcome: 'No _leaflet_pos error after leaving the hub.', evidence: 'Vitest', source_scope: ['apps/web/src/components/LocationHouseMap.tsx'] }],
+    terrain_verification: { schema_checks: ['Cross-check supabase/schema.sql for the hub data path; no migration expected.'] },
+    acceptance_criteria: [{ id: 'AC-1', criterion: 'Verify no schema, RLS, or migration change was needed.' }],
+  };
+  const approval = { approval_type: 'specification_review' };
+  assert.equal(routineRepairHold({ job, approval, evidence: { productSpecification: specification } }), null);
+  assert.equal(routineRepairHold({ job, approval: { approval_type: 'release_approval' }, evidence: { productSpecification: specification, changedFiles: ['apps/web/src/components/LocationHouseMap.tsx'] } }), null);
+
+  const redesign = { ...specification, delivery_requirements: [{ id: 'DR-1', outcome: 'Redesign the hub around a new map workflow.', evidence: 'x', source_scope: ['apps/web/src/pages/HubPage.tsx'] }] };
+  assert.match(routineRepairHold({ job, approval, evidence: { productSpecification: redesign } }).reasons[0], /expanded beyond a basic fix/);
+  const auth = { ...specification, functional_requirements: [{ id: 'FR-1', requirement: 'Change authentication for the hub.' }] };
+  assert.match(routineRepairHold({ job, approval, evidence: { productSpecification: auth } }).reasons[0], /expanded beyond a basic fix/);
+
+  // A database root cause may be built, but any migration holds the release for a person.
+  const database = { ...specification, delivery_requirements: [{ id: 'DR-1', outcome: 'Repair the access_presets view with an additive migration.', evidence: 'x', source_scope: ['supabase/schema.sql'] }] };
+  assert.equal(routineRepairHold({ job, approval, evidence: { productSpecification: database } }), null);
+  const migration = routineRepairHold({ job, approval: { approval_type: 'release_approval' }, evidence: { productSpecification: database, changedFiles: ['supabase/migrations/20261104100000_fix_access_presets.sql'] } });
+  assert.match(migration.reasons[0], /changed the database schema/);
+  assert.deepEqual(migration.files, ['supabase/migrations/20261104100000_fix_access_presets.sql']);
+});
+
 test('main-monitor repairs may fix the web app but hold protected or out-of-app files for a person', () => {
   const job = {
     autopilot_source: 'main_monitor',

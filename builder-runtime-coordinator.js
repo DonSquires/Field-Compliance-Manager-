@@ -234,6 +234,7 @@ function agenticGenerator(lane, context, extra = {}) {
       specification, uxPlan, liveContext,
       hints: requestedFiles,
       startAfterProvider: startAfter,
+      prepareWorkspace: lane === 'frontend' ? context.prepareWorkspace || null : null,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       previousAttempt,
       seedPatch,
