@@ -481,5 +481,15 @@ maintenance with the control-plane release timer and hold an expiring,
 holder-specific CCTV claim pause through queue drain, restart and health checks.
 Do not reset or rewrite a laptop branch merely to make deployment proceed.
 
+Docker Desktop's credential helper cannot reach Windows Credential Manager from
+an SSH or other non-interactive logon session, so a remote `build --pull` fails
+with "A specified logon session does not exist". When the laptop's Docker
+config has no registry login (every laptop base image is public), the updater
+builds with a temporary anonymous-pull config pinned to the current engine and
+removes it afterwards; a configured login is left in charge. Laptop builds can
+exceed the 300-second laptop-shell limit, and Windows OpenSSH ends `Start-Process`
+children with the session, so prebuild images in a detached process before the
+claim pause rather than holding CCTV claims through a full rebuild.
+
 The Python inference-tier tests (`services/fcm-inference/test_inference_tier.py`) are not run by CI; run them
 locally with the service requirements and `pytest` before changing the inference service.

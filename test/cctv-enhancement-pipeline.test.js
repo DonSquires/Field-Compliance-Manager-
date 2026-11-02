@@ -60,6 +60,17 @@ test('GPU detectors stay consistent per job, the VPS CPU is never mixed in, and 
   assert.match(laptopUpdater, /for \(\$attempt = 1; \$attempt -le 3; \$attempt\+\+\)/);
   assert.match(laptopUpdater, /Docker GPU startup failed after the build/);
   assert.match(laptopUpdater, /did not restart cleanly after three attempts/);
+  assert.match(laptopUpdater, /A specified logon session does not exist/);
+  assert.match(laptopUpdater, /foreach \(\$section in @\('auths', 'credHelpers'\)\)/);
+  assert.match(laptopUpdater, /docker context inspect --format '\{\{\.Endpoints\.docker\.Host\}\}'/);
+  assert.match(laptopUpdater, /"auths":\{"credential-free\.invalid":\{\}\}/);
+  assert.ok(
+    laptopUpdater.indexOf('$registryConfig = New-AnonymousRegistryDockerConfig') < laptopUpdater.indexOf('build --pull fcm-inference'),
+    'the anonymous registry config is in place before the pulling build',
+  );
+  assert.match(laptopUpdater, /if \(\$hadDockerConfig\) \{ \$env:DOCKER_CONFIG = \$previousDockerConfig \}/);
+  assert.match(laptopUpdater, /if \(\$hadDockerHost\) \{ \$env:DOCKER_HOST = \$previousDockerHost \}/);
+  assert.match(laptopUpdater, /Remove-Item \$registryConfig\.Path -Recurse -Force/);
   assert.doesNotMatch(laptopUpdater, /throw 'The checkout has tracked local changes/);
   assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);
