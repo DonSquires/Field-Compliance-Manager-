@@ -93,6 +93,12 @@ async function readLimitedText(req) {
  * @property {() => Promise<string>} salt
  * @property {() => number} [now]
  * @property {(message: string, detail?: unknown) => void} [logError]
+ * @property {(alert: { reference: string, enquiry: import('./validate.mjs').WebsiteEnquiry, receivedAt: Date }) => Promise<void>} [notify]
+ *   Sends the R&M email alert for a stored enquiry. It runs after the lead is
+ *   saved; a failure is logged and never changes the response.
+ * @property {(task: Promise<void>) => void} [background]
+ *   Keeps the alert running after the response is sent (EdgeRuntime.waitUntil).
+ *   Without it the handler waits for the alert before responding.
  */
 
 /**
@@ -162,6 +168,26 @@ export function createWebsiteEnquiryHandler(deps) {
       if (!isEnquiryReference(data)) {
         logError('website-enquiry: submit returned no reference');
         return json(500, UNAVAILABLE, origin);
+      }
+      if (deps.notify) {
+        const reference = /** @type {string} */ (data);
+        const alert = Promise.resolve()
+          .then(() => deps.notify?.({ reference, enquiry, receivedAt: new Date(now()) }))
+          .catch((alertError) => {
+            logError('website-enquiry: email alert failed', {
+              reference,
+              error: alertError instanceof Error ? alertError.message : String(alertError),
+            });
+          });
+        if (deps.background) {
+          try {
+            deps.background(alert);
+          } catch {
+            await alert;
+          }
+        } else {
+          await alert;
+        }
       }
       return json(200, { ok: true, reference: data }, origin);
     } catch (error) {
