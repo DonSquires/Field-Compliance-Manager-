@@ -83,21 +83,22 @@ test('Website hub offers statistics and news without an analytics opt-in', async
 test('administrator saves, adds a processed photo, publishes, revises privately and unpublishes', async ({ page }) => {
   const state = await routes(page);
   await signInAsAdmin(page, '/admin/website-posts');
-  await expect(page.getByLabel('Add photo')).toBeDisabled();
+  await expect(page.getByLabel('Add photo')).toBeEnabled();
   await page.getByLabel('Title', { exact: true }).fill('Synthetic patrol update');
   await page.getByLabel('Update text', { exact: true }).fill('Public test text.\n\nSecond paragraph.');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Private draft saved.' })).toBeVisible();
   await page.getByLabel('Add photo').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: state.png });
-  await expect(page.getByRole('status').filter({ hasText: 'Photo uploaded privately.' })).toBeVisible();
-  expect(state.uploads).toHaveLength(1);
-  expect(state.uploads[0].includes(Buffer.from([0xff, 0xd8])), 'Uploaded pixels were converted to JPEG').toBe(true);
+  await expect(page.getByRole('status').filter({ hasText: 'Photo ready.' })).toBeVisible();
+  expect(state.uploads).toHaveLength(0);
   await page.getByLabel('I confirm this text and photo').check();
   await expect(page.getByRole('button', { name: 'Publish to website' })).toBeDisabled();
   await page.getByLabel('Photo description', { exact: true }).fill('Synthetic vehicle at a test site');
   await page.getByLabel('I confirm this text and photo').check();
   await page.getByRole('button', { name: 'Publish to website' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Published to the website.' })).toBeVisible();
+  expect(state.uploads).toHaveLength(1);
+  expect(state.uploads[0].includes(Buffer.from([0xff, 0xd8])), 'Uploaded pixels were converted to JPEG').toBe(true);
   expect(state.posts[0].published_content?.photo_alt).toBe('Synthetic vehicle at a test site');
   await expect(page.getByRole('link', { name: 'Open public update' })).toHaveAttribute('href', /^https:\/\/www.randmsecurity.com\/blog\/synthetic-update-/);
   await page.getByLabel('Title', { exact: true }).fill('Private revision');
@@ -113,6 +114,26 @@ test('administrator saves, adds a processed photo, publishes, revises privately 
   expect(state.posts[0].published_content).toBeNull();
   await expect(page.getByRole('link', { name: 'Open public update' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('a photo chosen before the first save is uploaded and attached when publishing a new update', async ({ page }) => {
+  const state = await routes(page);
+  await signInAsAdmin(page, '/admin/website-posts');
+  await page.getByLabel('Title', { exact: true }).fill('First-time photo update');
+  await page.getByLabel('Update text', { exact: true }).fill('Body text for a brand new update.');
+  await page.getByLabel('Add photo').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: state.png });
+  await expect(page.getByRole('status').filter({ hasText: 'Photo ready.' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Photo preview, not yet uploaded' })).toBeVisible();
+  await page.getByLabel('Photo description', { exact: true }).fill('Synthetic gate at a test site');
+  await page.getByLabel('I confirm this text and photo').check();
+  await page.getByRole('button', { name: 'Publish to website' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Published to the website.' })).toBeVisible();
+  expect(state.requests.map(request => request.p_action)).toEqual(['save', 'publish']);
+  expect(state.requests[0].p_photo_path).toBeNull();
+  expect(state.uploads).toHaveLength(1);
+  expect(state.posts).toHaveLength(1);
+  expect(String(state.posts[0].published_content?.photo_path)).toMatch(new RegExp(`^${org}/${state.posts[0].id}/[0-9a-f-]{36}\\.jpg$`));
+  expect(state.posts[0].published_content?.photo_alt).toBe('Synthetic gate at a test site');
 });
 
 test('uncertain save retries the same request without creating a duplicate draft', async ({ page }) => {

@@ -40,7 +40,12 @@ export default function WebsitePostsPage({ onNavigate }: { onNavigate: NavigateW
   const [preview, setPreview] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const dirty = JSON.stringify(draft) !== JSON.stringify(selected ? draftOf(selected) : emptyDraft);
+  const [pending, setPending] = useState<{ photo: Blob; url: string } | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const dirty = Boolean(pending) || JSON.stringify(draft) !== JSON.stringify(selected ? draftOf(selected) : emptyDraft);
+  const hasPhoto = Boolean(pending || draft.photo_path);
+
+  useEffect(() => () => { if (pending) URL.revokeObjectURL(pending.url); }, [pending]);
 
   const load = useCallback(async () => {
     const request = ++generation.current;
@@ -70,7 +75,7 @@ export default function WebsitePostsPage({ onNavigate }: { onNavigate: NavigateW
   useEffect(() => {
     setPosts([]); setSelected(null); setDraft(emptyDraft); setError(null); setNotice(null);
     setDenied(false); setBusy(false); setApproved(false); setConflict(false); setConfirmUnpublish(false);
-    setListAvailable(false); inFlight.current = false;
+    setListAvailable(false); inFlight.current = false; setPending(null);
     attempt.current = null; postId.current = crypto.randomUUID();
     void load();
     return () => { generation.current += 1; };
@@ -95,7 +100,7 @@ export default function WebsitePostsPage({ onNavigate }: { onNavigate: NavigateW
 
   function open(post: WebsitePost | null) {
     if (dirty && !window.confirm('Discard your unsaved changes?')) return;
-    setSelected(post); setDraft(post ? draftOf(post) : emptyDraft);
+    setSelected(post); setDraft(post ? draftOf(post) : emptyDraft); setPending(null);
     postId.current = post?.id ?? crypto.randomUUID();
     attempt.current = null;
     setError(null); setNotice(null); setApproved(false); setConflict(false); setConfirmUnpublish(false);
@@ -106,77 +111,98 @@ export default function WebsitePostsPage({ onNavigate }: { onNavigate: NavigateW
     setApproved(false); setConfirmUnpublish(false); setNotice(null);
   }
 
-  async function save(action: 'save' | 'publish' | 'unpublish') {
-    if (inFlight.current || conflict || loading || !listAvailable || !form.current?.reportValidity() || (action === 'publish' && !approved)) return;
-    const operation = generation.current;
-    inFlight.current = true;
+  async function commit(action: 'save' | 'publish' | 'unpublish', base: WebsitePost | null, next: Draft, stale: () => boolean) {
     const values = {
-      p_post_id: postId.current, p_expected_version: selected?.version ?? 0, p_action: action,
-      p_title: draft.title.trim(), p_summary: draft.summary.trim(), p_body: draft.body.trim(),
-      p_photo_path: draft.photo_path, p_photo_alt: draft.photo_alt.trim(),
+      p_post_id: postId.current, p_expected_version: base?.version ?? 0, p_action: action,
+      p_title: next.title.trim(), p_summary: next.summary.trim(), p_body: next.body.trim(),
+      p_photo_path: next.photo_path, p_photo_alt: next.photo_alt.trim(),
     };
     const fingerprint = JSON.stringify({ context, ...values });
     if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, id: crypto.randomUUID() };
+    const { data, error: failure } = await supabase.rpc('manage_website_post', {
+      ...values, p_request_id: attempt.current.id,
+    });
+    if (stale()) return null;
+    if (failure) {
+      console.error('Website post action failed', { code: failure.code });
+      if (failure.code === '42501') setDenied(true);
+      if (failure.code === '40001') {
+        setConflict(true);
+        throw new Error('This update changed elsewhere. Refresh the list and reopen it before saving.');
+      }
+      if (failure.code === '22023' && failure.message.includes('website_post_invalid:pricing_not_permitted')) {
+        throw new Error('Do not publish prices, hourly rates or discounts. Each job is quoted for its scope and risk after a site assessment.');
+      }
+      if (failure.code === '22023') throw new Error('Check the title, update text, photo and photo description before trying again.');
+      throw new Error('The action was not confirmed. Keep your text and retry unchanged, or refresh to verify the saved state.');
+    }
+    const saved = parseWebsitePost(data);
+    if (saved.id !== values.p_post_id || saved.version !== values.p_expected_version + 1
+      || (action === 'publish' && !saved.published_content)
+      || (action === 'unpublish' && saved.published_content)) {
+      throw new Error('The action receipt could not be verified. Refresh before continuing.');
+    }
+    attempt.current = null;
+    setSelected(saved);
+    setPosts(previous => [saved, ...previous.filter(post => post.id !== saved.id)].slice(0, 100));
+    return saved;
+  }
+
+  async function save(action: 'save' | 'publish' | 'unpublish') {
+    if (inFlight.current || preparing || conflict || loading || !listAvailable || !form.current?.reportValidity()) return;
+    if (action === 'publish' && (!approved || (hasPhoto && !draft.photo_alt.trim()))) return;
+    const operation = generation.current;
+    const stale = () => currentContext.current !== context || generation.current !== operation;
+    inFlight.current = true;
     setBusy(true); setError(null); setNotice(null); setConfirmUnpublish(false);
     try {
-      const { data, error: failure } = await supabase.rpc('manage_website_post', {
-        ...values, p_request_id: attempt.current.id,
-      });
-      if (currentContext.current !== context || generation.current !== operation) return;
-      if (failure) {
-        console.error('Website post action failed', { code: failure.code });
-        if (failure.code === '42501') setDenied(true);
-        if (failure.code === '40001') {
-          setConflict(true);
-          throw new Error('This update changed elsewhere. Refresh the list and reopen it before saving.');
+      let base = selected;
+      let next = draft;
+      if (pending && action !== 'unpublish') {
+        // Storage only accepts photos for an existing post, so a new update is saved privately first.
+        if (!base) {
+          base = await commit('save', null, { ...draft, photo_path: null }, stale);
+          if (!base) return;
         }
-        if (failure.code === '22023' && failure.message.includes('website_post_invalid:pricing_not_permitted')) {
-          throw new Error('Do not publish prices, hourly rates or discounts. Each job is quoted for its scope and risk after a site assessment.');
+        const path = `${base.provider_organization_id}/${base.id}/${crypto.randomUUID()}.jpg`;
+        const { error: failure } = await supabase.storage.from('website-post-images').upload(path, pending.photo, {
+          contentType: 'image/jpeg', upsert: false,
+        });
+        if (stale()) return;
+        if (failure) {
+          console.error('Website draft photo upload failed', { code: failure.name });
+          throw new Error('The photo upload was not confirmed. Your update text has been saved privately; save again to retry the photo.');
         }
-        if (failure.code === '22023') throw new Error('Check the title, update text, photo and photo description before trying again.');
-        throw new Error('The action was not confirmed. Keep your text and retry unchanged, or refresh to verify the saved state.');
+        next = { ...draft, photo_path: path };
+        setPending(null);
+        setDraft(next);
       }
-      const saved = parseWebsitePost(data);
-      if (saved.id !== values.p_post_id || saved.version !== values.p_expected_version + 1
-        || (action === 'publish' && !saved.published_content)
-        || (action === 'unpublish' && saved.published_content)) {
-        throw new Error('The action receipt could not be verified. Refresh before continuing.');
-      }
-      setSelected(saved); setDraft(draftOf(saved)); setApproved(false); attempt.current = null;
-      setPosts(previous => [saved, ...previous.filter(post => post.id !== saved.id)].slice(0, 100));
+      const saved = await commit(action, base, next, stale);
+      if (!saved) return;
+      setDraft(draftOf(saved)); setApproved(false);
       setNotice(action === 'publish' ? 'Published to the website. Open the public update to check it.'
         : action === 'unpublish' ? 'Unpublished. This update is now a private draft.'
           : saved.published_content ? 'Draft saved. The published version is unchanged.' : 'Private draft saved.');
     } catch (failure) {
-      if (currentContext.current === context && generation.current === operation) setError(failure instanceof Error ? failure.message : 'The action was not confirmed. Refresh to verify its state.');
+      if (!stale()) setError(failure instanceof Error ? failure.message : 'The action was not confirmed. Refresh to verify its state.');
     } finally {
-      if (currentContext.current === context && generation.current === operation) { inFlight.current = false; setBusy(false); }
+      if (!stale()) { inFlight.current = false; setBusy(false); }
     }
   }
 
-  async function upload(file: File) {
-    if (!selected || inFlight.current || conflict || loading || !listAvailable) return;
+  async function choosePhoto(file: File) {
     const operation = generation.current;
-    inFlight.current = true;
-    setBusy(true); setError(null); setNotice(null);
+    setPreparing(true); setError(null); setNotice(null);
     try {
       const photo = await prepareWebsitePhoto(file);
       if (currentContext.current !== context || generation.current !== operation) return;
-      const path = `${selected.provider_organization_id}/${selected.id}/${crypto.randomUUID()}.jpg`;
-      const { error: failure } = await supabase.storage.from('website-post-images').upload(path, photo, {
-        contentType: 'image/jpeg', upsert: false,
-      });
-      if (currentContext.current !== context || generation.current !== operation) return;
-      if (failure) {
-        console.error('Website draft photo upload failed', { code: failure.name });
-        throw new Error('The photo upload was not confirmed. Your update text has been kept; choose the photo again to retry.');
-      }
-      change('photo_path', path);
-      setNotice('Photo uploaded privately. Save the draft or publish to attach it to the update.');
+      setPending({ photo, url: URL.createObjectURL(photo) });
+      change('photo_path', null);
+      setNotice('Photo ready. It is uploaded privately when you save the draft or publish.');
     } catch (failure) {
-      if (currentContext.current === context && generation.current === operation) setError(failure instanceof Error ? failure.message : 'The photo could not be processed or uploaded.');
+      if (currentContext.current === context && generation.current === operation) setError(failure instanceof Error ? failure.message : 'The photo could not be processed.');
     } finally {
-      if (currentContext.current === context && generation.current === operation) { inFlight.current = false; setBusy(false); }
+      if (currentContext.current === context && generation.current === operation) setPreparing(false);
     }
   }
 
@@ -222,22 +248,23 @@ export default function WebsitePostsPage({ onNavigate }: { onNavigate: NavigateW
           <p>When no summary is entered, the first part of the update is used.</p>
           <label>Update text<textarea rows={10} maxLength={20000} value={draft.body} onChange={event => change('body', event.target.value)} /></label>
           <p>Plain text and paragraphs. Do not include private operational, customer or staff information. Do not publish prices or rates: each job is quoted after a site assessment.</p>
-          <label>Add photo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={!selected} onChange={event => {
-            const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file);
+          <label>Add photo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={preparing} onChange={event => {
+            const file = event.target.files?.[0]; event.target.value = ''; if (file) void choosePhoto(file);
           }} /></label>
-          <p>{selected ? 'JPEG, PNG or WebP, up to 10 MB. Photos are resized and metadata is removed before upload.' : 'Save your first draft to enable photo upload.'}</p>
-          {draft.photo_path && <div className="website-posts-photo">
-            {preview && <img src={preview} alt={draft.photo_alt || 'Private draft photo preview'} />}
+          <p>{preparing ? 'Preparing photo...' : 'JPEG, PNG or WebP, up to 10 MB. Photos are resized and metadata is removed before upload.'}</p>
+          {hasPhoto && <div className="website-posts-photo">
+            {pending ? <img src={pending.url} alt={draft.photo_alt || 'Photo preview, not yet uploaded'} />
+              : preview && <img src={preview} alt={draft.photo_alt || 'Private draft photo preview'} />}
             <label>Photo description<input maxLength={240} value={draft.photo_alt}
               onChange={event => change('photo_alt', event.target.value)} /></label>
             <p>A description is required when publishing a photo.</p>
-            <button type="button" className="btn btn-secondary" onClick={() => { change('photo_path', null); change('photo_alt', ''); }}>Remove photo from draft</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setPending(null); change('photo_path', null); change('photo_alt', ''); }}>Remove photo from draft</button>
           </div>}
           <label className="website-posts-approval"><input type="checkbox" checked={approved}
             onChange={event => setApproved(event.target.checked)} /> I confirm this text and photo are approved for the public website.</label>
           <div className="website-posts-actions">
             <button type="submit" className="btn btn-secondary">Save draft</button>
-            <button type="button" className="btn btn-primary" disabled={!approved || !draft.body.trim() || Boolean(draft.photo_path && !draft.photo_alt.trim())}
+            <button type="button" className="btn btn-primary" disabled={!approved || preparing || !draft.body.trim() || (hasPhoto && !draft.photo_alt.trim())}
               onClick={() => void save('publish')}>{selected?.published_content ? 'Publish changes' : 'Publish to website'}</button>
             {selected?.published_content && <button type="button" className="btn btn-secondary" onClick={() => setConfirmUnpublish(true)}>Unpublish</button>}
           </div>
