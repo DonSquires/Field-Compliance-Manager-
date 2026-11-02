@@ -325,4 +325,7 @@ test('rate-limit identity prefers the proxy-set client address over a spoofable 
   assert.equal(clientIpFromHeaders(headers({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' })), '203.0.113.9');
   assert.equal(clientIpFromHeaders(headers({ 'x-real-ip': '192.0.2.4' })), '192.0.2.4');
   assert.equal(clientIpFromHeaders(headers({})), 'unknown');
+
+  const comment = read('supabase/migrations/20261103120100_website_enquiry_client_hash_comment.sql');
+  assert.match(comment, /COMMENT ON COLUMN public\.website_enquiries\.client_hash IS\s+'[^']*CF-Connecting-IP, else the first X-Forwarded-For entry, else X-Real-IP/);
 });

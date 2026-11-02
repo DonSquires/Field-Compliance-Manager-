@@ -390,8 +390,8 @@ entities; the live migration ledger ends at `20261103100000`):
   enquiries and IP hashes is not yet set. `WEBSITE_ENQUIRY_SALT` must be set as
   a function secret; until then the salt falls back to a hash of the
   service-role key. `enqueue_notification` keeps its existing anon EXECUTE
-  grant; that is outside this change. Grand masters see enquiries but not the
-  role-addressed notifications.
+  grant; that is outside this change and is closed by the next entry. Grand
+  masters see enquiries but not the role-addressed notifications.
 - **Evidence gate:** a rolled-back DO-block dry run on the live catalog
   confirmed RLS, grants, the rate limit, review rules, stale-version rejection,
   notifications and the audit row, and left the catalog unchanged. The root
@@ -399,6 +399,36 @@ entities; the live migration ledger ends at `20261103100000`):
   Playwright runs of the enquiry page pass. `schema.sql` and Atlas must be
   refreshed after the release lane applies the migration. No human walkthrough
   has been done yet.
+
+Notifications written by server code only, 2026-11-03 (live Atlas lists
+`enqueue_notification` as a wired rpc with 38 SQL callers and 3 edge functions):
+
+- **Before:** `enqueue_notification` is SECURITY DEFINER, checks no caller and
+  was executable by PUBLIC, anon and authenticated. With only the public anon
+  key from the web bundle, a live call ran the function body (it stopped at its
+  own recipient check, so nothing was written). Anyone could have sent any
+  user or role in any organisation a notification with any title, body and
+  link, bypassing the `notifications_insert` policy.
+- **During:** migration `20261103120000` revokes EXECUTE from PUBLIC, anon and
+  authenticated and keeps it for the service role. Every caller keeps working:
+  all 38 SQL callers are SECURITY DEFINER, the `bob-chat-bell-notify`,
+  `notify-credential-expiry` and `welfare-escalation-tick` edge functions use
+  the service role, and no web or mobile code calls it. The migration refuses
+  to apply if a caller runs with the caller's rights or a definer caller's
+  owner would lose EXECUTE. Migration `20261103120100` corrects the
+  `website_enquiries.client_hash` comment to the address order the edge
+  function actually uses (CF-Connecting-IP first).
+- **Left as is, with reasons:** organisation admins can still insert
+  notifications directly through the `notifications_insert` policy for their
+  own organisations; that is the designed admin path and RLS-checked.
+- **Evidence gate:** the root test `enqueue-notification-server-only` checks
+  the grants, scans `schema.sql` and later migrations for caller-rights
+  callers, and checks that clients never call the RPC and edge functions call
+  it only on a service-role client. A PGlite dry run applied the migration to a
+  live-shaped fixture: clients were denied, definer RPCs and triggers and the
+  service role still notified, re-applying was harmless, and each guard failure
+  rolled back with the grants unchanged. `schema.sql` and Atlas must be
+  refreshed after the release lane applies it.
 
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
