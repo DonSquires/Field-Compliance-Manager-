@@ -397,6 +397,40 @@ test('every allowed service has an alert label and the subject never carries vis
   assert.doesNotMatch(quiet.html, /Replying to this email goes/);
 });
 
+test('enquiry emails use the supplied Iron Eagle logo on the left and R&M logo on the right', async () => {
+  const { buildEnquiryAlert, validateEnquiry } = await loadModules();
+  const parsed = validateEnquiry(validEnquiry());
+  assert.equal(parsed.ok, true);
+  const alert = buildEnquiryAlert({ reference: 'ENQ-1A2B3C', enquiry: parsed.enquiry, receivedAt: new Date(0) });
+  const images = [...alert.html.matchAll(/<td align="(left|right)" valign="middle"[^>]*><img src="([^"]+)" alt="([^"]+)" width="(\d+)" height="(\d+)"/g)]
+    .map(([, alignment, url, alt, width, height]) => ({ alignment, url, alt, width, height }));
+  assert.deepEqual(images, [
+    {
+      alignment: 'left',
+      url: 'https://www.fcmanager.co.nz/assets/email/iron-eagle-brand-20261102.png',
+      alt: 'Iron Eagle Security',
+      width: '110',
+      height: '57',
+    },
+    {
+      alignment: 'right',
+      url: 'https://www.fcmanager.co.nz/assets/email/rm-security-brand-20261102.png',
+      alt: 'R&amp;M Security and Investigations',
+      width: '142',
+      height: '42',
+    },
+  ]);
+  assert.match(alert.html, /Field Compliance Manager/);
+  for (const [image, expectedWidth, expectedHeight] of [[images[0], 330, 170], [images[1], 426, 125]]) {
+    const path = resolve(root, 'apps/web/public', `.${new URL(image.url).pathname}`);
+    const png = readFileSync(path);
+    assert.deepEqual(png.subarray(0, 8), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    assert.equal(png.readUInt32BE(16), expectedWidth);
+    assert.equal(png.readUInt32BE(20), expectedHeight);
+    assert.ok(png.length < 65_536);
+  }
+});
+
 test('branded HTML escapes enquiry values while retaining the plain-text details', async () => {
   const { buildEnquiryAlert, validateEnquiry } = await loadModules();
   const parsed = validateEnquiry(validEnquiry());

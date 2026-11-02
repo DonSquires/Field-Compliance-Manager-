@@ -21,7 +21,8 @@ export const SERVICE_LABELS = Object.freeze({
 });
 
 const PREFERRED_LABELS = Object.freeze({ email: 'Email', phone: 'Phone', either: 'Email or phone' });
-const FCM_LOGO_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg';
+const IRON_EAGLE_LOGO_URL = 'https://www.fcmanager.co.nz/assets/email/iron-eagle-brand-20261102.png';
+const RM_SECURITY_LOGO_URL = 'https://www.fcmanager.co.nz/assets/email/rm-security-brand-20261102.png';
 
 // Stricter than the intake rule: only a plain address is safe as a Reply-To.
 const PLAIN_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
@@ -161,13 +162,14 @@ export function buildEnquiryAlert({ reference, enquiry, receivedAt, reviewUrl = 
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#07131b;">
     <tr><td align="center" style="padding:24px 12px;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#0c202b;">
-        <tr><td style="padding:24px;background:#07131b;border-bottom:3px solid #14c8d4;">
-          <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-            <td valign="middle" style="padding-right:16px;"><img src="${FCM_LOGO_URL}" alt="Iron Eagle Security" width="48" height="64" style="display:block;border:0;"></td>
-            <td valign="middle"><div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#55d7de;">FCM</div>
-              <div style="font-size:20px;line-height:1.3;font-weight:700;color:#f5f9fb;">Field Compliance Manager</div>
-              <div style="margin-top:4px;font-size:13px;color:#b8cad4;">Website enquiry</div></td>
+        <tr><td style="padding:20px 16px 24px;background:#07131b;border-bottom:3px solid #14c8d4;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+            <td align="left" valign="middle" style="padding-right:8px;"><img src="${IRON_EAGLE_LOGO_URL}" alt="Iron Eagle Security" width="110" height="57" style="display:block;width:110px;max-width:100%;height:auto;border:0;"></td>
+            <td align="right" valign="middle"><img src="${RM_SECURITY_LOGO_URL}" alt="R&amp;M Security and Investigations" width="142" height="42" style="display:block;width:142px;max-width:100%;height:auto;border:0;"></td>
           </tr></table>
+          <div style="margin-top:20px;font-size:12px;font-weight:700;letter-spacing:1px;color:#55d7de;">FCM</div>
+          <div style="font-size:20px;line-height:1.3;font-weight:700;color:#f5f9fb;">Field Compliance Manager</div>
+          <div style="margin-top:4px;font-size:13px;color:#b8cad4;">Website enquiry</div>
         </td></tr>
         <tr><td style="padding:24px;font-size:15px;line-height:1.5;">
           <p style="margin:0 0 18px;font-size:18px;font-weight:700;">A new enquiry has arrived from the R&amp;M website.</p>

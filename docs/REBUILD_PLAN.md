@@ -447,8 +447,11 @@ must be sent to admin@remsec.co.nz and don@remsec.co.nz"; no schema change):
   and plain-text alternative contain the same enquiry details, and both are
   sent as base64 because denomailer 1.6.0 wraps quoted-printable text without
   dot-stuffing, so visitor text could otherwise end the SMTP message early.
-  The HTML escapes visitor text, uses the app's public Iron Eagle logo and
-  displays the FCM name even when email images are blocked. Only HTTP(S)
+  The HTML escapes visitor text and displays the owner's supplied Iron Eagle
+  logo on the left and the R&M website logo on the right. Versioned public
+  copies are deployed with the FCM web app and must remain available for
+  previously sent emails. The FCM name remains visible when images are
+  blocked and both logos have alternative text. Only HTTP(S)
   review links without credentials are rendered; invalid `SITE_URL` values
   are omitted and logged without echoing the configured value.
   Each alert writes `audit_log` action `website_enquiry_email_alert` against
@@ -456,8 +459,9 @@ must be sent to admin@remsec.co.nz and don@remsec.co.nz"; no schema change):
   `smtp_port_blocked`) or `failed` (`smtp_timeout` or `smtp_error`) and the
   recipient count, never the enquiry details.
 - **Left as is, with reasons:** SMTP is configured live and two synthetic
-  alerts recorded `sent` for two recipients. The owner confirmed their
-  arrival in Don's inbox; receipt in the admin inbox remains unconfirmed.
+  alerts recorded `sent` for two recipients. The owner confirmed earlier
+  alerts in Don's inbox and confirmed the branded test arrived, without
+  specifying the inbox; receipt in the admin inbox remains unconfirmed.
   Supabase Edge Functions block ports 25
   and 587, so this alert defaults to 465 and refuses 25 and 587. The older SMTP
   senders (`send-invoice`, `send-report-pack`, `send-capability-share-invite`)
