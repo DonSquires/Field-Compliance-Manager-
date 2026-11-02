@@ -39372,6 +39372,16 @@ export type Database = {
         }
         Returns: string
       }
+      builder_vibe_send_with_attachments_opt_in: {
+        Args: {
+          p_allow_ollama_cloud: boolean
+          p_attachment_ids: string[]
+          p_client_request_id: string
+          p_content: string
+          p_session_id: string
+        }
+        Returns: string
+      }
       builder_vibe_session_close: {
         Args: { p_session_id: string }
         Returns: undefined
