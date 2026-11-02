@@ -18,7 +18,8 @@ export async function loadOfficerTimesheetWork(periodStart: string, periodEnd: s
     p_period_end: periodEnd,
   });
   if (error) throw error;
-  return Array.isArray(data) ? data as TimesheetWorkEntry[] : [];
+  if (!Array.isArray(data)) throw new Error('Timesheet work preview was not confirmed.');
+  return data as TimesheetWorkEntry[];
 }
 
 export async function submitOfficerTimesheetFromWork(

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { configDefaults } from 'vitest/config';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 
 // One identity per deployed build. An open tab compares it with /version.json so a user is told
@@ -58,5 +59,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    alias: [
+      { find: /^react-native$/, replacement: fileURLToPath(new URL('./test/mocks/reactNative.tsx', import.meta.url)) },
+      { find: /^react(?=\/|$)/, replacement: fileURLToPath(new URL('./node_modules/react', import.meta.url)) },
+    ],
   },
 });

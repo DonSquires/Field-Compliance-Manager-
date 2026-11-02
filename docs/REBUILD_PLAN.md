@@ -8,6 +8,33 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
+
+- **Before:** a late response for an earlier period could replace the selected
+  work on web or mobile; a failed or absent preview could look like empty work.
+  A correction could commit while its receipt was lost, leaving a rejected row
+  visible and inviting another attempt.
+- **During:** previews are tied to the officer and selected dates; obsolete
+  responses are ignored, failures are explicit and retryable, and submission
+  waits for both a confirmed preview and an available timesheet list. A new
+  submission reuses its client event ID only while its inputs are unchanged.
+  Web preserves a confirmed receipt if its list refresh fails. Because
+  `resubmit_rejected_timesheet_from_work` has no client event ID, a lost
+  correction receipt triggers a status refresh without claiming success;
+  another attempt stays blocked while the row cannot be verified.
+- **After:** the current list and receipt determine what the officer sees;
+  an unavailable list is not presented as an empty one. The submission RPC
+  still recalculates work and remains authoritative for payroll records.
+  Atlas shows both client helpers calling `get_officer_timesheet_work`; that
+  wired path is not invocation evidence. The stale Atlas
+  `timesheets.submitted_at` column flag is not an unwired feature: the schema
+  has writers and the web list reads it. The current generator does not create
+  column edges, and no Atlas row has been hand-edited.
+- **Evidence boundary:** offline browser tests use synthetic requests on desktop
+  and phone layouts. Component tests use a React Native stand-in, not a real
+  device. Local tests and builds do not prove live payroll behavior or human
+  acceptance; publication and normal post-merge Atlas refresh remain separate.
+
 Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
 
 - Before: any attachment on the current message excludes cloud fallback;

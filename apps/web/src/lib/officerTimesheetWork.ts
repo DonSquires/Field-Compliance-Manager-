@@ -14,7 +14,8 @@ export type TimesheetWorkEntry = {
 export async function loadOfficerTimesheetWork(periodStart: string, periodEnd: string): Promise<TimesheetWorkEntry[]> {
   const { data, error } = await supabase.rpc('get_officer_timesheet_work', { p_period_start: periodStart, p_period_end: periodEnd });
   if (error) throw error;
-  return Array.isArray(data) ? data as TimesheetWorkEntry[] : [];
+  if (!Array.isArray(data)) throw new Error('Timesheet work preview was not confirmed.');
+  return data as TimesheetWorkEntry[];
 }
 
 export async function submitOfficerTimesheetFromWork(clientEventId: string, periodStart: string, periodEnd: string, adjustmentHours: number, notes: string) {
