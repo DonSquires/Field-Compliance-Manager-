@@ -443,16 +443,22 @@ must be sent to admin@remsec.co.nz and don@remsec.co.nz"; no schema change):
   the visitor's address when it is plain. The alert runs in the background
   (`EdgeRuntime.waitUntil`) after the lead is stored; a failed alert is logged
   by reference only and never changes the visitor's response. The subject
-  carries only the reference and allowlisted service labels. The body is sent
-  as base64 because denomailer 1.6.0 wraps quoted-printable text without
+  carries only the reference and allowlisted service labels. The branded HTML
+  and plain-text alternative contain the same enquiry details, and both are
+  sent as base64 because denomailer 1.6.0 wraps quoted-printable text without
   dot-stuffing, so visitor text could otherwise end the SMTP message early.
+  The HTML escapes visitor text, uses the app's public Iron Eagle logo and
+  displays the FCM name even when email images are blocked. Only HTTP(S)
+  review links without credentials are rendered; invalid `SITE_URL` values
+  are omitted and logged without echoing the configured value.
   Each alert writes `audit_log` action `website_enquiry_email_alert` against
   the enquiry with `result` `sent`, `skipped` (`smtp_not_configured` or
   `smtp_port_blocked`) or `failed` (`smtp_timeout` or `smtp_error`) and the
   recipient count, never the enquiry details.
-- **Left as is, with reasons:** whether SMTP secrets are set live is
-  unconfirmed; until they are, every alert records `skipped` and the in-app
-  notification remains the only signal. Supabase Edge Functions block ports 25
+- **Left as is, with reasons:** SMTP is configured live and two synthetic
+  alerts recorded `sent` for two recipients. The owner confirmed their
+  arrival in Don's inbox; receipt in the admin inbox remains unconfirmed.
+  Supabase Edge Functions block ports 25
   and 587, so this alert defaults to 465 and refuses 25 and 587. The older SMTP
   senders (`send-invoice`, `send-report-pack`, `send-capability-share-invite`)
   still default to 587 and use the quoted-printable path; they are outside this
@@ -460,8 +466,11 @@ must be sent to admin@remsec.co.nz and don@remsec.co.nz"; no schema change):
 - **Evidence gate:** the root `website-enquiry-contract` test covers the
   recipients, header-safe subject, line-break handling, base64 body, the
   alert running only after a stored reference, failure isolation and the
-  background path; `deno check` passes. Live delivery is proved only by a test
-  enquiry, a `sent` audit row and the email arriving in both inboxes.
+  background path; the synthetic loopback SMTP test
+  (`deno test --allow-net=127.0.0.1 test/website-enquiry-smtp-integration.test.ts`)
+  captures the pinned client's actual MIME output.
+  `deno check` passes. Live delivery is proved only by a test enquiry, a
+  `sent` audit row and the email arriving in both inboxes.
 
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable

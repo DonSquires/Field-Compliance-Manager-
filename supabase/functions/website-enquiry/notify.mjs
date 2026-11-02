@@ -21,6 +21,7 @@ export const SERVICE_LABELS = Object.freeze({
 });
 
 const PREFERRED_LABELS = Object.freeze({ email: 'Email', phone: 'Phone', either: 'Email or phone' });
+const FCM_LOGO_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg';
 
 // Stricter than the intake rule: only a plain address is safe as a Reply-To.
 const PLAIN_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
@@ -58,6 +59,29 @@ function multiLine(value) {
     .trim();
 }
 
+/** @param {string} value */
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/** @param {string | null} value */
+function safeReviewHref(value) {
+  if (!value || /[\u0000-\u0020\u007f]/.test(value)) return null;
+  try {
+    const url = new URL(value);
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
+  } catch (error) {
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
+}
+
 /** @param {Date} date */
 function aucklandTime(date) {
   return new Intl.DateTimeFormat('en-NZ', {
@@ -77,13 +101,16 @@ function aucklandTime(date) {
 
 /**
  * @param {EnquiryAlertInput} input
- * @returns {{ subject: string, text: string, replyTo: string | null }}
+ * @returns {{ subject: string, text: string, html: string, replyTo: string | null, invalidReviewUrl: boolean }}
  */
 export function buildEnquiryAlert({ reference, enquiry, receivedAt, reviewUrl = null }) {
   const services = enquiry.services.map((slug) => SERVICE_LABELS[/** @type {keyof typeof SERVICE_LABELS} */ (slug)] ?? slug);
   const firstService = services[0];
   const subjectService = firstService ? `: ${firstService}${services.length > 1 ? ` +${services.length - 1}` : ''}` : '';
   const replyTo = enquiry.email && isPlainAddress(enquiry.email) ? enquiry.email : null;
+  const reviewHref = safeReviewHref(reviewUrl);
+  const invalidReviewUrl = Boolean(reviewUrl && !reviewHref);
+  const message = multiLine(enquiry.message);
 
   /** @type {Array<[string, string]>} */
   const rows = [
@@ -105,23 +132,72 @@ export function buildEnquiryAlert({ reference, enquiry, receivedAt, reviewUrl = 
     ...rows.map(([label, value]) => `${label}: ${value}`),
     '',
     'Message:',
-    multiLine(enquiry.message),
+    message,
     '',
     '---',
     'Reply, convert or close this enquiry in Field Compliance Manager: CRM > Website enquiries.',
   ];
-  if (reviewUrl) lines.push(reviewUrl);
+  if (reviewUrl && reviewHref) lines.push(reviewUrl);
+  if (invalidReviewUrl) lines.push('Review link unavailable; ask an administrator to check SITE_URL.');
   if (replyTo) lines.push('Replying to this email goes to the person who sent the enquiry.');
+
+  const detailRows = rows.map(([label, value]) => `
+    <tr>
+      <th scope="row" align="left" valign="top" style="padding:8px 12px 8px 0;color:#b8cad4;font-weight:600;white-space:nowrap;">${escapeHtml(label)}</th>
+      <td valign="top" style="padding:8px 0;color:#f5f9fb;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(value)}</td>
+    </tr>`).join('');
+  const reviewLink = reviewUrl && reviewHref
+    ? `<p style="margin:12px 0 0;"><a href="${escapeHtml(reviewHref)}" style="color:#55d7de;word-break:break-all;">${escapeHtml(reviewUrl)}</a></p>`
+    : invalidReviewUrl
+      ? '<p style="margin:12px 0 0;">Review link unavailable; ask an administrator to check SITE_URL.</p>'
+      : '';
+  const replyHint = replyTo
+    ? '<p style="margin:12px 0 0;">Replying to this email goes to the person who sent the enquiry.</p>'
+    : '';
+  const html = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#07131b;color:#f5f9fb;font-family:Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#07131b;">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#0c202b;">
+        <tr><td style="padding:24px;background:#07131b;border-bottom:3px solid #14c8d4;">
+          <table role="presentation" cellspacing="0" cellpadding="0"><tr>
+            <td valign="middle" style="padding-right:16px;"><img src="${FCM_LOGO_URL}" alt="Iron Eagle Security" width="48" height="64" style="display:block;border:0;"></td>
+            <td valign="middle"><div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#55d7de;">FCM</div>
+              <div style="font-size:20px;line-height:1.3;font-weight:700;color:#f5f9fb;">Field Compliance Manager</div>
+              <div style="margin-top:4px;font-size:13px;color:#b8cad4;">Website enquiry</div></td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:24px;font-size:15px;line-height:1.5;">
+          <p style="margin:0 0 18px;font-size:18px;font-weight:700;">A new enquiry has arrived from the R&amp;M website.</p>
+          <table width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;line-height:1.4;border-collapse:collapse;">${detailRows}
+          </table>
+          <div style="margin-top:20px;padding:16px;background:#112c3a;">
+            <div style="margin-bottom:8px;color:#b8cad4;font-size:13px;font-weight:700;">Message</div>
+            <div style="color:#f5f9fb;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(message).replace(/\n/g, '<br>')}</div>
+          </div>
+          <div style="margin-top:24px;padding-top:16px;border-top:1px solid #31515f;color:#b8cad4;font-size:13px;">
+            <p style="margin:0;">Reply, convert or close this enquiry in Field Compliance Manager: CRM &gt; Website enquiries.</p>${reviewLink}${replyHint}
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 
   return {
     subject: `Website enquiry ${reference}${subjectService}`,
     text: `${lines.join('\n')}\n`,
+    html,
     replyTo,
+    invalidReviewUrl,
   };
 }
 
 /**
- * Base64 body for a text/plain MIME part, in 76-character CRLF lines.
+ * Base64 body for a text MIME part, in 76-character CRLF lines.
  * denomailer's own quoted-printable path wraps every 74 characters without
  * dot-stuffing, so visitor text could start a line with "." and end the SMTP
  * DATA block early. Base64 never contains "." or bare line feeds.
@@ -135,4 +211,15 @@ export function encodeBase64Body(text) {
   }
   const encoded = btoa(binary);
   return (encoded.match(/.{1,76}/g) ?? ['']).join('\r\n');
+}
+
+/**
+ * @param {{ text: string, html: string }} message
+ * @returns {Array<{ mimeType: string, content: string, transferEncoding: 'base64' }>}
+ */
+export function buildAlertMimeContent(message) {
+  return [
+    { mimeType: 'text/plain; charset="utf-8"', content: encodeBase64Body(message.text), transferEncoding: 'base64' },
+    { mimeType: 'text/html; charset="utf-8"', content: encodeBase64Body(message.html), transferEncoding: 'base64' },
+  ];
 }

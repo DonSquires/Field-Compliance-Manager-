@@ -20,7 +20,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 import { createWebsiteEnquiryHandler } from './handler.mjs';
-import { buildEnquiryAlert, encodeBase64Body, resolveAlertRecipients } from './notify.mjs';
+import { buildAlertMimeContent, buildEnquiryAlert, resolveAlertRecipients } from './notify.mjs';
 import { sha256Hex } from './validate.mjs';
 
 const ALERT_TIMEOUT_MS = 20_000;
@@ -107,6 +107,9 @@ async function sendEnquiryAlert(alert: Parameters<typeof buildEnquiryAlert>[0]):
   const from = Deno.env.get('SMTP_FROM')?.trim() || user;
   const siteUrl = (Deno.env.get('SITE_URL')?.trim() || 'https://fcmanager.co.nz').replace(/\/+$/, '');
   const message = buildEnquiryAlert({ ...alert, reviewUrl: siteUrl });
+  if (message.invalidReviewUrl) {
+    console.warn('website-enquiry: SITE_URL is invalid; review link omitted', { reference: alert.reference });
+  }
 
   const smtp = new SMTPClient({
     connection: { hostname: host, port, tls: port === 465, auth: { username: user, password: pass } },
@@ -117,11 +120,7 @@ async function sendEnquiryAlert(alert: Parameters<typeof buildEnquiryAlert>[0]):
         from,
         to: recipients,
         subject: message.subject,
-        mimeContent: [{
-          mimeType: 'text/plain; charset="utf-8"',
-          content: encodeBase64Body(message.text),
-          transferEncoding: 'base64',
-        }],
+        mimeContent: buildAlertMimeContent(message),
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       }),
       ALERT_TIMEOUT_MS,
