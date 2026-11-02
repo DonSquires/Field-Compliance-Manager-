@@ -1,0 +1,65 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { knownSignatureFor, normalizeFailureText, planRoutineIntake, routineRepairBrief, routineSignature } = require('../builder-routine-intake');
+
+const packet = (id, page, message, failed) => ({
+  id,
+  envelope: {
+    before: { page, module: 'admin' },
+    during: { error: { kind: failed ? 'http_error' : 'exception', message }, ...(failed ? { failed_request: failed } : {}) },
+    expected: {},
+  },
+  basis: {},
+});
+
+test('failure signatures ignore the page, deployment hashes, and asset names', () => {
+  const hub = packet('p1', '/admin/hub', "Cannot read properties of undefined (reading '_leaflet_pos')");
+  const subs = packet('p2', '/admin/module-subscriptions', "Cannot read properties of undefined (reading '_leaflet_pos')");
+  assert.equal(routineSignature(hub), routineSignature(subs));
+  assert.equal(routineSignature(hub), 'known:leaflet_after_unmount');
+
+  const jsChunk = packet('p3', '/admin/users', 'Failed to fetch dynamically imported module: https://www.fcmanager.co.nz/assets/UserManagementPage-BXAa7IKO.js');
+  const cssChunk = packet('p4', '/admin/hub', 'Unable to preload CSS for /assets/HubPage-Q1w2E3r4.css');
+  assert.equal(routineSignature(jsChunk), 'known:stale_code_split_chunk');
+  assert.equal(routineSignature(jsChunk), routineSignature(cssChunk));
+
+  const failed = { fn: 'rest/access_presets', status: 500 };
+  const platform = packet('p5', '/admin/platform', "Dr Bob's read-only production walk of 2aae6e175322 saw GET rest/access_presets return HTTP 500 on /admin/platform.", failed);
+  const subscribers = packet('p6', '/admin/platform-subscribers', "Dr Bob's read-only production walk of 967bfa943f3f saw GET rest/access_presets return HTTP 500 on /admin/platform-subscribers.", failed);
+  const workshop = packet('p7', '/admin/workshop', "Dr Bob's read-only production walk of 967bfa943f3f saw GET rest/workshop_work_order_summary return HTTP 500 on /admin/workshop.", { fn: 'rest/workshop_work_order_summary', status: 500 });
+  assert.equal(routineSignature(platform), routineSignature(subscribers));
+  assert.notEqual(routineSignature(platform), routineSignature(workshop), 'different relations are different defects');
+  assert.equal(knownSignatureFor(platform).id, 'postgrest_server_error');
+
+  assert.equal(normalizeFailureText('Job 3f2a9c1d-1111-4222-8333-444455556666 failed at /admin/x after 12345 ms'), 'job <uuid> failed at <path> after <n> ms');
+  assert.notEqual(routineSignature(packet('a', '/x', 'TypeError: a is undefined')), routineSignature(packet('b', '/x', 'TypeError: b is undefined')));
+});
+
+test('one repair is opened per signature and open repairs cover new packets', () => {
+  const leafletHub = packet('p1', '/admin/hub', "reading '_leaflet_pos'");
+  const leafletSubs = packet('p2', '/admin/module-subscriptions', "reading '_leaflet_pos'");
+  const chunk = packet('p3', '/admin/users', 'Failed to fetch dynamically imported module: https://x/assets/A-12345678.js');
+  const other = packet('p4', '/admin/staff', 'TypeError: staff.map is not a function');
+  const { repairs, covered } = planRoutineIntake([leafletHub, chunk, leafletSubs, other], [{ jobId: 'job-chunk', signature: 'known:stale_code_split_chunk' }]);
+  assert.deepEqual(repairs.map((repair) => [repair.packet.id, repair.followers.map((follower) => follower.id)]), [['p1', ['p2']], ['p4', []]]);
+  assert.deepEqual(covered.map((entry) => [entry.packet.id, entry.jobId]), [['p3', 'job-chunk']]);
+  assert.deepEqual(planRoutineIntake([], []), { repairs: [], covered: [] });
+});
+
+test('the routine brief points at the shared root cause and every affected page', () => {
+  const hub = packet('p1', '/admin/hub', "Cannot read properties of undefined (reading '_leaflet_pos')");
+  const subs = packet('p2', '/admin/module-subscriptions', "Cannot read properties of undefined (reading '_leaflet_pos')");
+  const brief = routineRepairBrief(hub, { alsoReported: [subs, hub] });
+  assert.match(brief, /^Goal: repair the routine monitored defect recorded in friction packet p1\./);
+  assert.match(brief, /^Also reported on: \/admin\/module-subscriptions with the same failure signature/m);
+  assert.match(brief, /^Known signature: a Leaflet map is still animating/m);
+  assert.match(brief, /Likely shared files: apps\/web\/src\/components\/LocationHouseMap\.tsx/);
+  assert.match(brief, /record a scope_amendment with the reason/);
+  assert.match(brief, /^Routine boundary: .*Do not redesign, add a feature\/module\/workflow/m);
+  assert.doesNotMatch(routineRepairBrief(packet('p9', '/admin/x', 'TypeError: q is undefined')), /Known signature|Also reported on/);
+
+  const database = routineRepairBrief(packet('p5', '/admin/platform', 'GET rest/access_presets return HTTP 500', { fn: 'rest/access_presets', status: 500 }));
+  assert.match(database, /; request rest\/access_presets returned 500\./);
+  assert.match(database, /one new additive migration in supabase\/migrations\//);
+  assert.match(database, /Never weaken a policy/);
+});

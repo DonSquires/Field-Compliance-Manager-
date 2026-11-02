@@ -39,6 +39,75 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Builder and Vibe self-repair capability (2026-11-02)
+
+Before: a live read of Builder jobs found failures that were pipeline limits,
+not unfixable defects. Routine repair `34382d60` handed the verifier a
+duplicate TypeScript identifier, because no type check ran before handoff.
+Routine repairs `d5f65103` and `c604b921` reported the same
+Leaflet `_leaflet_pos` unmount error on two pages. The approved page scope
+refused the shared map component that holds the root cause, and the jobs were
+filed separately. Every routine repair was held as "significant" because its
+own guardrail text ("do not … schema/RLS/auth") matched the significance terms.
+Vibe sent one verification correction, then stopped at the step budget while a
+check was still failing.
+
+During:
+
+- Compile gate: `finish` runs `npm run lint --prefix apps/web` for changed web
+  TypeScript and `node --check` for changed JavaScript. A check that already
+  passed on the exact worktree fingerprint is not run again. Recognised
+  compiler output (`error TS…`, `SyntaxError`) is returned to the author as a
+  refused finish. A check that cannot run because of missing tooling, a
+  timeout or memory is recorded as `compile_gate.unavailable` and left to the
+  verifier. One bounded extension (`COMPILE_REPAIR_TURNS`) covers a compile
+  failure found in the last turns. `node --check` on a web `.ts/.tsx` file is
+  rewritten to the web type check. The frontend lane provisions web
+  dependencies (`prepareWorkspace`) before the author starts. Prompt version
+  is `agentic-engineer-v18`.
+- Scope amendments: when the root cause sits in another changed file in the
+  same lane, an acceptance entry may carry
+  `scope_amendment {file, reason}`. The reason must be at least 30
+  characters and the evidence must name the file. Protected, cross-lane and
+  unchanged files never qualify. Amendments travel in the proposal and in
+  `reconcileAcceptance` for code review and the release report.
+- Routine significance is judged only on the proposed outcome: the title, the
+  non-guardrail brief lines and the specification's problem, outcome, scope
+  and requirements, with negated clauses removed. Auth, dependency,
+  credential, redesign and architecture work is still held at the
+  specification gate.
+- Routine schema rule: a routine repair may add one migration when the root
+  cause is in the database. The release then holds structurally for
+  Grandmaster approval whenever any `supabase/migrations/` file changed.
+  Protected and evidential paths and the release lane are unchanged.
+- Routine intake (`builder-routine-intake.js`): friction packets are grouped
+  by a page-independent failure signature. Known signatures are stale
+  code-split chunks, Leaflet after unmount and PostgREST server errors; each
+  carries root-cause guidance. Each signature gets one repair job, and
+  matching packets are recorded with `covered_by_job_id`. They follow that
+  job's status instead of creating duplicate jobs.
+- Vibe (`vibe-v19`): failing verification gets up to `repairRounds`
+  corrections (default 3). After the first round, a further correction is sent
+  only when the failure signature changed or new edits landed. One
+  step-budget extension (`repairTurns`, `repairBudgetMs`) is granted while a
+  verification check is still failing.
+
+After: regression tests cover each rule:
+
+- `builder-agentic-engineer`: compile-gate refusal and recovery, unavailable
+  toolchain, syntax error, fingerprint reuse, TSX rewrite and amendment
+  accept/refuse cases.
+- `builder-implementation-acceptance`: amendments in reconciliation.
+- `builder-autopilot`: the guardrail boilerplate no longer holds a repair; a
+  migration holds the release.
+- `builder-routine-intake`: signature dedupe.
+- `builder-vibe-session`: repair rounds and extension.
+
+The migration `20261104090000_friction_packet_signature_cover.sql` adds the
+nullable cover column and index only. Human approval, code review, protected
+paths, the verified release identity and the PR-only path to `main` are
+unchanged.
+
 ### Owner-confirmed saved-patch verifier retry (2026-11-02)
 
 Before: successor job `402bfd7e-17f6-4b82-83c2-0a2048ec1722` is blocked after

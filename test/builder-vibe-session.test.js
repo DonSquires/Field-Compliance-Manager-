@@ -281,7 +281,7 @@ test('a continuation repairs the preserved failing draft and clears its exact ve
   installFixtureTypecheck(repo);
   const first = await vibe.processVibeMessage({
     store, message: ownerMessage('improve greeting without changing other behavior'), deps,
-    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1 },
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
   });
   assert.equal(first.error, true);
   const firstCommit = store.state.session.head_sha;
@@ -315,11 +315,72 @@ test('step-budget exhaustion still verifies and labels a broken draft', async ()
   ]);
   installFixtureTypecheck(repo);
   const result = await vibe.processVibeMessage({
-    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1 },
+    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
   });
   assert.equal(result.error, true);
   assert.match(result.reply, /Changes are not verified/);
   assert.match(result.reply, /ran out of steps/);
+});
+
+test('a step budget that runs out mid-repair is extended once so Bob can fix the failing check', async () => {
+  const { store, deps, repo, model } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'repair', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"hello"' } },
+    { thought: 'done', tool: 'reply', args: { message: 'Greeting repaired and checked.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({
+    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 3 },
+  });
+  assert.equal(result.error, undefined, result.reply);
+  assert.doesNotMatch(result.reply, /ran out of steps|not verified/);
+  const extension = store.state.rows.find(row => row.payload?.reason === 'verification_repair_extension');
+  assert.ok(extension, 'the extension is visible to the owner');
+  assert.equal(extension.payload.command, 'npm run lint --prefix apps/web');
+  assert.ok(model.calls[1].request.messages.some(row => String(row.content).includes('Step budget reached while npm run lint --prefix apps/web is failing')));
+  assert.equal(store.state.rows.filter(row => row.payload?.automatic).at(-1).payload.ok, true);
+
+  // The extension is granted once; a second exhaustion hands off the unverified draft.
+  const stuck = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'look', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'look again', tool: 'git_diff', args: {} },
+  ]);
+  installFixtureTypecheck(stuck.repo);
+  const unverified = await vibe.processVibeMessage({
+    store: stuck.store, message: ownerMessage('improve greeting'), deps: stuck.deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 2 },
+  });
+  assert.equal(unverified.error, true);
+  assert.match(unverified.reply, /Changes are not verified/);
+  assert.equal(stuck.store.state.rows.filter(row => row.payload?.reason === 'verification_repair_extension').length, 1);
+});
+
+test('failing checks get several repair rounds while Bob makes progress, then an honest unverified handoff', async () => {
+  const { store, deps, repo, model } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Done.' } },
+    { thought: 'partial', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: 'BROKEN /* still */' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Done now.' } },
+    { thought: 'repair', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN /* still */', new_text: '"hello"' } },
+    { thought: 'done', tool: 'reply', args: { message: 'Greeting repaired.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  const refusals = model.calls.flatMap(call => call.request.messages).filter(row => String(row.content).includes('Handoff refused: the latest verification failed'));
+  assert.ok(JSON.stringify(refusals).includes('repair round 2 of 3'));
+
+  // A repeated claim with no new edit and the same failure is not refused again.
+  const stuck = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Done.' } },
+    { thought: 'claim again', tool: 'reply', args: { message: 'Done.' } },
+  ]);
+  installFixtureTypecheck(stuck.repo);
+  const unverified = await vibe.processVibeMessage({ store: stuck.store, message: ownerMessage('improve greeting'), deps: stuck.deps });
+  assert.equal(unverified.error, true);
+  assert.match(unverified.reply, /Changes are not verified: npm run lint --prefix apps\/web failed/);
+  assert.equal(stuck.model.calls.length, 3);
 });
 
 test('vibe branch and workspace names are fixed to the session id', () => {

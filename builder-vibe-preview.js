@@ -100,6 +100,8 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
     }
     fs.rmSync(target, { recursive: true, force: true });
     execFileSync('cp', ['-al', cached, target]);
+    // apps/web/node_modules/.gitkeep is tracked; replacing the directory must not show up as a deletion.
+    try { execFileSync('git', ['checkout', '--', 'apps/web/node_modules/.gitkeep'], { cwd: workspacePath, stdio: 'ignore' }); } catch { /* not tracked at this commit */ }
     return target;
   }
 

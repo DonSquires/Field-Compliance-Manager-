@@ -60,6 +60,7 @@ function reconcileAcceptance(specification, bundles) {
       const claims = bundles.flatMap(bundle => (Array.isArray(bundle.envelope?.acceptance_evidence) ? bundle.envelope.acceptance_evidence : [])
         .filter(entry => entry.requirement_id === id).map(entry => ({ ...entry, bundle })));
       if (!claims.length) gaps.push('No current verified implementation claims this mandatory outcome; a skipped lane does not waive it.');
+      const amendments = [];
       for (const claim of claims) {
         const files = claim.bundle.manifest.map(item => item.path);
         if (claim.status !== 'completed' || typeof claim.evidence !== 'string' || !claim.evidence.trim()) {
@@ -67,7 +68,13 @@ function reconcileAcceptance(specification, bundles) {
           continue;
         }
         if (!files.some(file => scope.includes(file) && claim.evidence.includes(file))) {
-          gaps.push('Evidence must name an actual changed file in the approved scope; a lane reroute cannot silently rewrite that scope.');
+          // An author-recorded root-cause amendment (builder-agentic-engineer scopeAmendmentsFor) counts only
+          // for this requirement, for a file the verified manifest really changed, named in the evidence.
+          const amended = (Array.isArray(claim.bundle.envelope?.scope_amendments) ? claim.bundle.envelope.scope_amendments : [])
+            .filter(item => item?.requirement_id === id && typeof item.file === 'string' && typeof item.reason === 'string' && item.reason.trim().length >= 30
+              && files.includes(item.file) && claim.evidence.includes(item.file));
+          if (amended.length) amendments.push(...amended.map(({ file, reason }) => ({ file, reason, patch_artifact_id: claim.bundle.patchId })));
+          else gaps.push('Evidence must name an actual changed file in the approved scope; a lane reroute cannot silently rewrite that scope.');
         }
         const testFiles = files.filter(file => /(?:^test\/.*\.test\.[cm]?js$|[./][^/]+\.(?:test|spec)\.[cm]?[jt]sx?$)/.test(file));
         const regressionRequired = /\b(?:tests?|testing|coverage|regression|synthetic|scenarios?|playwright)\b/i.test(String(requirement.evidence || ''));
@@ -82,6 +89,7 @@ function reconcileAcceptance(specification, bundles) {
       }
       rows.push({ requirement_id: id, outcome: String(requirement?.outcome || ''),
         required_evidence: requirement?.evidence, source_scope: scope,
+        ...(amendments.length ? { scope_amendments: amendments } : {}),
         evidence: claims.map(({ requirement_id, status, evidence, bundle }) => ({ requirement_id, status, evidence, patch_artifact_id: bundle.patchId })),
         status: gaps.length ? 'blocked' : 'covered', gaps: [...new Set(gaps)],
         patch_artifact_ids: [...new Set(claims.map(claim => claim.bundle.patchId))] });
