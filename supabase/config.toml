@@ -424,3 +424,6 @@ verify_jwt = false
 # until the separate notice is approved and configured.
 [functions.website-page-view-analytics]
 verify_jwt = false
+
+[functions.website-news]
+verify_jwt = false

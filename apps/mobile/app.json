@@ -13,7 +13,9 @@
         "NSPhotoLibraryUsageDescription": "Select vehicle evidence for field compliance scans.",
         "NSLocationWhenInUseUsageDescription": "Capture the location for field compliance scans.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Record location during an active field shift, including while the app is in the background.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -45,7 +47,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Record location during an active field shift, including while the app is in the background."
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

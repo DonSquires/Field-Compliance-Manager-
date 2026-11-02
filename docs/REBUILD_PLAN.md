@@ -8,6 +8,59 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Website hub, news publishing and Expo preparation, 2026-11-02 (local acceptance):
+
+- **Before:** statistics already had a route, summary RPC and hub card, but the
+  CRM section navigation showed only Website and Website enquiries. The public
+  news page read an empty build-time collection; Atlas and the live public
+  schema had no website-news authoring/publishing entity. A missing authoring
+  flow, not an unwired generic RPC, was the confirmed gap.
+- **During:** the Website hub now links to enquiries, statistics and News and
+  updates, with direct CRM navigation to each. Active provider administrators
+  can save private plain-text drafts, add a processed photo, explicitly approve
+  publication, publish changes and unpublish. Existing provider/grand-master
+  authorization remains authoritative. Version checks prevent stale edits;
+  unchanged immediate retries recover the same persisted action receipt.
+  Draft saves never replace the public snapshot. Actions record actor, target,
+  request and version in the existing audit spine.
+  Publishing also enforces the existing no-pricing policy; private draft
+  notes may not bypass the public site's job-by-job quotation boundary.
+- **Photos:** the editor redraws JPEG/PNG/WebP input into resized JPEG pixels
+  before upload, removing source metadata. A private bucket, provider/post
+  paths and restrictive guards prevent existing permissive Storage policies
+  from exposing drafts or replacing/removing published assets. Publishing
+  validates the stored object and requires descriptive alt text. Detaching an
+  image does not physically delete earlier assets; cleanup is governed
+  maintenance, not a browser operation.
+- **After:** the public site renders published-only snapshots on demand, with
+  escaped text, same-origin photo delivery, a current news sitemap and explicit
+  404/503 states. Publication needs no website rebuild. Unpublishing removes
+  the current page and photo response while retaining the private draft.
+  List views explicitly cover the latest 100 updates. Marketing pages remain
+  static, and the adapter build preserves the existing analytics API.
+- **Verification:** 21 integrated disposable-PostgreSQL CI-entry tests pass,
+  including publication/replay/stale versions, inactive or cross-org denial,
+  draft exclusion and restrictive Storage policies. Ten offline browser checks
+  pass across desktop and phone; post/analytics/Edge boundary tests and web
+  types/build pass. The public site's production server bundle is tested
+  offline for rendered text/escaping, published photos, sitemap, 404/503 and
+  existing API limits. These are synthetic acceptance checks, not a production
+  administrator walkthrough; the available owner browser is signed out.
+- **Expo:** mobile dependencies are installed and aligned to the SDK 57 patch
+  set using `npx expo install --fix`; `npx expo install --check`, mobile
+  TypeScript and all 21 Expo Doctor checks pass. The SecureStore config plugin
+  is registered. Start development in `apps/mobile` with `npm start`; Android
+  package identity remains `com.fieldcompliance.manager`. No signed APK,
+  cloud build, signing credential or developer-account upload was created.
+  Existing CLI-related dependency advisories remain; the patch alignment
+  reduced high advisories from six to two without a forced major upgrade.
+- **Release boundary:** normal PR/sole-writer migration/function deployment and
+  generated Atlas/catalog refresh remain required. No Atlas row is hand-edited,
+  and a wired flag is not an invocation claim. No real news post or photo was
+  published during acceptance. Analytics collection remains disabled pending
+  separately approved/published notice; PRIV-01 and that approval boundary are
+  unchanged. Payroll PR #338 remains deliberately paused for this priority.
+
 Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
 
 - **Before:** a late response for an earlier period could replace the selected
