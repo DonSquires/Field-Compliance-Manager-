@@ -75,17 +75,27 @@ const OfficerTimesheetPage: React.FC = () => {
 
   const readTimesheets = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) throw new Error('Organisation access could not be confirmed. Timesheets are unavailable.');
+    const { data: staff, error: staffError } = await supabase
+      .from('staff_profiles')
+      .select('id')
+      .eq('organization_id', profile.organizationId)
+      .or(`user_id.eq.${profile.id},id.eq.${profile.id}`);
+    if (staffError) throw staffError;
+    if (!Array.isArray(staff) || staff.some((row) => !row || typeof row.id !== 'string' || row.id.length === 0)) throw new Error('Staff access could not be confirmed. Timesheets are unavailable.');
+    if (staff.length === 0) throw new Error('No staff profile is linked to your account. Contact payroll.');
+    const staffIds: string[] = staff.map((row) => row.id);
     const { data, error: err } = await supabase
       .from('timesheets')
       .select(TIMESHEET_COLUMNS)
-      .eq('staff_id', profile.id)
+      .eq('organization_id', profile.organizationId)
+      .in('staff_id', staffIds)
       .order('period_start', { ascending: false });
     if (err) throw err;
     if (!Array.isArray(data)) throw new Error('Timesheets could not be loaded.');
     return data as Timesheet[];
   }, [profile?.id, profile?.organizationId]);
 
-  // ATLAS READS: timesheets
+  // ATLAS READS: staff_profiles, timesheets
   useEffect(() => {
     let active = true;
     const load = async () => {

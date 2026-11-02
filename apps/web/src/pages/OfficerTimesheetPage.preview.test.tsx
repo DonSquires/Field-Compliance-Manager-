@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimesheetWorkEntry } from '../lib/officerTimesheetWork';
 
-const mocked = vi.hoisted(() => ({ loadWork: vi.fn(), submit: vi.fn(), resubmit: vi.fn(), read: vi.fn() }));
+const mocked = vi.hoisted(() => ({ loadWork: vi.fn(), submit: vi.fn(), resubmit: vi.fn(), read: vi.fn(), staff: vi.fn() }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'officer', organizationId: 'org' } }) }));
 vi.mock('react-router-dom', () => ({ useLocation: () => ({ search: '' }) }));
 vi.mock('../lib/officerTimesheetWork', () => ({
@@ -11,7 +11,11 @@ vi.mock('../lib/officerTimesheetWork', () => ({
   resubmitRejectedTimesheetFromWork: mocked.resubmit,
 }));
 vi.mock('../lib/supabase', () => ({
-  supabase: { from: () => ({ select: () => ({ eq: () => ({ order: mocked.read }) }) }) },
+  supabase: {
+    from: (table: string) => table === 'staff_profiles'
+      ? { select: () => ({ eq: () => ({ or: mocked.staff }) }) }
+      : { select: () => ({ eq: () => ({ in: () => ({ order: mocked.read }) }) }) },
+  },
 }));
 
 import OfficerTimesheetPage from './OfficerTimesheetPage';
@@ -35,6 +39,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocked.staff.mockResolvedValue({ data: [{ id: 'staff' }], error: null });
   mocked.read.mockResolvedValue({ data: [], error: null });
   mocked.loadWork.mockResolvedValue(work('Initial patrol', 480));
 });
@@ -82,5 +87,14 @@ describe('timesheet work preview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry work preview' }));
     await screen.findByText('Retried patrol');
     expect((screen.getByRole('button', { name: 'Send for approval' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('does not send when no staff profile is linked', async () => {
+    mocked.staff.mockResolvedValue({ data: [], error: null });
+    render(<OfficerTimesheetPage />);
+    await screen.findByText('No staff profile is linked to your account. Contact payroll.');
+    await screen.findByText('Initial patrol');
+    expect((screen.getByRole('button', { name: 'Send for approval' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocked.read).not.toHaveBeenCalled();
   });
 });

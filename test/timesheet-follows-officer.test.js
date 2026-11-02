@@ -39,15 +39,17 @@ test('the officer timesheet page speaks plainly, defaults to this week and shows
   assert.match(page, /export const thisWeekSoFar = \(now = new Date\(\)\) =>/);
   assert.match(page, /monday\.setDate\(now\.getDate\(\) - \(\(now\.getDay\(\) \+ 6\) % 7\)\);/);
   assert.match(page, /useState\(\{ \.\.\.thisWeekSoFar\(\), adjustmentHours: '0', notes: '' \}\)/);
-  assert.match(page, /void previewWork\(form\.periodStart, form\.periodEnd\)/);
+  assert.match(page, /void loadOfficerTimesheetWork\(form\.periodStart, form\.periodEnd\)/);
   assert.match(page, /Worked time: \$\{hoursAndMinutes\(workedMinutes\)\} across \$\{plural\(shiftCount, 'shift'\)\}/);
   assert.match(page, /min unpaid break taken off/);
   assert.match(page, /ended when your next shift started/);
   assert.match(page, /submitted: 'Waiting for review',\n\s+branch_checked: 'Checked by your branch',\n\s+approved: 'Approved',\n\s+rejected: 'Sent back to you',/);
   assert.match(page, /rejectedForPeriod \? 'Send corrected timesheet' : 'Send for approval'/);
   assert.match(page, /Your hours come from your shifts, not from what you type here\./);
-  assert.match(page, /disabled=\{submitting \|\| !periodValid \|\| workLoading \|\| Boolean\(alreadyCovering && !rejectedForPeriod\)\}/);
+  assert.match(page, /disabled=\{submitting \|\| !previewReady \|\| listUnavailable \|\| refreshingList \|\| Boolean\(alreadyCovering && !rejectedForPeriod\)\}/);
   // guarded paths kept
   assert.match(page, /if \(!profile\?\.id \|\| !profile\.organizationId\) \{/);
+  assert.match(page, /\.from\('staff_profiles'\)[\s\S]*?\.eq\('organization_id', profile\.organizationId\)[\s\S]*?\.or\(`user_id\.eq\.\$\{profile\.id\},id\.eq\.\$\{profile\.id\}`\)/);
+  assert.match(page, /\.from\('timesheets'\)[\s\S]*?\.eq\('organization_id', profile\.organizationId\)[\s\S]*?\.in\('staff_id', staffIds\)/);
   assert.match(page, /submitOfficerTimesheetFromWork\(eventIdRef\.current/);
 });

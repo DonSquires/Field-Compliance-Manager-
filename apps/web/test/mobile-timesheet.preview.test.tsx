@@ -2,13 +2,22 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimesheetWorkEntry } from '../../mobile/src/lib/officerTimesheetWork';
 
-const mocked = vi.hoisted(() => ({ loadWork: vi.fn(), submit: vi.fn(), read: vi.fn() }));
+const mocked = vi.hoisted(() => ({
+  loadWork: vi.fn(), submit: vi.fn(), read: vi.fn(), staff: vi.fn(), staffScope: vi.fn(), timesheetScope: vi.fn(), staffIds: vi.fn(),
+}));
 vi.mock('../../mobile/src/lib/officerTimesheetWork', () => ({
   loadOfficerTimesheetWork: mocked.loadWork,
   submitOfficerTimesheetFromWork: mocked.submit,
 }));
 vi.mock('../../mobile/src/lib/supabase', () => ({
-  supabase: { from: () => ({ select: () => ({ eq: () => ({ order: () => ({ limit: mocked.read }) }) }) }) },
+  supabase: {
+    from: (table: string) => table === 'staff_profiles'
+      ? { select: () => ({ eq: (column: string, value: string) => { mocked.staffScope(column, value); return { or: mocked.staff }; } }) }
+      : { select: () => ({ eq: (column: string, value: string) => {
+        mocked.timesheetScope(column, value);
+        return { in: (field: string, ids: string[]) => { mocked.staffIds(field, ids); return { order: () => ({ limit: mocked.read }) }; } };
+      } }) },
+  },
 }));
 vi.mock('../../mobile/src/lib/userFacingError', () => ({ userFacingError: (_error: unknown, message: string) => message }));
 
@@ -33,13 +42,14 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocked.staff.mockResolvedValue({ data: [{ id: 'staff' }], error: null });
   mocked.read.mockResolvedValue({ data: [], error: null });
   mocked.loadWork.mockResolvedValue(work('Initial patrol', 480));
 });
 afterEach(cleanup);
 
 function openPeriod(start: string, end: string) {
-  render(<OfficerTimesheetPanel officerId="officer" />);
+  render(<OfficerTimesheetPanel officerId="officer" organizationId="org" />);
   fireEvent.click(screen.getByRole('button', { name: 'Timesheets' }));
   fireEvent.change(screen.getByLabelText('Period start'), { target: { value: start } });
   fireEvent.change(screen.getByLabelText('Period end'), { target: { value: end } });
@@ -58,6 +68,41 @@ describe('mobile timesheet work preview', () => {
     await act(async () => earlier.resolve(work('Earlier patrol', 60)));
     expect(screen.queryByText(/Earlier patrol/)).toBeNull();
     expect((screen.getByRole('button', { name: 'Submit derived hours' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('does not reuse a preview after the officer organisation changes', async () => {
+    const newOrganization = deferred<TimesheetWorkEntry[]>();
+    mocked.loadWork.mockResolvedValueOnce(work('Original patrol', 480)).mockReturnValueOnce(newOrganization.promise);
+    const { rerender } = render(<OfficerTimesheetPanel officerId="officer" organizationId="org" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Timesheets' }));
+    fireEvent.change(screen.getByLabelText('Period start'), { target: { value: '2026-08-26' } });
+    fireEvent.change(screen.getByLabelText('Period end'), { target: { value: '2026-08-29' } });
+    await screen.findByText(/Original patrol/);
+    rerender(<OfficerTimesheetPanel officerId="officer" organizationId="another-org" />);
+    await waitFor(() => expect(mocked.loadWork).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Original patrol/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Submit derived hours' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => newOrganization.resolve(work('New patrol', 120)));
+    await screen.findByText(/New patrol/);
+  });
+
+  it('does not show a late timesheet list from another organisation', async () => {
+    const earlier = deferred<{ data: Array<Record<string, unknown>>; error: null }>();
+    mocked.read.mockReturnValueOnce(earlier.promise).mockResolvedValueOnce({ data: [{
+      id: 'new-sheet', period_start: '2026-09-01', period_end: '2026-09-07', scheduled_hours: 8,
+      actual_hours: 8, overtime_hours: 0, status: 'submitted', review_notes: null,
+    }], error: null });
+    const { rerender } = render(<OfficerTimesheetPanel officerId="officer" organizationId="org" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Timesheets' }));
+    await waitFor(() => expect(mocked.read).toHaveBeenCalledTimes(1));
+    rerender(<OfficerTimesheetPanel officerId="officer" organizationId="another-org" />);
+    await screen.findByText(/2026-09-01 to 2026-09-07.*submitted/);
+    await act(async () => earlier.resolve({ data: [{
+      id: 'old-sheet', period_start: '2026-08-01', period_end: '2026-08-07', scheduled_hours: 8,
+      actual_hours: 8, overtime_hours: 0, status: 'submitted', review_notes: null,
+    }], error: null }));
+    expect(screen.queryByText(/2026-08-01 to 2026-08-07/)).toBeNull();
+    expect(screen.getByText(/2026-09-01 to 2026-09-07.*submitted/)).toBeTruthy();
   });
 
   it('requires a valid date and a successful preview, with a retry after failure', async () => {
@@ -85,6 +130,38 @@ describe('mobile timesheet work preview', () => {
     expect(screen.queryByText('No timesheets.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh timesheet list' }));
     await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it('scopes a linked staff profile and its timesheets to the officer organisation', async () => {
+    mocked.staff.mockResolvedValue({ data: [{ id: 'linked-staff' }], error: null });
+    mocked.read.mockResolvedValue({ data: [{
+      id: 'sheet', period_start: '2026-08-24', period_end: '2026-08-29', scheduled_hours: 8,
+      actual_hours: 8, overtime_hours: 0, status: 'rejected', review_notes: null,
+    }], error: null });
+    openPeriod('2026-08-26', '2026-08-29');
+    await screen.findByText(/2026-08-24 to 2026-08-29.*rejected/);
+    expect(mocked.staffScope).toHaveBeenCalledWith('organization_id', 'org');
+    expect(mocked.staff).toHaveBeenCalledWith('user_id.eq.officer,id.eq.officer');
+    expect(mocked.timesheetScope).toHaveBeenCalledWith('organization_id', 'org');
+    expect(mocked.staffIds).toHaveBeenCalledWith('staff_id', ['linked-staff']);
+  });
+
+  it('does not send when no staff profile is linked', async () => {
+    mocked.staff.mockResolvedValue({ data: [], error: null });
+    openPeriod('2026-08-26', '2026-08-29');
+    await screen.findByText('No staff profile is linked to your account. Contact payroll.');
+    expect((screen.getByRole('button', { name: 'Submit derived hours' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocked.read).not.toHaveBeenCalled();
+  });
+
+  it('does not preview or send without an organisation', async () => {
+    render(<OfficerTimesheetPanel officerId="officer" organizationId={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Timesheets' }));
+    fireEvent.change(screen.getByLabelText('Period start'), { target: { value: '2026-08-26' } });
+    fireEvent.change(screen.getByLabelText('Period end'), { target: { value: '2026-08-29' } });
+    await screen.findByText('Organisation access could not be confirmed. Timesheets are unavailable.');
+    expect(mocked.loadWork).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Submit derived hours' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('reuses a failed submission identity only for the same inputs', async () => {

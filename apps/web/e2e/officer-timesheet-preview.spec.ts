@@ -158,6 +158,7 @@ test('a sent receipt remains clear when the timesheet list fails to refresh', as
   await signInAsOfficer(page, '/officer/timesheet');
   await page.getByLabel('To').fill('2026-08-29');
   await expect(page.getByText('Current patrol', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Nothing sent yet/)).toBeVisible();
   await page.getByRole('button', { name: 'Send for approval' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Timesheet sent for approval' })).toBeVisible();
   await refreshing;
@@ -265,4 +266,41 @@ test('a timesheet cannot be sent until the existing list has loaded', async ({ p
   listAvailable = true;
   await page.getByRole('button', { name: 'Retry timesheet list' }).click();
   await expect(page.getByRole('button', { name: 'Send for approval' })).toBeEnabled();
+});
+
+test('a linked staff profile with a different ID still shows the officer’s timesheet', async ({ page }) => {
+  const officerId = '22222222-2222-4222-8222-222222222222';
+  const organizationId = '33333333-3333-4333-8333-333333333333';
+  const staffId = '45454545-4545-4545-8545-454545454545';
+  let staffFilter = '';
+  let staffOrganization = '';
+  let timesheetFilter = '';
+  let timesheetOrganization = '';
+  await page.route('**/rest/v1/staff_profiles**', async (route) => {
+    const url = new URL(route.request().url());
+    staffFilter = url.searchParams.get('or') ?? '';
+    staffOrganization = url.searchParams.get('organization_id') ?? '';
+    await route.fulfill({ status: 200, json: [{ id: staffId }] });
+  });
+  await page.route('**/rest/v1/timesheets**', async (route) => {
+    const url = new URL(route.request().url());
+    timesheetFilter = url.searchParams.get('staff_id') ?? '';
+    timesheetOrganization = url.searchParams.get('organization_id') ?? '';
+    await route.fulfill({ status: 200, json: timesheetFilter === `in.(${staffId})` ? [{
+      id: 'abababab-abab-4bab-8bab-abababababab', period_start: '2026-08-24', period_end: '2026-08-29',
+      scheduled_hours: 8, actual_hours: 8, overtime_hours: 0, status: 'rejected', review_notes: null,
+      approved_at: null, submitted_at: '2026-08-29T09:30:00Z',
+    }] : [] });
+  });
+  await page.route('**/rest/v1/rpc/get_officer_timesheet_work', async (route) => {
+    await route.fulfill({ status: 200, json: work('Current patrol', 480) });
+  });
+
+  await signInAsOfficer(page, '/officer/timesheet');
+  await expect(page.getByRole('button', { name: 'Send corrected timesheet' })).toBeEnabled();
+  expect(staffFilter).toContain(`id.eq.${officerId}`);
+  expect(staffFilter).toContain(`user_id.eq.${officerId}`);
+  expect(staffOrganization).toBe(`eq.${organizationId}`);
+  expect(timesheetFilter).toBe(`in.(${staffId})`);
+  expect(timesheetOrganization).toBe(`eq.${organizationId}`);
 });

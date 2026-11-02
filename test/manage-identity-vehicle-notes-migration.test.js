@@ -14,6 +14,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./record-identity-person-det
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-enterprise-inference-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-inference-claim-gate-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-recognition-quality-gates.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./timesheet-submission-concurrency-migration.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
