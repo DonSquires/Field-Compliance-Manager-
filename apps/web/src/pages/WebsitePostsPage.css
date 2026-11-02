@@ -1,9 +1,9 @@
-.website-posts-page { width: 100%; max-width: 1280px; display: grid; gap: 18px; }
+.website-posts-page { width: 100%; max-width: none; display: grid; align-content: start; gap: 18px; }
 .website-posts-page .page-header { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
 .website-posts-page p { color: var(--color-text-secondary); line-height: 1.5; }
 .website-posts-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .website-posts-actions .btn { display: inline-flex; gap: 6px; align-items: center; }
-.website-posts-layout { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(0, 3fr); gap: 20px; }
+.website-posts-layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 20px; align-items: start; }
 .website-posts-list, .website-posts-editor { min-width: 0; padding: 18px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-secondary); }
 .website-posts-page label { display: grid; gap: 6px; margin: 12px 0; font-weight: 600; }
 .website-posts-page input:not([type=checkbox]), .website-posts-page textarea, .website-posts-page select { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-primary); color: var(--color-text-primary); font: inherit; }
