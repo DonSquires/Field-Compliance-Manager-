@@ -430,6 +430,39 @@ Notifications written by server code only, 2026-11-03 (live Atlas lists
   rolled back with the grants unchanged. `schema.sql` and Atlas must be
   refreshed after the release lane applies it.
 
+Website enquiry email alerts, 2026-11-02 (owner instruction: "notifications
+must be sent to admin@remsec.co.nz and don@remsec.co.nz"; no schema change):
+
+- **Before:** a stored enquiry only raised in-app notifications for the
+  `admin` and `master` roles. Nobody heard about a lead until they opened FCM,
+  and grand masters were not told at all.
+- **During:** after `submit_website_enquiry` returns a reference, the
+  `website-enquiry` edge function emails the enquiry to
+  `WEBSITE_ENQUIRY_NOTIFY_TO` (default `admin@remsec.co.nz` and
+  `don@remsec.co.nz`) over the shared `SMTP_*` secrets, with Reply-To set to
+  the visitor's address when it is plain. The alert runs in the background
+  (`EdgeRuntime.waitUntil`) after the lead is stored; a failed alert is logged
+  by reference only and never changes the visitor's response. The subject
+  carries only the reference and allowlisted service labels. The body is sent
+  as base64 because denomailer 1.6.0 wraps quoted-printable text without
+  dot-stuffing, so visitor text could otherwise end the SMTP message early.
+  Each alert writes `audit_log` action `website_enquiry_email_alert` against
+  the enquiry with `result` `sent`, `skipped` (`smtp_not_configured` or
+  `smtp_port_blocked`) or `failed` (`smtp_timeout` or `smtp_error`) and the
+  recipient count, never the enquiry details.
+- **Left as is, with reasons:** whether SMTP secrets are set live is
+  unconfirmed; until they are, every alert records `skipped` and the in-app
+  notification remains the only signal. Supabase Edge Functions block ports 25
+  and 587, so this alert defaults to 465 and refuses 25 and 587. The older SMTP
+  senders (`send-invoice`, `send-report-pack`, `send-capability-share-invite`)
+  still default to 587 and use the quoted-printable path; they are outside this
+  change.
+- **Evidence gate:** the root `website-enquiry-contract` test covers the
+  recipients, header-safe subject, line-break handling, base64 body, the
+  alert running only after a stored reference, failure isolation and the
+  background path; `deno check` passes. Live delivery is proved only by a test
+  enquiry, a `sent` audit row and the email arriving in both inboxes.
+
 Connected Bob delivery, owner instruction 2026-10-25: implement the phased
 [connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
 diagnostics/capability discovery, then shared knowledge/evidence, investigation

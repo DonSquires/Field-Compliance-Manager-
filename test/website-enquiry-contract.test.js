@@ -19,7 +19,8 @@ const loadModules = async () => {
   const dir = resolve(root, 'supabase/functions/website-enquiry');
   const validate = await import(pathToFileURL(resolve(dir, 'validate.mjs')).href);
   const handler = await import(pathToFileURL(resolve(dir, 'handler.mjs')).href);
-  return { ...validate, ...handler };
+  const notify = await import(pathToFileURL(resolve(dir, 'notify.mjs')).href);
+  return { ...validate, ...handler, ...notify };
 };
 
 const functionBody = (name) => {
@@ -45,7 +46,7 @@ const validEnquiry = (overrides = {}) => ({
   ...overrides,
 });
 
-const makeHandler = async ({ result = { data: 'ENQ-1A2B3C', error: null }, now = 1_000_000 + 60_000 } = {}) => {
+const makeHandler = async ({ result = { data: 'ENQ-1A2B3C', error: null }, now = 1_000_000 + 60_000, notify, background } = {}) => {
   const { createWebsiteEnquiryHandler } = await loadModules();
   const calls = [];
   const logs = [];
@@ -57,6 +58,8 @@ const makeHandler = async ({ result = { data: 'ENQ-1A2B3C', error: null }, now =
     salt: async () => 'test-salt',
     now: () => now,
     logError: (message, detail) => logs.push({ message, detail }),
+    ...(notify ? { notify } : {}),
+    ...(background ? { background } : {}),
   });
   return { handle, calls, logs };
 };
@@ -127,13 +130,18 @@ test('config.toml deploys website-enquiry without JWT verification', () => {
   assert.match(config, /\[functions\.website-enquiry\]\r?\nverify_jwt = false/);
 });
 
-test('edge function stays self-contained and writes only through the service-role RPC', () => {
-  assert.doesNotMatch(indexSource + handlerSource, /_shared/);
+test('edge function stays self-contained and writes enquiries only through the service-role RPC', () => {
+  const notifySource = read('supabase/functions/website-enquiry/notify.mjs');
+  assert.doesNotMatch(indexSource + handlerSource + notifySource, /_shared/);
   assert.match(indexSource, /from '\.\/handler\.mjs'/);
   assert.match(indexSource, /rpc\('submit_website_enquiry', args\)/);
   assert.match(indexSource, /Deno\.env\.get\('WEBSITE_ENQUIRY_SALT'\)/);
   assert.match(indexSource, /sha256Hex\(key\)/);
-  assert.doesNotMatch(indexSource + handlerSource, /\.from\(['"]website_enquiries['"]\)/);
+  assert.doesNotMatch(handlerSource + notifySource, /\.from\(['"]/);
+  // The only direct table access is the alert's read-only lookup by reference.
+  const enquiryAccess = indexSource.match(/\.from\(['"]website_enquiries['"]\)\s*\.\w+\(/g) ?? [];
+  assert.deepEqual(enquiryAccess.map((access) => access.replace(/\s+/g, '')), [".from('website_enquiries').select("]);
+  assert.match(indexSource, /\.select\('id, provider_organization_id'\)\s*\.eq\('reference', reference\)\s*\.maybeSingle\(\)/);
 });
 
 test('allowed origins match the published contract', async () => {
@@ -328,4 +336,149 @@ test('rate-limit identity prefers the proxy-set client address over a spoofable 
 
   const comment = read('supabase/migrations/20261103120100_website_enquiry_client_hash_comment.sql');
   assert.match(comment, /COMMENT ON COLUMN public\.website_enquiries\.client_hash IS\s+'[^']*CF-Connecting-IP, else the first X-Forwarded-For entry, else X-Real-IP/);
+});
+
+test('email alerts go to the R&M inbox by default and accept only plain configured addresses', async () => {
+  const { DEFAULT_ALERT_RECIPIENTS, resolveAlertRecipients } = await loadModules();
+  assert.deepEqual([...DEFAULT_ALERT_RECIPIENTS], ['admin@remsec.co.nz', 'don@remsec.co.nz']);
+  assert.deepEqual(resolveAlertRecipients(undefined), ['admin@remsec.co.nz', 'don@remsec.co.nz']);
+  assert.deepEqual(resolveAlertRecipients('   '), ['admin@remsec.co.nz', 'don@remsec.co.nz']);
+  assert.deepEqual(resolveAlertRecipients('nope, also bad@, "x" <y@z.nz>'), ['admin@remsec.co.nz', 'don@remsec.co.nz']);
+  assert.deepEqual(
+    resolveAlertRecipients(' Ops@RemSec.co.nz; don@remsec.co.nz ,ops@remsec.co.nz,bad\r\nbcc:evil@example.com'),
+    ['ops@remsec.co.nz', 'don@remsec.co.nz'],
+  );
+});
+
+test('every allowed service has an alert label and the subject never carries visitor text', async () => {
+  const { ALLOWED_SERVICES, SERVICE_LABELS, buildEnquiryAlert, validateEnquiry } = await loadModules();
+  assert.deepEqual(Object.keys(SERVICE_LABELS).sort(), [...ALLOWED_SERVICES].sort());
+  for (const label of Object.values(SERVICE_LABELS)) assert.match(label, /^[ -~]+$/);
+
+  const parsed = validateEnquiry(validEnquiry({
+    name: 'Ana\r\nBcc: evil@example.com',
+    organisation: 'Farm\u2028Ltd',
+    message: 'Line one.\r\n.\r\nQUIT\nLine three.',
+  }));
+  assert.equal(parsed.ok, true);
+  const alert = buildEnquiryAlert({
+    reference: 'ENQ-1A2B3C',
+    enquiry: parsed.enquiry,
+    receivedAt: new Date('2026-11-02T01:00:00Z'),
+    reviewUrl: 'https://fcmanager.co.nz',
+  });
+  assert.equal(alert.subject, 'Website enquiry ENQ-1A2B3C: Raptor mobile surveillance +1');
+  assert.doesNotMatch(alert.subject, /[\r\n]/);
+  assert.equal(alert.replyTo, 'ana@example.com');
+  assert.match(alert.text, /^Name: Ana Bcc: evil@example\.com$/m);
+  assert.doesNotMatch(alert.text, /^Bcc:/m);
+  assert.match(alert.text, /^Organisation: Farm Ltd$/m);
+  assert.match(alert.text, /^Services: Raptor mobile surveillance; Security patrols and alarm response$/m);
+  assert.match(alert.text, /^Phone: \+64 \(9\) 555-0100$/m);
+  assert.match(alert.text, /^Preferred contact: Phone$/m);
+  assert.match(alert.text, /Message:\nLine one\.\n\.\nQUIT\nLine three\.\n/);
+  assert.match(alert.text, /CRM > Website enquiries/);
+  assert.match(alert.text, /^https:\/\/fcmanager\.co\.nz$/m);
+
+  const phoneOnly = validateEnquiry(validEnquiry({ email: '', services: [] }));
+  assert.equal(phoneOnly.ok, true);
+  const quiet = buildEnquiryAlert({ reference: 'ENQ-ABCDEF', enquiry: phoneOnly.enquiry, receivedAt: new Date(0) });
+  assert.equal(quiet.subject, 'Website enquiry ENQ-ABCDEF');
+  assert.equal(quiet.replyTo, null);
+  assert.match(quiet.text, /^Email: Not given$/m);
+  assert.match(quiet.text, /^Services: Not chosen$/m);
+});
+
+test('alert body is base64 so visitor text can never end the SMTP DATA block', async () => {
+  const { encodeBase64Body } = await loadModules();
+  const text = `Kia ora.\n.\n${'x'.repeat(73)}.\nQUIT\n`;
+  const body = encodeBase64Body(text);
+  assert.doesNotMatch(body, /\./);
+  for (const line of body.split('\r\n')) assert.ok(line.length <= 76, line);
+  assert.doesNotMatch(body.replace(/\r\n/g, ''), /[\r\n]/);
+  assert.equal(Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8'), text.replace(/\n/g, '\r\n'));
+  assert.equal(encodeBase64Body(''), '');
+});
+
+test('the email alert runs once, only after the enquiry is stored, and never changes the response', async () => {
+  const sent = [];
+  const notify = async (alert) => { sent.push(alert); };
+  const ok = await makeHandler({ notify });
+  const response = await ok.handle(post(validEnquiry(), { origin: 'https://randmsecurity.com' }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, reference: 'ENQ-1A2B3C' });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].reference, 'ENQ-1A2B3C');
+  assert.equal(sent[0].enquiry.name, 'Ana Smith');
+  assert.deepEqual(sent[0].enquiry.services, ['raptor', 'patrols-response']);
+  assert.equal(sent[0].receivedAt.getTime(), 1_000_000 + 60_000);
+
+  await ok.handle(post(validEnquiry({ website: 'spam' })));
+  await ok.handle(post({}));
+  assert.equal(sent.length, 1);
+
+  for (const result of [
+    { data: null, error: { code: 'PT429', message: 'website_enquiry_rate_limited' } },
+    { data: null, error: { code: '42P01', message: 'boom' } },
+    { data: null, error: null },
+  ]) {
+    const failed = await makeHandler({ result, notify });
+    await failed.handle(post(validEnquiry()));
+  }
+  assert.equal(sent.length, 1);
+});
+
+test('a failed email alert is logged without enquiry details and the lead is still accepted', async () => {
+  const failing = await makeHandler({ notify: async () => { throw new Error('SMTP 535 authentication failed'); } });
+  const response = await failing.handle(post(validEnquiry()));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, reference: 'ENQ-1A2B3C' });
+  assert.equal(failing.logs.length, 1);
+  assert.equal(failing.logs[0].message, 'website-enquiry: email alert failed');
+  assert.deepEqual(failing.logs[0].detail, { reference: 'ENQ-1A2B3C', error: 'SMTP 535 authentication failed' });
+  assert.doesNotMatch(JSON.stringify(failing.logs), /Ana|ana@example|555-0100|overnight patrols/);
+});
+
+test('with a background runner the response does not wait for the email alert', async () => {
+  let release;
+  const gate = new Promise((resolveGate) => { release = resolveGate; });
+  const tasks = [];
+  let finished = false;
+  const { handle } = await makeHandler({
+    notify: async () => { await gate; finished = true; },
+    background: (task) => { tasks.push(task); },
+  });
+  const response = await handle(post(validEnquiry()));
+  assert.equal(response.status, 200);
+  assert.equal(tasks.length, 1);
+  assert.equal(finished, false);
+  release();
+  await tasks[0];
+  assert.equal(finished, true);
+
+  let awaited = false;
+  const fallback = await makeHandler({
+    notify: async () => { awaited = true; },
+    background: () => { throw new Error('EdgeRuntime.waitUntil unavailable'); },
+  });
+  assert.equal((await fallback.handle(post(validEnquiry()))).status, 200);
+  assert.equal(awaited, true);
+});
+
+test('Deno wiring sends over SMTP on an allowed port and audits every alert outcome', () => {
+  assert.match(indexSource, /import \{ SMTPClient \} from 'https:\/\/deno\.land\/x\/denomailer@1\.6\.0\/mod\.ts';/);
+  assert.match(indexSource, /resolveAlertRecipients\(Deno\.env\.get\('WEBSITE_ENQUIRY_NOTIFY_TO'\)\)/);
+  assert.match(indexSource, /const BLOCKED_SMTP_PORTS = new Set\(\[25, 587\]\);/);
+  assert.match(indexSource, /Deno\.env\.get\('SMTP_PORT'\)\?\.trim\(\) \|\| '465'/);
+  assert.match(indexSource, /content: encodeBase64Body\(message\.text\),\s*transferEncoding: 'base64'/);
+  assert.doesNotMatch(indexSource, /\bcontent: message\.text\b|\bhtml:/);
+  assert.match(indexSource, /action: 'website_enquiry_email_alert'/);
+  assert.match(indexSource, /target_table: 'website_enquiries'/);
+  for (const reason of ['smtp_not_configured', 'smtp_port_blocked', 'smtp_timeout', 'smtp_error']) {
+    assert.match(indexSource, new RegExp(`reason: [^\\n]*'${reason}'`), reason);
+  }
+  assert.match(indexSource, /result: 'sent'/);
+  assert.match(indexSource, /notify: sendEnquiryAlert,\s*background: backgroundTask,/);
+  assert.match(indexSource, /EdgeRuntime/);
+  assert.doesNotMatch(indexSource, /metadata: \{[^}]*(name|email|phone|message)/);
 });
