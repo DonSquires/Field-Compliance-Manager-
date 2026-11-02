@@ -120,6 +120,26 @@ During:
   follow that job instead of creating duplicate jobs. Only jobs the autopilot
   still drives cover new packets; a parked job (for example
   `acceptance_incomplete`) does not.
+- Routine retry after release: a routine repair that stopped left its packet
+  `failed` with disposition `open` after one attempt, so Dr Bob folded every
+  recurrence into a dead packet (live packets for `/admin/hub`,
+  `/admin/module-subscriptions` and `/admin/platform-subscribers`). Before
+  claiming new packets, the control plane now calls
+  `builder_requeue_failed_routine_repairs` with the release lane's
+  `deployed_sha` and the time that release went live. A failed routine packet
+  that failed under replaced code is queued again: one retry per verified
+  release, at most three attempts, within 21 days, never while a job still
+  works it, and only for packets nobody closed. Each requeue is audited
+  (`routine_repair_requeued`). The retry brief lists why earlier attempts
+  stopped so Bob addresses that reason instead of repeating it.
+- Routine continuations: autopilot continuations copy the packet onto the
+  child job, and the one-job-per-packet index rejected them (live: `7c6c68b6`,
+  "duplicate key value violates unique constraint
+  builder_jobs_source_friction_packet_unique"). The index now allows one live
+  root intake job per packet; continuations share it, and a failed or
+  cancelled root releases it. A job that continues as another job, or waits on
+  a repair of main, keeps its packet in progress instead of `completed` or
+  `failed`, and its covered packets move to the continuation.
 - Vibe (`vibe-v19`): failing verification gets up to `repairRounds`
   corrections (default 3). After the first round, a further correction is sent
   only when the failure signature changed or new edits landed. One
@@ -136,11 +156,18 @@ After: regression tests cover each rule:
 - `builder-implementation-acceptance`: amendments in reconciliation.
 - `builder-autopilot`: the guardrail boilerplate no longer holds a repair; a
   migration holds the release.
-- `builder-routine-intake`: signature dedupe.
+- `builder-routine-intake`: signature dedupe, retry brief and packet status
+  for continuations.
+- `builder-routine-retry-migration` (disposable PostgreSQL): continuation and
+  re-bind index rules, requeue eligibility, one retry per release, attempt
+  ceiling, audit rows and service-only grants.
 - `builder-vibe-session`: repair rounds and extension.
 
 The migration `20261104090000_friction_packet_signature_cover.sql` adds the
-nullable cover column and index only. Human approval, code review, protected
+nullable cover column and index only.
+`20261107210000_routine_repair_retry_after_release.sql` narrows the packet
+index, adds the `routine_repair_requeued` audit type and the service-only
+requeue RPC. Human approval, code review, protected
 paths, the verified release identity and the PR-only path to `main` are
 unchanged.
 

@@ -21,7 +21,7 @@ const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, mode
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
-const { planRoutineIntake, routineRepairBrief, routineRepairStillDriven, routineSignature } = require('./builder-routine-intake');
+const { planRoutineIntake, routinePacketAutomationStatus, routineRepairBrief, routineRepairStillDriven, routineSignature } = require('./builder-routine-intake');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
 const { createKnowledgeTool } = require('./builder-knowledge');
@@ -1162,8 +1162,60 @@ async function requeueRoutinePacket(packet, detail) {
   }).eq('id', packet.id).eq('automation_status', 'claimed');
 }
 
+// The release lane writes deployed_sha only after a verified production release; its mtime is when that
+// release went live. Null when no release has been recorded (or the file is unreadable).
+function releasedMarker() {
+  try {
+    const sha = fs.readFileSync(releasedShaFile, 'utf8').trim().toLowerCase();
+    if (!/^[a-f0-9]{40}$/.test(sha)) return null;
+    return { sha, releasedAt: fs.statSync(releasedShaFile).mtime.toISOString() };
+  } catch {
+    return null;
+  }
+}
+
+// A routine repair that failed under code since replaced by a verified release gets one more bounded
+// attempt (at most three in total; the RPC enforces the window, the cap, and one retry per release).
+async function requeueFailedRoutineRepairs() {
+  const released = releasedMarker();
+  if (!released) return [];
+  const { data, error } = await builderSupabase.rpc('builder_requeue_failed_routine_repairs', {
+    _release_sha: released.sha,
+    _released_at: released.releasedAt,
+    _limit: 3,
+  });
+  if (error) throw new Error(`failed routine repairs could not be re-queued: ${error.message}`);
+  const requeued = Array.isArray(data) ? data : [];
+  for (const packet of requeued) {
+    record('autopilot', 'builder.routine_repair.retry_after_release', packet.id, {
+      release_sha: released.sha,
+      attempt: Number(packet.automation_attempt_count) + 1,
+      page: String(packet.envelope?.before?.page || 'unknown').slice(0, 120),
+    });
+  }
+  return requeued;
+}
+
+// Why earlier attempts on these packets stopped, so the retry starts from that reason instead of repeating it.
+async function previousRoutineAttempts(packetIds) {
+  const { data, error } = await builderSupabase
+    .from('builder_jobs')
+    .select('id,status,last_error')
+    .in('source_friction_packet_id', packetIds)
+    .in('status', ['failed', 'cancelled'])
+    .order('updated_at', { ascending: false })
+    .limit(5);
+  if (error) throw new Error(`previous routine attempts could not be read: ${error.message}`);
+  return (Array.isArray(data) ? data : []).map((job) => ({ jobId: job.id, error: job.last_error || `ended as ${job.status}` }));
+}
+
 async function startRoutineRepairs() {
   if (!routineRepairEnabled) return [];
+  try {
+    await requeueFailedRoutineRepairs();
+  } catch (error) {
+    record('autopilot', 'builder.routine_repair.retry_unavailable', null, { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
+  }
   const project = await routineBuilderProject();
   const { sha } = builderRepositoryHead('main');
   const { data: packets, error: claimError } = await builderSupabase.rpc('builder_claim_routine_repairs', { _limit: 3 });
@@ -1192,11 +1244,17 @@ async function startRoutineRepairs() {
     let boundSuccessfully = false;
     try {
       const page = String(packet.envelope?.before?.page || 'application error').replace(/\s+/g, ' ').slice(0, 120);
+      let previousAttempts = [];
+      try {
+        previousAttempts = await previousRoutineAttempts([packet.id, ...followers.map((follower) => follower.id)]);
+      } catch (error) {
+        record('autopilot', 'builder.routine_repair.history_unavailable', packet.id, { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
+      }
       const { data: created, error } = await builderSupabase.rpc('builder_create_job_v2', {
         _organization_id: project.organization_id,
         _project_id: project.id,
         _title: `Routine repair: ${page}`.slice(0, 200),
-        _task_description: routineRepairBrief(packet, { alsoReported: followers }).slice(0, 12000),
+        _task_description: routineRepairBrief(packet, { alsoReported: followers, previousAttempts }).slice(0, 12000),
         _target_sha: sha,
         _branch_name: 'main',
         _description: `Opened automatically from monitored friction packet ${packet.id}.`,
@@ -1548,24 +1606,19 @@ async function autopilotOnce() {
             .maybeSingle();
           if (routineJobError) throw new Error(`routine repair provenance could not be read: ${routineJobError.message}`);
           if (routineJob?.autopilot_source === 'routine_monitor' && routineJob.source_friction_packet_id) {
-            const automationStatus = state === 'published'
-              ? 'published'
-              : state === 'done'
-                ? 'completed'
-              : state === 'awaiting_human'
-                ? 'awaiting_grandmaster'
-                : state === 'blocked'
-                  ? 'failed'
-                  : 'builder_started';
+            const automationStatus = routinePacketAutomationStatus(state, report);
             const { error: packetStatusError } = await builderSupabase.from('bob_friction_packets').update({
               automation_status: automationStatus,
               automation_updated_at: new Date().toISOString(),
             }).eq('id', routineJob.source_friction_packet_id);
             if (packetStatusError) throw new Error(`routine repair status could not be recorded: ${packetStatusError.message}`);
-            // Packets with the same failure signature that this job covers follow its status.
+            // Packets with the same failure signature that this job covers follow its status, and move with
+            // the work when it continues as another job.
+            const resumedAs = state === 'done' && /^[0-9a-f-]{36}$/i.test(String(report?.resumed_as_job_id || '')) ? report.resumed_as_job_id : null;
             const { error: coveredStatusError } = await builderSupabase.from('bob_friction_packets').update({
               automation_status: automationStatus,
               automation_updated_at: new Date().toISOString(),
+              ...(resumedAs ? { covered_by_job_id: resumedAs } : {}),
             }).eq('covered_by_job_id', jobId);
             if (coveredStatusError) record('autopilot', 'builder.routine_repair.covered_status_failed', jobId, { error: String(coveredStatusError.message).slice(0, 300) });
           }
