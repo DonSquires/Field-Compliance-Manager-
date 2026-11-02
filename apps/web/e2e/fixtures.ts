@@ -763,7 +763,8 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
       return;
     }
     if (resource === 'staff_profiles') {
-      await route.fulfill(fulfillJson({ id: OFFICER_ID }));
+      const timesheetLookup = select === 'id' && url.searchParams.has('or') && !url.searchParams.has('limit');
+      await route.fulfill(fulfillJson(timesheetLookup ? [{ id: OFFICER_ID }] : { id: OFFICER_ID }));
       return;
     }
     if (resource === 'shifts') {

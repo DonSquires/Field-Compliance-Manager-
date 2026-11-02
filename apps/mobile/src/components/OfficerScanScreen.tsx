@@ -154,7 +154,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     </CollapsibleSection>
     <CollapsibleSection title="My work">
       <OfficerLeavePanel officerId={officerId} />
-      <OfficerTimesheetPanel officerId={officerId} />
+      <OfficerTimesheetPanel officerId={officerId} organizationId={organizationId} />
       <OfficerDebriefPanel shiftId={shiftId} shiftStatus={shiftStatus} />
       <OfficerCredentialsPanel officerId={officerId} />
       <OfficerVehicleLookup organizationId={organizationId} />
