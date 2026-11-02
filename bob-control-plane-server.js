@@ -28,7 +28,7 @@ const { createKnowledgeTool } = require('./builder-knowledge');
 const { embedText, embeddingConfig } = require('./services/fcm-api/src/bob/knowledgeEmbedding');
 const { createBuilderChatWorker } = require('./builder-chat-session');
 const { createPlatformTools } = require('./bob-platform-diagnostics');
-const { runVibeHumanTest } = require('./builder-vibe-human-test');
+const { runBrowserSpecs, runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
@@ -643,6 +643,8 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     prepareWorkspace: (workspacePath) => vibePreview
       ? vibePreview.ensureWebDependencies(workspacePath)
       : Promise.reject(new Error('the apps/web dependency cache is disabled on this control plane (BOB_VIBE_ENABLED=0)')),
+    // Frontend authors run the Playwright specs their change targets before handoff (builder-browser-gate).
+    browserTest: builderBrowserTest,
     workerImage: builderWorkerImage,
     firewall: hostNetworkFor('bob-builder'),
     runnerId: builderRunnerId,
@@ -698,12 +700,18 @@ async function resolveBuilderSourceDir(jobId) {
 const runningBuilderJobs = new Map();
 const agenticWallBudgetMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS) || 45 * 60_000);
 const agenticTurnTimeoutMs = Math.max(30_000, Number(process.env.BOB_BUILDER_TURN_TIMEOUT_MS) || 420_000);
+// The frontend author's browser gate (BOB_BUILDER_BROWSER_TEST=0 disables it) can extend the author's
+// wall once (15 min) and then run a patched and a base browser pass, each bounded by the worker timeout.
+const builderBrowserTest = process.env.BOB_BUILDER_BROWSER_TEST === '0' || !builderWorkerImage ? null : runBrowserSpecs;
+const builderBrowserAllowanceMs = builderBrowserTest
+  ? 15 * 60_000 + 2 * Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_BROWSER_TEST_TIMEOUT_MS) || 15 * 60_000)
+  : 0;
 // A legitimate agentic run can outlive the old 45-minute lease. Clearing it while its model turn
 // is still active launches a second engineer against the same job and worktree.
 const staleBuilderRunMs = Math.max(
   5 * 60_000,
   Number(process.env.BOB_BUILDER_STALE_RUN_MS) || 45 * 60_000,
-  agenticWallBudgetMs + agenticTurnTimeoutMs + 5 * 60_000
+  agenticWallBudgetMs + agenticTurnTimeoutMs + builderBrowserAllowanceMs + 5 * 60_000
 );
 const builderPreflightTimeoutMs = Math.max(30_000, Number(process.env.BOB_BUILDER_PREFLIGHT_TIMEOUT_MS) || 120_000);
 

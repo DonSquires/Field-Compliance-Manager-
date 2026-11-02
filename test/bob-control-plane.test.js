@@ -192,7 +192,10 @@ test('health is public and reports the control plane', async () => {
 test('control-plane source has a bounded stale Builder lease recovery path', () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   assert.match(source, /BOB_BUILDER_STALE_RUN_MS/);
-  assert.match(source, /agenticWallBudgetMs \+ agenticTurnTimeoutMs \+ 5 \* 60_000/);
+  assert.match(source, /agenticWallBudgetMs \+ agenticTurnTimeoutMs \+ builderBrowserAllowanceMs \+ 5 \* 60_000/);
+  // The browser gate's wall extension and patched + base runs are inside the lease, never past it.
+  assert.match(source, /builderBrowserAllowanceMs = builderBrowserTest\s*\?\s*15 \* 60_000 \+ 2 \* /);
+  assert.match(source, /browserTest: builderBrowserTest,/);
   assert.match(source, /BOB_BUILDER_PREFLIGHT_TIMEOUT_MS/);
   assert.match(source, /builder\.run\.stale_lease_cleared/);
   assert.match(source, /clearStaleBuilderRun\(jobId\)/);

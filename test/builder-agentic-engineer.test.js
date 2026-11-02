@@ -463,6 +463,54 @@ test('a web build pass stands in for lint only for src TypeScript, and web JavaS
   }
 });
 
+test('the browser gate refuses a patch-only Playwright failure, extends the run once, and records the passing receipt (jobs 34382d60/7c6c68b6)', async () => {
+  const repo = makeRepo();
+  fs.mkdirSync(path.join(repo.source, 'apps/web/src/pages'), { recursive: true });
+  fs.mkdirSync(path.join(repo.source, 'apps/web/e2e'), { recursive: true });
+  fs.writeFileSync(path.join(repo.source, 'apps/web/src/pages/UserManagementPage.tsx'), 'export const page = 1;\n');
+  fs.writeFileSync(path.join(repo.source, 'apps/web/e2e/user-identity.spec.ts'), "test('UserManagement recovers', async () => {});\n");
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'page and spec']);
+  const sha = repo.git(['rev-parse', 'HEAD']);
+  const runs = [];
+  const browserTest = async ({ workspacePath, specs }) => {
+    const source = fs.readFileSync(path.join(workspacePath, 'apps/web/src/pages/UserManagementPage.tsx'), 'utf8');
+    runs.push({ base: path.basename(workspacePath).startsWith('.browser-base-'), specs });
+    const failures = source.includes('BROKEN') ? [{ file: 'user-identity.spec.ts', title: 'UserManagement recovers', error: 'Error: expect(locator).toBeVisible() failed' }] : [];
+    return { ok: !failures.length, status: failures.length ? 'failed' : 'succeeded', complete: true, passed: 1 - failures.length, failures, report_errors: [] };
+  };
+  try {
+    const model = fakeModel([
+      { tool: 'write_file', args: { path: 'apps/web/src/pages/UserManagementPage.tsx', content: 'export const page = 2; // BROKEN\n' } },
+      { tool: 'finish', args: { summary: 'Add the recovery state to the user management page and hand it over.', tests: [] } },
+      { tool: 'read_file', args: { path: 'apps/web/e2e/user-identity.spec.ts' } },
+      { tool: 'write_file', args: { path: 'apps/web/src/pages/UserManagementPage.tsx', content: 'export const page = 2;\n' } },
+      { tool: 'browser_test', args: { reason: 'confirm the recovery spec passes after the fix' } },
+      { tool: 'finish', args: { summary: 'Add the recovery state to the user management page; its browser spec now passes.', tests: [] } },
+    ]);
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'browsergate00001', organization_id: 'org', target_sha: sha, task_description: 'Recover from a lazy chunk failure' },
+      step: { id: 's' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 3 },
+      browserTest, callModel: model.callModel,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.routing.prompt_version, 'agentic-engineer-v21');
+    assert.match(model.seen[0].request.messages[0].content, /browser_test \{reason\}/);
+    assert.match(model.seen[0].request.messages[0].content, /finish runs the same browser gate/);
+    const refusal = JSON.stringify(model.seen[2].request.messages.at(-1));
+    assert.match(refusal, /the browser gate ran the Playwright specs your change targets/);
+    assert.match(refusal, /UserManagement recovers/);
+    assert.equal(model.seen.length, 6, 'the one-time browser repair allowance outlasted the 3-turn budget');
+    assert.equal(result.proposal.browser_gate.status, 'passed');
+    assert.deepEqual(result.proposal.browser_gate.specs, ['e2e/user-identity.spec.ts']);
+    assert.equal(runs.filter((run) => run.base).length, 1, 'the pinned commit ran once to separate pre-existing failures');
+    assert.equal(runs.filter((run) => !run.base).length, 2, 'the passing tool run is reused by the finish gate on the same tree');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
 test('an evidence-backed scope amendment lets a shared root-cause fix satisfy its requirement; weak or cross-lane amendments are refused (jobs d5f65103/c604b921)', () => {
   const specification = {
     delivery_requirements: [
@@ -986,6 +1034,12 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
     const refused = await tools.run({ command: 'cd apps/web && npm install' });
     assert.match(refused.error, /command not allowed; use exactly one of: .*npm test --prefix apps\/web -- src\/<path>\.test\.tsx/);
     assert.match(refused.error, /Playwright specs that only the independent verifier runs/);
+    const withBrowser = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
+    assert.match((await withBrowser.run({ command: 'cd apps/web && npm install' })).error, /run them with the browser_test tool, never through run/);
+    assert.match((await withBrowser.run({ command: 'npm test --prefix apps/web -- e2e/user-identity.spec.ts' })).error, /Wrong test runner[^]*Use the browser_test tool/);
+    const backend = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
+    assert.equal(backend.__browserGate, null, 'the browser gate belongs to the frontend lane');
+    assert.match((await backend.browser_test({ reason: 'x' })).error, /frontend lane/);
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }

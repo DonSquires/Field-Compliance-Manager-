@@ -67,7 +67,24 @@ During:
   failure found in the last turns. `node --check` on a web `.ts/.tsx` file is
   rewritten to the web type check. The frontend lane provisions web
   dependencies (`prepareWorkspace`) before the author starts. Prompt version
-  is `agentic-engineer-v19`.
+  is `agentic-engineer-v21`.
+- Browser gate (`builder-browser-gate.js`): in the frontend lane, after the
+  compile gate passes, `finish` runs the Playwright specs the change targets
+  (changed specs plus specs owning changed baseline PNGs) in the offline
+  `vibe-human-qa` worker profile. The author can also call `browser_test`
+  before finishing. Failures are compared against one run of the same specs at
+  the pinned HEAD in a detached temporary worktree, so only failures the patch
+  introduces refuse `finish`; failures in specs the patch adds are always the
+  patch's. A verdict is reused for an unchanged worktree fingerprint. A run that
+  cannot produce a readable report, times out, runs out of memory or would
+  start with under eight minutes left is recorded as `browser_gate.unavailable`
+  and left to the verifier. The gate refuses at most twice, then hands off with
+  `handed_off_after_refusals`. The first refusal grants one extension
+  (`BROWSER_REPAIR_TURNS`, up to 15 minutes of wall time). The smoke specs stay
+  verifier-only. `BOB_BUILDER_BROWSER_TEST=0` disables the gate and
+  `BOB_BUILDER_BROWSER_TEST_TIMEOUT_MS` (default 15 minutes) bounds each run.
+  Runs share the Vibe human-test queue. The stale-run lease includes the
+  browser allowance so a gated run is never treated as abandoned.
 - Scope amendments: when the root cause sits in another changed file in the
   same lane, an acceptance entry may carry
   `scope_amendment {file, reason}`. The reason must be at least 30
@@ -113,7 +130,9 @@ After: regression tests cover each rule:
 
 - `builder-agentic-engineer`: compile-gate refusal and recovery, unavailable
   toolchain, syntax error, fingerprint reuse, TSX rewrite and amendment
-  accept/refuse cases.
+  accept/refuse cases, and the browser-gate refusal, extension and receipt.
+- `builder-browser-gate`: spec selection, base subtraction, verdict reuse,
+  refusal cap and every unavailable outcome.
 - `builder-implementation-acceptance`: amendments in reconciliation.
 - `builder-autopilot`: the guardrail boilerplate no longer holds a repair; a
   migration holds the release.
