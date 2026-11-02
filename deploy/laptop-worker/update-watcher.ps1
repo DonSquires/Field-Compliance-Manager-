@@ -49,6 +49,33 @@ function New-LaptopDeploymentEnv {
   return $targetPath
 }
 
+# Docker Desktop's credential helper cannot open Windows Credential Manager from an SSH or other
+# non-interactive logon session ("A specified logon session does not exist"), so `build --pull` fails
+# when Bob runs this update remotely. Every base image here is public: when no registry login is
+# configured, build with a temporary config that pulls anonymously against the same Docker engine.
+function New-AnonymousRegistryDockerConfig {
+  $userConfigDir = if ([string]::IsNullOrWhiteSpace($env:DOCKER_CONFIG)) { Join-Path $env:USERPROFILE '.docker' } else { $env:DOCKER_CONFIG }
+  $userConfigPath = Join-Path $userConfigDir 'config.json'
+  if (Test-Path $userConfigPath) {
+    $userConfig = Get-Content $userConfigPath -Raw | ConvertFrom-Json
+    foreach ($section in @('auths', 'credHelpers')) {
+      if ($userConfig.$section -and @($userConfig.$section.PSObject.Properties).Count -gt 0) { return $null }
+    }
+  }
+
+  $engine = $env:DOCKER_HOST
+  if ([string]::IsNullOrWhiteSpace($engine)) {
+    $engine = (docker context inspect --format '{{.Endpoints.docker.Host}}' | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($engine)) { throw 'Could not resolve the current Docker engine endpoint.' }
+  }
+
+  $configDir = Join-Path ([System.IO.Path]::GetTempPath()) ("fcm-laptop-docker-$([guid]::NewGuid().ToString('N'))")
+  New-Item -ItemType Directory -Path $configDir | Out-Null
+  # A placeholder entry stops the Docker CLI from auto-selecting wincred/desktop as the default store.
+  [System.IO.File]::WriteAllText((Join-Path $configDir 'config.json'), '{"auths":{"credential-free.invalid":{}}}', (New-Object System.Text.UTF8Encoding($false)))
+  return [pscustomobject]@{ Path = $configDir; Engine = $engine }
+}
+
 $envFile = Join-Path $RepositoryRoot 'deploy\laptop-worker\laptop-worker.env'
 $composeFile = Join-Path $RepositoryRoot 'docker-compose.laptop-worker.yml'
 
@@ -69,6 +96,11 @@ $temporaryWorktree = $null
 $deploymentEnvFile = $null
 $hadWorkerEnvFile = Test-Path Env:LAPTOP_WORKER_ENV_FILE
 $previousWorkerEnvFile = $env:LAPTOP_WORKER_ENV_FILE
+$registryConfig = $null
+$hadDockerConfig = Test-Path Env:DOCKER_CONFIG
+$previousDockerConfig = $env:DOCKER_CONFIG
+$hadDockerHost = Test-Path Env:DOCKER_HOST
+$previousDockerHost = $env:DOCKER_HOST
 
 Push-Location $RepositoryRoot
 try {
@@ -96,6 +128,12 @@ try {
   $composeFile = Join-Path $releaseRoot 'docker-compose.laptop-worker.yml'
   $revision = (git -C $releaseRoot rev-parse --short HEAD).Trim()
   $env:LAPTOP_WORKER_ENV_FILE = $deploymentEnvFile
+  $registryConfig = New-AnonymousRegistryDockerConfig
+  if ($registryConfig) {
+    $env:DOCKER_HOST = $registryConfig.Engine
+    $env:DOCKER_CONFIG = $registryConfig.Path
+    Write-Host 'No registry login is configured; pulling public base images anonymously.'
+  }
   $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $deploymentEnvFile, '-f', $composeFile)
   & docker @composeArgs build --pull fcm-inference fcm-vision-watcher fcm-document-source-worker
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
@@ -129,6 +167,11 @@ try {
     $env:LAPTOP_WORKER_ENV_FILE = $previousWorkerEnvFile
   } else {
     Remove-Item Env:LAPTOP_WORKER_ENV_FILE -ErrorAction SilentlyContinue
+  }
+  if ($hadDockerConfig) { $env:DOCKER_CONFIG = $previousDockerConfig } else { Remove-Item Env:DOCKER_CONFIG -ErrorAction SilentlyContinue }
+  if ($hadDockerHost) { $env:DOCKER_HOST = $previousDockerHost } else { Remove-Item Env:DOCKER_HOST -ErrorAction SilentlyContinue }
+  if ($registryConfig -and (Test-Path $registryConfig.Path)) {
+    Remove-Item $registryConfig.Path -Recurse -Force
   }
   if ($temporaryWorktree -and (Test-Path $temporaryWorktree)) {
     git worktree remove --force $temporaryWorktree
