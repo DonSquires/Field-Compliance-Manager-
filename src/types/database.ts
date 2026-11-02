@@ -33197,6 +33197,41 @@ export type Database = {
           },
         ]
       }
+      website_page_views_daily: {
+        Row: {
+          country_code: string
+          page_path: string
+          page_views: number
+          provider_organization_id: string
+          region_code: string
+          viewed_on: string
+        }
+        Insert: {
+          country_code?: string
+          page_path: string
+          page_views?: number
+          provider_organization_id: string
+          region_code?: string
+          viewed_on: string
+        }
+        Update: {
+          country_code?: string
+          page_path?: string
+          page_views?: number
+          provider_organization_id?: string
+          region_code?: string
+          viewed_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "website_page_views_daily_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       welfare_alerts: {
         Row: {
           acknowledged_at: string | null
@@ -43571,6 +43606,10 @@ export type Database = {
           year: number
         }[]
       }
+      get_website_page_view_summary: {
+        Args: { p_from: string; p_to: string }
+        Returns: Json
+      }
       gettransactionid: { Args: never; Returns: unknown }
       grant_branch_area_access: {
         Args: {
@@ -48478,6 +48517,15 @@ export type Database = {
           p_source: string
         }
         Returns: Json
+      }
+      record_website_page_view: {
+        Args: {
+          p_country_code: string
+          p_notice_version: string
+          p_page_path: string
+          p_region_code: string
+        }
+        Returns: undefined
       }
       recover_stale_cctv_inference_jobs: { Args: never; Returns: number }
       refresh_canonical_ta_names: {
