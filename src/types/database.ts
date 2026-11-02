@@ -2136,6 +2136,7 @@ export type Database = {
           builder_job_id: string | null
           client_packet_key: string
           confidence: number | null
+          covered_by_job_id: string | null
           created_at: string
           disposition: string
           envelope: Json
@@ -2162,6 +2163,7 @@ export type Database = {
           builder_job_id?: string | null
           client_packet_key: string
           confidence?: number | null
+          covered_by_job_id?: string | null
           created_at?: string
           disposition?: string
           envelope?: Json
@@ -2188,6 +2190,7 @@ export type Database = {
           builder_job_id?: string | null
           client_packet_key?: string
           confidence?: number | null
+          covered_by_job_id?: string | null
           created_at?: string
           disposition?: string
           envelope?: Json
@@ -2209,6 +2212,13 @@ export type Database = {
           {
             foreignKeyName: "bob_friction_packets_builder_job_id_fkey"
             columns: ["builder_job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_friction_packets_covered_by_job_id_fkey"
+            columns: ["covered_by_job_id"]
             isOneToOne: false
             referencedRelation: "builder_jobs"
             referencedColumns: ["id"]
@@ -37426,6 +37436,7 @@ export type Database = {
           builder_job_id: string | null
           client_packet_key: string
           confidence: number | null
+          covered_by_job_id: string | null
           created_at: string
           disposition: string
           envelope: Json
