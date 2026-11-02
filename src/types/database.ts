@@ -33232,6 +33232,85 @@ export type Database = {
           },
         ]
       }
+      website_posts: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string
+          id: string
+          last_request_id: string
+          last_request_payload: Json
+          photo_alt: string
+          photo_path: string | null
+          provider_organization_id: string
+          published_content: Json | null
+          slug: string
+          summary: string
+          title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          created_by: string
+          id: string
+          last_request_id: string
+          last_request_payload: Json
+          photo_alt?: string
+          photo_path?: string | null
+          provider_organization_id: string
+          published_content?: Json | null
+          slug: string
+          summary?: string
+          title: string
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          last_request_id?: string
+          last_request_payload?: Json
+          photo_alt?: string
+          photo_path?: string | null
+          provider_organization_id?: string
+          published_content?: Json | null
+          slug?: string
+          summary?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "website_posts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "website_posts_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "website_posts_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       welfare_alerts: {
         Row: {
           acknowledged_at: string | null
@@ -44182,6 +44261,7 @@ export type Database = {
           id: string
         }[]
       }
+      list_website_posts: { Args: never; Returns: Json }
       location_event_search_text: {
         Args: { p_event_type: string; p_payload: Json }
         Returns: string
@@ -46542,6 +46622,20 @@ export type Database = {
         }
         Returns: Json
       }
+      manage_website_post: {
+        Args: {
+          p_action: string
+          p_body: string
+          p_expected_version: number
+          p_photo_alt: string
+          p_photo_path: string
+          p_post_id: string
+          p_request_id: string
+          p_summary: string
+          p_title: string
+        }
+        Returns: Json
+      }
       manage_welfare_alert: {
         Args: {
           p_action: string
@@ -47518,6 +47612,10 @@ export type Database = {
           validity_state: string
           vehicle_plates: string[]
         }[]
+      }
+      read_published_website_posts: {
+        Args: { p_id?: string; p_slug?: string }
+        Returns: Json
       }
       reassign_roster_slot: {
         Args: {
@@ -52830,6 +52928,7 @@ export type Database = {
         Args: { p_receipt_id: string; p_sha256?: string }
         Returns: Json
       }
+      website_post_admin_organization: { Args: never; Returns: string }
       wf_approve_job: {
         Args: {
           _comment?: string
