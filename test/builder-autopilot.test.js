@@ -147,6 +147,18 @@ test('routine monitor is not held by its own guardrail boilerplate, only by the 
   assert.match(routineRepairHold({ job, approval, evidence: { productSpecification: redesign } }).reasons[0], /expanded beyond a basic fix/);
   const auth = { ...specification, functional_requirements: [{ id: 'FR-1', requirement: 'Change authentication for the hub.' }] };
   assert.match(routineRepairHold({ job, approval, evidence: { productSpecification: auth } }).reasons[0], /expanded beyond a basic fix/);
+  // A negated clause never hides the affirmative change that follows a contrast, and descriptive
+  // negations describe what the fix changes.
+  for (const requirement of [
+    'Do not redesign the page, but change authentication to restore access.',
+    'Never touch the map; however, rotate the credential the hub uses.',
+    'Avoid layout changes, instead add a new workflow for hub repairs.',
+    'The hub does not require authentication; make it require it.',
+    'The hub is not using the right credential.',
+  ]) {
+    const widened = { ...specification, functional_requirements: [{ id: 'FR-1', requirement }] };
+    assert.match(routineRepairHold({ job, approval, evidence: { productSpecification: widened } })?.reasons?.[0] ?? '', /expanded beyond a basic fix/, requirement);
+  }
 
   // A database root cause may be built, but any migration holds the release for a person.
   const database = { ...specification, delivery_requirements: [{ id: 'DR-1', outcome: 'Repair the access_presets view with an additive migration.', evidence: 'x', source_scope: ['supabase/schema.sql'] }] };
@@ -247,7 +259,7 @@ function releaseReadyFixture() {
     [`${org}/job-4/review.json`]: JSON.stringify({ verdict: 'passed', summary: 'Narrow regex change with tests; no auth or data exposure.', findings: [] }),
     [`${org}/job-4/notes.json`]: JSON.stringify({ release_notes: ['Bob accepts more ways of saying yes.'], known_risks: [] }),
   };
-  return { job, supabase: fakeSupabase({ job, steps, artifacts, workerRuns, objects }) };
+  return { job, supabase: fakeSupabase({ job, steps, artifacts, workerRuns, objects }), parts: { org, loc, steps, artifacts, workerRuns, objects } };
 }
 
 test('autopilot publishes a release-ready job with an explanatory pull request and a plain-language report', async () => {
@@ -576,6 +588,86 @@ test('autopilot still clears the release gate itself for non-evidential work', a
   const actions = actionsRecorder({ pending: [{ id: 'appr-8', approval_type: 'release_approval', status: 'pending' }] });
   assert.deepEqual(await autopilotTick({ supabase, jobs: [gated], actions }), [{ job: 'job-4', outcome: 'gate_cleared', count: 1 }]);
   assert.match(actions.calls.find(([name]) => name === 'approve')[2], /No evidential paths are involved/);
+});
+
+// PR #326 review: the release gate judged only the last verified lane, and a read failure cleared gates.
+function fullstackRoutineFixture({ frontendManifest = true } = {}) {
+  const { job, parts } = releaseReadyFixture();
+  const { org, loc } = parts;
+  const routine = { ...job, status: 'approval_pending', autopilot_source: 'routine_monitor', repair_risk: 'routine', title: 'Routine repair: /admin/hub', task_description: 'Fix the hub render failure with the smallest corrective patch.' };
+  const steps = [...parts.steps, { id: 's-frontend', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer', status: 'completed' }];
+  const artifacts = [
+    ...parts.artifacts,
+    { id: 'fe-proposal', step_id: 's-frontend', artifact_type: 'code_implementation', status: 'final', storage_location: loc('fe-proposal.json') },
+    { id: 'fe-manifest', step_id: 's-frontend', artifact_type: 'changed_file_manifest', status: 'final', storage_location: loc('fe-files.json') },
+  ];
+  const workerRuns = [
+    ...parts.workerRuns,
+    { id: 'run-fe', step_id: 's-frontend', status: 'completed', profile: 'frontend-verify', patch_artifact_id: 'fe-proposal', output_artifact_ids: ['fe-manifest'] },
+  ];
+  const objects = {
+    ...parts.objects,
+    [`${org}/job-4/changed-files.json`]: JSON.stringify([{ path: 'supabase/migrations/20261104100000_fix_access_presets.sql' }]),
+    [`${org}/job-4/fe-proposal.json`]: JSON.stringify({ summary: 'Stop the hub map on unmount.', patch: 'diff --git a/y b/y\n', changed_files: ['apps/web/src/pages/HubPage.tsx'] }),
+  };
+  if (frontendManifest) objects[`${org}/job-4/fe-files.json`] = JSON.stringify([{ path: 'apps/web/src/pages/HubPage.tsx' }]);
+  return { job: routine, supabase: fakeSupabase({ job: routine, steps, artifacts, workerRuns, objects }), parts: { steps, artifacts, workerRuns, objects } };
+}
+
+test('the release gate judges every lane: a frontend correction verified after a backend migration still holds the migration', async () => {
+  const { job, supabase } = fullstackRoutineFixture();
+  const actions = actionsRecorder({ pending: [{ id: 'appr-9', approval_type: 'release_approval', status: 'pending' }] });
+  const outcomes = await autopilotTick({ supabase, jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'awaiting_human', gate: 'release_approval', files: ['supabase/migrations/20261104100000_fix_access_presets.sql'] }]);
+  assert.ok(!actions.calls.some(([name]) => name === 'approve'));
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.match(recorded[3].text, /Why it stopped: routine repair changed the database schema\./);
+  assert.deepEqual(recorded[3].evidential_files, ['supabase/migrations/20261104100000_fix_access_presets.sql']);
+});
+
+test('a gate stays pending while a lane manifest, the snapshot or the specification cannot be read', async () => {
+  const unreadable = fullstackRoutineFixture({ frontendManifest: false });
+  const release = actionsRecorder({ pending: [{ id: 'appr-10', approval_type: 'release_approval', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase: unreadable.supabase, jobs: [unreadable.job], actions: release }), [
+    { job: 'job-4', outcome: 'evidence_pending', reason: 'the verified changed-file manifest of frontend-verify could not be read', count: 0 },
+  ]);
+  assert.deepEqual(release.calls.map(([name]) => name), ['listPending'], 'nothing is approved or recorded until the evidence is readable');
+
+  const { job } = fullstackRoutineFixture();
+  const broken = { ...fakeSupabase({ job }), from() { throw new Error('network down'); } };
+  const snapshotDown = actionsRecorder({ pending: [{ id: 'appr-11', approval_type: 'release_approval', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase: broken, jobs: [job], actions: snapshotDown }), [
+    { job: 'job-4', outcome: 'evidence_pending', reason: 'the job evidence could not be read', count: 0 },
+  ]);
+  assert.ok(!snapshotDown.calls.some(([name]) => name === 'approve' || name === 'record'));
+
+  const specGate = { ...job, status: 'specification_ready' };
+  const { parts } = fullstackRoutineFixture();
+  const withoutSpecObject = { ...parts.objects };
+  delete withoutSpecObject[Object.keys(withoutSpecObject).find((key) => key.endsWith('/spec.json'))];
+  const specUnreadable = actionsRecorder({ pending: [{ id: 'appr-12', approval_type: 'specification_review', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: specGate, steps: parts.steps, artifacts: parts.artifacts, workerRuns: parts.workerRuns, objects: withoutSpecObject }), jobs: [specGate], actions: specUnreadable }), [
+    { job: 'job-4', outcome: 'evidence_pending', reason: 'the approved specification could not be read', count: 0 },
+  ]);
+  assert.ok(!specUnreadable.calls.some(([name]) => name === 'approve'));
+});
+
+test('a routine gate with no specification, or a release gate with no verified change, waits for a person', async () => {
+  const { job, parts } = fullstackRoutineFixture();
+  const specGate = { ...job, status: 'specification_ready' };
+  const noSpec = actionsRecorder({ pending: [{ id: 'appr-13', approval_type: 'specification_review', status: 'pending' }] });
+  const artifacts = parts.artifacts.filter((artifact) => artifact.artifact_type !== 'product_specification');
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: specGate, steps: parts.steps, artifacts, workerRuns: parts.workerRuns, objects: parts.objects }), jobs: [specGate], actions: noSpec }), [
+    { job: 'job-4', outcome: 'awaiting_human', gate: 'specification_review', files: [] },
+  ]);
+  assert.ok(!noSpec.calls.some(([name]) => name === 'approve'));
+
+  const chat = { ...job, autopilot_source: null, repair_risk: null };
+  const unverified = actionsRecorder({ pending: [{ id: 'appr-14', approval_type: 'release_approval', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: chat, steps: parts.steps, artifacts: parts.artifacts, workerRuns: [], objects: parts.objects }), jobs: [chat], actions: unverified }), [
+    { job: 'job-4', outcome: 'awaiting_human', gate: 'release_approval', files: [] },
+  ]);
+  assert.ok(!unverified.calls.some(([name]) => name === 'approve'));
 });
 
 test('a job blocked by a red main opens a repair job for the same requester instead of asking a person to fix it', async () => {

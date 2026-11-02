@@ -33,6 +33,18 @@ test('failure signatures ignore the page, deployment hashes, and asset names', (
 
   assert.equal(normalizeFailureText('Job 3f2a9c1d-1111-4222-8333-444455556666 failed at /admin/x after 12345 ms'), 'job <uuid> failed at <path> after <n> ms');
   assert.notEqual(routineSignature(packet('a', '/x', 'TypeError: a is undefined')), routineSignature(packet('b', '/x', 'TypeError: b is undefined')));
+
+  // PR #326 review: Dr Bob's message keeps navigation parameters in the page route; the page (with its
+  // query) is not the defect, but the failing endpoint is.
+  const presets = { fn: 'rest/access_presets', status: 500 };
+  const tabOne = packet('p8', '/admin/manage?tab=one', 'GET rest/access_presets returned HTTP 500 on /admin/manage?tab=one&area=north.', presets);
+  const tabTwo = packet('p9', '/admin/manage?tab=two', 'GET rest/access_presets returned HTTP 500 on /admin/manage?tab=two.', presets);
+  assert.equal(routineSignature(tabOne), routineSignature(tabTwo));
+  const routeA = packet('pa', '/admin/a', 'Request failed (HTTP 500)', { route: 'https://x.supabase.co/rest/v1/access_presets?select=*&id=eq.3f2a9c1d-1111-4222-8333-444455556666', status: 500 });
+  const routeB = packet('pb', '/admin/b?tab=x', 'Request failed (HTTP 500)', { route: '/rest/v1/access_presets?select=id', status: 500 });
+  const routeC = packet('pc', '/admin/a', 'Request failed (HTTP 500)', { route: '/rest/v1/workshop_work_order_summary?select=*', status: 500 });
+  assert.equal(routineSignature(routeA), routineSignature(routeB), 'origin and query do not split one endpoint');
+  assert.notEqual(routineSignature(routeA), routineSignature(routeC), 'a different endpoint is a different defect');
 });
 
 test('one repair is opened per signature and open repairs cover new packets', () => {
@@ -44,6 +56,31 @@ test('one repair is opened per signature and open repairs cover new packets', ()
   assert.deepEqual(repairs.map((repair) => [repair.packet.id, repair.followers.map((follower) => follower.id)]), [['p1', ['p2']], ['p4', []]]);
   assert.deepEqual(covered.map((entry) => [entry.packet.id, entry.jobId]), [['p3', 'job-chunk']]);
   assert.deepEqual(planRoutineIntake([], []), { repairs: [], covered: [] });
+});
+
+// PR #326 review: a parked job must not absorb new packets, and a covered packet starts where its owner is.
+test('only repairs the autopilot still drives cover new packets, at the owning packet status', () => {
+  const { routineRepairStillDriven } = require('../builder-routine-intake');
+  for (const state of ['driving', 'awaiting_human', 'published']) assert.equal(routineRepairStillDriven({ autopilot_state: state }), true, state);
+  assert.equal(routineRepairStillDriven({ autopilot_state: 'blocked', autopilot_report: { reason: 'acceptance_incomplete' } }), false, 'a parked acceptance_incomplete job never updates followers');
+  assert.equal(routineRepairStillDriven({ autopilot_state: 'blocked', autopilot_report: { repair_job_id: 'r1' } }), true, 'waiting on a repair of main is still driven');
+  assert.equal(routineRepairStillDriven({ autopilot_state: 'blocked', autopilot_report: { repair_job_id: 'r1', repair_outcome: 'failed' } }), false);
+  assert.equal(routineRepairStillDriven({ autopilot_state: 'done' }), false);
+  assert.equal(routineRepairStillDriven({ autopilot_state: null }), false);
+
+  const leaflet = packet('p1', '/admin/hub', "reading '_leaflet_pos'");
+  const chunk = packet('p2', '/admin/users', 'Failed to fetch dynamically imported module: https://x/assets/A-12345678.js');
+  const { covered } = planRoutineIntake([leaflet, chunk], [
+    { jobId: 'job-map', signature: 'known:leaflet_after_unmount', automationStatus: 'awaiting_grandmaster' },
+    { jobId: 'job-chunk', signature: 'known:stale_code_split_chunk', automationStatus: 'failed' },
+  ]);
+  assert.deepEqual(covered.map((entry) => [entry.jobId, entry.automationStatus]), [['job-map', 'awaiting_grandmaster'], ['job-chunk', 'builder_started']]);
+
+  const server = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'bob-control-plane-server.js'), 'utf8');
+  assert.match(server, /select\('id,source_friction_packet_id,autopilot_state,autopilot_report'\)[^]*?\.filter\(routineRepairStillDriven\)/);
+  assert.match(server, /automationStatus: source\.automation_status \?\? null/);
+  assert.match(server, /await coverRoutinePacket\(packet, jobId, signature, automationStatus\)/);
+  assert.match(server, /automation_status: automationStatus,\n    covered_by_job_id: jobId/);
 });
 
 test('the routine brief points at the shared root cause and every affected page', () => {

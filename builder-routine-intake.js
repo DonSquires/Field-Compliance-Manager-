@@ -41,12 +41,12 @@ function packetFailure(packet) {
   return { envelope, during, error, failed };
 }
 
-/** Lower-case failure text with deployment-specific noise (URLs, paths, hashes, ids) removed. */
+/** Lower-case failure text with deployment-specific noise (URLs, page routes with their query, hashes, ids) removed. */
 function normalizeFailureText(text) {
   return String(text ?? '')
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, '<url>')
-    .replace(/(^|[\s(])\/[\w\-./:%]*/g, '$1<path>')
+    .replace(/(^|[\s(])\/[\w\-./:%]*(?:[?#][^\s)]*)?/g, '$1<path>')
     .replace(/\b[\w-]+-[a-z0-9_]{6,}\.(?:m?js|css)\b/gi, '<asset>')
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
     .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{7,64}\b/g, '<hex>')
@@ -54,6 +54,19 @@ function normalizeFailureText(text) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 240);
+}
+
+/** The failing endpoint keeps its path (it names the relation or function); origin, query and ids are noise. */
+function normalizeEndpoint(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/^https?:\/\/[^/\s]+/, '')
+    .replace(/[?#].*$/s, '')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
+    .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{7,64}\b/g, '<hex>')
+    .replace(/\b\d{4,}\b/g, '<n>')
+    .trim()
+    .slice(0, 160);
 }
 
 function knownSignatureFor(packet) {
@@ -67,7 +80,7 @@ function routineSignature(packet) {
   const { error, failed } = packetFailure(packet);
   const known = knownSignatureFor(packet);
   if (known && known.id !== 'postgrest_server_error') return `known:${known.id}`;
-  const request = failed.fn || failed.route ? `${normalizeFailureText(failed.fn || failed.route)}:${Number(failed.status) || ''}` : '';
+  const request = failed.fn || failed.route ? `${normalizeEndpoint(failed.fn || failed.route)}:${Number(failed.status) || ''}` : '';
   return [plain(error.kind || 'runtime_error', 80).toLowerCase(), normalizeFailureText(error.message), request].join('|');
 }
 
@@ -102,17 +115,32 @@ function routineRepairBrief(packet, { alsoReported = [] } = {}) {
  * Split claimed packets into repairs to open and packets already covered by an open repair.
  * `openRepairs` is [{ jobId, signature }] for routine jobs that are still running.
  */
+// The autopilot still drives a routine repair in these states (listAutopilotJobs), or while it waits
+// on a repair of main. Any other open job is parked: a new packet must not follow a job that never moves.
+const DRIVEN_AUTOPILOT_STATES = new Set(['driving', 'awaiting_human', 'published']);
+
+function routineRepairStillDriven(job) {
+  if (DRIVEN_AUTOPILOT_STATES.has(job?.autopilot_state)) return true;
+  const report = job?.autopilot_report && typeof job.autopilot_report === 'object' ? job.autopilot_report : {};
+  return job?.autopilot_state === 'blocked' && Boolean(report.repair_job_id) && !report.resumed_as_job_id && !report.repair_outcome;
+}
+
+// Covered packets start where the owning packet is (e.g. awaiting_grandmaster), not at builder_started.
+const COVERABLE_STATUSES = new Set(['builder_started', 'awaiting_grandmaster', 'published']);
+
 function planRoutineIntake(packets, openRepairs = []) {
   const open = new Map();
   for (const repair of openRepairs) {
-    if (repair?.jobId && repair.signature && !open.has(repair.signature)) open.set(repair.signature, repair.jobId);
+    if (repair?.jobId && repair.signature && !open.has(repair.signature)) open.set(repair.signature, repair);
   }
   const leaders = new Map();
   const covered = [];
   for (const packet of Array.isArray(packets) ? packets : []) {
     const signature = routineSignature(packet);
     if (open.has(signature)) {
-      covered.push({ packet, jobId: open.get(signature), signature });
+      const repair = open.get(signature);
+      const automationStatus = COVERABLE_STATUSES.has(repair.automationStatus) ? repair.automationStatus : 'builder_started';
+      covered.push({ packet, jobId: repair.jobId, signature, automationStatus });
     } else if (leaders.has(signature)) {
       leaders.get(signature).followers.push(packet);
     } else {
@@ -128,5 +156,6 @@ module.exports = {
   normalizeFailureText,
   planRoutineIntake,
   routineRepairBrief,
+  routineRepairStillDriven,
   routineSignature,
 };

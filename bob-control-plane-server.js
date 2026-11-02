@@ -21,7 +21,7 @@ const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, mode
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
-const { planRoutineIntake, routineRepairBrief, routineSignature } = require('./builder-routine-intake');
+const { planRoutineIntake, routineRepairBrief, routineRepairStillDriven, routineSignature } = require('./builder-routine-intake');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
 const { createKnowledgeTool } = require('./builder-knowledge');
@@ -1109,37 +1109,41 @@ function productionHumanTestStatus() {
 }
 
 // Open routine repairs keyed by failure signature: a newly claimed packet with the same signature is covered
-// by that job instead of opening a second repair for another page.
+// by that job instead of opening a second repair for another page. Only jobs the autopilot still drives count.
 async function openRoutineRepairSignatures() {
   const { data: jobs, error } = await builderSupabase
     .from('builder_jobs')
-    .select('id,source_friction_packet_id')
+    .select('id,source_friction_packet_id,autopilot_state,autopilot_report')
     .eq('autopilot_source', 'routine_monitor')
     .not('status', 'in', '("deployed","failed","cancelled")')
     .not('source_friction_packet_id', 'is', null)
     .limit(50);
   if (error) throw new Error(`open routine repairs could not be read: ${error.message}`);
-  if (!Array.isArray(jobs) || !jobs.length) return [];
+  const driven = (Array.isArray(jobs) ? jobs : []).filter(routineRepairStillDriven);
+  if (!driven.length) return [];
   const { data: sources, error: sourceError } = await builderSupabase
     .from('bob_friction_packets')
-    .select('id,envelope')
-    .in('id', jobs.map((job) => job.source_friction_packet_id));
+    .select('id,envelope,automation_status')
+    .in('id', driven.map((job) => job.source_friction_packet_id));
   if (sourceError) throw new Error(`open routine repair packets could not be read: ${sourceError.message}`);
   const byPacket = new Map((sources || []).map((packet) => [packet.id, packet]));
-  return jobs
+  return driven
     .filter((job) => byPacket.has(job.source_friction_packet_id))
-    .map((job) => ({ jobId: job.id, signature: routineSignature(byPacket.get(job.source_friction_packet_id)) }));
+    .map((job) => {
+      const source = byPacket.get(job.source_friction_packet_id);
+      return { jobId: job.id, signature: routineSignature(source), automationStatus: source.automation_status ?? null };
+    });
 }
 
-async function coverRoutinePacket(packet, jobId, signature) {
+async function coverRoutinePacket(packet, jobId, signature, automationStatus = 'builder_started') {
   const { error } = await builderSupabase.from('bob_friction_packets').update({
-    automation_status: 'builder_started',
+    automation_status: automationStatus,
     covered_by_job_id: jobId,
     automation_error_redacted: null,
     automation_updated_at: new Date().toISOString(),
   }).eq('id', packet.id).eq('automation_status', 'claimed');
   if (error) throw new Error(`routine packet could not be attached to its open repair: ${error.message}`);
-  record('autopilot', 'builder.routine_repair.covered', jobId, { packet_id: packet.id, signature: String(signature).slice(0, 200) });
+  record('autopilot', 'builder.routine_repair.covered', jobId, { packet_id: packet.id, signature: String(signature).slice(0, 200), automation_status: automationStatus });
 }
 
 async function requeueRoutinePacket(packet, detail) {
@@ -1165,9 +1169,9 @@ async function startRoutineRepairs() {
     record('autopilot', 'builder.routine_repair.dedupe_unavailable', null, { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
   }
   const { repairs, covered } = planRoutineIntake(packets, openRepairs);
-  for (const { packet, jobId, signature } of covered) {
+  for (const { packet, jobId, signature, automationStatus } of covered) {
     try {
-      await coverRoutinePacket(packet, jobId, signature);
+      await coverRoutinePacket(packet, jobId, signature, automationStatus);
       outcomes.push({ packet: packet.id, job: jobId, outcome: 'covered' });
     } catch (error) {
       const detail = String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300);

@@ -39,7 +39,11 @@ const SIGNIFICANT_ROUTINE_TERMS = [
 // held every routine repair at its own boilerplate (jobs 7c6c68b6, 3aaf56b4), so only the proposed change
 // is scanned, with negated clauses removed.
 const ROUTINE_GUARDRAIL_LINE = /^\s*(?:Required investigation|Required verification|Routine boundary|Triage basis|Known signature|Root-cause guidance|Also reported on):/i;
-const NEGATED_CLAUSE = /\b(?:do not|don't|does not|doesn't|must not|mustn't|should not|shouldn't|will not|won't|never|without|avoid(?:ing)?|no|not|nor)\b[^.;!?\n]*/gi;
+// Only directive negations are removed, and only up to the end of their clause: a contrast
+// ("Do not redesign the page, but change authentication") keeps the affirmative change visible.
+// Descriptive negations ("the page does not require authentication") describe what the fix
+// changes, so they are kept and scanned.
+const NEGATED_CLAUSE = /\b(?:do not|don't|must not|mustn't|should not|shouldn't|will not|won't|never|without|avoid(?:ing)?|no)\b(?:(?!\b(?:but|however|instead|yet|although|though|whereas|while|rather|then|except|also)\b)[^.;:!?\n])*/gi;
 
 function proposedRoutineScope(job, specification) {
   const brief = String(job?.task_description ?? '').split('\n').filter((line) => !ROUTINE_GUARDRAIL_LINE.test(line));
@@ -58,6 +62,9 @@ function routineRepairHold({ job, approval, evidence }) {
   if (!['routine_monitor', 'main_monitor'].includes(job?.autopilot_source)) return null;
   if (job.repair_risk !== 'routine') {
     return { gate: approval.approval_type, files: [], reasons: ['repair is no longer classified as routine'] };
+  }
+  if (job.autopilot_source === 'routine_monitor' && evidence?.specificationMissing === true) {
+    return { gate: approval.approval_type, files: [], reasons: ['no product specification was found to judge the routine scope'] };
   }
   const scopeText = proposedRoutineScope(job, evidence?.productSpecification);
   const significant = job.autopilot_source === 'main_monitor'
@@ -172,9 +179,14 @@ async function collectEvidence({ supabase, snapshot }) {
   const finalOf = (type, stepIds = null) => snapshot.artifacts.filter((a) => a.artifact_type === type && a.status === 'final' && (!stepIds || stepIds.has(a.step_id)));
   const runs = implementationRuns(snapshot);
   const verifyRun = runs.at(-1) || null;
+  const manifestOf = (run) => snapshot.artifacts.find((a) => Array.isArray(run.output_artifact_ids) && run.output_artifact_ids.includes(a.id) && a.artifact_type === 'changed_file_manifest') || null;
+  // The current verified change of every lane: a frontend correction verified after a backend
+  // migration must not hide that migration from the release gate. The latest run leads.
+  const laneRuns = [verifyRun, ...['frontend-verify', 'backend-verify']
+    .map((profile) => runs.filter((run) => run.profile === profile).at(-1))
+    .filter((run) => run && run !== verifyRun)].filter(Boolean);
   const authorArtifact = verifyRun ? snapshot.artifacts.find((a) => a.id === verifyRun.patch_artifact_id) : null;
   const validatedPatch = verifyRun ? snapshot.artifacts.find((a) => Array.isArray(verifyRun.output_artifact_ids) && verifyRun.output_artifact_ids.includes(a.id) && a.artifact_type === 'code_implementation') : null;
-  const manifest = verifyRun ? snapshot.artifacts.find((a) => Array.isArray(verifyRun.output_artifact_ids) && verifyRun.output_artifact_ids.includes(a.id) && a.artifact_type === 'changed_file_manifest') : null;
   const stepId = (id) => snapshot.steps.find((s) => s.step_id === id)?.id;
   const security = finalOf('security_review', new Set([stepId('security_review')])).at(-1) || null;
   const review = finalOf('code_review', new Set([stepId('code_review')])).at(-1) || null;
@@ -186,17 +198,23 @@ async function collectEvidence({ supabase, snapshot }) {
       && a.artifact_type === 'build_logs')
     : null;
 
-  const [author, manifestRows, securityReport, reviewReport, release, specification, verification] = await Promise.all([
+  const laneManifests = laneRuns.map(manifestOf);
+  const [author, securityReport, reviewReport, release, specification, verification, ...laneRows] = await Promise.all([
     authorArtifact ? download(authorArtifact) : null,
-    manifest ? download(manifest) : null,
     security ? download(security) : null,
     review ? download(review) : null,
     releaseNotes ? download(releaseNotes) : null,
     productSpecification ? download(productSpecification) : null,
     verificationArtifact ? download(verificationArtifact) : null,
+    ...laneManifests.map((artifact) => (artifact ? download(artifact) : null)),
   ]);
+  const manifestRows = verifyRun ? laneRows[0] : null;
   const envelope = author && typeof author === 'object' && typeof author.patch === 'string' ? author : (typeof author === 'string' ? unwrapPatchArtifact(author).envelope : null);
-  const changedFiles = Array.isArray(manifestRows) ? manifestRows.map((row) => row?.path).filter(Boolean) : (envelope?.changed_files ?? []);
+  const unreadableLanes = laneRuns.filter((_, index) => !Array.isArray(laneRows[index])).map((run) => run.profile);
+  const laneFiles = laneRows.filter(Array.isArray).flatMap((rows) => rows.map((row) => row?.path).filter(Boolean));
+  const changedFiles = laneRows.some(Array.isArray)
+    ? [...new Set([...laneFiles, ...(unreadableLanes.length ? (envelope?.changed_files ?? []) : [])])]
+    : (envelope?.changed_files ?? []);
   const verifiedRuns = Array.isArray(envelope?.verified_runs) ? envelope.verified_runs.filter((r) => r && typeof r.command === 'string') : [];
   const passingTests = verifiedRuns.filter((r) => /^node --test\b/.test(r.command) && r.exit_code === 0).map((r) => plain(r.command, 160));
   const verificationContract = evaluateVerificationContract({
@@ -230,6 +248,11 @@ async function collectEvidence({ supabase, snapshot }) {
     releaseNotes: release && typeof release === 'object' ? { notes: Array.isArray(release.release_notes) ? release.release_notes.map((t) => plain(t, 300)) : [], risks: Array.isArray(release.known_risks) ? release.known_risks.map((t) => plain(t, 300)) : [] } : null,
     verificationContract,
     productSpecification: specification && typeof specification === 'object' ? specification : null,
+    // What the gates need before Bob may judge them (see evidenceGap / routineRepairHold).
+    verifiedLanes: laneRuns.length,
+    manifestGap: unreadableLanes.length ? `the verified changed-file manifest of ${unreadableLanes.join(' and ')} could not be read` : null,
+    specificationMissing: !productSpecification,
+    specificationUnreadable: Boolean(productSpecification) && !(specification && typeof specification === 'object'),
   };
 }
 
@@ -389,6 +412,24 @@ function evidentialHold({ job, approval, evidence }) {
   const changed = approval.approval_type === 'release_approval' ? evidentialPathsIn(evidence?.changedFiles) : [];
   const files = [...new Set([...changed, ...mentioned])].sort();
   return files.length ? { gate: approval.approval_type, files, reasons: ['protected or evidential paths are involved'] } : null;
+}
+
+/**
+ * Evidence that must be readable before Bob may judge a gate. A read failure leaves the gate
+ * pending for the next tick; a gate is never cleared because its evidence was missing.
+ */
+function evidenceGap({ job, approval, evidence }) {
+  if (!evidence) return 'the job evidence could not be read';
+  if (approval.approval_type === 'release_approval' && evidence.manifestGap) return evidence.manifestGap;
+  if (job.autopilot_source === 'routine_monitor' && evidence.specificationUnreadable) return 'the approved specification could not be read';
+  return null;
+}
+
+/** A release gate with no verified change has nothing Bob can judge: a person decides. */
+function unverifiedReleaseHold({ approval, evidence }) {
+  return approval.approval_type === 'release_approval' && evidence && evidence.verifiedLanes === 0
+    ? { gate: approval.approval_type, files: [], reasons: ['no verified change was found for the release gate'] }
+    : null;
 }
 
 /**
@@ -622,14 +663,18 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const pending = await actions.listPending(job.id);
         let evidence = null;
         let hold = null;
+        let gap = null;
         let cleared = 0;
         for (const approval of pending) {
           // Routine repairs are judged on the approved specification's proposed change at the spec gate too.
-          if (!evidence && (approval.approval_type === 'release_approval' || job.autopilot_source === 'routine_monitor')) {
+          const needsEvidence = approval.approval_type === 'release_approval' || job.autopilot_source === 'routine_monitor';
+          if (!evidence && needsEvidence) {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
             evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
           }
-          hold = hold || routineRepairHold({ job, approval, evidence }) || evidentialHold({ job, approval, evidence });
+          gap = needsEvidence ? evidenceGap({ job, approval, evidence }) : null;
+          if (gap) break;
+          hold = hold || routineRepairHold({ job, approval, evidence }) || unverifiedReleaseHold({ approval, evidence }) || evidentialHold({ job, approval, evidence });
           if (hold) continue;
           const authority = job.autopilot_source === 'routine_monitor'
             ? `the monitored defect ${job.source_friction_packet_id ?? 'n/a'} was deterministically classified as a routine repair`
@@ -644,6 +689,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           await actions.record(job.id, 'awaiting_human', composeReport({ job, evidence, state: 'awaiting_human', hold }));
           log({ job: job.id, awaiting_human: hold.gate, evidential: hold.files.slice(0, 6) });
           outcomes.push({ job: job.id, outcome: 'awaiting_human', gate: hold.gate, files: hold.files });
+          continue;
+        }
+        if (gap) {
+          log({ job: job.id, evidence_pending: gap });
+          outcomes.push({ job: job.id, outcome: 'evidence_pending', reason: gap, count: cleared });
           continue;
         }
         outcomes.push({ job: job.id, outcome: 'gate_cleared', count: cleared });

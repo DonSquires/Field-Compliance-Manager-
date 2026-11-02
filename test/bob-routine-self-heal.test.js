@@ -55,7 +55,8 @@ test('expanded or protected routine work stops for Grandmaster review', () => {
   assert.match(autopilot, /repair scope expanded beyond a basic fix/);
   assert.match(autopilot, /routine repair changed more than eight files/);
   assert.match(autopilot, /routine repair changed the database schema/);
-  assert.match(autopilot, /routineRepairHold\(\{ job, approval, evidence \}\) \|\| evidentialHold/);
+  assert.match(autopilot, /routineRepairHold\(\{ job, approval, evidence \}\) \|\| unverifiedReleaseHold\(\{ approval, evidence \}\) \|\| evidentialHold/);
+  assert.match(autopilot, /gap = needsEvidence \? evidenceGap\(\{ job, approval, evidence \}\) : null;\n\s+if \(gap\) break;/);
   assert.match(migration, /builder_autopilot_decide_approval_guarded/);
   assert.match(migration, /Routine repair authorization is no longer valid/);
 });

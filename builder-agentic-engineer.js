@@ -738,11 +738,17 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     const current = worktreeFingerprint();
     const passedOnThisTree = (pattern) => current !== null && runs.some((entry) => entry.exit_code === 0 && entry.fingerprint === current && pattern.test(entry.command));
     const checks = [];
-    if (files.some((file) => /^apps\/web\/.+\.(?:tsx?|mts|cts)$/.test(file)) && !passedOnThisTree(/^npm run (?:lint|build) --prefix apps\/web$/)) {
+    const webTypeScript = files.filter((file) => /^apps\/web\/.+\.(?:tsx?|mts|cts)$/.test(file));
+    // `build` (tsc -b) covers only apps/web/src; `lint` also checks the e2e project. A build pass stands in
+    // for lint only when every changed TypeScript file is under src.
+    const typeCheckPassed = passedOnThisTree(/^npm run lint --prefix apps\/web$/)
+      || (webTypeScript.every((file) => file.startsWith('apps/web/src/')) && passedOnThisTree(/^npm run build --prefix apps\/web$/));
+    if (webTypeScript.length && !typeCheckPassed) {
       checks.push('npm run lint --prefix apps/web');
     }
+    // Every changed JavaScript file is syntax-checked, whichever lane owns it (apps/web/scripts/*.cjs too).
     for (const file of files) {
-      if (file.startsWith('apps/web/') || !/^[A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/.test(file)) continue;
+      if (!/^[A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/.test(file)) continue;
       if (!fs.existsSync(path.join(workspacePath, file))) continue;
       const command = `node --check ${file}`;
       if (!passedOnThisTree(new RegExp(`^${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))) checks.push(command);
