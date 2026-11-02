@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { knownSignatureFor, normalizeFailureText, planRoutineIntake, routineRepairBrief, routineSignature } = require('../builder-routine-intake');
+const { knownSignatureFor, normalizeFailureText, planRoutineIntake, routinePacketAutomationStatus, routineRepairBrief, routineSignature } = require('../builder-routine-intake');
 
 const packet = (id, page, message, failed) => ({
   id,
@@ -99,4 +99,48 @@ test('the routine brief points at the shared root cause and every affected page'
   assert.match(database, /; request rest\/access_presets returned 500\./);
   assert.match(database, /one new additive migration in supabase\/migrations\//);
   assert.match(database, /Never weaken a policy/);
+});
+
+test('a retry brief names why earlier attempts stopped so Bob does not repeat them', () => {
+  const hub = packet('p1', '/admin/hub', "Cannot read properties of undefined (reading '_leaflet_pos')");
+  const brief = routineRepairBrief(hub, {
+    previousAttempts: [
+      { jobId: 'd5f65103-0000-4000-8000-000000000000', error: 'independent reviewer blocked:\n the map still animates after unmount' },
+      { jobId: 'c604b921-0000-4000-8000-000000000000' },
+      { error: 'no job id is ignored' },
+    ],
+  });
+  assert.match(brief, /^Previous attempts: job d5f65103 stopped: independent reviewer blocked: the map still animates after unmount; job c604b921 stopped without a recorded reason\. .*do not repeat a stopped approach/m);
+  assert.doesNotMatch(brief, /no job id is ignored/);
+  assert.ok(brief.indexOf('Previous attempts:') < brief.indexOf('Required investigation:'));
+  assert.doesNotMatch(routineRepairBrief(hub), /Previous attempts/);
+});
+
+test('a packet stays in progress while its repair continues or waits on main, and fails only when the work stops', () => {
+  assert.equal(routinePacketAutomationStatus('done', { resumed_as_job_id: 'child' }), 'builder_started');
+  assert.equal(routinePacketAutomationStatus('done', {}), 'completed');
+  assert.equal(routinePacketAutomationStatus('done', null), 'completed');
+  assert.equal(routinePacketAutomationStatus('blocked', { repair_job_id: 'main-fix' }), 'builder_started');
+  assert.equal(routinePacketAutomationStatus('blocked', { repair_job_id: 'main-fix', repair_outcome: 'failed' }), 'failed');
+  assert.equal(routinePacketAutomationStatus('blocked', { repair_job_id: null }), 'failed');
+  assert.equal(routinePacketAutomationStatus('published', {}), 'published');
+  assert.equal(routinePacketAutomationStatus('awaiting_human', {}), 'awaiting_grandmaster');
+  assert.equal(routinePacketAutomationStatus('driving', null), 'builder_started');
+
+  const server = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'bob-control-plane-server.js'), 'utf8');
+  assert.match(server, /const automationStatus = routinePacketAutomationStatus\(state, report\);/);
+  assert.match(server, /\.\.\.\(resumedAs \? \{ covered_by_job_id: resumedAs \} : \{\}\),\n\s+\}\)\.eq\('covered_by_job_id', jobId\)/);
+});
+
+test('failed routine repairs are re-queued after a verified release before new packets are claimed', () => {
+  const server = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'bob-control-plane-server.js'), 'utf8');
+  const start = server.slice(server.indexOf('async function startRoutineRepairs()'));
+  assert.ok(start.indexOf('await requeueFailedRoutineRepairs()') < start.indexOf("rpc('builder_claim_routine_repairs'"));
+  assert.match(start, /builder\.routine_repair\.retry_unavailable/);
+  assert.match(server, /rpc\('builder_requeue_failed_routine_repairs', \{\n\s+_release_sha: released\.sha,\n\s+_released_at: released\.releasedAt,/);
+  assert.match(server, /function releasedMarker\(\)[^]*?fs\.readFileSync\(releasedShaFile[^]*?\/\^\[a-f0-9\]\{40\}\$\/[^]*?fs\.statSync\(releasedShaFile\)\.mtime/);
+  assert.match(server, /builder\.routine_repair\.retry_after_release/);
+  assert.match(start, /previousAttempts = await previousRoutineAttempts\(\[packet\.id, \.\.\.followers\.map/);
+  assert.match(start, /routineRepairBrief\(packet, \{ alsoReported: followers, previousAttempts \}\)/);
+  assert.match(server, /\.in\('source_friction_packet_id', packetIds\)\n\s+\.in\('status', \['failed', 'cancelled'\]\)/);
 });
