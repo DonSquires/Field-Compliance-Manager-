@@ -429,6 +429,36 @@ test('the compile gate reports a check that could not run instead of blaming the
   }
 });
 
+// PR #326 review: `build` (tsc -b) covers only apps/web/src while `lint` also checks the e2e project,
+// and web-owned JavaScript (apps/web/scripts/*.cjs) was never syntax-checked.
+test('a web build pass stands in for lint only for src TypeScript, and web JavaScript is syntax-checked', async () => {
+  const repo = makeRepo();
+  addWebTypecheck(repo);
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web', private: true, scripts: { lint: 'node typecheck.js', build: 'node -e ""' } }) + '\n');
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'web build']);
+  const sha = repo.git(['rev-parse', 'HEAD']);
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'gatebuildlint0001', targetSha: sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  try {
+    fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/src/app.tsx'), 'export const a = 2;\n');
+    fs.mkdirSync(path.join(ws.workspacePath, 'apps/web/e2e'), { recursive: true });
+    fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/e2e/app.spec.ts'), 'export const spec = 1;\n');
+    assert.equal((await tools.run({ command: 'npm run build --prefix apps/web' })).exit_code, 0);
+    assert.deepEqual((await tools.__compileGate(['apps/web/src/app.tsx'])).ran, [], 'a build pass covers src TypeScript on this tree');
+    assert.deepEqual((await tools.__compileGate(['apps/web/src/app.tsx', 'apps/web/e2e/app.spec.ts'])).ran, ['npm run lint --prefix apps/web'], 'e2e TypeScript needs lint');
+
+    fs.mkdirSync(path.join(ws.workspacePath, 'apps/web/scripts'), { recursive: true });
+    fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/scripts/holidays.cjs'), 'module.exports = {;\n');
+    const broken = await gateProposal(tools, { changed_files: ['apps/web/scripts/holidays.cjs'] });
+    assert.match(broken.error, /node --check apps\/web\/scripts\/holidays\.cjs/);
+    assert.match(broken.error, /SyntaxError/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
 test('an evidence-backed scope amendment lets a shared root-cause fix satisfy its requirement; weak or cross-lane amendments are refused (jobs d5f65103/c604b921)', () => {
   const specification = {
     delivery_requirements: [

@@ -55,8 +55,11 @@ check was still failing.
 During:
 
 - Compile gate: `finish` runs `npm run lint --prefix apps/web` for changed web
-  TypeScript and `node --check` for changed JavaScript. A check that already
-  passed on the exact worktree fingerprint is not run again. Recognised
+  TypeScript and `node --check` for every changed JavaScript file in either
+  lane, including `apps/web/scripts/*.cjs`. A check that already passed on the
+  exact worktree fingerprint is not run again. A web `build` pass stands in for
+  lint only when every changed TypeScript file is under `apps/web/src`, because
+  `tsc -b` does not check the e2e project. Recognised
   compiler output (`error TS…`, `SyntaxError`) is returned to the author as a
   refused finish. A check that cannot run because of missing tooling, a
   timeout or memory is recorded as `compile_gate.unavailable` and left to the
@@ -73,9 +76,19 @@ During:
   `reconcileAcceptance` for code review and the release report.
 - Routine significance is judged only on the proposed outcome: the title, the
   non-guardrail brief lines and the specification's problem, outcome, scope
-  and requirements, with negated clauses removed. Auth, dependency,
-  credential, redesign and architecture work is still held at the
-  specification gate.
+  and requirements, with directive negations ("do not", "never", "avoid",
+  "without", "no") removed up to the end of their clause. A contrast ("but",
+  "however", "instead") ends the clause, so "Do not redesign the page, but
+  change authentication" still holds. Descriptive negations ("does not") are
+  kept. Auth, dependency, credential, redesign and architecture work is still
+  held at the specification gate.
+- Gate evidence: the release gate judges the union of every lane's current
+  verified changed-file manifest, so a frontend correction verified after a
+  backend migration cannot hide the migration. When the snapshot, a lane
+  manifest or a routine job's specification cannot be read, the gate stays
+  pending (`evidence_pending`) and is judged again next tick. A routine job
+  with no specification, or a release gate with no verified change, waits for
+  a person.
 - Routine schema rule: a routine repair may add one migration when the root
   cause is in the database. The release then holds structurally for
   Grandmaster approval whenever any `supabase/migrations/` file changed.
@@ -83,9 +96,13 @@ During:
 - Routine intake (`builder-routine-intake.js`): friction packets are grouped
   by a page-independent failure signature. Known signatures are stale
   code-split chunks, Leaflet after unmount and PostgREST server errors; each
-  carries root-cause guidance. Each signature gets one repair job, and
-  matching packets are recorded with `covered_by_job_id`. They follow that
-  job's status instead of creating duplicate jobs.
+  carries root-cause guidance. The signature drops the page route with its
+  query string and keeps the failing endpoint's path. Each signature gets one
+  repair job, and matching packets are recorded with `covered_by_job_id`. They
+  start at the owning packet's status (for example `awaiting_grandmaster`) and
+  follow that job instead of creating duplicate jobs. Only jobs the autopilot
+  still drives cover new packets; a parked job (for example
+  `acceptance_incomplete`) does not.
 - Vibe (`vibe-v19`): failing verification gets up to `repairRounds`
   corrections (default 3). After the first round, a further correction is sent
   only when the failure signature changed or new edits landed. One
