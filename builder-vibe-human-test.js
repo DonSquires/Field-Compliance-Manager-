@@ -126,11 +126,14 @@ function pruneRuns(root, prefix) {
   } catch { /* retention is best-effort */ }
 }
 
-async function runOnce({ workspacePath, changedFiles, reason, image, execute, timeoutMs, requestedSpecs, artifactLabel }) {
+async function runOnce({ workspacePath, changedFiles, reason, image, execute, timeoutMs, requestedSpecs, artifactLabel, authorSpecs }) {
   if (!image) throw new Error('Human test worker image is not configured (BOB_WORKER_IMAGE)');
-  const targeted = requestedSpecs !== undefined;
-  const specs = targeted ? validateBrowserSpecs(workspacePath, requestedSpecs) : humanTestSpecs(workspacePath, changedFiles);
+  const targeted = requestedSpecs !== undefined || Boolean(authorSpecs);
+  const specs = authorSpecs
+    ? [...new Set(authorSpecs)].filter(spec => isBrowserSpecPath(spec) && fs.existsSync(path.join(workspacePath, 'apps/web', spec)))
+    : targeted ? validateBrowserSpecs(workspacePath, requestedSpecs) : humanTestSpecs(workspacePath, changedFiles);
   if (!targeted && !specs.includes(HUMAN_SPEC)) throw new Error(`${HUMAN_SPEC} is missing from the workspace`);
+  if (!specs.length) throw new Error('No Playwright spec to run in this workspace');
   const root = path.join(path.dirname(workspacePath), '.human-test-runs');
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const prefix = `${path.basename(artifactLabel || workspacePath)}-`;
@@ -164,8 +167,10 @@ async function runOnce({ workspacePath, changedFiles, reason, image, execute, ti
     screenshot_mismatches: summary.failures.filter(test => test.screenshot_mismatch).map(test => `${test.file} > ${test.title}`),
     output_tail: ok ? undefined : clip(output.slice(-2500), 2500),
     evidence_directory: artifactDir,
-    note: targeted
-      ? 'Offline targeted fixture browser check (desktop). This does not replace the full human walk or publication verification.'
+    note: authorSpecs
+      ? 'Offline fixture run of the named Playwright specs on this tree (desktop). It is browser evidence for the author, not the independent verification or a merge approval.'
+      : targeted
+        ? 'Offline targeted fixture browser check (desktop). This does not replace the full human walk or publication verification.'
       : 'Offline fixture walk of the rendered app on this branch (desktop). It is browser evidence for the change, not a live tenant test or merge approval.',
   };
 }
@@ -178,4 +183,13 @@ function runVibeHumanTest({ workspacePath, changedFiles = [], reason = '', specs
   return run;
 }
 
-module.exports = { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
+/** Builder's author runs exactly the named specs (no Dr Bob walk) in the same offline worker and queue. */
+function runBrowserSpecs({ workspacePath, specs, reason = '', image = process.env.BOB_WORKER_IMAGE, execute = executeWorker,
+  timeoutMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_BROWSER_TEST_TIMEOUT_MS || 15 * 60_000)) }) {
+  if (!Array.isArray(specs) || !specs.length) return Promise.reject(new Error('specs are required'));
+  const run = queue.then(() => runOnce({ workspacePath, changedFiles: [], reason, image, execute, timeoutMs, authorSpecs: specs }));
+  queue = run.catch(() => {});
+  return run;
+}
+
+module.exports = { HUMAN_SPEC, SPEC_PATTERN, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
