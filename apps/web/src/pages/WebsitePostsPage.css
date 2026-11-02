@@ -1,0 +1,27 @@
+.website-posts-page { width: 100%; max-width: 1280px; display: grid; gap: 18px; }
+.website-posts-page .page-header { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
+.website-posts-page p { color: var(--color-text-secondary); line-height: 1.5; }
+.website-posts-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.website-posts-actions .btn { display: inline-flex; gap: 6px; align-items: center; }
+.website-posts-layout { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(0, 3fr); gap: 20px; }
+.website-posts-list, .website-posts-editor { min-width: 0; padding: 18px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-secondary); }
+.website-posts-page label { display: grid; gap: 6px; margin: 12px 0; font-weight: 600; }
+.website-posts-page input:not([type=checkbox]), .website-posts-page textarea, .website-posts-page select { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-primary); color: var(--color-text-primary); font: inherit; }
+.website-posts-page textarea { resize: vertical; }
+.website-posts-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.website-posts-list ul { display: grid; gap: 8px; list-style: none; padding: 0; }
+.website-posts-list li button { width: 100%; padding: 12px; text-align: left; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-primary); color: var(--color-text-primary); cursor: pointer; overflow-wrap: anywhere; }
+.website-posts-list li button.selected { border-color: var(--color-accent); }
+.website-posts-list li span { display: block; margin-top: 6px; color: var(--color-text-secondary); }
+.website-posts-page .website-posts-approval { display: flex; align-items: flex-start; gap: 10px; font-weight: 400; }
+.website-posts-approval input { margin-top: 4px; flex-shrink: 0; }
+.website-posts-photo img { display: block; max-width: 100%; max-height: 300px; object-fit: contain; }
+.website-posts-note { padding: 12px; border-left: 3px solid var(--color-accent); background: var(--color-bg-elevated); margin: 12px 0; }
+.website-posts-editor > a { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; }
+@media (max-width: 720px) {
+  .website-posts-page { width: 100%; }
+  .website-posts-layout { grid-template-columns: 1fr; }
+  .website-posts-actions { width: 100%; }
+  .website-posts-actions .btn { flex: 1 1 160px; justify-content: center; }
+  .website-posts-editor, .website-posts-list { padding: 12px; }
+}

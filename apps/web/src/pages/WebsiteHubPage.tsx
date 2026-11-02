@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowRight, BarChart3, ExternalLink, Inbox, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ArrowRight, BarChart3, ExternalLink, FileText, Inbox, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isAdminTierRole } from '../lib/roles';
 import { getWebsiteAnalyticsDateRange, parseWebsiteAnalyticsSummary } from '../lib/websiteAnalytics';
@@ -73,7 +73,7 @@ export default function WebsiteHubPage({ onNavigate }: { onNavigate: NavigateWit
         <div>
           <p className="website-hub-eyebrow">Clients &amp; Delivery</p>
           <h1>Website</h1>
-          <p>Review incoming enquiries and high-level website activity.</p>
+          <p>Review enquiries, check website statistics, and publish news and updates.</p>
         </div>
         <div className="website-hub-header-actions">
           <a className="btn btn-secondary btn-sm" href="https://randmsecurity.com" target="_blank" rel="noopener noreferrer">
@@ -86,6 +86,16 @@ export default function WebsiteHubPage({ onNavigate }: { onNavigate: NavigateWit
       </header>
 
       <section className="website-hub-cards" aria-label="Website workspaces">
+        <article className="website-hub-card">
+          <div className="website-hub-card-icon" aria-hidden="true"><FileText size={20} /></div>
+          <div className="website-hub-card-content">
+            <h2>News and updates</h2>
+            <p>Write an update, add a photo, and publish it to the public website. Drafts stay private.</p>
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate('website-posts')}>
+              Write or manage updates <ArrowRight size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </article>
         <article className="website-hub-card">
           <div className="website-hub-card-icon" aria-hidden="true"><Inbox size={20} /></div>
           <div className="website-hub-card-content">
