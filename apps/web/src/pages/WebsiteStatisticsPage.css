@@ -2,7 +2,8 @@
   display: grid;
   gap: 16px;
   width: 100%;
-  max-width: 1100px;
+  max-width: none;
+  align-content: start;
 }
 
 .website-statistics-page .page-header {
