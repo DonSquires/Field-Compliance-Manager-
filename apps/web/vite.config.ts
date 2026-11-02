@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite';
+import { defineConfig, transformWithOxc } from 'vite';
 import react from '@vitejs/plugin-react';
 import { configDefaults } from 'vitest/config';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 
 // One identity per deployed build. An open tab compares it with /version.json so a user is told
@@ -12,6 +13,20 @@ function resolveBuildId() {
   catch { return `local-${Date.now()}`; }
 }
 const BUILD_ID = resolveBuildId();
+const MOBILE_TEST_SOURCE = /[/\\]mobile[/\\]src[/\\].*\.tsx?$/;
+
+function mobileTestTransform(): Plugin {
+  return {
+    name: 'fcm-mobile-test-transform',
+    enforce: 'pre',
+    apply: () => Boolean(process.env.VITEST),
+    async transform(code, id) {
+      if (!MOBILE_TEST_SOURCE.test(id)) return;
+      // Web CI tests native components without installing Expo or its tsconfig.
+      return transformWithOxc(code, id, { tsconfig: false, jsx: { runtime: 'automatic' } });
+    },
+  };
+}
 
 function buildVersionManifest(): Plugin {
   return {
@@ -28,7 +43,8 @@ function buildVersionManifest(): Plugin {
 // the standard match for a bare main.tsx + BrowserRouter entry; revisit if
 // that assumption is later contradicted by evidence.
 export default defineConfig({
-  plugins: [react(), buildVersionManifest()],
+  plugins: [react(process.env.VITEST ? { exclude: [/\/node_modules\//, MOBILE_TEST_SOURCE] } : {}), buildVersionManifest(), mobileTestTransform()],
+  oxc: process.env.VITEST ? { exclude: MOBILE_TEST_SOURCE } : undefined,
   define: { __APP_BUILD_ID__: JSON.stringify(BUILD_ID) },
   build: {
     // Mermaid is loaded only when Bob renders a diagram; its lazy runtime is
@@ -58,5 +74,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    alias: [
+      { find: /^react-native$/, replacement: fileURLToPath(new URL('./test/mocks/reactNative.tsx', import.meta.url)) },
+      { find: /^react(?=\/|$)/, replacement: fileURLToPath(new URL('./node_modules/react', import.meta.url)) },
+    ],
   },
 });

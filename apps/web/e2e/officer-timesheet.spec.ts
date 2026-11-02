@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
+test.use({ timezoneId: 'UTC' });
+
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
   await installOfficerScheduleFixtures(page);

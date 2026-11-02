@@ -8,6 +8,47 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
+
+- **Before:** a late response for an earlier period could replace the selected
+  work on web or mobile; a failed or absent preview could look like empty work.
+  A correction could commit while its receipt was lost, leaving a rejected row
+  visible and inviting another attempt. The list also assumed the staff
+  profile ID always equalled the signed-in user ID, although the schema and
+  submission RPC support a separate linked `user_id`.
+- **During:** previews are tied to the officer and selected dates; obsolete
+  responses are ignored, failures are explicit and retryable, and submission
+  waits for both a confirmed preview and an available timesheet list. Staff
+  IDs are resolved by either profile ID or linked user ID within the officer's
+  organisation; the list is restricted to those IDs and that organisation.
+  A new submission reuses its client event ID only while its inputs are unchanged.
+  Web preserves a confirmed receipt if its list refresh fails. Because
+  `resubmit_rejected_timesheet_from_work` has no client event ID, a lost
+  correction receipt triggers a status refresh without claiming success;
+  another attempt stays blocked while the row cannot be verified.
+- **Concurrency:** the submit RPC now serializes submissions by staff profile
+  before checking the idempotency key and overlapping date range. A concurrent
+  overlapping submission waits, then receives the existing overlap rejection;
+  grants remain unchanged.
+- **After:** the current list and receipt determine what the officer sees;
+  an unavailable list is not presented as an empty one. The submission RPC
+  still recalculates work and remains authoritative for payroll records.
+  Atlas shows both client helpers calling `get_officer_timesheet_work`; that
+  wired path is not invocation evidence. The stale Atlas
+  `timesheets.submitted_at` column flag is not an unwired feature: the schema
+  has writers and the web list reads it. The current generator does not create
+  column edges, and no Atlas row has been hand-edited.
+- **Evidence boundary:** offline browser tests use synthetic requests on desktop
+  and phone layouts. Component tests use a React Native stand-in, not a real
+  device. Local tests and builds do not prove live payroll behavior or human
+  acceptance; publication and normal post-merge Atlas refresh remain separate.
+- **Local acceptance:** 18 focused Vitest tests and 28 offline Playwright checks
+  pass across desktop and phone; web lint/build and the mobile TypeScript check
+  pass. A clean web-only dependency fixture also passes the 15 native/helper
+  tests without Expo installed; the test transform leaves production mobile
+  settings unchanged. These checks do not replace a human walkthrough or live
+  payroll verification.
+
 Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
 
 - Before: any attachment on the current message excludes cloud fallback;
@@ -358,10 +399,11 @@ present-but-unwired entities; live schema and migration ledger match the repo):
   `project_historical_patrol_roster` is intentionally disabled; its comment
   points to `apply_historical_roster_assignment_import`. Person-domain items
   such as `persons.homeless_status` are not HR.
-- **Evidence gate:** vitest guards, `rosterWords` and the web build pass. Serial
-  synthetic Playwright runs of HR administration and officer timesheets pass
-  apart from `officer-timesheet.spec.ts:22`, which assumes a UTC browser and
-  fails only on an NZ-time machine. No human walkthrough has been done yet.
+- **Evidence gate:** web lint/build, the mobile TypeScript check, 18 focused
+  Vitest tests and 28 offline officer-timesheet Playwright checks pass across
+  desktop and phone; the browser test now sets UTC explicitly. The HR-admin
+  Playwright suite was not rerun in this follow-up, and no human walkthrough
+  has been done yet.
 
 Website enquiry intake, 2026-11-03 (live Atlas has no website or enquiry
 entities; the live migration ledger ends at `20261103100000`):
