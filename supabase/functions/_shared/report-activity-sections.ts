@@ -22,15 +22,24 @@ export type ReportBlock =
   | { kind: 'metrics'; items: Array<{ label: string; value: string }> }
   | { kind: 'charts'; charts: Array<{ title: string; items: Array<{ label: string; value: number }> }> }
   | { kind: 'gallery'; photos: Array<{ ref: ReportPhotoRef; caption: string }> }
-  | { kind: 'entry'; when: string; tags: string[]; title: string; lines: ReportEntryLine[]; photos: ReportPhotoRef[]; photoCount: number; tone: 'incident' | 'default' };
+  | { kind: 'entry'; when: string; tags: string[]; title: string; lines: ReportEntryLine[]; photos: ReportPhotoRef[]; photoCount: number; tone: 'incident' | 'default' }
+  | { kind: 'rich'; runs: Array<{ text: string; bold: boolean }>; style: 'heading' | 'bullet' | 'paragraph' };
 
 export {
   ACTIVITY_REPORT_VERSION,
+  INCIDENT_TYPE_LABELS,
   NO_PLACE_LABEL,
   PRIVILEGED_PHOTO,
   SUMMARY_PHOTO_LIMIT,
   activityEmailSummary,
+  activityLineKey,
+  applyIncidentTriage,
+  confirmedIncidentCount,
+  executiveSummaryBlocks,
+  executiveSummaryMarkup,
   humaniseCode,
+  incidentTypeLabel,
+  isIncidentLine,
   isNotableLine,
   isRoutineLine,
   monthlyActivityBlocks,
@@ -38,6 +47,6 @@ export {
   readActivityReport,
   reportDate,
   siteLogBlocks,
-  summaryParagraphs,
+  summaryMarkup,
   textParagraphs,
 } from './report-activity-sections.mjs';

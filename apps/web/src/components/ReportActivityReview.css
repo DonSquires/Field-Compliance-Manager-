@@ -129,6 +129,44 @@
 .report-photo-viewer-nav { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--color-border, #334155); }
 .report-photo-viewer-nav .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
 
+.report-activity-summary-heading { margin: 12px 0 0; font-weight: 700; }
+.report-activity-summary-list { margin: 6px 0 0; padding-left: 20px; line-height: 1.5; }
+.report-activity-summary-list li + li { margin-top: 4px; }
+
+.report-entry.is-flagged { border-color: var(--color-warning, #f59e0b); box-shadow: inset 4px 0 0 var(--color-warning, #f59e0b); }
+.report-entry.is-confirmed { border-color: var(--color-danger, #ef4444); box-shadow: inset 4px 0 0 var(--color-danger, #ef4444); }
+.report-entry.is-cleared { border-color: var(--color-success, #22c55e); box-shadow: inset 4px 0 0 var(--color-success, #22c55e); }
+.report-entry-triage { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--color-border, #334155); }
+.report-entry-review { min-height: 40px; }
+
+.report-triage-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.report-triage-actions .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.report-triage-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.report-triage-filter-option { min-height: 40px; padding: 6px 12px; border: 1px solid var(--color-border, #334155); border-radius: 999px; color: inherit; background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.report-triage-filter-option.is-selected { border-color: var(--color-primary, #60a5fa); background: var(--color-bg-secondary, rgba(96, 165, 250, 0.12)); font-weight: 600; }
+.report-triage-filter-option:focus-visible { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
+
+.report-triage-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; overflow: hidden; border: 1px solid var(--color-border-strong, #475569); border-radius: 8px; color: var(--color-text-primary, #f8fafc); background: var(--color-bg-elevated, #0f1b2d); }
+.report-triage-dialog[open] { display: flex; flex-direction: column; }
+.report-triage-dialog::backdrop { background: var(--color-bg-overlay, rgba(2, 8, 14, 0.72)); }
+.report-triage-body { display: grid; flex: 1 1 auto; gap: 12px; padding: 14px; overflow: auto; }
+.report-triage-decision { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.report-triage-decision legend { margin-bottom: 6px; padding: 0; font-weight: 700; }
+.report-triage-option { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; padding: 10px; border: 2px solid var(--color-border, #334155); border-radius: 6px; cursor: pointer; }
+.report-triage-option input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; }
+.report-triage-option span { display: grid; gap: 2px; min-width: 0; }
+.report-triage-option small { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.report-triage-option:focus-within { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
+.report-triage-option.is-selected { border-color: var(--color-text-secondary, #94a3b8); }
+.report-triage-option.is-incident.is-selected { border-color: var(--color-danger, #ef4444); color: var(--color-danger, #ef4444); }
+.report-triage-option.is-not_incident.is-selected { border-color: var(--color-success, #22c55e); color: var(--color-success, #22c55e); }
+.report-triage-decision:disabled .report-triage-option { cursor: default; opacity: 0.8; }
+.report-triage-bob { padding: 10px 12px; border-left: 4px solid var(--color-warning, #f59e0b); border-radius: 6px; background: var(--color-bg-secondary, transparent); }
+.report-triage-bob p { margin: 0; line-height: 1.5; }
+.report-triage-bob p + p { margin-top: 4px; }
+.report-log-field textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--color-border-strong, #475569); border-radius: 6px; color: var(--color-text-primary, #f8fafc); background: var(--color-bg-elevated, #0f1b2d); font: inherit; font-size: 16px; font-weight: 400; resize: vertical; }
+.report-log-field textarea:focus-visible { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
+
 @media (max-width: 760px) {
   .report-activity { width: 100%; box-sizing: border-box; padding: 12px; }
   .report-activity-heading,
@@ -156,6 +194,11 @@
   .report-activity-retry { align-items: stretch; flex-direction: column; }
   .report-photo-viewer { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .report-photo-viewer-stage img { max-height: calc(100dvh - 180px); }
+  .report-triage-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .report-triage-decision { grid-template-columns: 1fr; }
+  .report-triage-actions .btn,
+  .report-entry-review { width: 100%; min-height: 44px; justify-content: center; }
+  .report-triage-filter-option { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

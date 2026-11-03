@@ -49,6 +49,10 @@ export interface ActivityReport {
 export interface ReportPhotoRef { bucket: string; path: string }
 
 export interface ActivityLine {
+  /** Content key shared with report_incident_triage; see activityLineKey. */
+  key: string;
+  /** Incident type a reviewer confirmed for this entry; empty when not confirmed. */
+  confirmedType: string;
   date: string;
   time: string;
   place: string;
@@ -114,6 +118,154 @@ function readHunterReturns(value: unknown): HunterReturns | null {
 export function humaniseCode(value: string): string {
   const text = value.replaceAll('_', ' ').trim();
   return text ? text[0].toUpperCase() + text.slice(1) : '';
+}
+
+/** Incident types a reviewer can confirm; matches report_incident_triage and the shared report sections. */
+export const INCIDENT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  theft: 'Theft',
+  trespass: 'Trespass',
+  perimeter_compromise: 'Perimeter compromise',
+  vandalism: 'Vandalism or damage',
+  surveillance_tampering: 'Surveillance tampering',
+  hardware_failure: 'Lock or hardware failure',
+  illegal_hunting: 'Illegal hunting or firearms',
+  dumping: 'Dumping',
+  fire: 'Fire',
+  safety_hazard: 'Safety hazard',
+  other: 'Other incident',
+};
+
+export function incidentTypeLabel(code: string): string {
+  return INCIDENT_TYPE_LABELS[code] || (code ? humaniseCode(code) : 'Incident');
+}
+
+const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key']);
+
+/**
+ * Content key of one frozen activity line (snapshot lines carry no record id):
+ * every content field except photo and video counts and refs, which can change
+ * as media arrives. Must match activityLineKey in
+ * supabase/functions/_shared/report-activity-sections.mjs.
+ */
+export function activityLineKey(line: Json): string {
+  const source = JSON.stringify(Object.keys(line)
+    .filter((field) => !LINE_KEY_IGNORED.has(field))
+    .sort()
+    .map((field) => [field, typeof line[field] === 'string' ? (line[field] as string).trim() : line[field] ?? null])
+    .filter(([, value]) => value !== '' && value !== null));
+  // cyrb53 (public domain): a fast 53-bit string hash.
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hash = 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  return `v1:${hash.toString(16).padStart(14, '0')}`;
+}
+
+export type TriageDecision = 'unreviewed' | 'incident' | 'not_incident';
+
+/** Bob's assessment of one entry and the reviewer's decision, from list_report_incident_triage. */
+export interface IncidentTriage {
+  lineKey: string;
+  bobFlagged: boolean;
+  bobType: string;
+  bobReason: string;
+  bobConfidence: number | null;
+  decision: TriageDecision;
+  incidentType: string;
+  note: string;
+  decidedAt: string;
+}
+
+export function readIncidentTriage(value: unknown): IncidentTriage[] {
+  return list(value).flatMap((row) => {
+    const lineKey = str(row.line_key);
+    if (!lineKey) return [];
+    const decision = str(row.decision);
+    return [{
+      lineKey,
+      bobFlagged: row.bob_flagged === true,
+      bobType: str(row.bob_incident_type),
+      bobReason: str(row.bob_reason),
+      bobConfidence: typeof row.bob_confidence === 'number' ? row.bob_confidence : typeof row.bob_confidence === 'string' && row.bob_confidence ? Number(row.bob_confidence) : null,
+      decision: decision === 'incident' || decision === 'not_incident' ? decision : 'unreviewed',
+      incidentType: str(row.incident_type),
+      note: str(row.decision_note),
+      decidedAt: str(row.decided_at),
+    }];
+  });
+}
+
+/** Marks the lines a reviewer confirmed as incidents, as the client PDF does. */
+export function applyIncidentTriage(lines: ActivityLine[], triage: Map<string, IncidentTriage>): ActivityLine[] {
+  if (!triage.size) return lines;
+  return lines.map((line) => {
+    const row = line.kind === 'incident' ? undefined : triage.get(line.key);
+    const confirmedType = row?.decision === 'incident' ? row.incidentType || 'other' : '';
+    return confirmedType === line.confirmedType ? line : { ...line, confirmedType };
+  });
+}
+
+/** A recorded incident or an entry confirmed as one on review. */
+export function isIncidentLine(line: ActivityLine): boolean {
+  return line.kind === 'incident' || Boolean(line.confirmedType);
+}
+
+export interface TextRun { text: string; bold: boolean }
+export interface MarkupItem { style: 'heading' | 'bullet' | 'paragraph'; runs: TextRun[] }
+
+function markupRuns(value: string): TextRun[] {
+  const runs: TextRun[] = [];
+  value.split('**').forEach((part, index) => {
+    const cleaned = part.replace(/__|`/g, '');
+    if (cleaned) runs.push({ text: cleaned, bold: index % 2 === 1 });
+  });
+  return runs.length ? runs : [{ text: value.replace(/\*\*|__|`/g, ''), bold: false }];
+}
+
+/**
+ * The reviewer's summary as headings, bullets and paragraphs, as in the PDF and email:
+ * **bold**, "# heading" or a wholly bold line, and "* ", "- " or "• " bullets.
+ */
+export function summaryMarkup(value: string): MarkupItem[] {
+  const items: MarkupItem[] = [];
+  let paragraph: string[] = [];
+  const flush = () => {
+    if (paragraph.length) items.push({ style: 'paragraph', runs: markupRuns(paragraph.join(' ')) });
+    paragraph = [];
+  };
+  for (const raw of value.replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+    const heading = /^#{1,6}\s+(.+)$/.exec(line);
+    const bullet = /^(?:[-*•]|\d+[.)])\s+(.+)$/.exec(line);
+    if (heading || /^\*\*[^*]+\*\*:?$/.test(line)) {
+      flush();
+      items.push({ style: 'heading', runs: [{ text: (heading ? heading[1] : line).replace(/\*\*|__|`/g, '').trim(), bold: true }] });
+    } else if (bullet) {
+      flush();
+      items.push({ style: 'bullet', runs: markupRuns(bullet[1]) });
+    } else {
+      paragraph.push(line);
+    }
+  }
+  flush();
+  return items;
+}
+
+/** The executive summary without Bob's own "Executive Summary: ..." title, for surfaces that already show one. */
+export function executiveSummaryMarkup(value: string): MarkupItem[] {
+  const items = summaryMarkup(value);
+  if (items[0]?.style === 'heading' && /^executive summary\b/i.test(items[0].runs.map((run) => run.text).join(''))) items.shift();
+  return items;
 }
 
 const FIXED_LABELS: Record<string, Record<string, string>> = {
@@ -198,6 +350,7 @@ export function readActivityLines(value: unknown): { lines: ActivityLine[]; notI
   return {
     notItemised: num(document.notItemised),
     lines: list(document.lines).map((line) => ({
+      key: activityLineKey(line), confirmedType: '',
       date: str(line.d), time: str(line.t), place: str(line.p) || NO_PLACE_LABEL, kind: str(line.k), category: str(line.c), module: str(line.mo),
       activity: str(line.a), subject: str(line.s), species: str(line.sp), equipment: str(line.eq), job: str(line.j),
       materials: list(line.m).map((item) => ({ type: str(item.t), calibre: str(item.cal), quantity: typeof item.q === 'number' ? item.q : null })),
@@ -296,6 +449,17 @@ export function describeActivityLine(report: Pick<ActivityReport, 'labels'>, lin
     if (line.action && !sameText(line.action, line.note)) lines.push({ label: line.kind === 'work_order' ? 'Completion' : 'Action taken', text: line.action });
   }
   if (line.job) tags.push(`Ref ${line.job}`);
+  if (line.kind !== 'incident' && line.confirmedType) {
+    return {
+      when: [reportDate(line.date), line.time].filter(Boolean).join(' · '),
+      tags: ['Confirmed on review', ...tags.filter(Boolean)],
+      title: incidentTypeLabel(line.confirmedType),
+      lines: [...(title ? [{ label: 'Recorded as', text: title }] : []), ...lines],
+      photos: line.photoRefs,
+      photoCount: line.photos,
+      tone: 'incident',
+    };
+  }
   return {
     when: [reportDate(line.date), line.time].filter(Boolean).join(' · '),
     tags: tags.filter(Boolean),
@@ -311,7 +475,7 @@ export function describeActivityLine(report: Pick<ActivityReport, 'labels'>, lin
 export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
   const byPlace = new Map<string, ActivityLine[]>();
   for (const line of lines) {
-    if (line.kind === 'incident') continue;
+    if (isIncidentLine(line)) continue;
     byPlace.set(line.place, [...(byPlace.get(line.place) ?? []), line]);
   }
   return [...byPlace.keys()]
@@ -330,12 +494,11 @@ export const SUMMARY_PHOTO_LIMIT = 6;
 
 /** An observation, CCTV activation or anything photographed; incidents are listed separately and routine patrols only counted. */
 export function isNotableLine(line: ActivityLine): boolean {
-  if (line.kind === 'incident' || isRoutineLine(line)) return false;
+  if (isIncidentLine(line) || isRoutineLine(line)) return false;
   return line.kind === 'observation' || line.category === 'camera_activation' || line.photos > 0;
 }
 
-const noteRank = (line: ActivityLine) => (line.kind === 'incident' ? 0 : line.category === 'camera_activation' ? 1 : line.kind === 'observation' ? 2 : 3);
-const joinList = (parts: string[]) => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
+const noteRank = (line: ActivityLine) => (isIncidentLine(line) ? 0 : line.category === 'camera_activation' ? 1 : line.kind === 'observation' ? 2 : 3);
 const shortDate = (value: string) => {
   const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
   return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
@@ -344,7 +507,7 @@ const shortDate = (value: string) => {
 /** Summary photos: one per entry in order of importance before any entry gets a second. */
 export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: ActivityLine[]): Array<{ ref: ReportPhotoRef; caption: string }> {
   const ranked = lines
-    .filter((line) => line.kind === 'incident' || isNotableLine(line))
+    .filter((line) => isIncidentLine(line) || isNotableLine(line))
     .map((line, index) => ({ line, index }))
     .filter((item) => item.line.photoRefs.length > 0)
     .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
@@ -357,7 +520,8 @@ export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: Act
       const key = ref ? `${ref.bucket}/${ref.path}` : '';
       if (!ref || seen.has(key) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
       seen.add(key);
-      const what = line.kind === 'incident' ? activityLabel(report, 'incidentType', line.incidentType) || 'Incident' : activityLabel(report, 'category', line.category);
+      const what = line.kind === 'incident' ? activityLabel(report, 'incidentType', line.incidentType) || 'Incident'
+        : line.confirmedType ? incidentTypeLabel(line.confirmedType) : activityLabel(report, 'category', line.category);
       picks.push({ ref, caption: [shortDate(line.date), line.place, what].filter(Boolean).join(' · ') });
     }
   }
@@ -367,37 +531,6 @@ export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: Act
 /** Paragraphs of reviewer text, split on blank lines. */
 export function textParagraphs(value: string): string[] {
   return value.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
-}
-
-/** The period in plain sentences, built only from the frozen figures; used when the reviewer has not written an executive summary. */
-export function summaryParagraphs(report: ActivityReport): string[] {
-  const { totals, incidents, observations } = report;
-  const hunters = report.hunterReturns;
-  const hunterText = hunters && hunters.returns > 0
-    ? `Permit holders submitted ${countedText(hunters.returns, 'hunter return', 'hunter returns')} reporting ${countedText(hunters.animals, 'animal', 'animals')}.`
-    : '';
-  if (totals.entries === 0) return ['Nothing was recorded at your locations during the period.', hunterText].filter(Boolean);
-  const paragraphs: string[] = [];
-  const top = report.byPlace.filter((row) => row.place && row.place !== NO_PLACE_LABEL).sort((left, right) => right.entries - left.entries)[0];
-  paragraphs.push(`${countedText(totals.entries, 'entry was', 'entries were')} recorded across ${countedText(totals.places, 'location', 'locations')} during the period.`
-    + (top && totals.places > 1 ? ` The most active location was ${top.place} with ${countedText(top.entries, 'entry', 'entries')}.` : ''));
-  const culls = report.pest.bySpecies.reduce((sum, row) => sum + row.culls, 0);
-  const work = [
-    totals.patrolVisits > 0 ? countedText(totals.patrolVisits, 'patrol or site check', 'patrols and site checks') : '',
-    totals.cameraActivations > 0 ? countedText(totals.cameraActivations, 'CCTV activation', 'CCTV activations') : '',
-    culls > 0 ? countedText(culls, 'pest cull', 'pest culls') : '',
-    report.maintenance.entries > 0 ? countedText(report.maintenance.entries, 'maintenance entry', 'maintenance entries') : '',
-  ].filter(Boolean);
-  if (work.length || hunterText) paragraphs.push([work.length ? `Work included ${joinList(work)}.` : '', hunterText].filter(Boolean).join(' '));
-  const serious = incidents.bySeverity.filter((row) => row.code === 'high' || row.code === 'critical').reduce((sum, row) => sum + row.entries, 0);
-  const incidentText = incidents.total > 0
-    ? `${countedText(incidents.total, 'incident was', 'incidents were')} recorded${serious > 0 ? `, ${formatActivityNumber(serious)} of high or critical severity` : ''}.`
-    : 'No incidents were recorded.';
-  const observationText = observations.total > 0
-    ? ` ${countedText(observations.total, 'observation was', 'observations were')} logged, ${formatActivityNumber(observations.withPhoto)} with photos.`
-    : '';
-  paragraphs.push(`${incidentText}${observationText}`);
-  return paragraphs;
 }
 
 export interface ActivityAccounting {

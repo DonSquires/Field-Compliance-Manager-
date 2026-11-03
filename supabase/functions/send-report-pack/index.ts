@@ -17,7 +17,8 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
-import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
+import { activityEmailSummary, applyIncidentTriage, confirmedIncidentCount, executiveSummaryMarkup, summaryMarkup } from '../_shared/report-activity-sections.ts';
+import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
 import { fetchCappedBytes, reportEmailMimeContent, reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -27,7 +28,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v16';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v17';
 // Larger PDFs are sent as the signed download link only, keeping the message
 // under common mailbox size limits once base64-encoded.
 const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -57,6 +58,9 @@ interface ReportPackEmail {
   report_kind: string;
   report_scope: JsonMap;
   data: JsonMap | null;
+  activity_lines: JsonMap | null;
+  /** Logged entries a reviewer confirmed as incidents; derived, not a column. */
+  confirmed_incidents?: number;
   editorial: JsonMap | null;
   pdf_path: string | null;
   pdf_renderer_version: string | null;
@@ -83,14 +87,31 @@ function customScopeLabel(reportScope: JsonMap, key: string, valueKey: string, f
   return labels.length ? labels.join(', ') : fallback;
 }
 
+function markupHtml(value: string, markup = summaryMarkup) {
+  const runs = (items: Array<{ text: string; bold: boolean }>) => items.map((run) => run.bold ? `<strong>${escapeHtml(run.text)}</strong>` : escapeHtml(run.text)).join('');
+  const html: string[] = [];
+  let bullets: string[] = [];
+  const flushBullets = () => {
+    if (bullets.length) html.push(`<ul>${bullets.join('')}</ul>`);
+    bullets = [];
+  };
+  for (const item of markup(value)) {
+    if (item.style === 'bullet') { bullets.push(`<li>${runs(item.runs)}</li>`); continue; }
+    flushBullets();
+    html.push(item.style === 'heading' ? `<p><strong>${runs(item.runs.map((run) => ({ ...run, bold: false })))}</strong></p>` : `<p>${runs(item.runs)}</p>`);
+  }
+  flushBullets();
+  return html.join('');
+}
+
 function editorialHtml(editorial: JsonMap) {
-  const sections: Array<[string, unknown]> = [
-    ['Executive summary', editorial.executive_summary],
-    ['Notes', editorial.client_notes],
-    ['Follow-up', editorial.follow_up]
+  const sections: Array<[string, unknown, typeof summaryMarkup]> = [
+    ['Executive summary', editorial.executive_summary, executiveSummaryMarkup],
+    ['Notes', editorial.client_notes, summaryMarkup],
+    ['Follow-up', editorial.follow_up, summaryMarkup]
   ];
-  return sections.flatMap(([heading, value])=>typeof value === 'string' && value.trim()
-    ? [`<h3>${heading}</h3>${value.replace(/\r\n/g, '\n').split(/\n\s*\n/).map((paragraph)=>paragraph.trim()).filter(Boolean).map((paragraph)=>`<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`).join('')}`]
+  return sections.flatMap(([heading, value, markup])=>typeof value === 'string' && value.trim()
+    ? [`<h3>${heading}</h3>${markupHtml(value, markup)}`]
     : []).join('');
 }
 
@@ -132,7 +153,7 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     const pct = expected > 0 ? Math.round(completed / expected * 100) : 0;
     return `<tr><td>${escapeHtml(facility.siteName)}</td><td align="right">${expected}</td><td align="right">${completed}</td><td align="right">${pct}%</td></tr>`;
   }).join('');
-  const activity = activityEmailSummary(d);
+  const activity = activityEmailSummary(d, { confirmedIncidents: pack.confirmed_incidents ?? 0 });
   // The client activity report replaces the legacy patrol line; travel,
   // hours and operational detail are never part of the client email.
   const activityHtml = activity ? `<h3>Activity at your locations</h3>
@@ -200,11 +221,17 @@ async function loadDeliveryContext(req: Request, packId: string) {
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: callerProfile } = await admin.from('user_profiles').select('role, organization_id, deactivated_at').eq('id', caller.id).single();
   if (!callerProfile || callerProfile.deactivated_at || !CAN_SEND.has(callerProfile.role)) throw new RequestError('Forbidden: insufficient role', 403);
-  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, editorial, pdf_path, pdf_renderer_version, pdf_source_updated_at, updated_at, sent_to, provider:organization_id(name, logo_url)').eq('id', packId).single();
+  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, activity_lines, editorial, pdf_path, pdf_renderer_version, pdf_source_updated_at, updated_at, sent_to, provider:organization_id(name, logo_url)').eq('id', packId).single();
   if (!pack) throw new RequestError('Pack not found', 404);
   const { data: maySend } = await callerClient.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (maySend !== true) throw new RequestError('Cannot send packs for other organizations', 403);
-  return { admin, callerId: caller.id, pack: pack as ReportPackEmail };
+  const emailPack = pack as ReportPackEmail;
+  if (emailPack.report_kind !== 'custom' && emailPack.service_agreement_id) {
+    const { data: confirmed, error: triageError } = await readConfirmedIncidents(admin, emailPack);
+    if (triageError) throw new RequestError(`Incident review could not be read: ${triageError}`, 500);
+    emailPack.confirmed_incidents = confirmedIncidentCount(applyIncidentTriage(emailPack.activity_lines, confirmed));
+  }
+  return { admin, callerId: caller.id, pack: emailPack };
 }
 
 function assertEmailDeliveryReady(pack: ReportPackEmail): asserts pack is ReportPackEmail & { published_at: string; delivery_channel: 'email'; pdf_path: string } {

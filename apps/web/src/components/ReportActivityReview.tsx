@@ -1,22 +1,27 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, ChevronLeft, ChevronRight, FileText, ImageOff, MapPin, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleDashed, FileText, ImageOff, MapPin, RefreshCw, ShieldAlert, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   activityAccountingProblem,
   activityLabel,
+  applyIncidentTriage,
   countedText,
   describeActivityLine,
   formatActivityNumber,
   humaniseCode,
+  INCIDENT_TYPE_LABELS,
+  incidentTypeLabel,
+  isIncidentLine,
   isReportPhotoRef,
   NO_PLACE_LABEL,
   readActivityAccounting,
   readActivityLines,
   readActivityReport,
+  readIncidentTriage,
   routineSummary,
   siteLogGroups,
-  summaryParagraphs,
+  executiveSummaryMarkup,
   summaryPhotos,
   textParagraphs,
   type AccountingProblem,
@@ -24,8 +29,11 @@ import {
   type ActivityEntry,
   type ActivityLine,
   type ActivityReport,
+  type IncidentTriage,
   type ReportPhotoRef,
+  type TriageDecision,
 } from '../lib/reportActivity';
+import { MarkupText } from './ReportMarkupText';
 import './ReportActivityReview.css';
 
 const ENTRY_PAGE = 60;
@@ -54,6 +62,32 @@ type AccountingState =
   | { state: 'idle' | 'loading' }
   | { state: 'problem'; problem: AccountingProblem }
   | { state: 'ready'; result: ActivityAccounting };
+
+type TriageMap = Map<string, IncidentTriage>;
+type TriageLoad = { state: 'loading' | 'ready' } | { state: 'error'; message: string };
+type ScanState = { state: 'idle' } | { state: 'running'; message: string } | { state: 'done'; message: string } | { state: 'error'; message: string };
+type TriageFilter = 'all' | 'awaiting' | 'confirmed' | 'cleared';
+type ReviewTarget = { line: ActivityLine; row: IncidentTriage };
+type Review = (target: ReviewTarget) => void;
+
+/** Scan passes per click: each covers about a minute of Bob's reading. */
+const MAX_SCAN_PASSES = 8;
+
+function triageState(row: IncidentTriage | undefined): 'flagged' | 'confirmed' | 'cleared' | null {
+  if (!row) return null;
+  if (row.decision === 'incident') return 'confirmed';
+  if (row.decision === 'not_incident') return 'cleared';
+  return row.bobFlagged ? 'flagged' : null;
+}
+
+async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
+    if (typeof body?.error === 'string' && body.error) return body.error;
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 const photoKey = (ref: ReportPhotoRef) => `${ref.bucket}/${ref.path}`;
 
@@ -236,10 +270,11 @@ function PhotoStrip({ entry, caption, urls, onOpen, onPhotoError }: { entry: Act
   );
 }
 
-function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError }: { entry: ActivityEntry; place?: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError }) {
+function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError, triage, onReview }: { entry: ActivityEntry; place?: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError; triage?: IncidentTriage; onReview?: () => void }) {
   const caption = [entry.title || entry.tags[0], place, entry.when].filter(Boolean).join(' · ');
+  const reviewState = triageState(triage);
   return (
-    <article className={`report-entry${entry.tone === 'incident' ? ' is-incident' : ''}`}>
+    <article className={`report-entry${entry.tone === 'incident' ? ' is-incident' : ''}${reviewState ? ` is-${reviewState}` : ''}`}>
       <div className="report-entry-head">
         <p className="report-entry-when">
           {entry.when}
@@ -254,7 +289,117 @@ function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError }: { entry: A
         <p key={index} className="report-entry-line">{line.label && <strong>{line.label}: </strong>}{line.text}</p>
       ))}
       <PhotoStrip entry={entry} caption={caption} urls={urls} onOpen={onOpenPhoto} onPhotoError={onPhotoError} />
+      {triage && reviewState && (
+        <div className="report-entry-triage">
+          {reviewState === 'flagged' && <Chip tone="warning">Bob: possible {incidentTypeLabel(triage.bobType || 'other').toLowerCase()} · awaiting review</Chip>}
+          {reviewState === 'confirmed' && <Chip tone="danger">Confirmed incident · {incidentTypeLabel(triage.incidentType || 'other')}</Chip>}
+          {reviewState === 'cleared' && <Chip tone="success">Reviewed: not an incident</Chip>}
+          {onReview && <button type="button" className="btn btn-secondary report-entry-review" onClick={onReview}>Review entry</button>}
+        </div>
+      )}
     </article>
+  );
+}
+
+function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPhotoError, onClose, onSaved }: { target: ReviewTarget; entry: ActivityEntry; editable: boolean; packId: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError; onClose: () => void; onSaved: (row: IncidentTriage, pdfStale: boolean) => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const noteId = useId();
+  const typeId = useId();
+  const { line, row } = target;
+  const [decision, setDecision] = useState<TriageDecision>(row.decision);
+  const [incidentType, setIncidentType] = useState(row.incidentType || row.bobType || 'other');
+  const [note, setNote] = useState(row.note);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (dialog && !dialog.open) dialog.showModal?.();
+    return () => {
+      if (dialog?.open) dialog.close();
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+  const changed = decision !== row.decision || (decision === 'incident' && incidentType !== (row.incidentType || row.bobType || 'other')) || note.trim() !== row.note;
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    const { data, error: saveError } = await supabase.rpc('set_report_incident_triage', {
+      p_pack_id: packId,
+      p_line_key: row.lineKey,
+      p_decision: decision,
+      p_incident_type: decision === 'incident' ? incidentType : null,
+      p_note: note.trim() || null,
+    });
+    setSaving(false);
+    const saved = saveError ? null : readIncidentTriage([data])[0];
+    if (!saved) {
+      setError(saveError?.message ? `The decision was not saved: ${saveError.message}` : 'The decision was not saved. Try again.');
+      return;
+    }
+    onSaved(saved, Boolean((data as { pdf_needs_regenerating?: unknown } | null)?.pdf_needs_regenerating));
+  };
+  const options: Array<{ value: TriageDecision; label: string; hint: string; icon: ReactNode }> = [
+    { value: 'unreviewed', label: 'Not reviewed', hint: 'Leave for later', icon: <CircleDashed size={18} aria-hidden="true" /> },
+    { value: 'incident', label: 'Incident', hint: 'Listed under Incidents in the client report', icon: <ShieldAlert size={18} aria-hidden="true" /> },
+    { value: 'not_incident', label: 'Not an incident', hint: 'Stays in the site log', icon: <CheckCircle2 size={18} aria-hidden="true" /> },
+  ];
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      className="report-triage-dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }}
+    >
+      <header className="report-photo-viewer-head">
+        <div>
+          <h2 id={titleId}>Review possible incident</h2>
+          <p>{[line.place, entry.when].filter(Boolean).join(' · ')}</p>
+        </div>
+        <button type="button" className="report-photo-viewer-close" onClick={onClose} disabled={saving} aria-label="Close review"><X size={18} aria-hidden="true" /></button>
+      </header>
+      <div className="report-triage-body">
+        <fieldset className="report-triage-decision" disabled={!editable || saving}>
+          <legend>Is this an incident?</legend>
+          {options.map((option) => (
+            <label key={option.value} className={`report-triage-option is-${option.value}${decision === option.value ? ' is-selected' : ''}`}>
+              <input type="radio" name={`${titleId}-decision`} value={option.value} checked={decision === option.value} onChange={() => setDecision(option.value)} />
+              {option.icon}
+              <span><strong>{option.label}</strong><small>{option.hint}</small></span>
+            </label>
+          ))}
+        </fieldset>
+        {!editable && <p className="report-review-source-note">This report has been sent, so decisions are shown as delivered and cannot be changed.</p>}
+        {row.bobFlagged && (
+          <div className="report-triage-bob">
+            <p><Sparkles size={15} aria-hidden="true" /> <strong>Bob flagged a possible {incidentTypeLabel(row.bobType || 'other').toLowerCase()}</strong>{row.bobConfidence !== null && ` (${Math.round(row.bobConfidence * 100)}% confident)`}</p>
+            {row.bobReason && <p>{row.bobReason}</p>}
+          </div>
+        )}
+        {!row.bobFlagged && row.decision === 'unreviewed' && <p className="report-review-source-note">Bob did not flag this entry.</p>}
+        <EntryCard entry={entry} place={line.place} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} />
+        {decision === 'incident' && (
+          <label className="report-log-field" htmlFor={typeId}>
+            <span>Type of incident</span>
+            <select id={typeId} value={incidentType} onChange={(event) => setIncidentType(event.target.value)} disabled={!editable || saving}>
+              {Object.entries(INCIDENT_TYPE_LABELS).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="report-log-field" htmlFor={noteId}>
+          <span>Reviewer note (provider only, optional)</span>
+          <textarea id={noteId} value={note} maxLength={1000} rows={3} onChange={(event) => setNote(event.target.value)} disabled={!editable || saving} />
+        </label>
+        <div aria-live="polite">{error && <div className="alert alert-error" role="alert">{error}</div>}</div>
+      </div>
+      <footer className="report-photo-viewer-nav">
+        <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+        {editable && <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving || !changed}>{saving ? 'Saving…' : 'Save decision'}</button>}
+      </footer>
+    </dialog>,
+    document.body,
   );
 }
 
@@ -344,16 +489,19 @@ interface SiteLogProps {
   onOpenPhoto: OpenPhoto;
   onPhotoError: PhotoError;
   idPrefix: string;
+  triage: TriageMap;
+  onReview: Review;
 }
 
 function entrySearchText(entry: ActivityEntry, place: string): string {
   return [entry.when, place, entry.title, ...entry.tags, ...entry.lines.map((line) => `${line.label ?? ''} ${line.text}`)].join(' ').toLowerCase();
 }
 
-function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpenPhoto, onPhotoError, idPrefix }: SiteLogProps) {
+function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpenPhoto, onPhotoError, idPrefix, triage, onReview }: SiteLogProps) {
   const [place, setPlace] = useState('all');
   const [category, setCategory] = useState('all');
   const [photosOnly, setPhotosOnly] = useState(false);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [query, setQuery] = useState('');
   const [visible, setVisible] = useState(ENTRY_PAGE);
 
@@ -370,13 +518,14 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
   const categories = report.categories.filter((row) => groups.some((group) => group.lines.some((line) => line.category === row.code)));
 
   const needle = query.trim().toLowerCase();
-  const filtersActive = place !== 'all' || category !== 'all' || photosOnly || needle !== '';
+  const filtersActive = place !== 'all' || category !== 'all' || photosOnly || flaggedOnly || needle !== '';
   const filtered = groups
     .filter((group) => place === 'all' || group.place === place)
     .map((group) => ({
       ...group,
-      cards: group.cards.filter((card) => (category === 'all' || card.line.category === category) && (!photosOnly || card.line.photos > 0) && (!needle || card.search.includes(needle))),
-      showRoutine: group.routine.length > 0 && !photosOnly && !needle && (category === 'all' || category === 'patrol_visit'),
+      cards: group.cards.filter((card) => (category === 'all' || card.line.category === category) && (!photosOnly || card.line.photos > 0)
+        && (!flaggedOnly || triageState(triage.get(card.line.key)) !== null) && (!needle || card.search.includes(needle))),
+      showRoutine: group.routine.length > 0 && !photosOnly && !flaggedOnly && !needle && (category === 'all' || category === 'patrol_visit'),
     }))
     .filter((group) => group.cards.length > 0 || group.showRoutine);
   const matching = filtered.reduce((sum, group) => sum + group.cards.length, 0);
@@ -394,7 +543,7 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
   // Keyed on the photo paths on screen, so signing runs when the page of entries changes, not on every render.
   useEffect(() => { requestPhotos(pageRefs); }, [pageRefsKey, requestPhotos]);
 
-  const reset = () => { setPlace('all'); setCategory('all'); setPhotosOnly(false); setQuery(''); setVisible(ENTRY_PAGE); };
+  const reset = () => { setPlace('all'); setCategory('all'); setPhotosOnly(false); setFlaggedOnly(false); setQuery(''); setVisible(ENTRY_PAGE); };
   const narrow = (apply: () => void) => { apply(); setVisible(ENTRY_PAGE); };
 
   return (
@@ -422,6 +571,10 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
           <input type="checkbox" checked={photosOnly} onChange={(event) => narrow(() => setPhotosOnly(event.target.checked))} />
           <span>With photos only</span>
         </label>
+        <label className="report-log-check">
+          <input type="checkbox" checked={flaggedOnly} onChange={(event) => narrow(() => setFlaggedOnly(event.target.checked))} />
+          <span>Highlighted by Bob or reviewed</span>
+        </label>
       </div>
       <div className="report-log-status">
         <span role="status">{filtersActive ? `${counted(matching, 'entry matches', 'entries match')} these filters` : `${counted(matching, 'entry', 'entries')} with comments, work or photos`}</span>
@@ -436,7 +589,10 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
             <h5 id={`${idPrefix}-place-${index}`}><MapPin size={15} aria-hidden="true" /> {group.place}</h5>
             <span>{counted(group.lines.length, 'entry', 'entries')}</span>
           </header>
-          {group.cards.map((card) => <EntryCard key={card.key} entry={card.entry} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} />)}
+          {group.cards.map((card) => {
+            const row = triage.get(card.line.key);
+            return <EntryCard key={card.key} entry={card.entry} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} triage={row} onReview={row ? () => onReview({ line: card.line, row }) : undefined} />;
+          })}
           {group.showRoutine && <p className="report-log-routine">{routineSummary(group.routine)}</p>}
         </section>
       ))}
@@ -590,31 +746,107 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   };
 
   const readyLines = useMemo(() => (lines.state === 'ready' ? lines.lines : []), [lines]);
-  const incidentEntries = useMemo(() => readyLines
-    .filter((line) => line.kind === 'incident')
-    .map((line) => ({ line, entry: describeActivityLine(report, line) })), [readyLines, report]);
-  const gallery = useMemo(() => summaryPhotos(report, readyLines), [readyLines, report]);
-  const figureSummary = useMemo(() => summaryParagraphs(report), [report]);
-  const writtenSummary = textParagraphs(reviewerSummary);
-  const openingParagraphs = writtenSummary.length ? writtenSummary : figureSummary;
+
+  const editable = status === 'draft' || status === 'generated';
+  const [triage, setTriage] = useState<TriageMap>(() => new Map());
+  const [triageLoad, setTriageLoad] = useState<TriageLoad>({ state: 'loading' });
+  const [scan, setScan] = useState<ScanState>({ state: 'idle' });
+  const [triageFilter, setTriageFilter] = useState<TriageFilter>('all');
+  const [reviewing, setReviewing] = useState<ReviewTarget | null>(null);
+
+  const loadTriage = useCallback(async () => {
+    setTriageLoad({ state: 'loading' });
+    const { data: rows, error } = await supabase.rpc('list_report_incident_triage', { p_pack_id: packId });
+    if (error) {
+      setTriageLoad({ state: 'error', message: 'Bob\'s incident highlights could not be loaded. Try again.' });
+      return;
+    }
+    setTriage(new Map(readIncidentTriage(rows).map((row) => [row.lineKey, row])));
+    setTriageLoad({ state: 'ready' });
+  }, [packId]);
+  useEffect(() => { void loadTriage(); }, [loadTriage]);
+
+  const runScan = async (again: boolean) => {
+    const rescanBefore = again ? new Date().toISOString() : undefined;
+    let checked = 0;
+    let flagged = 0;
+    let remaining = 0;
+    let notItemised = 0;
+    for (let pass = 0; pass < MAX_SCAN_PASSES; pass += 1) {
+      setScan({ state: 'running', message: checked ? `Bob has read ${counted(checked, 'entry', 'entries')} so far and is still reading…` : 'Bob is reading the logged activity and officer notes…' });
+      const { data: result, error } = await supabase.functions.invoke('flag-report-potential-incidents', { body: { pack_id: packId, ...(rescanBefore ? { rescan_before: rescanBefore } : {}) } });
+      if (error || !result) {
+        await loadTriage();
+        setScan({ state: 'error', message: `${checked ? `Bob read ${counted(checked, 'entry', 'entries')} before stopping. ` : ''}${await functionErrorMessage(error, 'Bob could not check the entries.')} Try again to continue.` });
+        return;
+      }
+      checked += Number(result.checked) || 0;
+      flagged += Number(result.flagged) || 0;
+      remaining = Number(result.remaining) || 0;
+      notItemised = Number(result.not_itemised) || 0;
+      if (remaining === 0 || !(Number(result.checked) > 0)) break;
+    }
+    await loadTriage();
+    const outcome = checked === 0
+      ? 'Bob had no new entries to check.'
+      : `Bob read ${counted(checked, 'entry', 'entries')} and highlighted ${counted(flagged, 'possible incident', 'possible incidents')} for your review.`;
+    const unread = notItemised > 0 ? ` ${counted(notItemised, 'further entry was', 'further entries were')} not itemised in this report, so Bob could not read them.` : '';
+    setScan(remaining > 0
+      ? { state: 'error', message: `${outcome}${unread} ${counted(remaining, 'entry is', 'entries are')} still to check. Select the button again to continue.` }
+      : { state: 'done', message: `${outcome}${unread}` });
+  };
+
+  const triagedLines = useMemo(() => applyIncidentTriage(readyLines, triage), [readyLines, triage]);
+  const incidentEntries = useMemo(() => triagedLines
+    .filter(isIncidentLine)
+    .map((line) => ({ line, entry: describeActivityLine(report, line) })), [triagedLines, report]);
+  const confirmedCount = useMemo(() => triagedLines.filter((line) => line.kind !== 'incident' && line.confirmedType).length, [triagedLines]);
+  const checkedCount = useMemo(() => readyLines.filter((line) => line.kind !== 'incident' && triage.has(line.key)).length, [readyLines, triage]);
+  const reviewEntries = useMemo(() => readyLines.flatMap((line) => {
+    const row = line.kind === 'incident' ? undefined : triage.get(line.key);
+    const reviewState = triageState(row);
+    return row && reviewState ? [{ line, row, reviewState, entry: describeActivityLine(report, line) }] : [];
+  }), [readyLines, triage, report]);
+  const reviewCounts = {
+    awaiting: reviewEntries.filter((item) => item.reviewState === 'flagged').length,
+    confirmed: reviewEntries.filter((item) => item.reviewState === 'confirmed').length,
+    cleared: reviewEntries.filter((item) => item.reviewState === 'cleared').length,
+  };
+  const shownReviews = useMemo(() => reviewEntries.filter((item) => triageFilter === 'all'
+    || (triageFilter === 'awaiting' && item.reviewState === 'flagged')
+    || (triageFilter === 'confirmed' && item.reviewState === 'confirmed')
+    || (triageFilter === 'cleared' && item.reviewState === 'cleared')), [reviewEntries, triageFilter]);
+  const reviewingEntry = useMemo(() => (reviewing ? describeActivityLine(report, reviewing.line) : null), [reviewing, report]);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const saveReview = (row: IncidentTriage, pdfStale: boolean) => {
+    setTriage((current) => new Map(current).set(row.lineKey, row));
+    setReviewing(null);
+    setReviewNotice(pdfStale ? 'Decision saved. The client report changed, so generate the PDF again before sending it.' : 'Decision saved.');
+  };
+
+  const gallery = useMemo(() => summaryPhotos(report, triagedLines), [triagedLines, report]);
+  const summaryItems = useMemo(() => executiveSummaryMarkup(reviewerSummary), [reviewerSummary]);
   useEffect(() => {
     requestPhotos([
       ...gallery.map((photo) => photo.ref),
       ...incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
+      ...shownReviews.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
     ]);
-  }, [gallery, incidentEntries, requestPhotos]);
+  }, [gallery, incidentEntries, shownReviews, requestPhotos]);
 
+  const totalIncidents = incidents.total + confirmedCount;
   const incidentSummary = [
     `${counted(incidents.total, 'incident was', 'incidents were')} recorded at these locations`,
+    confirmedCount > 0 ? `${counted(confirmedCount, 'further logged entry was', 'further logged entries were')} confirmed as ${confirmedCount === 1 ? 'an incident' : 'incidents'} on review` : '',
     incidents.investigations > 0 ? `${counted(incidents.investigations, 'investigation is', 'investigations are')} linked` : '',
     incidents.withMedia > 0 ? `${count(incidents.withMedia)} with photo or video evidence` : '',
   ].filter(Boolean).join('; ');
-  const unlistedIncidents = lines.state === 'ready' ? incidents.total - incidentEntries.length : 0;
+  const unlistedIncidents = lines.state === 'ready' ? totalIncidents - incidentEntries.length : 0;
 
   const metrics: Array<[string, number, boolean?]> = [
     ['Locations with activity', totals.places],
     ['Entries recorded', totals.entries],
-    ['Incidents', totals.incidents, totals.incidents > 0],
+    ['Incidents', totalIncidents, totalIncidents > 0],
     ['Observations', totals.observations],
     ['Patrols', totals.patrolVisits],
     ['CCTV activity', totals.cameraActivations],
@@ -643,11 +875,16 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       )}
 
       <section className="report-activity-section report-activity-summary" aria-labelledby={`${headingId}-summary`}>
-        <h5 id={`${headingId}-summary`}>Executive summary</h5>
-        <p className="report-review-source-note">{writtenSummary.length
-          ? 'Your executive summary and highlights open the client report.'
-          : 'No executive summary is written yet, so the client report opens with these sentences built from the recorded figures.'}</p>
-        {[...openingParagraphs, ...textParagraphs(highlights)].map((paragraph, index) => <p key={`summary-${index}`} className="report-activity-summary-text">{paragraph}</p>)}
+        <h5 id={`${headingId}-summary`}>{summaryItems.length || gallery.length === 0 ? 'Executive summary' : 'Selected photos'}</h5>
+        {summaryItems.length ? (
+          <>
+            <p className="report-review-source-note">Your executive summary and highlights open the client report.</p>
+            <MarkupText items={summaryItems} />
+          </>
+        ) : (
+          <p className="report-review-source-note">No executive summary is written yet. Use Draft with Bob or write one above; the figures already appear under At a glance.</p>
+        )}
+        {textParagraphs(highlights).map((paragraph, index) => <p key={`highlight-${index}`} className="report-activity-summary-text">{paragraph}</p>)}
         {gallery.length > 0 && (
           <ul className="report-activity-gallery" aria-label="Selected photos">
             {gallery.map((photo, index) => {
@@ -714,9 +951,9 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       <section className="report-activity-section report-incidents" aria-labelledby={`${headingId}-incidents`}>
         <div className="report-section-head">
           <h5 id={`${headingId}-incidents`}>Incidents and investigations</h5>
-          {incidents.total > 0 && <Chip tone="danger">{counted(incidents.total, 'incident', 'incidents')}</Chip>}
+          {totalIncidents > 0 && <Chip tone="danger">{counted(totalIncidents, 'incident', 'incidents')}</Chip>}
         </div>
-        {incidents.total === 0 ? (
+        {totalIncidents === 0 ? (
           <Empty>No incidents were recorded at these locations during the period.</Empty>
         ) : (
           <>
@@ -731,9 +968,67 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
         )}
         <div aria-live="polite">
           <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
-          {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
+          {incidentEntries.map(({ line, entry }, index) => {
+            const row = line.kind === 'incident' ? undefined : triage.get(line.key);
+            return <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} triage={row} onReview={row ? () => setReviewing({ line, row }) : undefined} />;
+          })}
           {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
         </div>
+      </section>
+
+      <section className="report-activity-section report-triage" aria-labelledby={`${headingId}-triage`}>
+        <div className="report-section-head">
+          <h5 id={`${headingId}-triage`}><Sparkles size={16} aria-hidden="true" /> Potential incidents (Bob)</h5>
+          <Chip tone="info">Provider only</Chip>
+        </div>
+        <p className="report-review-source-note">Not part of the client report. Bob reads the logged activity and officer notes and highlights entries that may be incidents. Review each one: entries you confirm move to Incidents in the client report; entries you clear stay in the site log.</p>
+        {editable && (
+          <div className="report-triage-actions">
+            <button type="button" className="btn btn-primary" onClick={() => void runScan(false)} disabled={scan.state === 'running' || lines.state !== 'ready'}>
+              <Sparkles size={15} aria-hidden="true" />
+              {scan.state === 'running' ? 'Bob is checking…' : 'Ask Bob to check for potential incidents'}
+            </button>
+            {triage.size > 0 && (
+              <button type="button" className="btn btn-secondary" onClick={() => void runScan(true)} disabled={scan.state === 'running' || lines.state !== 'ready'}>
+                <RefreshCw size={15} aria-hidden="true" /> Check again
+              </button>
+            )}
+          </div>
+        )}
+        <div aria-live="polite">
+          {scan.state !== 'idle' && (
+            <p className={scan.state === 'error' ? 'report-review-warning' : 'report-review-source-note'} role={scan.state === 'error' ? 'alert' : 'status'}>{scan.message}</p>
+          )}
+          {reviewNotice && <p className="report-review-source-note" role="status">{reviewNotice}</p>}
+          {triageLoad.state === 'error' && (
+            <div className="alert alert-error" role="alert">
+              {triageLoad.message} <button type="button" className="btn btn-secondary" onClick={() => void loadTriage()}>Try again</button>
+            </div>
+          )}
+        </div>
+        {triageLoad.state === 'loading' && triage.size === 0 && <p className="report-activity-empty" role="status">Loading Bob&rsquo;s highlights…</p>}
+        {triageLoad.state === 'ready' && reviewEntries.length === 0 && (
+          <Empty>{checkedCount > 0 ? 'Bob checked the entries and found nothing that looks like an incident.' : editable ? 'Bob has not checked this report yet.' : 'Bob did not check this report.'}</Empty>
+        )}
+        {reviewEntries.length > 0 && (
+          <>
+            <div className="report-triage-filter" role="group" aria-label="Show potential incidents">
+              {([
+                ['all', `All · ${count(reviewEntries.length)}`],
+                ['awaiting', `Awaiting review · ${count(reviewCounts.awaiting)}`],
+                ['confirmed', `Confirmed · ${count(reviewCounts.confirmed)}`],
+                ['cleared', `Not incidents · ${count(reviewCounts.cleared)}`],
+              ] as Array<[TriageFilter, string]>).map(([value, text]) => (
+                <button key={value} type="button" className={`report-triage-filter-option${triageFilter === value ? ' is-selected' : ''}`} aria-pressed={triageFilter === value} onClick={() => setTriageFilter(value)}>{text}</button>
+              ))}
+            </div>
+            {shownReviews.length === 0
+              ? <Empty>No highlighted entries match this filter.</Empty>
+              : shownReviews.map(({ line, row, entry }) => (
+                <EntryCard key={line.key} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} triage={row} onReview={() => setReviewing({ line, row })} />
+              ))}
+          </>
+        )}
       </section>
 
       <Group title="Activity by location" meta={counted(report.byPlace.length, 'location', 'locations')}>
@@ -841,7 +1136,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
         </div>
         {logOpen && lines.state === 'ready' && lines.lines.length > 0 && (
-          <SiteLog report={report} lines={lines.lines} notItemised={lines.notItemised} label={label} urls={urls} requestPhotos={requestPhotos} onOpenPhoto={openPhoto} onPhotoError={photoFailed} idPrefix={headingId} />
+          <SiteLog report={report} lines={triagedLines} notItemised={lines.notItemised} label={label} urls={urls} requestPhotos={requestPhotos} onOpenPhoto={openPhoto} onPhotoError={photoFailed} idPrefix={headingId} triage={triage} onReview={setReviewing} />
         )}
       </Group>
 
@@ -873,6 +1168,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       </Group>
 
       {viewer && <PhotoViewer viewer={viewer} urls={urls} onPhotoError={photoFailed} onRetry={retryPhoto} onClose={() => setViewer(null)} onIndex={(index) => setViewer((current) => (current ? { ...current, index } : current))} />}
+      {reviewing && reviewingEntry && <TriageDialog target={reviewing} entry={reviewingEntry} editable={editable} packId={packId} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} onClose={() => setReviewing(null)} onSaved={saveReview} />}
     </section>
   );
 }

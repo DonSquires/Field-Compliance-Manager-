@@ -2,17 +2,18 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ReportActivityReview } from './ReportActivityReview';
 import { activityLinesFixture, activityReportFixture } from '../lib/reportActivity.fixture';
+import { activityLineKey } from '../lib/reportActivity';
 
-const { rpc, maybeSingle, select, eq, from, createSignedUrls, storageFrom } = vi.hoisted(() => {
+const { rpc, accountingRpc, triageRpc, invoke, maybeSingle, select, eq, from, createSignedUrls, storageFrom } = vi.hoisted(() => {
   const maybeSingle = vi.fn();
   const eq = vi.fn();
   const select = vi.fn();
   const from = vi.fn();
   const createSignedUrls = vi.fn();
   const storageFrom = vi.fn();
-  return { rpc: vi.fn(), maybeSingle, select, eq, from, createSignedUrls, storageFrom };
+  return { rpc: vi.fn(), accountingRpc: vi.fn(), triageRpc: vi.fn(), invoke: vi.fn(), maybeSingle, select, eq, from, createSignedUrls, storageFrom };
 });
-vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, storage: { from: storageFrom } } }));
+vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, functions: { invoke }, storage: { from: storageFrom } } }));
 
 const updatedAt = '2026-10-01T00:00:00Z';
 const data = { patrolVisits: 3, activityReport: activityReportFixture };
@@ -47,6 +48,8 @@ beforeEach(() => {
   select.mockImplementation(() => ({ eq }));
   from.mockImplementation(() => ({ select }));
   maybeSingle.mockResolvedValue(linesRow());
+  triageRpc.mockResolvedValue({ data: [], error: null });
+  rpc.mockImplementation((name: string, args: unknown) => (name.endsWith('_incident_triage') ? triageRpc(name, args) : accountingRpc(name, args)));
   storageFrom.mockImplementation((bucket: string) => ({ createSignedUrls: (paths: string[], seconds: number) => createSignedUrls(bucket, paths, seconds) }));
   createSignedUrls.mockImplementation(async (bucket: string, paths: string[]) => ({
     data: paths.map((path) => ({ path, signedUrl: signed(bucket, path), error: null })),
@@ -249,7 +252,7 @@ describe('ReportActivityReview', () => {
     expect(card.querySelector('img')?.getAttribute('src')).toBe('https://storage.test/renewed');
     expect(signCalls('bob-uploads')).toBe(2);
     expect(maybeSingle).toHaveBeenCalledTimes(1);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(accountingRpc).not.toHaveBeenCalled();
   });
 
   it('loads entries straight away when there are no incidents, then filters, searches and folds routine patrols', async () => {
@@ -334,7 +337,7 @@ describe('ReportActivityReview', () => {
   });
 
   it('runs the provider accounting check and warns when live records changed', async () => {
-    rpc.mockResolvedValueOnce({
+    accountingRpc.mockResolvedValueOnce({
       data: {
         version: 1,
         packUpdatedAt: updatedAt,
@@ -361,7 +364,7 @@ describe('ReportActivityReview', () => {
   });
 
   it('does not certify an older on-screen snapshot using a newer accounting result', async () => {
-    rpc.mockResolvedValueOnce({
+    accountingRpc.mockResolvedValueOnce({
       data: { version: 1, packUpdatedAt: '2026-10-02T00:00:00Z', freshness: { hasFrozenReport: true, matchesLive: true, liveEntries: 9 } },
       error: null,
     });
@@ -375,7 +378,7 @@ describe('ReportActivityReview', () => {
   });
 
   it('shows a permission state instead of the raw error for non-administrators', async () => {
-    rpc.mockResolvedValueOnce({ data: null, error: { message: 'Provider administrator access required' } });
+    accountingRpc.mockResolvedValueOnce({ data: null, error: { message: 'Provider administrator access required' } });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const check = group(/^Completeness check/);
     await setOpen(check, true);
@@ -383,5 +386,58 @@ describe('ReportActivityReview', () => {
     await waitFor(() => expect(within(check).getByRole('status').textContent).toContain('Only a provider administrator'));
     expect(within(check).queryByRole('alert')).toBeNull();
     await screen.findByText('Trespass');
+  });
+  it('asks Bob to check the logged activity and reports what he highlighted', async () => {
+    invoke.mockResolvedValueOnce({ data: { checked: 6, flagged: 1, remaining: 0, not_itemised: 3 }, error: null });
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
+    expect(await within(section).findByText('Bob has not checked this report yet.')).toBeTruthy();
+    const ask = within(section).getByRole('button', { name: 'Ask Bob to check for potential incidents' }) as HTMLButtonElement;
+    await waitFor(() => expect(ask.disabled).toBe(false));
+    fireEvent.click(ask);
+    expect(await within(section).findByText('Bob read 6 entries and highlighted 1 possible incident for your review. 3 further entries were not itemised in this report, so Bob could not read them.')).toBeTruthy();
+    expect(invoke).toHaveBeenCalledWith('flag-report-potential-incidents', { body: { pack_id: 'p1' } });
+    expect(triageRpc.mock.calls.filter(([name]) => name === 'list_report_incident_triage')).toHaveLength(2);
+  });
+
+  it('lets a reviewer confirm an entry Bob highlighted, recolouring it and listing it under Incidents', async () => {
+    const gate = activityLinesFixture.lines.find((line) => (line as { n?: string }).n === 'Gate found open and secured.')!;
+    const key = activityLineKey(gate as Record<string, unknown>);
+    const flagged = { line_key: key, bob_flagged: true, bob_incident_type: 'perimeter_compromise', bob_reason: 'An open gate on patrol suggests unauthorised access.', bob_confidence: 0.7, decision: 'unreviewed', incident_type: null, decision_note: null, decided_at: null };
+    triageRpc.mockImplementation(async (name: string) => (name === 'list_report_incident_triage'
+      ? { data: [flagged], error: null }
+      : { data: { ...flagged, decision: 'incident', incident_type: 'perimeter_compromise', decided_at: '2026-10-03T00:00:00Z', pdf_needs_regenerating: true }, error: null }));
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
+    const card = (await within(section).findByText('Gate found open and secured.')).closest('article')!;
+    expect(card.className).toContain('is-flagged');
+    expect(within(card).getByText('Bob: possible perimeter compromise · awaiting review')).toBeTruthy();
+    expect(within(incidentsSection()).queryByText('Gate found open and secured.')).toBeNull();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Review entry' }));
+    const dialog = screen.getByRole('dialog', { name: 'Review possible incident' });
+    expect(within(dialog).getByText('An open gate on patrol suggests unauthorised access.')).toBeTruthy();
+    expect((within(dialog).getByRole('radio', { name: /^Not reviewed/ }) as HTMLInputElement).checked).toBe(true);
+    const save = within(dialog).getByRole('button', { name: 'Save decision' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /^Incident/ }));
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(triageRpc).toHaveBeenCalledWith('set_report_incident_triage', { p_pack_id: 'p1', p_line_key: key, p_decision: 'incident', p_incident_type: 'perimeter_compromise', p_note: null });
+
+    const confirmed = within(section).getByText('Gate found open and secured.').closest('article')!;
+    expect(confirmed.className).toContain('is-confirmed');
+    expect(within(confirmed).getByText('Confirmed incident · Perimeter compromise')).toBeTruthy();
+    expect(within(incidentsSection()).getByText('Gate found open and secured.')).toBeTruthy();
+    expect(within(incidentsSection()).getByText(/1 further logged entry was confirmed as an incident on review/)).toBeTruthy();
+    expect(within(section).getByRole('status').textContent).toBe('Decision saved. The client report changed, so generate the PDF again before sending it.');
+  });
+
+  it('shows Bob\'s highlights read-only once the report has been sent', async () => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="sent" />);
+    const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
+    expect(await within(section).findByText('Bob did not check this report.')).toBeTruthy();
+    expect(within(section).queryByRole('button', { name: /Ask Bob/ })).toBeNull();
   });
 });

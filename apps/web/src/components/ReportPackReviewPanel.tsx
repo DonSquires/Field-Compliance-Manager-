@@ -259,7 +259,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
             )}
           </div>
           <textarea id={`executive-summary-${pack.id}`} name="executive-summary" value={executiveSummary} onChange={(event) => setExecutiveSummary(event.target.value)} maxLength={4000} rows={8} aria-describedby={`executive-summary-help-${pack.id}`} aria-busy={drafting} />
-          <small id={`executive-summary-help-${pack.id}`}>Two short paragraphs for the client: the work delivered, then the significant issues. {executiveSummary.length}/4000 characters</small>
+          <small id={`executive-summary-help-${pack.id}`}>Exception-based summary for the client: significant breaches and infrastructure issues, pest control and trends against the previous two months. Use **bold**, a line that is wholly **bold** for a heading, and "- " for bullets. {executiveSummary.length}/4000 characters</small>
           <p className="report-review-draft-status" aria-live="polite">{draftStatus}</p>
           {draftError && <p className="report-review-draft-error" role="alert">{draftError}</p>}
         </div>
