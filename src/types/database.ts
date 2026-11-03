@@ -28096,6 +28096,90 @@ export type Database = {
           },
         ]
       }
+      report_incident_triage: {
+        Row: {
+          bob_assessed_at: string | null
+          bob_confidence: number | null
+          bob_flagged: boolean
+          bob_incident_type: string | null
+          bob_model: string | null
+          bob_reason: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision: string
+          decision_note: string | null
+          excerpt: string | null
+          id: string
+          incident_type: string | null
+          line_date: string
+          line_key: string
+          organization_id: string
+          place: string | null
+          service_agreement_id: string
+          updated_at: string
+        }
+        Insert: {
+          bob_assessed_at?: string | null
+          bob_confidence?: number | null
+          bob_flagged?: boolean
+          bob_incident_type?: string | null
+          bob_model?: string | null
+          bob_reason?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string
+          decision_note?: string | null
+          excerpt?: string | null
+          id?: string
+          incident_type?: string | null
+          line_date: string
+          line_key: string
+          organization_id: string
+          place?: string | null
+          service_agreement_id: string
+          updated_at?: string
+        }
+        Update: {
+          bob_assessed_at?: string | null
+          bob_confidence?: number | null
+          bob_flagged?: boolean
+          bob_incident_type?: string | null
+          bob_model?: string | null
+          bob_reason?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string
+          decision_note?: string | null
+          excerpt?: string | null
+          id?: string
+          incident_type?: string | null
+          line_date?: string
+          line_key?: string
+          organization_id?: string
+          place?: string | null
+          service_agreement_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_incident_triage_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_incident_triage_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_templates: {
         Row: {
           id: string
@@ -44644,6 +44728,10 @@ export type Database = {
           total_count: number
         }[]
       }
+      list_report_incident_triage: {
+        Args: { p_pack_id: string }
+        Returns: Json
+      }
       list_unlinked_plate_mentions_for_agreement: {
         Args: {
           p_from?: string
@@ -49353,6 +49441,7 @@ export type Database = {
       }
       report_code_or_null: { Args: { p_value: string }; Returns: string }
       report_numeric_or_null: { Args: { p_value: string }; Returns: number }
+      report_pack_trend_context: { Args: { p_pack_id: string }; Returns: Json }
       report_photo_name_withheld: { Args: { p_name: string }; Returns: boolean }
       report_place_hazard: {
         Args: {
@@ -51517,6 +51606,16 @@ export type Database = {
       }
       set_person_search_access: {
         Args: { p_enabled: boolean; p_reason: string; p_user_id: string }
+        Returns: Json
+      }
+      set_report_incident_triage: {
+        Args: {
+          p_decision: string
+          p_incident_type?: string
+          p_line_key: string
+          p_note?: string
+          p_pack_id: string
+        }
         Returns: Json
       }
       set_site_geometry: {
