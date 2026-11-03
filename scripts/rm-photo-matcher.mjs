@@ -23,7 +23,15 @@ function minuteKey(year, month, day, hour, minute) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+// Owner ruling: "NZTA yymmdd…" and "<rego> NZTA yymmdd…" files are NZTA owner/vehicle
+// screenshots. They are privileged and must never be attached to a record or reach a client.
+export function isPrivilegedPhotoName(fileName) {
+  const stem = String(fileName ?? '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '');
+  return /(?:^|[^A-Z0-9])NZTA(?:[^A-Z0-9]|$)/i.test(stem);
+}
+
 export function parsePhotoName(fileName) {
+  if (isPrivilegedPhotoName(fileName)) return null;
   const stem = String(fileName ?? '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '').toUpperCase();
   const dateFirst = new RegExp(`(?:^|[^0-9])([0-9]{6})[ _-]+([0-9]{4}(?:[0-9]{2})?)(?:[ _-]+(${PLATE_PATTERN}))?(?:[^A-Z0-9]|$)`).exec(stem);
   const plateFirst = new RegExp(`(?:^|[^A-Z0-9])(${PLATE_PATTERN})[ _-]+([0-9]{6})[ _-]+([0-9]{4}(?:[0-9]{2})?)(?:[^0-9]|$)`).exec(stem);
@@ -133,7 +141,10 @@ export function indexPhotoTargets(targets) {
 
 export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
   const candidates = targetsByMinute.get(parsed.minuteKey) ?? [];
+  // Library folders are named "<Location> - <Area> - <Client>", so the leading location
+  // segment is compared as well as the whole folder name.
   const folderPlaces = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1)
+    .flatMap((folder) => [folder, folder.split(/\s+-\s+/)[0]])
     .map(normalizePlace).filter(Boolean);
   const matched = candidates.filter((target) => parsed.plate
     ? target.plateCandidates.has(parsed.plate)

@@ -9,6 +9,7 @@ import { validatePhotoImportEnvironment } from './rm-photo-import-config.mjs';
 import {
   aucklandInstant,
   indexPhotoTargets,
+  isPrivilegedPhotoName,
   matchPhotoTarget,
   normalizePlate,
   parsePhotoName,
@@ -146,6 +147,7 @@ export async function loadTargets(service, organizationIds, { includePatrolEvent
 export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName = null, eventsByMinute = null) {
   const extension = extname(relativePath).toLowerCase();
   if (!/^photos[\\/]/i.test(relativePath) || !SUPPORTED_EXTENSIONS.has(extension)) return { status: 'unsupported' };
+  if (isPrivilegedPhotoName(fileName ?? relativePath)) return { status: 'privileged' };
   const parsed = parsePhotoName(fileName ?? relativePath);
   if (!parsed) return { status: 'unnamed' };
   let match = matchPhotoTarget(parsed, relativePath, byMinute);
@@ -192,7 +194,7 @@ async function matchPhotos(inventoryPath, sourceRoot, byMinute) {
     const row = JSON.parse(line);
     const relativePath = String(row.relative_path ?? '');
     const result = await classifyPhoto(relativePath, sourceRoot, byMinute, row.file_name ?? null);
-    if (result.status === 'unsupported') continue;
+    if (result.status === 'unsupported' || result.status === 'privileged') continue;
     supportedPhotos += 1;
     if (result.status === 'unnamed') continue;
     namedPhotos += 1;

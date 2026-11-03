@@ -130,6 +130,16 @@ test('photos attach only on a unique match, only when committing, and are never 
   assert.deepEqual([edited.results[0].status, edited.results[0].reason], ['deferred', 'photo_limit_reached']);
 });
 
+test('privileged NZTA screenshots are ignored and never attached, even when committing', async () => {
+  const entries = [{ relative_path: 'Photos/ABC123 NZTA 240817 112216.png', size_bytes: 10, modified_at: 't1' }];
+  const attached = [];
+  const { results, receipts } = await promotePhotos({ entries, classify: async () => ({ status: 'privileged' }),
+    attach: async row => { attached.push(row); return { sha256: SHA, storage_path: 'x' }; }, commit: true, limit: 5 });
+  assert.deepEqual([results[0].status, results[0].reason], ['ignored', 'privileged_nzta_record']);
+  assert.deepEqual(receipts, {});
+  assert.equal(attached.length, 0);
+});
+
 test('governed RPC refusals become holds; transport failures stay retryable', () => {
   const stdout = JSON.stringify({ _tag: 'Error', error: { message: 'unexpected status 400: {"message":"Failed to run sql query: ERROR:  P0001: Duplicate source headers require manual correction\nCONTEXT: x"}' } });
   assert.equal(serverRefusal({ stdout }), 'server_refused:duplicate_source_headers_require_manual_correction');

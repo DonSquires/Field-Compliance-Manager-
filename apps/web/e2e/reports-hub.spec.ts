@@ -141,7 +141,7 @@ test('administrator previews the client site activity report with incidents, pho
   const check = report.locator('details', { has: page.locator('summary', { hasText: /^Completeness check/ }) });
   await expect(check.locator('summary')).toContainText('Provider only · All 9 records accounted for');
   await check.locator('summary').click();
-  await expect(check.getByText('1 travel or administration record is kept out of the client report.')).toBeVisible();
+  await expect(check.getByText('1 travel or materials record is kept out of the client report.')).toBeVisible();
   await check.getByRole('button', { name: 'Check against live records' }).click();
   await expect(check.getByText(/This pack matches live records: 7 entries/)).toBeVisible();
   await expect(check.getByRole('region', { name: 'Source files' }).getByText('Civic patrol log August.xlsx')).toBeVisible();

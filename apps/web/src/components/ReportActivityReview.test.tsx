@@ -278,7 +278,7 @@ describe('ReportActivityReview', () => {
     const check = group(/^Completeness check/);
     expect(check.querySelector('summary')?.textContent).toBe('Completeness checkProvider only · All 12 records accounted for');
     expect(within(check).getByText('9 entries are in the client report; every record in scope is accounted for.')).toBeTruthy();
-    expect(within(check).getByText('2 travel and administration records are kept out of the client report.')).toBeTruthy();
+    expect(within(check).getByText('2 travel and materials records are kept out of the client report.')).toBeTruthy();
     expect(within(check).getByText('1 shift start or finish marker is kept out of the client report.')).toBeTruthy();
     expect(within(check).getByText(/1 automatic patrol-log copy of an observation was excluded/)).toBeTruthy();
     expect(screen.queryByRole('note')).toBeNull();
