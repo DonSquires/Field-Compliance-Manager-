@@ -125,10 +125,10 @@ describe('describeActivityLine', () => {
 });
 
 describe('siteLogGroups', () => {
-  it('groups by location and keeps incidents, CCTV reviews and routine checks out of the site log', () => {
+  it('groups by location and keeps incidents, observations and routine checks out of the site log', () => {
     const groups = siteLogGroups(lines);
     expect(groups.map((group) => group.place)).toEqual(['Alpha Reserve']);
-    expect(lines.some((entry) => reviewSectionCode(entry) === 'camera_activation')).toBe(true);
+    expect(lines.some((entry) => reviewSectionCode(entry) === 'observation')).toBe(true);
     expect(lines.filter(isRoutineCheck)).toHaveLength(2);
     expect(groups[0].lines.some((entry) => entry.kind === 'incident' || isRoutineCheck(entry))).toBe(false);
   });

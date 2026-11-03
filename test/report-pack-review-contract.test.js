@@ -58,7 +58,7 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdfTextFonts, /widthOfTextAtSize\(character, 1\)/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /return expected !== 0 \|\| completed !== 0/);
-  assert.match(send, /fcm-report-pack-pdf-lib-a4-v19/);
+  assert.match(send, /fcm-report-pack-pdf-lib-a4-v20/);
 });
 
 test('monthly client email summaries exclude provider-wide incident and alert totals', () => {

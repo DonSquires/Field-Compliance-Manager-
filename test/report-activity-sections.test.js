@@ -73,14 +73,15 @@ test('the compact client report keeps incidents, reviews, work and pest figures,
   const { monthlyActivityBlocks } = await load();
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines);
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
-  assert.deepEqual(titles, ['At a Glance', 'Incidents and Investigations', 'Maintenance and Repairs', 'Pest Control']);
+  assert.deepEqual(titles, ['At a Glance', 'Incidents and Investigations', 'Observations', 'Maintenance and Repairs', 'Pest Control']);
   assert.equal(blocks.some((block) => block.kind === 'gallery'), false, 'photos stay with their entries, never in a gallery at the top');
   for (const block of tables(blocks)) {
     assert.equal(block.columns.reduce((sum, column) => sum + column.width, 0), 487, `${block.columns[0].label} spans the page`);
     for (const row of block.rows) assert.equal(row.length, block.columns.length);
   }
   const metrics = blocks.find((block) => block.kind === 'metrics');
-  assert.deepEqual(metrics.items.map((item) => item.label), ['Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'CCTV activity', 'Photos', 'Pest culls recorded']);
+  assert.deepEqual(metrics.items.map((item) => item.label), ['Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'Photos', 'Pest culls recorded']);
+  assert.equal(metrics.items.find((item) => item.label === 'Observations').value, '2', 'camera card reviews count as observations');
   assert.equal(metrics.items.find((item) => item.label === 'Pest culls recorded').value, '1');
   const charts = blocks.find((block) => block.kind === 'charts');
   assert.deepEqual(charts.charts.map((chart) => chart.title), ['Activity type highlights', 'Top locations', 'Pest culls by species']);
@@ -165,7 +166,7 @@ test('the executive summary is the reviewer text as headings, bullets and paragr
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines, { summary: '   ', highlights: '  ' });
   assert.deepEqual(opening(blocks), [], 'nothing precedes At a Glance when no summary is written');
   assert.doesNotMatch(allText(blocks), /Of Note|of note|Selected Photos/);
-  const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Maintenance and Repairs'));
+  const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Observations'));
   assert.deepEqual(incidents.filter((block) => block.kind === 'entry').map((entry) => [entry.tone, entry.tags[0]]), [['incident', 'Alpha Reserve']]);
   assert.deepEqual(incidents.find((block) => block.kind === 'entry').photos, [photo('b')], 'the photo is shown with its incident');
   assert.ok(sectionAt(blocks, 'At a Glance') < sectionAt(blocks, 'Incidents and Investigations'));
@@ -199,7 +200,7 @@ test('line keys are stable content hashes and confirmed entries move from the si
 
   const blocks = monthlyActivityBlocks({ activityReport: report }, triaged);
   const sectionAt = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
-  const incidentEntries = blocks.slice(sectionAt('Incidents and Investigations') + 1, sectionAt('Maintenance and Repairs')).filter((block) => block.kind === 'entry');
+  const incidentEntries = blocks.slice(sectionAt('Incidents and Investigations') + 1, sectionAt('Observations')).filter((block) => block.kind === 'entry');
   assert.equal(incidentEntries.length, 2);
   assert.match(allText(incidentEntries), /Freedom campers spoken to and moved on\./);
   assert.match(allText(incidentEntries), /Trespass/);
@@ -211,14 +212,14 @@ test('the site log groups entries by location with comments, actions and photos,
   const blocks = siteLogBlocks({ activityReport: report }, lines);
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
   assert.deepEqual(blocks.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [
-    ['Alpha Reserve', '4 entries'],
+    ['Alpha Reserve', '3 entries'],
     ['Not location-specific', '1 entry'],
   ]);
   const entries = blocks.filter((block) => block.kind === 'entry');
-  assert.equal(entries.length, 5, 'the incident and two routine patrols are not listed');
+  assert.equal(entries.length, 4, 'the incident, the observation and two routine patrols are not listed');
   assert.ok(entries.every((entry) => entry.tone === 'default'));
 
-  const [pest, gate, campers, rubbish, workOrder] = entries;
+  const [pest, gate, campers, workOrder] = entries;
   assert.equal(pest.when, 'Thu 1 Oct 2026 · 09:15');
   assert.equal(pest.title, 'Cull · Possum');
   assert.deepEqual(pest.tags, ['Pest control', 'Ref J-1001'], 'a short label that repeats the category is not tagged');
@@ -229,7 +230,6 @@ test('the site log groups entries by location with comments, actions and photos,
   assert.deepEqual(gate.photos, [photo('c')], 'external links are never fetched into the report');
   assert.equal(gate.photoCount, 2);
   assert.deepEqual(campers.tags, ['Patrols and site checks', 'Check']);
-  assert.deepEqual(rubbish.tags, ['Other site activity', 'General observation']);
   assert.equal(workOrder.title, 'Replace gate latch');
   assert.deepEqual(workOrder.tags, ['Maintenance and repairs', 'In progress', 'Ref WO-1']);
 
@@ -288,8 +288,8 @@ test('short status-only gate, lock and patrol checks are summarised under Routin
   assert.deepEqual(log.filter((block) => block.kind === 'subsection').map((block) => block.title), ['Beta Forest'], 'a location with only routine checks has no site log heading');
 });
 
-test('CCTV reviews and administration entries get their own sections and leave the site log', async () => {
-  const { monthlyActivityBlocks, siteLogBlocks, reviewSectionCode } = await load();
+test('card reviews are observations listed with their photos, and administration is left out of the report', async () => {
+  const { monthlyActivityBlocks, siteLogBlocks, reviewSectionCode, readActivityLines, isAdministrationLine } = await load();
   const labelled = { ...report, labels: { ...report.labels, category: { ...report.labels.category, camera_activation: 'CCTV and camera activity', administration: 'Administration and review' } } };
   const desk = {
     version: 2,
@@ -297,49 +297,60 @@ test('CCTV reviews and administration entries get their own sections and leave t
     lines: [
       ...lines.lines,
       { d: '2026-10-08', t: '00:00', p: 'General / All Forests (Admin, HQ, Travel)', k: 'event', c: 'administration', n: 'Monthly hunter permits reconciled with the client.' },
-      { d: '2026-10-09', t: '14:20', p: 'Serpentine', k: 'event', c: 'camera_activation', n: 'Camera card reviewed; a ute passes the gate at 02:14.', ph: 1, pr: [photo('e')] },
+      { d: '2026-10-09', t: '14:20', p: 'Serpentine', k: 'event', c: 'camera_activation', ti: 'Card review', n: 'Camera activation gate. A ute passes the gate at 02:14.', ph: 1, pr: [photo('e')] },
       { d: '2026-10-10', t: '15:00', p: 'Serpentine', k: 'event', c: 'camera_activation', tri: 'theft', n: 'Card shows the fuel tank being drained.' },
+      { d: '2026-10-11', t: '16:22', p: 'Inwoods', k: 'event', c: 'other_work', ti: 'Card review', n: 'Replace card' },
     ],
   };
-  assert.equal(reviewSectionCode(desk.lines[8]), 'administration');
-  assert.equal(reviewSectionCode(desk.lines[9]), 'camera_activation');
+  assert.equal(isAdministrationLine(desk.lines[8]), true);
+  assert.equal(isAdministrationLine({ ...desk.lines[8], tri: 'theft' }), false, 'an entry confirmed as an incident is always reported');
+  assert.equal(readActivityLines(desk).lines.length, desk.lines.length - 1, 'administration entries are never read into the report');
+  assert.equal(reviewSectionCode(desk.lines[6]), 'observation');
+  assert.equal(reviewSectionCode(desk.lines[9]), 'observation');
+  assert.equal(reviewSectionCode(desk.lines[11]), 'observation', 'every card review is an observation, whatever its comment');
   assert.equal(reviewSectionCode(desk.lines[10]), '', 'a confirmed incident stays with the incidents');
 
   const blocks = monthlyActivityBlocks({ activityReport: labelled }, desk);
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
   const at = (title) => titles.indexOf(title);
-  assert.ok(at('Incidents and Investigations') < at('CCTV and Camera Reviews'));
-  assert.ok(at('CCTV and Camera Reviews') < at('Administration and Review'));
-  assert.ok(at('Administration and Review') < at('Maintenance and Repairs'));
+  assert.ok(at('Incidents and Investigations') < at('Observations'));
+  assert.ok(at('Observations') < at('Maintenance and Repairs'));
+  assert.equal(titles.some((title) => /CCTV|Administration/.test(title)), false);
   const sectionEntries = (title) => {
     const start = blocks.findIndex((block) => block.kind === 'section' && block.title === title);
     const end = blocks.findIndex((block, index) => index > start && block.kind === 'section');
     return blocks.slice(start + 1, end).filter((block) => block.kind === 'entry');
   };
-  const [cctv] = sectionEntries('CCTV and Camera Reviews');
-  assert.equal(sectionEntries('CCTV and Camera Reviews').length, 1);
-  assert.equal(cctv.tags[0], 'Serpentine');
-  assert.deepEqual(cctv.photos, [photo('e')]);
-  const [admin] = sectionEntries('Administration and Review');
-  assert.equal(admin.tags[0], 'General / All Forests (Admin, HQ, Travel)');
-  assert.match(allText([admin]), /Monthly hunter permits reconciled with the client\./);
+  const observed = sectionEntries('Observations');
+  assert.deepEqual(observed.map((entry) => entry.tags[0]), ['Alpha Reserve', 'Serpentine', 'Inwoods']);
+  assert.deepEqual(observed[1].photos, [photo('e')], 'the card review photo stays with its entry');
+  assert.doesNotMatch(allText(blocks), /hunter permits|All Forests/);
 
   const log = allText(siteLogBlocks({ activityReport: labelled }, desk));
-  assert.doesNotMatch(log, /hunter permits|Camera card reviewed|fuel tank/);
+  assert.doesNotMatch(log, /hunter permits|ute passes|fuel tank|Replace card/);
   assert.match(log, /listed in their own sections above/);
-  assert.equal(monthlyActivityBlocks({ activityReport: report }, lines).some((block) => block.kind === 'section' && /CCTV and Camera|Administration and Review/.test(block.title)), false, 'sections appear only when there are entries');
+  const quiet = { ...lines, lines: lines.lines.filter((line) => line.k !== 'observation') };
+  assert.equal(monthlyActivityBlocks({ activityReport: report }, quiet).some((block) => block.kind === 'section' && block.title === 'Observations'), false, 'the section appears only when there are entries');
+
+  const older = { ...report, categories: [...report.categories, { code: 'administration', entries: 3, photos: 0 }] };
+  const olderBlocks = monthlyActivityBlocks({ activityReport: older }, desk);
+  assert.equal(olderBlocks.find((block) => block.kind === 'metrics').items.find((item) => item.label === 'Entries recorded').value, '6', 'administration in an older pack is not counted');
+  assert.doesNotMatch(allText(olderBlocks.filter((block) => block.kind === 'charts')), /Administration/);
 });
 
 test('the client email summary is a headline and entries by type of activity', async () => {
   const { activityEmailSummary } = await load();
   const email = activityEmailSummary({ activityReport: report });
-  assert.equal(email.headline, '9 entries recorded across 2 locations, including 1 incident, 1 observation and 4 photos.');
+  assert.equal(email.headline, '9 entries recorded across 2 locations, including 1 incident, 2 observations and 4 photos.', 'camera card reviews count as observations');
   assert.deepEqual(email.categories[1], ['Patrols and site checks', '4']);
   assert.ok(email.categories.every((row) => row.length === 2));
   assert.doesNotMatch(JSON.stringify(email), FORBIDDEN);
-  const single = { ...report, totals: { ...report.totals, entries: 1, places: 1, incidents: 0, observations: 0, photos: 1 } };
+  const single = { ...report, totals: { ...report.totals, entries: 1, places: 1, incidents: 0, observations: 0, cameraActivations: 0, photos: 1 } };
   assert.equal(activityEmailSummary({ activityReport: single }).headline, '1 entry recorded across 1 location, including 0 incidents, 0 observations and 1 photo.');
   assert.match(activityEmailSummary({ activityReport: report }, { confirmedIncidents: 2 }).headline, /including 3 incidents,/, 'entries confirmed on review count as incidents');
+  const older = activityEmailSummary({ activityReport: { ...report, categories: [...report.categories, { code: 'administration', entries: 3, photos: 0 }] } });
+  assert.match(older.headline, /^6 entries recorded/, 'administration in an older pack is not counted');
+  assert.equal(older.categories.some((row) => /Administration/i.test(row[0])), false);
 });
 
 test('confirmed entries are counted once and the summary title is not repeated under the section heading', async () => {
@@ -362,7 +373,7 @@ test('PDF, send gate and every web surface agree on the current renderer version
   const pdf = version(read('supabase/functions/generate-report-pack-pdf/index.ts'), /const rendererVersion = '([^']+)'/);
   const send = version(read('supabase/functions/send-report-pack/index.ts'), /const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
   const web = version(read('apps/web/src/lib/reportPackRenderer.ts'), /export const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
-  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v19');
+  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v20');
   assert.equal(send, pdf);
   assert.equal(web, pdf);
   for (const surface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {
@@ -392,8 +403,8 @@ test('notable site events list only described entries not reported elsewhere, by
   const { notableEventBlocks, isNotableEvent } = await load();
   const blocks = notableEventBlocks({ activityReport: report }, lines);
   assert.equal(blocks[0].title, 'Notable Site Events');
-  assert.deepEqual(blocks.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [['Alpha Reserve', '3 entries']]);
-  assert.deepEqual(lines.lines.map(isNotableEvent), [false, false, false, false, true, true, true, false], 'pest control, incidents, routine patrols and maintenance are reported in their own sections');
+  assert.deepEqual(blocks.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [['Alpha Reserve', '2 entries']]);
+  assert.deepEqual(lines.lines.map(isNotableEvent), [false, false, false, false, true, true, false, false], 'pest control, incidents, observations, routine patrols and maintenance are reported in their own sections');
   assert.match(allText(blocks), /Freedom campers spoken to and moved on\./);
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
   assert.deepEqual(notableEventBlocks({ activityReport: report }, { version: 2, lines: [lines.lines[2]], notItemised: 0 }), [], 'nothing notable, no section');

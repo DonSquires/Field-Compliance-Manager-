@@ -84,17 +84,17 @@ test('when entries exceed the limit, incidents are kept ahead of routine notes',
   assert.equal(brief.entriesNotIncluded, 6);
 });
 
-test('the instructions follow the analyst brief: exception-based, no volumes, pest and trend comparisons, no named people', async () => {
+test('the instructions ask for a two-paragraph executive summary of occurrences and trends, without volumes, copying or names', async () => {
   const { EXECUTIVE_SUMMARY_INSTRUCTIONS } = await load();
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /expert corporate security analyst/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Exclude all high-level operational statistics/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Significant Security Breaches & Critical Infrastructure Issues/);
-  for (const bullet of ['Targeted Commercial Theft', 'Perimeter Compromise & Trespass', 'Lock & Hardware Failures', 'Surveillance Tampering & Blind Spots']) {
-    assert.ok(EXECUTIVE_SUMMARY_INSTRUCTIONS.includes(`**${bullet}:**`), bullet);
-  }
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Pest Control\*\*[\s\S]*previous two months/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Trends\*\*[\s\S]*previous two months/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Never name or describe an identifiable person/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Executive Summary: <month and year from the brief>\*\*\n\n<paragraph 1>\n\n<paragraph 2>/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Paragraph 1, significant occurrences[\s\S]*commercial theft[\s\S]*perimeter compromise[\s\S]*lock and hardware failures[\s\S]*surveillance tampering/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Paragraph 2, trends[\s\S]*previous two months[\s\S]*pest control[\s\S]*previous two months/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Write a summary, not a copy/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /no bullets/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Do not restate volume statistics/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /never name, initial or otherwise identify a private individual/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\[name withheld\][\s\S]*must not be reconstructed/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Use only facts in the brief/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /entriesNotItemised is above zero[\s\S]*itemised entries only/);
 });
@@ -114,7 +114,7 @@ test('model output keeps headers, bullets and bold, without reasoning or other m
 });
 
 const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
-const PARAGRAPHS = '**Executive Summary: October 2026**\n\n**Significant Security Breaches & Critical Infrastructure Issues**\n* **Targeted Commercial Theft:** diesel was taken at **Smiths**.\n* **Lock & Hardware Failures:** a lock failed.';
+const PARAGRAPHS = '**Executive Summary: October 2026**\n\nThe period was marked by targeted commercial theft at **Smiths** and repeated electronic lock failures that left perimeter gates exposed.\n\nIncidents concentrated in the second half of the month, above the previous two months, while goat culls fell against September.';
 
 test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () => {
   const { draftExecutiveSummary } = await load();
@@ -155,7 +155,12 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
     fetchImpl: async (url) => url.includes('ollama')
       ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
       : reply({ choices: [{ message: { content: 'Another single paragraph. It also exceeds the minimum length check and should be rejected.' } }] }),
-  }), /model did not return bullet points/);
+  }), /model did not return two paragraphs/);
+  await assert.rejects(draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async () => reply({ message: { content: '**Executive Summary: October 2026**\n\n* Diesel was taken at Smiths and a lock failed at Denckers this month.\n* Incidents rose against the previous two months across the forest blocks.' }, choices: [{ message: { content: '* Diesel was taken at Smiths and a lock failed at Denckers this month.\n\n* Incidents rose against the previous two months across the forest blocks.' } }] }),
+  }), /bullet points instead of two paragraphs/);
 });
 
 test('the edge function and review panel keep drafting governed; only an empty draft summary is filled', () => {

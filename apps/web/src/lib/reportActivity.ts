@@ -139,15 +139,18 @@ export function incidentTypeLabel(code: string): string {
   return INCIDENT_TYPE_LABELS[code] || (code ? humaniseCode(code) : 'Incident');
 }
 
-const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key']);
+const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key', 'lk', 'pv']);
+const STORED_LINE_KEY = /^v1:[0-9a-f]{14}$/;
 
 /**
  * Content key of one frozen activity line (snapshot lines carry no record id):
  * every content field except photo and video counts and refs, which can change
- * as media arrives. Must match activityLineKey in
+ * as media arrives. A line reworded by Bob's privacy check keeps its original
+ * key in lk. Must match activityLineKey in
  * supabase/functions/_shared/report-activity-sections.mjs.
  */
 export function activityLineKey(line: Json): string {
+  if (typeof line.lk === 'string' && STORED_LINE_KEY.test(line.lk)) return line.lk;
   const source = JSON.stringify(Object.keys(line)
     .filter((field) => !LINE_KEY_IGNORED.has(field))
     .sort()
@@ -292,14 +295,17 @@ export function readActivityReport(data: unknown): ActivityReport | null {
   for (const [dim, map] of Object.entries(object(report.labels) ?? {})) {
     labels[dim] = Object.fromEntries(Object.entries(object(map) ?? {}).map(([key, value]) => [key, str(value)]).filter(([, value]) => value !== ''));
   }
+  const allCategories = list(report.categories).map(count);
+  // Administration is withheld from the client report; older packs still carry it (WITHHELD_CATEGORIES).
+  const withheldEntries = allCategories.filter((row) => WITHHELD_CATEGORIES.has(row.code)).reduce((sum, row) => sum + row.entries, 0);
   return {
     basis: str(report.basis),
     totals: {
-      entries: num(totals.entries), events: num(totals.events), observations: num(totals.observations), workOrders: num(totals.workOrders),
+      entries: Math.max(0, num(totals.entries) - withheldEntries), events: num(totals.events), observations: num(totals.observations), workOrders: num(totals.workOrders),
       incidents: num(totals.incidents), patrolVisits: num(totals.patrolVisits), cameraActivations: num(totals.cameraActivations),
       withNotes: num(totals.withNotes), places: num(totals.places), photos: num(totals.photos),
     },
-    categories: list(report.categories).map(count),
+    categories: allCategories.filter((row) => !WITHHELD_CATEGORIES.has(row.code)),
     byPlace: list(report.byPlace).map((row) => ({
       place: str(row.place) || NO_PLACE_LABEL, entries: num(row.entries), photos: num(row.photos),
       categories: Object.fromEntries(Object.entries(object(row.categories) ?? {}).map(([key, value]) => [key, num(value)])),
@@ -352,7 +358,7 @@ export function readActivityLines(value: unknown): { lines: ActivityLine[]; notI
   if (!document || document.version !== ACTIVITY_REPORT_VERSION) return null;
   return {
     notItemised: num(document.notItemised),
-    lines: list(document.lines).map((line) => ({
+    lines: list(document.lines).filter((line) => !isAdministrationLine(line)).map((line) => ({
       key: activityLineKey(line), confirmedType: '',
       date: str(line.d), time: str(line.t), place: str(line.p) || NO_PLACE_LABEL, kind: str(line.k), category: str(line.c), module: str(line.mo),
       activity: str(line.a), subject: str(line.s), species: str(line.sp), equipment: str(line.eq), job: str(line.j),
@@ -461,16 +467,34 @@ export function describeActivityLine(report: Pick<ActivityReport, 'labels'>, lin
   };
 }
 
-/** CCTV/camera reviews and administration entries have their own sections, as in the PDF (REVIEW_SECTIONS). */
+/** Categories withheld from the client report (owner ruling 2026-11-05: admin records are removed). */
+export const WITHHELD_CATEGORIES: ReadonlySet<string> = new Set(['administration', 'travel_admin']);
+
+/** Administration and desk entries carried by packs generated before the ruling (isAdministrationLine in the PDF). */
+function isAdministrationLine(line: Json): boolean {
+  return str(line.k) !== 'incident' && !str(line.tri) && WITHHELD_CATEGORIES.has(str(line.c));
+}
+
+/** A camera card review or other observation; card reviews are observations (isObservationLine in the PDF). */
+export function isObservationLine(line: ActivityLine): boolean {
+  if (isIncidentLine(line)) return false;
+  return line.kind === 'observation' || line.category === 'camera_activation' || line.category === 'vehicle_observation'
+    || line.title.toLowerCase().replace(/[^a-z]/g, '') === 'cardreview';
+}
+
+/** Observations, including camera card reviews, have their own section, as in the PDF (REVIEW_SECTIONS). */
 export const REVIEW_SECTIONS = [
-  { code: 'camera_activation', title: 'CCTV and camera reviews', one: 'CCTV or camera entry', many: 'CCTV and camera entries' },
-  { code: 'administration', title: 'Administration and review', one: 'administration entry', many: 'administration entries' },
+  { code: 'observation', title: 'Observations', one: 'observation', many: 'observations' },
 ] as const;
 
 /** The review section an entry belongs in, or '' when it stays in the site log. */
 export function reviewSectionCode(line: ActivityLine): string {
-  if (isIncidentLine(line)) return '';
-  return REVIEW_SECTIONS.some((review) => review.code === line.category) ? line.category : '';
+  return isObservationLine(line) ? 'observation' : '';
+}
+
+/** Observations for At a Glance: recorded observations plus camera card reviews (observationCount in the PDF). */
+export function observationCount(totals: Pick<ActivityReport['totals'], 'observations' | 'cameraActivations'>): number {
+  return totals.observations + totals.cameraActivations;
 }
 
 /** Longest note, in words, that still reads as a status rather than a report (ROUTINE_STATUS_WORDS in the PDF). */
@@ -520,7 +544,7 @@ export function routineCheckRows(report: Pick<ActivityReport, 'labels'>, lines: 
     });
 }
 
-/** Site-log grouping as in the PDF: incidents, CCTV reviews, administration and routine checks excluded (they have their own sections), locations A-Z, "Not location-specific" last. */
+/** Site-log grouping as in the PDF: incidents, observations and routine checks excluded (they have their own sections), locations A-Z, "Not location-specific" last. */
 export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
   const byPlace = new Map<string, ActivityLine[]>();
   for (const line of lines) {

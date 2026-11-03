@@ -19,7 +19,7 @@ import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportP
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { CURRENT_REPORT_PDF_RENDERER } from '../lib/reportPackRenderer';
-import { draftSummaryIfEmpty, functionErrorMessage, runIncidentScan } from '../lib/reportBob';
+import { draftSummaryIfEmpty, functionErrorMessage, runIncidentScan, runPrivacyCheck } from '../lib/reportBob';
 import './PageStyles.css';
 
 interface BreachAlert {
@@ -396,6 +396,10 @@ const ReportsHubPage: React.FC = () => {
     setNotice(null);
     const bobNotes: string[] = [];
     if (pack.report_kind !== 'custom' && pack.status !== 'sent') {
+      // Names are withheld before Bob reads the entries, so his summary never sees them.
+      setBusyStage('Bob is checking for personal names...');
+      const privacy = await runPrivacyCheck(pack.id);
+      if (privacy.error) bobNotes.push(`Bob could not finish the privacy check (${privacy.error}).`);
       setBusyStage('Bob is reviewing...');
       const scan = await runIncidentScan(pack.id);
       if (scan.error) bobNotes.push(`Bob could not finish checking for potential incidents (${scan.error}); use Ask Bob in the review to continue.`);
@@ -407,6 +411,12 @@ const ReportsHubPage: React.FC = () => {
         if (draft.error) bobNotes.push(`Bob could not draft the executive summary (${draft.error}).`);
         else if (draft.saved) bobNotes.push('Bob drafted the executive summary; check and edit it in the review before publishing.');
       }
+      setBusyStage('Bob is checking for personal names...');
+      const recheck = await runPrivacyCheck(pack.id);
+      if (recheck.error && !privacy.error) bobNotes.push(`Bob could not finish the privacy check (${recheck.error}).`);
+      else if (!recheck.error && recheck.remaining > 0) bobNotes.push(`Bob still has ${recheck.remaining === 1 ? '1 entry' : `${recheck.remaining} entries`} to check for personal names; generate the preview again to continue.`);
+      const withheld = privacy.reworded + recheck.reworded;
+      if (withheld > 0) bobNotes.push(`Bob withheld personal names or contact details in ${withheld === 1 ? '1 place' : `${withheld} places`}.`);
     }
     setBusyStage('Rendering...');
     const { error: renderError } = await supabase.functions.invoke('generate-report-pack-pdf', { body: { pack_id: pack.id } });

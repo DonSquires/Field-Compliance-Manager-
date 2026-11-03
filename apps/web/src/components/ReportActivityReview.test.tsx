@@ -78,7 +78,7 @@ describe('ReportActivityReview', () => {
 
     const glance = screen.getByRole('group', { name: 'Report at a glance' });
     expect([...glance.querySelectorAll('span')].map((node) => node.textContent)).toEqual([
-      'Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'CCTV activity', 'Photos', 'Pest culls recorded',
+      'Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'Photos', 'Pest culls recorded',
     ]);
     expect(within(glance).getByText('Incidents').closest('div')?.className).toBe('is-alert');
     expect(within(glance).getByText('Pest culls recorded').nextSibling?.textContent).toBe('2');
@@ -265,12 +265,12 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(2);
 
     const log = group(/^Site log/);
-    expect(log.querySelector('summary')?.textContent).toContain('5 entries by location, with comments and photos');
-    const cctv = screen.getByRole('heading', { name: 'CCTV and camera reviews' }).closest('section') as HTMLElement;
+    expect(log.querySelector('summary')?.textContent).toContain('4 entries by location, with comments and photos');
+    const cctv = screen.getByRole('heading', { name: 'Observations' }).closest('section') as HTMLElement;
     expect(within(cctv).getByText('Motion alert reviewed; wildlife only.')).toBeTruthy();
     await setOpen(log, true);
 
-    const status = await within(log).findByText('5 entries with comments, work or photos');
+    const status = await within(log).findByText('4 entries with comments, work or photos');
     expect(within(log).getByRole('heading', { name: 'Alpha Reserve' })).toBeTruthy();
     expect(within(log).queryByRole('heading', { name: 'Not location-specific' })).toBeNull();
     expect(within(log).queryByText('Motion alert reviewed; wildlife only.')).toBeNull();
@@ -290,7 +290,7 @@ describe('ReportActivityReview', () => {
 
     fireEvent.click(within(log).getByRole('button', { name: 'Clear filters' }));
     fireEvent.click(within(log).getByRole('checkbox', { name: 'With photos only' }));
-    expect(status.textContent).toBe('2 entries match these filters');
+    expect(status.textContent).toBe('1 entry matches these filters');
     await waitFor(() => expect(createSignedUrls.mock.calls.filter(([bucket]) => bucket === 'scans').flatMap(([, paths]) => paths).sort()).toEqual(['org/obs/1.jpg', 'org/obs/2.jpg', 'org/obs/3.jpg', 'org/pest/ridge.jpg']));
 
     fireEvent.change(within(log).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'nothing like this' } });
@@ -299,7 +299,7 @@ describe('ReportActivityReview', () => {
     await setOpen(log, false);
     await setOpen(log, true);
     expect(maybeSingle).toHaveBeenCalledTimes(2);
-    expect(within(log).getByText('5 entries with comments, work or photos')).toBeTruthy();
+    expect(within(log).getByText('4 entries with comments, work or photos')).toBeTruthy();
   });
 
   it('refuses newer site log detail and reloads only after the displayed snapshot changes', async () => {

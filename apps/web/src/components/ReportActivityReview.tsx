@@ -21,6 +21,7 @@ import {
   readActivityReport,
   readIncidentTriage,
   REVIEW_SECTIONS,
+  observationCount,
   reviewSectionCode,
   isRoutineCheck,
   routineCheckRows,
@@ -843,9 +844,8 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     ['Locations with activity', totals.places],
     ['Entries recorded', totals.entries],
     ['Incidents', totalIncidents, totalIncidents > 0],
-    ['Observations', totals.observations],
+    ['Observations', observationCount(totals)],
     ['Patrols', totals.patrolVisits],
-    ['CCTV activity', totals.cameraActivations],
     ['Photos', totals.photos],
     ['Pest culls recorded', pest.bySpecies.reduce((sum, row) => sum + row.culls, 0)],
   ];
@@ -1117,7 +1117,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
         );
       })}
 
-      <Group title="Observations" meta={`${counted(observations.total, 'observation', 'observations')} · ${counted(observations.photos, 'photo', 'photos')}`}>
+      <Group title="Observations by type" meta={`${counted(observations.total, 'observation', 'observations')} · ${counted(observations.photos, 'photo', 'photos')}`}>
         {observations.byModule.length > 0 ? (
           <>
             <p className="report-review-source-note">{counted(observations.total, 'observation', 'observations')}; {count(observations.withPhoto)} with photos.</p>

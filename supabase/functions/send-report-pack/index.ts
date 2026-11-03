@@ -19,6 +19,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 import { activityEmailSummary, applyIncidentTriage, confirmedIncidentCount, executiveSummaryMarkup, summaryMarkup } from '../_shared/report-activity-sections.ts';
 import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
+import { privacyHoldReason } from '../_shared/report-privacy-oracle.mjs';
 import { fetchCappedBytes, reportEmailMimeContent, reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -28,7 +29,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v19';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v20';
 // Larger PDFs are sent as the signed download link only, keeping the message
 // under common mailbox size limits once base64-encoded.
 const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -241,6 +242,8 @@ function assertEmailDeliveryReady(pack: ReportPackEmail): asserts pack is Report
   if (!pack.pdf_path) throw new RequestError('Generate the reviewed PDF before sending this report', 409);
   if (pack.pdf_source_updated_at !== pack.updated_at) throw new RequestError('Generate a current reviewed PDF before sending this report', 409);
   if (pack.pdf_renderer_version !== CURRENT_REPORT_PDF_RENDERER) throw new RequestError('Generate a PDF with the current report layout before sending this report', 409);
+  const privacyHold = privacyHoldReason(pack);
+  if (privacyHold) throw new RequestError(privacyHold, 409);
 }
 
 async function claimEmailDelivery(admin: SupabaseClient, callerId: string, packId: string, expectedUpdatedAt: string, requestedRecipient: string): Promise<{ deliveryAttemptId: string; recipient: string } | { alreadySentTo: string | null }> {
