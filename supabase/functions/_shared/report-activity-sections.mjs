@@ -282,6 +282,8 @@ export function monthlyActivityBlocks(data, activityLines) {
     { label: 'Photos', value: fmt(num(totals.photos)) },
     { label: 'Pest culls recorded', value: fmt(speciesCulls(report)) },
   ];
+  const hunters = obj(report.hunterReturns);
+  if (hunters) metrics.push({ label: 'Hunter-reported kills', value: fmt(num(hunters.animals)) });
   blocks.push({ kind: 'metrics', items: metrics });
   if (text(report.basis)) blocks.push(note(text(report.basis), 8.5, true));
 
@@ -369,6 +371,29 @@ export function monthlyActivityBlocks(data, activityLines) {
     }
   } else {
     blocks.push(note('No pest-control work was recorded at your locations during the period.'));
+  }
+
+  if (hunters) {
+    blocks.push(section('Hunter Kill Returns'));
+    if (num(hunters.returns) > 0) {
+      blocks.push(note(`${counted(hunters.returns, 'hunter return was', 'hunter returns were')} submitted for hunts in the period: ${fmt(num(hunters.killReturns))} with kills and ${fmt(num(hunters.nilReturns))} nil. ${counted(hunters.animals, 'animal was', 'animals were')} reported. Figures are as reported by permit holders.`));
+      const species = rows(hunters.bySpecies);
+      if (species.length) {
+        blocks.push(table(
+          [['Species', 287], ['Animals reported', 100, 'right'], ['Returns', 100, 'right']],
+          species.map((row) => [text(row.species), fmt(num(row.animals)), fmt(num(row.returns))]),
+        ));
+      }
+      const areas = rows(hunters.byArea);
+      if (areas.length) {
+        blocks.push(table(
+          [['Hunting area', 187], ['Returns', 75, 'right'], ['With kills', 75, 'right'], ['Nil', 75, 'right'], ['Animals', 75, 'right']],
+          areas.map((row) => [text(row.area), fmt(num(row.returns)), fmt(num(row.kill)), fmt(num(row.nil)), fmt(num(row.animals))]),
+        ));
+      }
+    } else {
+      blocks.push(note('No hunter kill or nil returns were submitted for hunts in the period.'));
+    }
   }
 
   for (const [key, title, empty] of /** @type {const} */ ([
@@ -466,8 +491,12 @@ export function activityEmailSummary(data) {
   if (!report) return null;
   const label = labeller(report);
   const totals = obj(report.totals) ?? {};
+  const hunters = obj(report.hunterReturns);
+  const hunterSentence = hunters && num(hunters.returns) > 0
+    ? ` Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`
+    : '';
   return {
-    headline: `${counted(totals.entries, 'entry', 'entries')} recorded across ${counted(totals.places, 'location', 'locations')}, including ${counted(totals.incidents, 'incident', 'incidents')}, ${counted(totals.observations, 'observation', 'observations')} and ${counted(totals.photos, 'photo', 'photos')}.`,
+    headline: `${counted(totals.entries, 'entry', 'entries')} recorded across ${counted(totals.places, 'location', 'locations')}, including ${counted(totals.incidents, 'incident', 'incidents')}, ${counted(totals.observations, 'observation', 'observations')} and ${counted(totals.photos, 'photo', 'photos')}.${hunterSentence}`,
     categories: rows(report.categories).map((row) => [label('category', row.code), fmt(num(row.entries))]),
   };
 }

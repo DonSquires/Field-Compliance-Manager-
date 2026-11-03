@@ -574,6 +574,8 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
     ['Photos', totals.photos],
     ['Pest culls recorded', pest.bySpecies.reduce((sum, row) => sum + row.culls, 0)],
   ];
+  const hunters = report.hunterReturns;
+  if (hunters) metrics.push(['Hunter-reported kills', hunters.animals]);
   const logEntries = Math.max(totals.entries - totals.incidents, 0);
   const accountedBadge = accountedFor.reconciled
     ? (accountedFor.entries === 1 ? '1 record accounted for' : `All ${count(accountedFor.entries)} records accounted for`)
@@ -670,6 +672,32 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
           </>
         ) : <Empty>No pest-control work was recorded at these locations during the period.</Empty>}
       </Group>
+
+      {hunters && (
+        <Group title="Hunter kill returns" meta={counted(hunters.returns, 'return', 'returns')}>
+          {hunters.returns > 0 ? (
+            <>
+              <p className="report-review-source-note">
+                {counted(hunters.returns, 'hunter return was', 'hunter returns were')} submitted through RAMS for hunts in the period: {count(hunters.killReturns)} with kills and {count(hunters.nilReturns)} nil, reporting {counted(hunters.animals, 'animal', 'animals')}. Figures are as reported by permit holders; hunter identities stay with R &amp; M.
+              </p>
+              {hunters.bySpecies.length > 0 && (
+                <ActivityTable
+                  label="Hunter-reported animals by species"
+                  columns={[{ label: 'Species' }, { label: 'Animals reported', numeric: true }, { label: 'Returns', numeric: true }]}
+                  rows={hunters.bySpecies.map((row) => [row.species, count(row.animals), count(row.returns)])}
+                />
+              )}
+              {hunters.byArea.length > 0 && (
+                <ActivityTable
+                  label="Hunter returns by hunting area"
+                  columns={[{ label: 'Hunting area' }, { label: 'Returns', numeric: true }, { label: 'With kills', numeric: true }, { label: 'Nil', numeric: true }, { label: 'Animals', numeric: true }]}
+                  rows={hunters.byArea.map((row) => [row.area, count(row.returns), count(row.kill), count(row.nil), count(row.animals)])}
+                />
+              )}
+            </>
+          ) : <Empty>No hunter kill or nil returns were submitted for hunts in the period.</Empty>}
+        </Group>
+      )}
 
       {([['maintenance', 'Maintenance and repairs', 'No maintenance or repair work was recorded during the period.'], ['manufacture', 'Manufacture and fabrication', 'No manufacture or fabrication work was recorded during the period.']] as const).map(([key, title, empty]) => {
         const work = report[key];
