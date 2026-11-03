@@ -155,7 +155,24 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
     fetchImpl: async (url) => url.includes('ollama')
       ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
       : reply({ choices: [{ message: { content: 'Another single paragraph. It also exceeds the minimum length check and should be rejected.' } }] }),
-  }), /model did not return two paragraphs/);
+  }), /model did not return exactly two paragraphs/);
+  await assert.rejects(draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async () => reply({ message: { content: `${PARAGRAPHS}\n\nA third paragraph adds closing remarks that the executive summary format does not allow.` }, choices: [{ message: { content: `${PARAGRAPHS}\n\nAnother third paragraph.` } }] }),
+  }), /ollama_cloud: model did not return exactly two paragraphs; openai: model did not return exactly two paragraphs/);
+  const copied = 'Diesel tank found drained overnight and the padlock on the yard gate had been cut through';
+  await assert.rejects(draftExecutiveSummary({
+    brief: { entries: [{ date: '2026-10-03', location: 'Smiths', detail: `${copied}.` }] },
+    env,
+    fetchImpl: async () => reply({ message: { content: `**Executive Summary: October 2026**\n\nAt **Smiths**, ${copied.toLowerCase()}, indicating targeted theft.\n\nIncidents rose against the previous two months while goat culls fell against September.` }, choices: [] }),
+  }), /model copied a log entry instead of summarising/);
+  const own = await draftExecutiveSummary({
+    brief: { entries: [{ date: '2026-10-03', location: 'Smiths', detail: `${copied}.` }] },
+    env,
+    fetchImpl: async () => reply({ message: { content: PARAGRAPHS } }),
+  });
+  assert.equal(own.summary, PARAGRAPHS, 'a summary in its own words is accepted');
   await assert.rejects(draftExecutiveSummary({
     brief: {},
     env,

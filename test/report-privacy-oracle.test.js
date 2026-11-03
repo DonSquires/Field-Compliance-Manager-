@@ -39,6 +39,11 @@ test('findings are withheld as whole words; plates, places and organisations sta
   assert.equal(withholdFindings('Spoke to donald about the gate at Donald Creek.', { names: ['Donald'] }, terms), `Spoke to ${NAME_WITHHELD} about the gate at ${NAME_WITHHELD} Creek.`,
     'a surname that is only part of a block name is still withheld');
   assert.equal(withholdFindings('', { names: ['A B'] }), '');
+  assert.equal(withholdFindings('Norris said he had been at Norris B and walked to Norris gate.', { names: ['Norris'] }, ['Norris']),
+    `${NAME_WITHHELD} said he had been at Norris B and walked to Norris gate.`, 'a name that is also a place is withheld where it names a person');
+  const long = `${'Routine patrol, all clear. '.repeat(80)}Kathlene Jackson was spoken to.`;
+  const { privacyBatchMessage } = await load();
+  assert.match(privacyBatchMessage([{ fields: { n: long } }]), /Kathlene Jackson/, 'long wording is sent to Bob whole');
 });
 
 test("Bob's answer must be the requested JSON; entries outside the batch are ignored", async () => {
@@ -92,6 +97,7 @@ test('the PDF and the email refuse wording the oracle has not cleared, and the w
   assert.doesNotMatch(edge, /metadata: \{[^}]*names/, 'the audit receipt never stores the withheld words');
 
   const hub = read('apps/web/src/pages/ReportsHubPage.tsx');
+  assert.match(hub, /privacyCleared = privacy\.cleared;[\s\S]*if \(privacyCleared\) \{[\s\S]*runIncidentScan/, 'Bob reads the entries only after names are withheld');
   const order = ['runPrivacyCheck(pack.id)', 'runIncidentScan(pack.id)', 'draftSummaryIfEmpty(pack.id)', 'const recheck = await runPrivacyCheck(pack.id)', "invoke('generate-report-pack-pdf'"].map((needle) => hub.indexOf(needle));
   assert.ok(order.every((index) => index > 0), 'every step is present');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'privacy check, incident scan, summary draft, privacy check, render');

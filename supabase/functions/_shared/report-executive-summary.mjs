@@ -238,6 +238,30 @@ export function cleanExecutiveSummary(raw) {
   return summary;
 }
 
+const COPY_RUN_WORDS = 10;
+/** @param {string} value */
+const words = (value) => value.toLowerCase().replace(/\*\*/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean);
+
+/**
+ * Whether the summary repeats a run of COPY_RUN_WORDS or more consecutive
+ * words from one of the brief's log entries: a summary combines and
+ * interprets, it does not paste.
+ * @param {string} summary
+ * @param {unknown} brief
+ */
+export function copiesLogEntry(summary, brief) {
+  const body = ` ${words(summary).join(' ')} `;
+  for (const entry of rows(obj(brief)?.entries)) {
+    for (const field of ['detail', 'action', 'issue']) {
+      const source = words(text(entry[field]));
+      for (let start = 0; start + COPY_RUN_WORDS <= source.length; start += 1) {
+        if (body.includes(` ${source.slice(start, start + COPY_RUN_WORDS).join(' ')} `)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * The prose paragraphs of a summary, without its bold header line.
  * @param {string} summary
@@ -344,7 +368,8 @@ export async function draftExecutiveSummary({ brief, env, fetchImpl = fetch, tim
       const summary = finaliseExecutiveSummary(cleanExecutiveSummary(content), brief);
       if (summary.length < 120) throw new Error('empty draft');
       if (/^\* /m.test(summary)) throw new Error('model returned bullet points instead of two paragraphs');
-      if (summaryParagraphs(summary).length < 2) throw new Error('model did not return two paragraphs');
+      if (summaryParagraphs(summary).length !== 2) throw new Error('model did not return exactly two paragraphs');
+      if (copiesLogEntry(summary, brief)) throw new Error('model copied a log entry instead of summarising');
       return summary;
     },
   });

@@ -395,11 +395,19 @@ const ReportsHubPage: React.FC = () => {
     setError(null);
     setNotice(null);
     const bobNotes: string[] = [];
+    let privacyCleared = false;
+    let withheld = 0;
     if (pack.report_kind !== 'custom' && pack.status !== 'sent') {
       // Names are withheld before Bob reads the entries, so his summary never sees them.
       setBusyStage('Bob is checking for personal names...');
       const privacy = await runPrivacyCheck(pack.id);
-      if (privacy.error) bobNotes.push(`Bob could not finish the privacy check (${privacy.error}).`);
+      if (privacy.error) bobNotes.push(`Bob could not finish the privacy check (${privacy.error}); try again before Bob reviews the entries.`);
+      else if (!privacy.cleared) bobNotes.push(`Bob still has ${privacy.remaining === 1 ? '1 entry' : `${privacy.remaining} entries`} to check for personal names; generate the preview again to continue.`);
+      privacyCleared = privacy.cleared;
+      withheld = privacy.reworded;
+    }
+    if (privacyCleared) {
+      // Bob reads the entries only once every name in them has been withheld.
       setBusyStage('Bob is reviewing...');
       const scan = await runIncidentScan(pack.id);
       if (scan.error) bobNotes.push(`Bob could not finish checking for potential incidents (${scan.error}); use Ask Bob in the review to continue.`);
@@ -413,11 +421,11 @@ const ReportsHubPage: React.FC = () => {
       }
       setBusyStage('Bob is checking for personal names...');
       const recheck = await runPrivacyCheck(pack.id);
-      if (recheck.error && !privacy.error) bobNotes.push(`Bob could not finish the privacy check (${recheck.error}).`);
-      else if (!recheck.error && recheck.remaining > 0) bobNotes.push(`Bob still has ${recheck.remaining === 1 ? '1 entry' : `${recheck.remaining} entries`} to check for personal names; generate the preview again to continue.`);
-      const withheld = privacy.reworded + recheck.reworded;
-      if (withheld > 0) bobNotes.push(`Bob withheld personal names or contact details in ${withheld === 1 ? '1 place' : `${withheld} places`}.`);
+      if (recheck.error) bobNotes.push(`Bob could not finish the privacy check (${recheck.error}).`);
+      else if (!recheck.cleared) bobNotes.push(`Bob still has ${recheck.remaining === 1 ? '1 entry' : `${recheck.remaining} entries`} to check for personal names; generate the preview again to continue.`);
+      withheld += recheck.reworded;
     }
+    if (withheld > 0) bobNotes.push(`Bob withheld personal names or contact details in ${withheld === 1 ? '1 place' : `${withheld} places`}.`);
     setBusyStage('Rendering...');
     const { error: renderError } = await supabase.functions.invoke('generate-report-pack-pdf', { body: { pack_id: pack.id } });
     if (renderError) setError([await functionErrorMessage(renderError, 'The PDF preview could not be generated.'), ...bobNotes].join(' '));
