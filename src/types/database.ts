@@ -16278,6 +16278,97 @@ export type Database = {
           },
         ]
       }
+      hunter_kill_returns: {
+        Row: {
+          animals: Json
+          client_organization_id: string
+          comments: string | null
+          hunt_date: string
+          hunter_email: string | null
+          hunter_name: string | null
+          hunting_area: string
+          id: string
+          organization_id: string
+          permit_number: string | null
+          person_permit_id: string | null
+          return_type: string
+          source_booking_id: string | null
+          source_created_at: string | null
+          source_id: string
+          source_system: string
+          source_updated_at: string | null
+          synced_at: string
+          total_animals: number
+          withdrawn_at: string | null
+        }
+        Insert: {
+          animals?: Json
+          client_organization_id: string
+          comments?: string | null
+          hunt_date: string
+          hunter_email?: string | null
+          hunter_name?: string | null
+          hunting_area: string
+          id?: string
+          organization_id: string
+          permit_number?: string | null
+          person_permit_id?: string | null
+          return_type: string
+          source_booking_id?: string | null
+          source_created_at?: string | null
+          source_id: string
+          source_system?: string
+          source_updated_at?: string | null
+          synced_at?: string
+          total_animals?: number
+          withdrawn_at?: string | null
+        }
+        Update: {
+          animals?: Json
+          client_organization_id?: string
+          comments?: string | null
+          hunt_date?: string
+          hunter_email?: string | null
+          hunter_name?: string | null
+          hunting_area?: string
+          id?: string
+          organization_id?: string
+          permit_number?: string | null
+          person_permit_id?: string | null
+          return_type?: string
+          source_booking_id?: string | null
+          source_created_at?: string | null
+          source_id?: string
+          source_system?: string
+          source_updated_at?: string | null
+          synced_at?: string
+          total_animals?: number
+          withdrawn_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hunter_kill_returns_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hunter_kill_returns_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hunter_kill_returns_person_permit_id_fkey"
+            columns: ["person_permit_id"]
+            isOneToOne: false
+            referencedRelation: "person_permits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       identity_document_type_definitions: {
         Row: {
           active: boolean
@@ -27082,6 +27173,315 @@ export type Database = {
           },
         ]
       }
+      rams_person_associations: {
+        Row: {
+          associated_canonical_person_id: string
+          booking_count: number
+          canonical_person_id: string
+          client_organization_id: string | null
+          companion_email: string | null
+          companion_name: string
+          companion_phone: string | null
+          first_booking_date: string | null
+          holder_source_user_id: string
+          id: string
+          last_booking_date: string | null
+          last_hunting_area: string | null
+          organization_id: string
+          permitted_status: string | null
+          relationship: string
+          source_system: string
+          synced_at: string
+        }
+        Insert: {
+          associated_canonical_person_id: string
+          booking_count?: number
+          canonical_person_id: string
+          client_organization_id?: string | null
+          companion_email?: string | null
+          companion_name: string
+          companion_phone?: string | null
+          first_booking_date?: string | null
+          holder_source_user_id: string
+          id?: string
+          last_booking_date?: string | null
+          last_hunting_area?: string | null
+          organization_id: string
+          permitted_status?: string | null
+          relationship?: string
+          source_system?: string
+          synced_at?: string
+        }
+        Update: {
+          associated_canonical_person_id?: string
+          booking_count?: number
+          canonical_person_id?: string
+          client_organization_id?: string | null
+          companion_email?: string | null
+          companion_name?: string
+          companion_phone?: string | null
+          first_booking_date?: string | null
+          holder_source_user_id?: string
+          id?: string
+          last_booking_date?: string | null
+          last_hunting_area?: string | null
+          organization_id?: string
+          permitted_status?: string | null
+          relationship?: string
+          source_system?: string
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rams_person_associations_associated_canonical_person_id_fkey"
+            columns: ["associated_canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_associations_associated_canonical_person_id_fkey"
+            columns: ["associated_canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_associations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_associations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_associations_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_associations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rams_person_profiles: {
+        Row: {
+          account_role: string | null
+          admin_level: string | null
+          canonical_person_id: string
+          client_organization_ids: string[]
+          date_of_birth: string | null
+          email: string | null
+          firearms_licence_document_url: string | null
+          firearms_licence_expiry: string | null
+          firearms_licence_number: string | null
+          firearms_licence_status: string | null
+          full_name: string
+          home_address: string | null
+          id: string
+          is_verified: boolean | null
+          legal_name: string | null
+          nickname: string | null
+          organization_id: string
+          phone: string | null
+          source_created_at: string | null
+          source_system: string
+          source_updated_at: string | null
+          source_url: string
+          source_user_id: string
+          synced_at: string
+        }
+        Insert: {
+          account_role?: string | null
+          admin_level?: string | null
+          canonical_person_id: string
+          client_organization_ids?: string[]
+          date_of_birth?: string | null
+          email?: string | null
+          firearms_licence_document_url?: string | null
+          firearms_licence_expiry?: string | null
+          firearms_licence_number?: string | null
+          firearms_licence_status?: string | null
+          full_name: string
+          home_address?: string | null
+          id?: string
+          is_verified?: boolean | null
+          legal_name?: string | null
+          nickname?: string | null
+          organization_id: string
+          phone?: string | null
+          source_created_at?: string | null
+          source_system?: string
+          source_updated_at?: string | null
+          source_url: string
+          source_user_id: string
+          synced_at?: string
+        }
+        Update: {
+          account_role?: string | null
+          admin_level?: string | null
+          canonical_person_id?: string
+          client_organization_ids?: string[]
+          date_of_birth?: string | null
+          email?: string | null
+          firearms_licence_document_url?: string | null
+          firearms_licence_expiry?: string | null
+          firearms_licence_number?: string | null
+          firearms_licence_status?: string | null
+          full_name?: string
+          home_address?: string | null
+          id?: string
+          is_verified?: boolean | null
+          legal_name?: string | null
+          nickname?: string | null
+          organization_id?: string
+          phone?: string | null
+          source_created_at?: string | null
+          source_system?: string
+          source_updated_at?: string | null
+          source_url?: string
+          source_user_id?: string
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rams_person_profiles_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_profiles_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rams_person_vehicles: {
+        Row: {
+          archived: boolean | null
+          canonical_person_id: string
+          canonical_vehicle_id: string
+          colour: string | null
+          company_insurance: boolean | null
+          company_insurance_comments: string | null
+          id: string
+          insurance_document_urls: string[]
+          insurance_expiry: string | null
+          make: string | null
+          model: string | null
+          organization_id: string
+          plate_as_recorded: string
+          rams_person_profile_id: string
+          synced_at: string
+          vehicle_status: string | null
+          withdrawn_at: string | null
+        }
+        Insert: {
+          archived?: boolean | null
+          canonical_person_id: string
+          canonical_vehicle_id: string
+          colour?: string | null
+          company_insurance?: boolean | null
+          company_insurance_comments?: string | null
+          id?: string
+          insurance_document_urls?: string[]
+          insurance_expiry?: string | null
+          make?: string | null
+          model?: string | null
+          organization_id: string
+          plate_as_recorded: string
+          rams_person_profile_id: string
+          synced_at?: string
+          vehicle_status?: string | null
+          withdrawn_at?: string | null
+        }
+        Update: {
+          archived?: boolean | null
+          canonical_person_id?: string
+          canonical_vehicle_id?: string
+          colour?: string | null
+          company_insurance?: boolean | null
+          company_insurance_comments?: string | null
+          id?: string
+          insurance_document_urls?: string[]
+          insurance_expiry?: string | null
+          make?: string | null
+          model?: string | null
+          organization_id?: string
+          plate_as_recorded?: string
+          rams_person_profile_id?: string
+          synced_at?: string
+          vehicle_status?: string | null
+          withdrawn_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rams_person_vehicles_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_vehicles_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_vehicles_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_vehicles_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_vehicles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rams_person_vehicles_rams_person_profile_id_fkey"
+            columns: ["rams_person_profile_id"]
+            isOneToOne: false
+            referencedRelation: "rams_person_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rate_rules: {
         Row: {
           active: boolean
@@ -36411,6 +36811,15 @@ export type Database = {
         }
         Returns: Json
       }
+      base44_rams_resolve_person: {
+        Args: {
+          p_canonical_key: string
+          p_email: string
+          p_name: string
+          p_provider_organization_id: string
+        }
+        Returns: Record<string, unknown>
+      }
       batch_publish_roster_slots: {
         Args: {
           p_client_request_id: string
@@ -36758,6 +37167,15 @@ export type Database = {
         Returns: Json
       }
       build_agreement_activity_report: {
+        Args: {
+          p_from: string
+          p_max_lines?: number
+          p_service_agreement_id: string
+          p_to: string
+        }
+        Returns: Json
+      }
+      build_agreement_activity_report_core: {
         Args: {
           p_from: string
           p_max_lines?: number
@@ -43804,6 +44222,26 @@ export type Database = {
           p_source_document: string
           p_source_sha256: string
         }
+        Returns: Json
+      }
+      ingest_base44_rams_companions: {
+        Args: { p_provider_organization_id: string; p_rows: Json }
+        Returns: Json
+      }
+      ingest_base44_rams_kill_returns: {
+        Args: {
+          p_provider_organization_id: string
+          p_rows: Json
+          p_seen_source_ids?: string[]
+        }
+        Returns: Json
+      }
+      ingest_base44_rams_people: {
+        Args: { p_provider_organization_id: string; p_rows: Json }
+        Returns: Json
+      }
+      ingest_base44_rams_permits: {
+        Args: { p_provider_organization_id: string; p_rows: Json }
         Returns: Json
       }
       insert_adhoc_stop: {
