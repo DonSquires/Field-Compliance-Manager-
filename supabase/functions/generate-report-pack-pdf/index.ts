@@ -9,11 +9,12 @@ import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
 import { monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
+import { loadReportLogo } from '../_shared/report-delivery.mjs';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v14';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v15';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -29,7 +30,7 @@ interface PdfAgreement {
 interface PdfReportPack {
   id: string;
   agreement: PdfAgreement | PdfAgreement[] | null;
-  provider: { name: string } | Array<{ name: string }> | null;
+  provider: { name: string; logo_url?: string | null } | Array<{ name: string; logo_url?: string | null }> | null;
   organization_id: string;
   period_start: string;
   period_end: string;
@@ -118,6 +119,7 @@ interface ReportRenderInput {
   status: string;
   deliveryChannel: string | null;
   loadPhotos?: (refs: ReportPhotoRef[]) => Promise<Map<string, Uint8Array>>;
+  logo?: { bytes: Uint8Array; kind: 'png' | 'jpg' } | null;
 }
 
 function availabilityLine(status: string, deliveryChannel: string | null) {
@@ -130,6 +132,11 @@ function availabilityLine(status: string, deliveryChannel: string | null) {
 function relationName(value: { name: string } | Array<{ name: string }> | null | undefined) {
   const name = Array.isArray(value) ? value[0]?.name : value?.name;
   return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
+
+function providerLogoUrl(provider: PdfReportPack['provider']) {
+  const row = Array.isArray(provider) ? provider[0] : provider;
+  return row?.logo_url ?? null;
 }
 
 function reportAgreementName(pack: PdfReportPack) {
@@ -202,7 +209,7 @@ function entryPhotoRefs(blocks: ReportBlock[]) {
   return refs;
 }
 
-export async function renderPdf({ templateTitle, agreementName, providerName, clientName, period, packId, snapshotGeneratedAt, editorial, data, activityLines, reportKind, reportScope, status, deliveryChannel, loadPhotos }: ReportRenderInput): Promise<Uint8Array> {
+export async function renderPdf({ templateTitle, agreementName, providerName, clientName, period, packId, snapshotGeneratedAt, editorial, data, activityLines, reportKind, reportScope, status, deliveryChannel, loadPhotos, logo }: ReportRenderInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.setLanguage('en-NZ');
   const { normal, bold } = await embedPdfNotoFonts(pdf);
@@ -229,6 +236,14 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
       photos.set(key, await pdf.embedJpg(bytes));
     } catch {
       // An unreadable photo is reported as held on file.
+    }
+  }
+  let logoImage: PDFImage | null = null;
+  if (logo) {
+    try {
+      logoImage = logo.kind === 'png' ? await pdf.embedPng(logo.bytes) : await pdf.embedJpg(logo.bytes);
+    } catch {
+      // The report renders without branding rather than failing.
     }
   }
 
@@ -521,12 +536,17 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
     drawBlocks(logBlocks);
   };
   const drawCover = () => {
-    const titleLines = wrapText(reportTitle, bold, 20, WIDTH).slice(0, 3);
-    const bandHeight = 40 + (providerName ? 22 : 0) + titleLines.length * 25;
+    const logoSize = logoImage ? logoImage.scaleToFit(150, 44) : null;
+    const headerWidth = logoSize ? WIDTH - logoSize.width - 18 : WIDTH;
+    const titleLines = wrapText(reportTitle, bold, 20, headerWidth).slice(0, logoSize ? 4 : 3);
+    const bandHeight = Math.max(40 + (providerName ? 22 : 0) + titleLines.length * 25, logoSize ? logoSize.height + 36 : 0);
     page.drawRectangle({ x: 0, y: PAGE_SIZE[1] - bandHeight, width: PAGE_SIZE[0], height: bandHeight, color: BRAND });
+    if (logoImage && logoSize) {
+      page.drawImage(logoImage, { x: RIGHT - logoSize.width, y: PAGE_SIZE[1] - 18 - logoSize.height, width: logoSize.width, height: logoSize.height });
+    }
     let baseline = PAGE_SIZE[1] - 30;
     if (providerName) {
-      drawRuns(fit(providerName.toUpperCase(), bold, 9, WIDTH), LEFT, baseline, bold, 9, BRAND_SOFT);
+      drawRuns(fit(providerName.toUpperCase(), bold, 9, headerWidth), LEFT, baseline, bold, 9, BRAND_SOFT);
       baseline -= 26;
     }
     for (const line of titleLines) {
@@ -594,7 +614,7 @@ async function loadRenderContext(req: Request, packId: string): Promise<{ admin:
   const admin = createClient(url, serviceKey);
   const { data: profile } = await admin.from('user_profiles').select('role,organization_id,deactivated_at').eq('id', user.id).single();
   if (!profile || profile.deactivated_at || !canRender.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
-  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name,client:client_organization_id(name)),provider:organization_id(name)').eq('id', packId).single();
+  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name,client:client_organization_id(name)),provider:organization_id(name,logo_url)').eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayRender } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayRender !== true) throw new RequestError('Forbidden', 403);
@@ -655,6 +675,7 @@ async function handlePdfGeneration(req: Request) {
     status: pack.status,
     deliveryChannel: pack.delivery_channel,
     loadPhotos: (refs) => loadReportPhotos(admin, refs),
+    logo: await loadReportLogo(providerLogoUrl(pack.provider)),
   });
   return json({ ok: true, pack: await storeRenderedPdf(admin, userId, pack, bytes) });
 }

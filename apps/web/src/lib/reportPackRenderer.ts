@@ -2,7 +2,7 @@
 // and CURRENT_REPORT_PDF_RENDERER in supabase/functions/send-report-pack/index.ts.
 // A PDF rendered by an older layout is hidden until it is regenerated, except
 // for issued (sent) packs, whose frozen PDF is the record of what was sent.
-export const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v14';
+export const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v15';
 
 export interface ReportPackPdfState {
   status: string;
