@@ -28,7 +28,6 @@
 
 export const ACTIVITY_REPORT_VERSION = 2;
 export const NO_PLACE_LABEL = 'Not location-specific';
-export const SUMMARY_PHOTO_LIMIT = 6;
 // Photos named for NZTA are privileged and never go into a client report.
 export const PRIVILEGED_PHOTO = /nzta/i;
 
@@ -332,20 +331,6 @@ export function reportDate(value) {
   return `${DAYS[day.getUTCDay()]} ${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
 }
 
-/** @param {string[]} dates ISO dates in order */
-function dayList(dates) {
-  /** @type {Map<string, number[]>} */
-  const byMonth = new Map();
-  for (const value of dates) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) continue;
-    const key = `${match[1]}-${match[2]}`;
-    const days = byMonth.get(key) ?? [];
-    if (!days.includes(Number(match[3]))) days.push(Number(match[3]));
-    byMonth.set(key, days);
-  }
-  return [...byMonth.entries()].map(([key, days]) => `${days.join(', ')} ${MONTHS[Number(key.slice(5)) - 1]}`).join('; ');
-}
 
 /** @param {Record<string, unknown>} line @param {ReturnType<typeof labeller>} label */
 function materialsText(line, label) {
@@ -461,58 +446,71 @@ function summaryChart(title, source, itemLabel, itemValue) {
   return items.length ? { title, items } : null;
 }
 
+/** Longest note, in words, that still reads as a status rather than a report ("Secure", "Provide access - no lock"). */
+export const ROUTINE_STATUS_WORDS = 4;
+const ROUTINE_CHECK_CATEGORIES = new Set(['patrol_visit', 'inspection']);
+const ROUTINE_RESULTS_SHOWN = 4;
+
+/** @param {string} value */
+function statusWords(value) {
+  return value.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+}
+
 /**
- * An entry worth calling out to the client: an observation, a CCTV activation
- * or anything with a photo. Incidents have their own section and routine
- * patrols are only counted.
+ * A patrol or check (gate, lock, site) whose only record is a short status:
+ * no action, nothing used, no photo, and not an incident. These are summarised
+ * in Routine Checks instead of being listed one by one. The rule is structural
+ * (length and shape), not a keyword list, so anything an officer wrote more
+ * about stays itemised. Bob still reads these notes for potential incidents.
  * @param {Record<string, unknown>} line
  */
-export function isNotableLine(line) {
-  if (isIncidentLine(line) || isRoutineLine(line)) return false;
-  return text(line.k) === 'observation' || text(line.c) === 'camera_activation' || num(line.ph) > 0;
+export function isRoutineCheck(line) {
+  if (isIncidentLine(line) || text(line.k) !== 'event' || !ROUTINE_CHECK_CATEGORIES.has(text(line.c))) return false;
+  if (text(line.ac) || num(line.ph) > 0 || rows(line.pr).length > 0 || rows(line.m).length > 0) return false;
+  const status = text(line.n);
+  return !status || (status.length <= 40 && statusWords(status) <= ROUTINE_STATUS_WORDS);
 }
 
-/** Incidents first, then CCTV activations, observations and other photographed work. @param {Record<string, unknown>} line */
-function noteRank(line) {
-  if (isIncidentLine(line)) return 0;
-  if (text(line.c) === 'camera_activation') return 1;
-  return text(line.k) === 'observation' ? 2 : 3;
-}
-
-/** @param {string} value "2026-10-14" -> "14 Oct" */
-function shortDate(value) {
-  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
-  return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
+/** "secure." -> "Secure"; a blank note reads "Nothing to report". @param {Record<string, unknown>} line */
+function routineResult(line) {
+  const status = text(line.n).replace(/[.\s]+$/, '');
+  return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Nothing to report';
 }
 
 /**
- * Up to SUMMARY_PHOTO_LIMIT photos for the summary: one per entry in order of
- * importance before any entry gets a second.
+ * Routine checks by type: how many, at how many locations, and the recorded
+ * results, most common first.
  * @param {Record<string, unknown>[]} lines
  * @param {ReturnType<typeof labeller>} label
- * @returns {ReportGalleryPhoto[]}
+ * @returns {{ check: string, checks: number, places: number, results: string }[]}
  */
-function summaryPhotos(lines, label) {
-  const ranked = lines
-    .filter((line) => isIncidentLine(line) || isNotableLine(line))
-    .map((line, index) => ({ line, index, refs: photoRefs(line) }))
-    .filter((item) => item.refs.length)
-    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
-  /** @type {ReportGalleryPhoto[]} */
-  const picks = [];
-  const seen = new Set();
-  for (let round = 0; picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
-    if (!ranked.some((item) => item.refs.length > round)) break;
-    for (const { line, refs } of ranked) {
-      const ref = refs[round];
-      if (!ref || seen.has(`${ref.b}/${ref.p}`) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
-      seen.add(`${ref.b}/${ref.p}`);
-      const what = text(line.k) === 'incident' ? label('incidentType', line.it) || 'Incident'
-        : text(line.tri) ? incidentTypeLabel(line.tri) : label('category', line.c);
-      picks.push({ ref, caption: [shortDate(text(line.d)), text(line.p) || NO_PLACE_LABEL, what].filter(Boolean).join(' · ') });
-    }
+export function routineCheckRows(lines, label) {
+  /** @type {Map<string, { check: string, checks: number, places: Set<string>, results: Map<string, { text: string, count: number }> }>} */
+  const byCheck = new Map();
+  for (const line of lines) {
+    if (!isRoutineCheck(line)) continue;
+    const category = label('category', line.c);
+    const subject = text(line.s) && !['other', 'general'].includes(text(line.s)) ? label('subject', line.s) : '';
+    const check = subject && !sameText(subject, category) ? `${category} · ${subject}` : category;
+    const row = byCheck.get(check) ?? { check, checks: 0, places: new Set(), results: new Map() };
+    row.checks += 1;
+    row.places.add(text(line.p) || NO_PLACE_LABEL);
+    const result = routineResult(line);
+    const key = result.toLowerCase();
+    const seen = row.results.get(key) ?? { text: result, count: 0 };
+    seen.count += 1;
+    row.results.set(key, seen);
+    byCheck.set(check, row);
   }
-  return picks;
+  return [...byCheck.values()]
+    .sort((left, right) => right.checks - left.checks || left.check.localeCompare(right.check))
+    .map((row) => {
+      const results = [...row.results.values()].sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
+      const shown = results.slice(0, ROUTINE_RESULTS_SHOWN).map((item) => `${item.text} ${fmt(item.count)}`);
+      const rest = results.slice(ROUTINE_RESULTS_SHOWN).reduce((sum, item) => sum + item.count, 0);
+      if (rest > 0) shown.push(`other ${fmt(rest)}`);
+      return { check: row.check, checks: row.checks, places: row.places.size, results: shown.join(' · ') };
+    });
 }
 
 /** Paragraphs of reviewer text, split on blank lines. @param {string} value */
@@ -537,8 +535,8 @@ export function executiveSummaryBlocks(summary, highlights) {
 
 /**
  * Client summary sections for a monthly pack, in reading order: the
- * reviewer's executive summary (omitted when none is written) with a few
- * photos, at a glance with its charts, then the activity tables with incidents
+ * reviewer's executive summary (omitted when none is written), at a glance
+ * with its charts and routine checks, then the activity tables with incidents
  * and investigations itemised, including logged entries a reviewer confirmed
  * as incidents (line.tri, see applyIncidentTriage). Returns null when the pack
  * has no client activity report so the caller keeps its legacy layout.
@@ -558,12 +556,6 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   const blocks = [];
 
   blocks.push(...executiveSummaryBlocks(options?.summary, options?.highlights));
-  const gallery = summaryPhotos(lines, label);
-  if (gallery.length) {
-    if (!blocks.length) blocks.push(section('Selected Photos'));
-    blocks.push({ kind: 'gallery', photos: gallery });
-    blocks.push(note('Selected photos from the period. Each is shown again with its entry.', 8, true));
-  }
 
   const confirmedLines = lines.filter((line) => text(line.k) !== 'incident' && text(line.tri));
   blocks.push(section('At a Glance'));
@@ -601,6 +593,17 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   if (charts.length) {
     blocks.push({ kind: 'charts', charts });
     blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
+  }
+
+  const routineRows = routineCheckRows(lines, label);
+  if (routineRows.length) {
+    const checks = routineRows.reduce((sum, row) => sum + row.checks, 0);
+    blocks.push(section('Routine Checks'));
+    blocks.push(note(`${counted(checks, 'routine patrol or check', 'routine patrols and checks')} recorded a status only. They are summarised here rather than listed in the site log; anything an officer described further is listed in full.`, 9, true));
+    blocks.push(table(
+      [['Check', 150], ['Checks', 55, 'right'], ['Locations', 62, 'right'], ['Recorded results', 220]],
+      routineRows.map((row) => [row.check, fmt(row.checks), fmt(row.places), row.results]),
+    ));
   }
 
   blocks.push(section('Activity Overview'));
@@ -782,23 +785,19 @@ export function siteLogBlocks(data, activityLines) {
       : 'Nothing was recorded at your locations during the period.'));
     return blocks;
   }
-  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents, CCTV and camera reviews, and administration entries are listed in their own sections above.', 9, true));
+  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents, CCTV and camera reviews, and administration entries are listed in their own sections above; routine checks are summarised under Routine Checks.', 9, true));
   /** @type {Map<string, Record<string, unknown>[]>} */
   const byPlace = new Map();
   for (const line of lines) {
-    if (isIncidentLine(line) || reviewSectionCode(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) continue;
     const place = text(line.p) || NO_PLACE_LABEL;
     byPlace.set(place, [...(byPlace.get(place) ?? []), line]);
   }
   const placeNames = [...byPlace.keys()].sort((left, right) => (left === NO_PLACE_LABEL ? 1 : 0) - (right === NO_PLACE_LABEL ? 1 : 0) || left.localeCompare(right));
   for (const place of placeNames) {
     const placeLines = byPlace.get(place) ?? [];
-    const routine = placeLines.filter(isRoutineLine);
     blocks.push({ kind: 'subsection', title: place, detail: counted(placeLines.length, 'entry', 'entries') });
-    for (const line of placeLines) if (!isRoutineLine(line)) blocks.push(entryFromLine(line, label));
-    if (routine.length) {
-      blocks.push(note(`${counted(routine.length, 'routine patrol', 'routine patrols')} with nothing further to report (${dayList(routine.map((line) => text(line.d)))}).`, 9, true));
-    }
+    for (const line of placeLines) blocks.push(entryFromLine(line, label));
   }
   if (notItemised > 0) {
     blocks.push(note(`A further ${counted(notItemised, 'entry', 'entries')} from this period ${isAre(notItemised)} included in the totals above and held on file.`, 9, true));

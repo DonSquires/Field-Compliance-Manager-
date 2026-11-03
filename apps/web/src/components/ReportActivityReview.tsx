@@ -22,10 +22,10 @@ import {
   readIncidentTriage,
   REVIEW_SECTIONS,
   reviewSectionCode,
-  routineSummary,
+  isRoutineCheck,
+  routineCheckRows,
   siteLogGroups,
   executiveSummaryMarkup,
-  summaryPhotos,
   textParagraphs,
   type AccountingProblem,
   type ActivityAccounting,
@@ -500,7 +500,7 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
     const order = new Map(lines.map((line, index) => [line, index]));
     return siteLogGroups(lines).map((group) => ({
       ...group,
-      cards: group.entries.map((line) => {
+      cards: group.lines.map((line) => {
         const entry = describeActivityLine(report, line);
         return { key: order.get(line) ?? 0, line, entry, search: entrySearchText(entry, group.place) };
       }),
@@ -516,9 +516,8 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
       ...group,
       cards: group.cards.filter((card) => (category === 'all' || card.line.category === category) && (!photosOnly || card.line.photos > 0)
         && (!flaggedOnly || triageState(triage.get(card.line.key)) !== null) && (!needle || card.search.includes(needle))),
-      showRoutine: group.routine.length > 0 && !photosOnly && !flaggedOnly && !needle && (category === 'all' || category === 'patrol_visit'),
     }))
-    .filter((group) => group.cards.length > 0 || group.showRoutine);
+    .filter((group) => group.cards.length > 0);
   const matching = filtered.reduce((sum, group) => sum + group.cards.length, 0);
 
   let remaining = visible;
@@ -584,7 +583,6 @@ function SiteLog({ report, lines, notItemised, label, urls, requestPhotos, onOpe
             const row = triage.get(card.line.key);
             return <EntryCard key={card.key} entry={card.entry} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} triage={row} onReview={row ? () => onReview({ line: card.line, row }) : undefined} />;
           })}
-          {group.showRoutine && <p className="report-log-routine">{routineSummary(group.routine)}</p>}
         </section>
       ))}
       {matching > shown && (
@@ -811,16 +809,16 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     setReviewNotice(pdfStale ? 'Decision saved. The client report changed, so generate the PDF again before sending it.' : 'Decision saved.');
   };
 
-  const gallery = useMemo(() => summaryPhotos(report, triagedLines), [triagedLines, report]);
   const summaryItems = useMemo(() => executiveSummaryMarkup(reviewerSummary), [reviewerSummary]);
+  const routineRows = useMemo(() => routineCheckRows(report, triagedLines), [triagedLines, report]);
+  const routineCount = useMemo(() => triagedLines.filter(isRoutineCheck).length, [triagedLines]);
   useEffect(() => {
     requestPhotos([
-      ...gallery.map((photo) => photo.ref),
       ...incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
       ...shownReviews.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
       ...reviewSections.flatMap((review) => review.entries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY))),
     ]);
-  }, [gallery, incidentEntries, shownReviews, reviewSections, requestPhotos]);
+  }, [incidentEntries, shownReviews, reviewSections, requestPhotos]);
 
   const totalIncidents = incidents.total + confirmedCount;
   const incidentSummary = [
@@ -844,7 +842,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   const hunters = report.hunterReturns;
   if (hunters) metrics.push(['Hunter-reported kills', hunters.animals]);
   const summaryCharts = reportSummaryCharts(report, label);
-  const logEntries = Math.max(totals.entries - totals.incidents - confirmedCount - reviewSectionCount, 0);
+  const logEntries = Math.max(totals.entries - totals.incidents - confirmedCount - reviewSectionCount - routineCount, 0);
   const accountedBadge = accountedFor.reconciled
     ? (accountedFor.entries === 1 ? '1 record accounted for' : `All ${count(accountedFor.entries)} records accounted for`)
     : 'Totals need review';
@@ -863,7 +861,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       )}
 
       <section className="report-activity-section report-activity-summary" aria-labelledby={`${headingId}-summary`}>
-        <h5 id={`${headingId}-summary`}>{summaryItems.length || gallery.length === 0 ? 'Executive summary' : 'Selected photos'}</h5>
+        <h5 id={`${headingId}-summary`}>Executive summary</h5>
         {summaryItems.length ? (
           <>
             <p className="report-review-source-note">Your executive summary and highlights open the client report.</p>
@@ -873,26 +871,6 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           <p className="report-review-source-note">No executive summary is written yet. Use Draft with Bob or write one above; the figures already appear under At a glance.</p>
         )}
         {textParagraphs(highlights).map((paragraph, index) => <p key={`highlight-${index}`} className="report-activity-summary-text">{paragraph}</p>)}
-        {gallery.length > 0 && (
-          <ul className="report-activity-gallery" aria-label="Selected photos">
-            {gallery.map((photo, index) => {
-              const url = urls[photoKey(photo.ref)];
-              return (
-                <li key={photoKey(photo.ref)}>
-                  <button
-                    type="button"
-                    className="report-photo-thumb"
-                    onClick={() => openPhoto(gallery.map((item) => item.ref), index, gallery.map((item) => item.caption))}
-                    aria-label={url === null ? `Photo unavailable: ${photo.caption}. Open to retry` : `Open photo: ${photo.caption}`}
-                  >
-                    {url ? <img src={url} alt="" loading="lazy" decoding="async" onError={() => photoFailed(photo.ref, url)} /> : url === null ? <ImageOff size={20} aria-hidden="true" /> : <span className="report-photo-loading" aria-hidden="true" />}
-                  </button>
-                  <span>{photo.caption}</span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </section>
 
       <h5 className="report-activity-glance-heading">At a glance</h5>
@@ -923,6 +901,20 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           })}
           <p className="report-activity-chart-note">Charts highlight the highest recorded counts; complete figures remain in the tables below.</p>
         </div>
+      )}
+
+      {routineRows.length > 0 && (
+        <section className="report-activity-section" aria-labelledby={`${headingId}-routine`}>
+          <h5 id={`${headingId}-routine`}>Routine checks</h5>
+          <p className="report-review-source-note">
+            {counted(routineCount, 'routine patrol or check', 'routine patrols and checks')} recorded a status only. They are summarised here rather than listed in the site log; anything an officer described further is listed in full.
+          </p>
+          <ActivityTable
+            label="Routine checks by type"
+            columns={[{ label: 'Check' }, { label: 'Checks', numeric: true }, { label: 'Locations', numeric: true }, { label: 'Recorded results' }]}
+            rows={routineRows.map((row) => [row.check, count(row.checks), count(row.places), row.results])}
+          />
+        </section>
       )}
 
       <section className="report-activity-section" aria-labelledby={`${headingId}-overview`}>

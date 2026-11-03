@@ -123,7 +123,8 @@ test('administrator previews the client site activity report with incidents, pho
   const log = report.locator('details', { has: page.locator('summary', { hasText: /^Site log/ }) });
   await expect(log.getByRole('status')).toHaveText('5 entries with comments, work or photos');
   await expect(log.getByRole('heading', { name: 'Civic Events Centre' })).toBeVisible();
-  await expect(log.getByText('1 routine patrol with nothing further to report (20 Aug).')).toBeVisible();
+  await expect(log.getByText(/routine patrol/)).toHaveCount(0);
+  await expect(report.getByRole('region', { name: 'Routine checks by type' })).toBeVisible();
   await expect(log.getByText('Ref WO-0042')).toBeVisible();
   await expect(log.getByText('Ammunition .223 × 12')).toBeVisible();
   await expect(log.getByText('Vandalism')).toHaveCount(0);

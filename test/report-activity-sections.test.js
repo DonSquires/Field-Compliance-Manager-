@@ -73,7 +73,8 @@ test('client summary sections use plain language and carry no operational or sys
   const { monthlyActivityBlocks } = await load();
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines);
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
-  assert.deepEqual(titles, ['Selected Photos', 'At a Glance', 'Activity Overview', 'Incidents and Investigations', 'Activity by Location', 'Pest Control', 'Maintenance and Repairs', 'Manufacture and Fabrication', 'Observations']);
+  assert.deepEqual(titles, ['At a Glance', 'Routine Checks', 'Activity Overview', 'Incidents and Investigations', 'Activity by Location', 'Pest Control', 'Maintenance and Repairs', 'Manufacture and Fabrication', 'Observations']);
+  assert.equal(blocks.some((block) => block.kind === 'gallery'), false, 'photos stay with their entries, never in a gallery at the top');
   for (const block of tables(blocks)) {
     assert.equal(block.columns.reduce((sum, column) => sum + column.width, 0), 487, `${block.columns[0].label} spans the page`);
     for (const row of block.rows) assert.equal(row.length, block.columns.length);
@@ -135,7 +136,7 @@ test('incidents are itemised with investigation reference and status, never inve
   assert.match(allText(unlisted), /2 further incidents are held on file\./);
 });
 
-test('the executive summary is the reviewer text as headings, bullets and paragraphs, then highlights and selected photos', async () => {
+test('the executive summary is the reviewer text as headings, bullets and paragraphs, then highlights, with no photo gallery', async () => {
   const { monthlyActivityBlocks } = await load();
   const sectionAt = (blocks, title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
   const opening = (blocks) => blocks.slice(0, sectionAt(blocks, 'At a Glance'));
@@ -155,34 +156,20 @@ test('the executive summary is the reviewer text as headings, bullets and paragr
     ['paragraph', 'Gate repair is booked.'],
   ]);
   assert.deepEqual(rich[1].runs.filter((run) => run.bold).map((run) => run.text), ['Perimeter Compromise & Trespass:', 'Alpha Reserve']);
-  assert.ok(head.some((block) => block.kind === 'gallery'));
+  assert.equal(written.some((block) => block.kind === 'gallery'), false);
 
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines, { summary: '   ', highlights: '  ' });
-  assert.deepEqual(opening(blocks).filter((block) => block.kind === 'section').map((block) => block.title), ['Selected Photos']);
-  assert.equal(opening(blocks).some((block) => block.kind === 'rich'), false, 'no figure sentences are invented when no summary is written');
-  assert.doesNotMatch(allText(blocks), /Of Note|of note/);
-  const gallery = opening(blocks).find((block) => block.kind === 'gallery');
-  assert.deepEqual(gallery.photos.map((photo) => [photo.ref.p.split('/').at(-1), photo.caption]), [
-    ['b.png', '2 Oct · Alpha Reserve · CCTV review'],
-    ['d.png', '7 Oct · Alpha Reserve · Other site activity'],
-    ['a.png', '1 Oct · Alpha Reserve · Pest control'],
-    ['c.png', '5 Oct · Alpha Reserve · Patrols and site checks'],
-  ]);
-
+  assert.deepEqual(opening(blocks), [], 'nothing precedes At a Glance when no summary is written');
+  assert.doesNotMatch(allText(blocks), /Of Note|of note|Selected Photos/);
   const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Activity by Location'));
   assert.deepEqual(incidents.filter((block) => block.kind === 'entry').map((entry) => [entry.tone, entry.tags[0]]), [['incident', 'Alpha Reserve']]);
+  assert.deepEqual(incidents.find((block) => block.kind === 'entry').photos, [photo('b')], 'the photo is shown with its incident');
   assert.ok(sectionAt(blocks, 'Activity Overview') < sectionAt(blocks, 'Incidents and Investigations'));
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
 
   const privileged = { ...lines, lines: lines.lines.map((line) => (line.pr ? { ...line, pr: [{ b: 'bob-uploads', p: 'org/o/rm/photos/NZTA_camera.png' }] } : line)) };
   const hidden = monthlyActivityBlocks({ activityReport: report }, privileged);
-  assert.equal(hidden.some((block) => block.kind === 'gallery'), false);
-  assert.equal(hidden.some((block) => block.kind === 'section' && block.title === 'Selected Photos'), false);
   assert.doesNotMatch(allText(hidden), /NZTA/);
-
-  const burst = { version: 2, notItemised: 0, lines: [{ d: '2026-10-03', t: '08:00', p: 'Beta Forest', k: 'observation', c: 'unclassified', n: 'Dumped rubbish', ph: 8, pr: Array.from({ length: 8 }, (_, index) => ({ b: 'scans', p: `org/burst/${index}.jpg` })) }] };
-  const burstGallery = monthlyActivityBlocks({ activityReport: report }, burst).find((block) => block.kind === 'gallery');
-  assert.equal(burstGallery.photos.length, 6);
 });
 
 test('line keys are stable content hashes and confirmed entries move from the site log to Incidents', async () => {
@@ -215,16 +202,16 @@ test('line keys are stable content hashes and confirmed entries move from the si
   assert.equal(blocks.find((block) => block.kind === 'metrics').items.find((item) => item.label === 'Incidents').value, '2');
   assert.doesNotMatch(allText(siteLogBlocks({ activityReport: report }, triaged)), /Freedom campers/);
 });
-test('the site log groups entries by location with comments, actions and photos, and folds routine patrols', async () => {
-  const { siteLogBlocks, isRoutineLine } = await load();
+test('the site log groups entries by location with comments, actions and photos, and leaves routine checks to the summary', async () => {
+  const { siteLogBlocks, isRoutineLine, isRoutineCheck } = await load();
   const blocks = siteLogBlocks({ activityReport: report }, lines);
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
   assert.deepEqual(blocks.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [
-    ['Alpha Reserve', '6 entries'],
+    ['Alpha Reserve', '4 entries'],
     ['Not location-specific', '1 entry'],
   ]);
   const entries = blocks.filter((block) => block.kind === 'entry');
-  assert.equal(entries.length, 5, 'the incident and two routine patrols are not repeated as entries');
+  assert.equal(entries.length, 5, 'the incident and two routine patrols are not listed');
   assert.ok(entries.every((entry) => entry.tone === 'default'));
 
   const [pest, gate, campers, rubbish, workOrder] = entries;
@@ -242,15 +229,62 @@ test('the site log groups entries by location with comments, actions and photos,
   assert.equal(workOrder.title, 'Replace gate latch');
   assert.deepEqual(workOrder.tags, ['Maintenance and repairs', 'In progress', 'Ref WO-1']);
 
-  const routine = blocks.find((block) => block.kind === 'text' && /routine patrols/.test(block.text));
-  assert.equal(routine.text, '2 routine patrols with nothing further to report (3, 5 Oct).');
+  assert.doesNotMatch(allText(blocks), /routine patrol/);
+  assert.match(allText(blocks), /routine checks are summarised under Routine Checks/);
   assert.match(allText(blocks), /A further 1 entry from this period is included in the totals above and held on file\./);
   assert.equal(isRoutineLine(lines.lines[2]), true);
   assert.equal(isRoutineLine(lines.lines[5]), false);
+  assert.equal(isRoutineCheck(lines.lines[2]), true);
+  assert.equal(isRoutineCheck(lines.lines[4]), false, 'an action or photo keeps a check listed');
+  assert.equal(isRoutineCheck(lines.lines[5]), false, 'a written description keeps a check listed');
 
   assert.match(allText(siteLogBlocks({ activityReport: report }, null)), /The itemised site log is not available for this report\./);
   const empty = { ...report, totals: { ...report.totals, entries: 0 } };
   assert.match(allText(siteLogBlocks({ activityReport: empty }, { version: 2, lines: [], notItemised: 0 })), /Nothing was recorded at your locations during the period\./);
+});
+
+test('short status-only gate, lock and patrol checks are summarised under Routine Checks with their results', async () => {
+  const { monthlyActivityBlocks, siteLogBlocks, isRoutineCheck, routineCheckRows } = await load();
+  const labelled = { ...report, labels: { ...report.labels, category: { ...report.labels.category, inspection: 'Inspections' }, subject: { gate: 'Gate', electronic_lock: 'Electronic lock' } } };
+  const check = (d, p, s, n, extra = {}) => ({ d, t: '08:00', p, k: 'event', c: 'inspection', a: 'inspection', s, n, ...extra });
+  const checks = {
+    version: 2,
+    notItemised: 0,
+    lines: [
+      check('2026-10-01', 'Alpha Reserve', 'gate', 'Secure'),
+      check('2026-10-02', 'Alpha Reserve', 'gate', 'Secure.'),
+      check('2026-10-02', 'Beta Forest', 'gate', 'secure'),
+      check('2026-10-03', 'Beta Forest', 'gate', 'Live'),
+      check('2026-10-03', 'Beta Forest', 'gate', 'Provide access - no lock'),
+      check('2026-10-04', 'Beta Forest', 'gate', 'Closed but not locked.'),
+      check('2026-10-04', 'Beta Forest', 'gate', 'Nil vehicles.'),
+      check('2026-10-04', 'Beta Forest', 'gate', ''),
+      check('2026-10-05', 'Beta Forest', 'electronic_lock', 'Working'),
+      check('2026-10-06', 'Beta Forest', 'gate', 'Gate closed but large log beside gate freshly pulled out'),
+      check('2026-10-06', 'Beta Forest', 'electronic_lock', 'Working', { ac: 'Battery replaced' }),
+      check('2026-10-07', 'Beta Forest', 'gate', 'Secure', { tri: 'trespass' }),
+    ],
+  };
+  assert.deepEqual(checks.lines.map(isRoutineCheck), [true, true, true, true, true, true, true, true, true, false, false, false]);
+  const label = (dim, value) => labelled.labels[dim]?.[value] || String(value);
+  assert.deepEqual(routineCheckRows(checks.lines, label), [
+    { check: 'Inspections · Gate', checks: 8, places: 2, results: 'Secure 3 · Closed but not locked 1 · Live 1 · Nil vehicles 1 · other 2' },
+    { check: 'Inspections · Electronic lock', checks: 1, places: 1, results: 'Working 1' },
+  ]);
+
+  const blocks = monthlyActivityBlocks({ activityReport: labelled }, checks);
+  const at = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
+  assert.ok(at('At a Glance') < at('Routine Checks') && at('Routine Checks') < at('Activity Overview'));
+  const routine = blocks.slice(at('Routine Checks') + 1, at('Activity Overview'));
+  assert.match(routine[0].text, /^9 routine patrols and checks recorded a status only\./);
+  assert.deepEqual(routine[1].columns.map((column) => column.label), ['Check', 'Checks', 'Locations', 'Recorded results']);
+
+  const log = siteLogBlocks({ activityReport: labelled }, checks);
+  const logged = log.filter((block) => block.kind === 'entry');
+  assert.equal(logged.length, 2, 'only the described log and the battery action are listed; the confirmed incident has its own section');
+  assert.match(allText(logged), /freshly pulled out/);
+  assert.match(allText(logged), /Battery replaced/);
+  assert.deepEqual(log.filter((block) => block.kind === 'subsection').map((block) => block.title), ['Beta Forest'], 'a location with only routine checks has no site log heading');
 });
 
 test('CCTV reviews and administration entries get their own sections and leave the site log', async () => {
