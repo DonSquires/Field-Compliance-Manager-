@@ -1,0 +1,10 @@
+[Unit]
+Description=FCM read-only Base44 RAMS (OFO) sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fcm-base44-rams-sync.sh
+TimeoutStartSec=45min
+Nice=10
