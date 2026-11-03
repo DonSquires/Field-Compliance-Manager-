@@ -106,8 +106,24 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
   const ollama = await draftExecutiveSummary({ brief: {}, env, fetchImpl: async () => reply({ message: { content: PARAGRAPHS } }) });
   assert.equal(ollama.provider, 'ollama_cloud');
 
+  const secondProvider = await draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async (url) => url.includes('ollama')
+      ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
+      : reply({ choices: [{ message: { content: PARAGRAPHS } }] }),
+  });
+  assert.equal(secondProvider.provider, 'openai');
+
   await assert.rejects(draftExecutiveSummary({ brief: {}, env: {}, fetchImpl }), /No drafting model is configured/);
   await assert.rejects(draftExecutiveSummary({ brief: {}, env, fetchImpl: async () => reply({ message: { content: 'Too short.' }, choices: [] }) }), /ollama_cloud: empty draft; openai: empty draft/);
+  await assert.rejects(draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async (url) => url.includes('ollama')
+      ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
+      : reply({ choices: [{ message: { content: 'Another single paragraph. It also exceeds the minimum length check and should be rejected.' } }] }),
+  }), /model did not return exactly two paragraphs/);
 });
 
 test('the edge function and review panel keep drafting governed and unsaved until review', () => {
@@ -116,6 +132,7 @@ test('the edge function and review panel keep drafting governed and unsaved unti
   assert.match(edge, /'grand_master', 'master', 'admin', 'admin_officer'/);
   assert.match(edge, /Sent report packs cannot be changed/);
   assert.match(edge, /monthly_report_pack_summary_drafted/);
+  assert.match(edge, /if \(auditError\) throw new RequestError/);
   assert.doesNotMatch(edge, /\.update\(|\.rpc\('review_monthly_report_pack'/);
   const panel = read('apps/web/src/components/ReportPackReviewPanel.tsx');
   assert.match(panel, /functions\.invoke\('draft-report-executive-summary'/);

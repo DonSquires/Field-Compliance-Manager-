@@ -203,6 +203,7 @@ export async function draftExecutiveSummary({ brief, env, fetchImpl = fetch, tim
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const summary = cleanExecutiveSummary(candidate.read(await response.json()));
       if (summary.length < 80) throw new Error('empty draft');
+      if (summary.split(/\n\s*\n/).length !== 2) throw new Error('model did not return exactly two paragraphs');
       return { summary, provider: candidate.provider, model: candidate.model };
     } catch (error) {
       failures.push(`${candidate.provider}: ${error instanceof Error ? error.message : String(error)}`);
