@@ -68,6 +68,7 @@ async function handleCheck(req: Request) {
   const packId = typeof body.pack_id === 'string' ? body.pack_id.trim() : '';
   if (!packId) throw new RequestError('pack_id is required', 400);
   const proposed = body.editorial && typeof body.editorial === 'object' && !Array.isArray(body.editorial) ? body.editorial as Record<string, unknown> : null;
+  const expectedUpdatedAt = typeof body.expected_updated_at === 'string' ? body.expected_updated_at : null;
 
   const authorization = req.headers.get('Authorization') ?? '';
   if (!authorization) throw new RequestError('Unauthorized', 401);
@@ -85,6 +86,10 @@ async function handleCheck(req: Request) {
   const { data: mayCheck } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayCheck !== true) throw new RequestError('Forbidden', 403);
   if (!['draft', 'generated'].includes(pack.status)) throw new RequestError('Sent report packs cannot be changed', 409);
+  // A reviewer's check must not adopt someone else's newer save as its own starting point.
+  if (expectedUpdatedAt && Date.parse(expectedUpdatedAt) !== Date.parse(String(pack.updated_at))) {
+    throw new RequestError('This report changed since you opened it. Refresh and review the latest version.', 409);
+  }
 
   const agreement = Array.isArray(pack.agreement) ? pack.agreement[0] : pack.agreement;
   const terms = protectedTerms(pack.activity_lines, [relationName(agreement?.client), relationName(agreement), relationName(pack.provider)]);
@@ -148,12 +153,17 @@ async function handleCheck(req: Request) {
   const applied = applyPrivacyFindings(pack.activity_lines, checked, terms);
   const digest = editorialDigest(editorial);
   const writeEditorial = !proposed && editorialReworded > 0;
-  const changed = checked.length > 0 || writeEditorial || (isDocument(pack.activity_lines) && stored?.editorial_digest !== digest);
+  // The exact cleared wording is kept beside its digest so the publish RPC can enforce the same clearance in SQL.
+  const clearedEditorial = Object.fromEntries(EDITORIAL_TEXT_FIELDS.map((field) => [field, editorial[field] ?? '']));
+  const storedCleared = stored?.cleared_editorial && typeof stored.cleared_editorial === 'object' ? stored.cleared_editorial as Record<string, unknown> : {};
+  const clearedCurrent = EDITORIAL_TEXT_FIELDS.every((field) => (storedCleared[field] ?? '') === clearedEditorial[field]);
+  const changed = checked.length > 0 || writeEditorial
+    || (isDocument(pack.activity_lines) && (stored?.editorial_digest !== digest || !clearedCurrent));
   let updatedAt = pack.updated_at as string;
   if (changed && isDocument(applied.activityLines)) {
     const nextLines = {
       ...applied.activityLines,
-      privacy: { version: PRIVACY_VERSION, checked_at: new Date().toISOString(), editorial_digest: digest, models: [...models] },
+      privacy: { version: PRIVACY_VERSION, checked_at: new Date().toISOString(), editorial_digest: digest, cleared_editorial: clearedEditorial, models: [...models] },
     };
     const editorialRecord = pack.editorial && typeof pack.editorial === 'object' ? pack.editorial as Record<string, unknown> : {};
     const update: Record<string, unknown> = { activity_lines: nextLines, updated_at: new Date().toISOString() };

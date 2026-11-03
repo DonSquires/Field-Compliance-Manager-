@@ -21,6 +21,7 @@ import {
   activityLineKey,
   applyIncidentTriage,
   isIncidentLine,
+  isReportedLine,
   type ActivityLine,
   type IncidentTriage,
 } from './reportActivity';
@@ -73,6 +74,41 @@ describe('readActivityLines', () => {
     expect(parsed.lines[0]).toMatchObject({ place: 'Not location-specific', note: 'Gate open', photoRefs: [{ bucket: 'scans', path: 'a.jpg' }] });
     expect(readActivityLines({ version: 1, lines: [] })).toBeNull();
     expect(readActivityLines(null)).toBeNull();
+  });
+
+  it('keeps administration out of the report unless it is confirmed as an incident, and keeps card reviews', () => {
+    const parsed = readActivityLines({
+      version: 2,
+      lines: [
+        { d: '2026-10-08', t: '00:00', p: 'HQ', k: 'event', c: 'administration', n: 'Permits reconciled.' },
+        { d: '2026-10-09', t: '00:00', p: 'Smiths', k: 'event', c: 'administration', ti: 'Card review', n: 'Two vehicles at the gate.' },
+        { d: '2026-10-10', t: '00:00', p: 'HQ', k: 'event', c: 'travel_admin', n: 'Fuel card missing from the office.' },
+      ],
+    })!;
+    expect(parsed.lines.map((item) => item.withheld)).toEqual([true, false, true]);
+    expect(reviewSectionCode(parsed.lines[1])).toBe('observation');
+    const triage = new Map<string, IncidentTriage>([[parsed.lines[2].key, { decision: 'incident', incidentType: 'theft' } as IncidentTriage]]);
+    const reported = applyIncidentTriage(parsed.lines, triage).filter(isReportedLine);
+    expect(reported.map((item) => item.note)).toEqual(['Two vehicles at the gate.', 'Fuel card missing from the office.']);
+    expect(isIncidentLine(reported[1])).toBe(true);
+  });
+
+  it('drops administration from every aggregate of an older pack', () => {
+    const first = activityReportFixture.byPlace[0];
+    const older = readActivityReport({ activityReport: {
+      ...activityReportFixture,
+      totals: { ...activityReportFixture.totals, entries: activityReportFixture.totals.entries + 4, places: activityReportFixture.totals.places + 1 },
+      categories: [...activityReportFixture.categories, { code: 'administration', entries: 4, photos: 0 }],
+      byPlace: [
+        { ...first, entries: first.entries + 1, categories: { ...first.categories, administration: 1 } },
+        ...activityReportFixture.byPlace.slice(1),
+        { place: 'HQ', entries: 3, photos: 0, categories: { administration: 3 } },
+      ],
+    } })!;
+    expect(older.totals.entries).toBe(report.totals.entries);
+    expect(older.totals.places).toBe(report.byPlace.length);
+    expect(older.byPlace).toEqual(report.byPlace);
+    expect(older.categories).toEqual(report.categories);
   });
 
   it('only signs photos in the report buckets', () => {

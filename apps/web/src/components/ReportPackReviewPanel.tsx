@@ -213,7 +213,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
     let withheldNote = '';
     // Everything the client reads passes Bob's privacy oracle first; the PDF and email refuse unchecked wording.
     if (action === 'publish' && pack.report_kind === 'monthly') {
-      const privacy = await runPrivacyCheck(pack.id, { editorial: wording });
+      const privacy = await runPrivacyCheck(pack.id, { editorial: wording, expectedUpdatedAt: pack.updated_at });
       if (!privacy.cleared || !privacy.editorial) {
         setError(privacy.error
           ? `Bob's privacy check could not finish (${privacy.error}). The report was not published; try again.`

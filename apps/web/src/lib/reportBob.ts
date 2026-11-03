@@ -84,10 +84,15 @@ const wordingOf = (value: unknown, fallback: ReviewWording): ReviewWording => {
  * checked in passes first; the reviewer's unsaved wording, when given, is
  * checked last and returned reworded so exactly that wording is published.
  */
-export async function runPrivacyCheck(packId: string, options: { editorial?: ReviewWording } = {}): Promise<PrivacyCheckResult> {
-  const result: PrivacyCheckResult = { cleared: false, remaining: 0, reworded: 0, editorial: null, updatedAt: null, error: null };
+export async function runPrivacyCheck(
+  packId: string,
+  options: { editorial?: ReviewWording; expectedUpdatedAt?: string } = {},
+): Promise<PrivacyCheckResult> {
+  const result: PrivacyCheckResult = { cleared: false, remaining: 0, reworded: 0, editorial: null, updatedAt: options.expectedUpdatedAt ?? null, error: null };
   const check = async (editorial?: ReviewWording) => {
-    const { data, error } = await supabase.functions.invoke('check-report-privacy', { body: { pack_id: packId, ...(editorial ? { editorial } : {}) } });
+    // With a starting version, each pass expects the version left by the previous pass, so another administrator's save stops the check.
+    const expected = result.updatedAt ? { expected_updated_at: result.updatedAt } : {};
+    const { data, error } = await supabase.functions.invoke('check-report-privacy', { body: { pack_id: packId, ...expected, ...(editorial ? { editorial } : {}) } });
     if (error || !data) {
       result.error = await functionErrorMessage(error, 'Bob could not complete the privacy check.');
       return null;
