@@ -180,6 +180,8 @@ export interface IncidentTriage {
   incidentType: string;
   note: string;
   decidedAt: string;
+  /** A sent report already covers this entry, so a change is a recorded reclassification. */
+  inSentReport: boolean;
 }
 
 export function readIncidentTriage(value: unknown): IncidentTriage[] {
@@ -197,6 +199,7 @@ export function readIncidentTriage(value: unknown): IncidentTriage[] {
       incidentType: str(row.incident_type),
       note: str(row.decision_note),
       decidedAt: str(row.decided_at),
+      inSentReport: row.in_sent_report === true,
     }];
   });
 }

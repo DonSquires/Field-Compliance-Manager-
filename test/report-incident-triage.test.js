@@ -88,7 +88,6 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.match(sql, /revoke all on function public\.report_pack_trend_context\(uuid\) from public, anon, authenticated, service_role;\s*grant execute on function public\.report_pack_trend_context\(uuid\) to service_role;/);
   assert.equal((sql.match(/security definer\s+set search_path to 'pg_catalog'/g) ?? []).length, 3);
   assert.equal((sql.match(/is_report_provider_custodian_for_org/g) ?? []).length, 2);
-  assert.match(sql, /status not in \('draft', 'generated'\)[\s\S]*Sent report packs cannot be changed/);
   assert.match(sql, /That entry has not been checked by Bob for this report/);
   assert.match(sql, /insert into public\.audit_log/);
   assert.match(sql, /insert into public\.bob_knowledge_cards[\s\S]*'report_incident_triage'/);
@@ -102,8 +101,15 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.doesNotMatch(edge, /decision_note/, 'reviewer notes are not read for prompts');
   assert.match(edge, /select\('excerpt,decision,incident_type'\)\s*\.eq\('service_agreement_id', pack\.service_agreement_id\)/, 'worked examples are scoped to this agreement');
   assert.match(edge, /readPackTriage/, 'triage reads page past the 1,000-row cap');
-  assert.match(sql, /already been sent, so its decision cannot be changed/);
   assert.match(sql, /set pdf_source_updated_at = null/, 'a changed decision makes generated PDFs stale');
+  const reclassify = read('supabase/migrations/20261105120000_report_triage_reclassify_after_send.sql');
+  assert.doesNotMatch(reclassify, /cannot be changed/, 'new evidence can change a decision after the report was sent');
+  assert.match(reclassify, /cardinality\(v_sent_packs\) > 0 and v_changes and length\(coalesce\(v_note, ''\)\) < 10/, 'a reclassification after delivery needs a reason');
+  assert.match(reclassify, /'after_delivery', cardinality\(v_sent_packs\) > 0,\s*'sent_pack_ids', to_jsonb\(v_sent_packs\)/);
+  assert.match(reclassify, /and pack\.status in \('draft', 'generated'\)/, 'sent packs are never changed');
+  assert.match(reclassify, /'in_sent_report', exists \(/);
+  assert.match(reclassify, /revoke all on function public\.set_report_incident_triage\(uuid, text, text, text, text\) from public, anon, authenticated, service_role;\s*grant execute on function public\.set_report_incident_triage\(uuid, text, text, text, text\) to authenticated;/);
+  assert.match(reclassify, /if not public\.is_report_provider_custodian_for_org\(v_pack\.organization_id\)/);
 
   const view = read('apps/web/src/components/ReportActivityReview.tsx');
   const bob = read('apps/web/src/lib/reportBob.ts');
