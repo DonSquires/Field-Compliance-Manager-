@@ -126,6 +126,10 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
       continue;
     }
     const match = await classify(entry.relative_path);
+    if (match.status === 'privileged') {
+      results.push({ ...base, status: 'ignored', reason: 'privileged_nzta_record' });
+      continue;
+    }
     // Owner ruling: photos outside the structured "YYMMDD HHMM[SS] [rego]" naming are ignored.
     if (match.status === 'unnamed' || match.status === 'unsupported') {
       results.push({ ...base, status: 'ignored', reason: match.status === 'unnamed' ? 'filename_not_structured' : 'unsupported_image_type' });

@@ -720,7 +720,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         <p className="report-review-source-note">Not part of the client report. Confirms every record in scope is either reported or deliberately kept out, and compares this pack with live records.</p>
         <ul className="report-activity-facts">
           <li>{counted(accountedFor.reported, 'entry is', 'entries are')} in the client report{accountedFor.reconciled ? '; every record in scope is accounted for.' : '.'}</li>
-          {accountedFor.withheldTravelAdmin > 0 && <li>{counted(accountedFor.withheldTravelAdmin, 'travel or administration record is', 'travel and administration records are')} kept out of the client report.</li>}
+          {accountedFor.withheldTravelAdmin > 0 && <li>{counted(accountedFor.withheldTravelAdmin, 'travel or materials record is', 'travel and materials records are')} kept out of the client report.</li>}
           {accountedFor.withheldShiftMarkers > 0 && <li>{counted(accountedFor.withheldShiftMarkers, 'shift start or finish marker is', 'shift start and finish markers are')} kept out of the client report.</li>}
           {accountedFor.mirrorEventsExcluded > 0 && <li>{counted(accountedFor.mirrorEventsExcluded, 'automatic patrol-log copy of an observation was', 'automatic patrol-log copies of observations were')} excluded so nothing is counted twice.</li>}
           {accountedFor.unclassified > 0 && <li>{counted(accountedFor.unclassified, 'entry has', 'entries have')} no work type recorded and {accountedFor.unclassified === 1 ? 'appears' : 'appear'} as &ldquo;{label('category', 'unclassified')}&rdquo;.</li>}

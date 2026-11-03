@@ -23,6 +23,18 @@ test('rejects invalid dates and out-of-range local times', () => {
   });
 });
 
+test('treats NZTA owner/vehicle screenshots as privileged and never parses them', () => {
+  return loadMatcher().then(({ isPrivilegedPhotoName, parsePhotoName }) => {
+  for (const fileName of ['NZTA 240817 112216.png', 'ABC123 NZTA 240817 112216.png', 'Photos/Site/abc123 nzta 230914 0621.jpg',
+    'ABC123 NZTA Rabb Is 280831 143518.jpg', 'NZTA check ABC123 230615 175300.png']) {
+    assert.equal(isPrivilegedPhotoName(fileName), true, fileName);
+    assert.equal(parsePhotoName(fileName), null, fileName);
+  }
+  assert.equal(isPrivilegedPhotoName('260920 163612 GKJ550.jpg'), false);
+  assert.equal(isPrivilegedPhotoName('260920 163612 NZTAX1.jpg'), false);
+  });
+});
+
 test('matches Auckland date and minute while ignoring differing seconds', () => {
   return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
   const parsed = parsePhotoName('260920 163612 GKJ550.jpg');
@@ -76,6 +88,20 @@ test('matches timestamp-only photos only through an exact folder place alias', (
   assert.equal(result.target.id, 'place-observation');
   assert.equal(result.matchType, 'place');
   assert.equal(matchPhotoTarget(parsed, 'Photos/Other Reserve/260920 163612.jpg', index).status, 'unmatched');
+  });
+});
+
+test('matches the leading location segment of "<Location> - <Area> - <Client>" folders', () => {
+  return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
+  const parsed = parsePhotoName('251213 102734 cyclist enters .jpg');
+  const index = indexPhotoTargets([
+    { id: 'serpentine-card-review', observed_at: '2025-12-12T21:27:00Z', place_aliases: ['Serpentine Rd', 'SERP'] },
+    { id: 'other-place', observed_at: '2025-12-12T21:27:00Z', place_aliases: ['Rai Forest Rd'] },
+  ]);
+  const result = matchPhotoTarget(parsed, 'Photos/Serpentine Rd - Rai Forest - OFO/251213 102734 cyclist enters .jpg', index);
+  assert.equal(result.status, 'matched');
+  assert.equal(result.target.id, 'serpentine-card-review');
+  assert.equal(matchPhotoTarget(parsed, 'Photos/Inwoods Lookout  - OFO/251213 102734 x.jpg', index).status, 'unmatched');
   });
 });
 
