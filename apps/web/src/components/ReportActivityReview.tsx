@@ -292,7 +292,7 @@ function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError, triage, onRe
   );
 }
 
-function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPhotoError, onClose, onSaved }: { target: ReviewTarget; entry: ActivityEntry; editable: boolean; packId: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError; onClose: () => void; onSaved: (row: IncidentTriage, pdfStale: boolean) => void }) {
+function TriageDialog({ target, entry, packSent, packId, urls, onOpenPhoto, onPhotoError, onClose, onSaved }: { target: ReviewTarget; entry: ActivityEntry; packSent: boolean; packId: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError; onClose: () => void; onSaved: (row: IncidentTriage, pdfStale: boolean, reclassified: boolean) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const noteId = useId();
@@ -312,7 +312,11 @@ function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPh
       if (opener?.isConnected) opener.focus();
     };
   }, []);
-  const changed = decision !== row.decision || (decision === 'incident' && incidentType !== (row.incidentType || row.bobType || 'other')) || note.trim() !== row.note;
+  const decisionChanged = decision !== row.decision || (decision === 'incident' && incidentType !== (row.incidentType || row.bobType || 'other'));
+  const changed = decisionChanged || note.trim() !== row.note;
+  // New evidence can change a decision after the client has the report; the sent report stays as delivered.
+  const delivered = packSent || row.inSentReport;
+  const reasonNeeded = delivered && decisionChanged && note.trim().length < 10;
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -329,7 +333,7 @@ function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPh
       setError(saveError?.message ? `The decision was not saved: ${saveError.message}` : 'The decision was not saved. Try again.');
       return;
     }
-    onSaved(saved, Boolean((data as { pdf_needs_regenerating?: unknown } | null)?.pdf_needs_regenerating));
+    onSaved(saved, Boolean((data as { pdf_needs_regenerating?: unknown } | null)?.pdf_needs_regenerating), delivered && decisionChanged);
   };
   const options: Array<{ value: TriageDecision; label: string; hint: string; icon: ReactNode }> = [
     { value: 'unreviewed', label: 'Not reviewed', hint: 'Leave for later', icon: <CircleDashed size={18} aria-hidden="true" /> },
@@ -352,7 +356,12 @@ function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPh
         <button type="button" className="report-photo-viewer-close" onClick={onClose} disabled={saving} aria-label="Close review"><X size={18} aria-hidden="true" /></button>
       </header>
       <div className="report-triage-body">
-        <fieldset className="report-triage-decision" disabled={!editable || saving}>
+        {delivered && (
+          <p className="report-review-source-note">
+            This entry was in a report already sent to the client. You can still change the decision if new evidence comes to light: the sent report stays as delivered, the change is recorded with your reason, and it carries into reports generated from now on.
+          </p>
+        )}
+        <fieldset className="report-triage-decision" disabled={saving}>
           <legend>Is this an incident?</legend>
           {options.map((option) => (
             <label key={option.value} className={`report-triage-option is-${option.value}${decision === option.value ? ' is-selected' : ''}`}>
@@ -362,7 +371,6 @@ function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPh
             </label>
           ))}
         </fieldset>
-        {!editable && <p className="report-review-source-note">This report has been sent, so decisions are shown as delivered and cannot be changed.</p>}
         {row.bobFlagged && (
           <div className="report-triage-bob">
             <p><Sparkles size={15} aria-hidden="true" /> <strong>Bob flagged a possible {incidentTypeLabel(row.bobType || 'other').toLowerCase()}</strong>{row.bobConfidence !== null && ` (${Math.round(row.bobConfidence * 100)}% confident)`}</p>
@@ -374,20 +382,21 @@ function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPh
         {decision === 'incident' && (
           <label className="report-log-field" htmlFor={typeId}>
             <span>Type of incident</span>
-            <select id={typeId} value={incidentType} onChange={(event) => setIncidentType(event.target.value)} disabled={!editable || saving}>
+            <select id={typeId} value={incidentType} onChange={(event) => setIncidentType(event.target.value)} disabled={saving}>
               {Object.entries(INCIDENT_TYPE_LABELS).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
             </select>
           </label>
         )}
         <label className="report-log-field" htmlFor={noteId}>
-          <span>Reviewer note (provider only, optional)</span>
-          <textarea id={noteId} value={note} maxLength={1000} rows={3} onChange={(event) => setNote(event.target.value)} disabled={!editable || saving} />
+          <span>{delivered ? 'Reason for change or new evidence (provider only, required to change the decision)' : 'Reviewer note (provider only, optional)'}</span>
+          <textarea id={noteId} value={note} maxLength={1000} rows={3} onChange={(event) => setNote(event.target.value)} disabled={saving} aria-required={delivered && decisionChanged} />
+          {reasonNeeded && <small className="report-review-source-note">Add the reason or new evidence (at least 10 characters) to save a changed decision.</small>}
         </label>
         <div aria-live="polite">{error && <div className="alert alert-error" role="alert">{error}</div>}</div>
       </div>
       <footer className="report-photo-viewer-nav">
         <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        {editable && <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving || !changed}>{saving ? 'Saving…' : 'Save decision'}</button>}
+        <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving || !changed || reasonNeeded}>{saving ? 'Saving…' : delivered && decisionChanged ? 'Save reclassification' : 'Save decision'}</button>
       </footer>
     </dialog>,
     document.body,
@@ -803,10 +812,11 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   })).filter((review) => review.entries.length > 0), [triagedLines, report]);
   const reviewSectionCount = reviewSections.reduce((sum, review) => sum + review.entries.length, 0);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
-  const saveReview = (row: IncidentTriage, pdfStale: boolean) => {
+  const saveReview = (row: IncidentTriage, pdfStale: boolean, reclassified: boolean) => {
     setTriage((current) => new Map(current).set(row.lineKey, row));
     setReviewing(null);
-    setReviewNotice(pdfStale ? 'Decision saved. The client report changed, so generate the PDF again before sending it.' : 'Decision saved.');
+    const sentNote = reclassified ? ' The report already sent is unchanged; tell the client in a follow-up or the next report if the change matters to them.' : '';
+    setReviewNotice((pdfStale ? 'Decision saved. The client report changed, so generate the PDF again before sending it.' : 'Decision saved.') + sentNote);
   };
 
   const summaryItems = useMemo(() => executiveSummaryMarkup(reviewerSummary), [reviewerSummary]);
@@ -1162,7 +1172,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       </Group>
 
       {viewer && <PhotoViewer viewer={viewer} urls={urls} onPhotoError={photoFailed} onRetry={retryPhoto} onClose={() => setViewer(null)} onIndex={(index) => setViewer((current) => (current ? { ...current, index } : current))} />}
-      {reviewing && reviewingEntry && <TriageDialog target={reviewing} entry={reviewingEntry} editable={editable} packId={packId} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} onClose={() => setReviewing(null)} onSaved={saveReview} />}
+      {reviewing && reviewingEntry && <TriageDialog target={reviewing} entry={reviewingEntry} packSent={status === 'sent'} packId={packId} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} onClose={() => setReviewing(null)} onSaved={saveReview} />}
     </section>
   );
 }

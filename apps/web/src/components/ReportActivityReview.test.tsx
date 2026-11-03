@@ -433,6 +433,31 @@ describe('ReportActivityReview', () => {
     expect(within(section).getByRole('status').textContent).toBe('Decision saved. The client report changed, so generate the PDF again before sending it.');
   });
 
+  it('lets a reviewer reclassify an entry from a sent report when new evidence arrives, with a recorded reason', async () => {
+    const gate = activityLinesFixture.lines.find((line) => (line as { n?: string }).n === 'Gate found open and secured.')!;
+    const key = activityLineKey(gate as Record<string, unknown>);
+    const delivered = { line_key: key, bob_flagged: true, bob_incident_type: 'perimeter_compromise', bob_reason: 'Open gate.', bob_confidence: 0.7, decision: 'not_incident', incident_type: null, decision_note: null, decided_at: '2026-10-01T00:00:00Z', in_sent_report: true };
+    triageRpc.mockImplementation(async (name: string) => (name === 'list_report_incident_triage'
+      ? { data: [delivered], error: null }
+      : { data: { ...delivered, decision: 'incident', incident_type: 'perimeter_compromise', decision_note: 'Police confirmed a break-in.', pdf_needs_regenerating: false, in_sent_report: true }, error: null }));
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="sent" />);
+    const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
+    const card = (await within(section).findByText('Gate found open and secured.')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: 'Review entry' }));
+    const dialog = screen.getByRole('dialog', { name: 'Review possible incident' });
+    expect(within(dialog).getByText(/already sent to the client\. You can still change the decision/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('radio', { name: /^Incident/ }));
+    const save = within(dialog).getByRole('button', { name: 'Save reclassification' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    const reason = within(dialog).getByRole('textbox', { name: /Reason for change or new evidence/ });
+    fireEvent.change(reason, { target: { value: 'Police confirmed a break-in.' } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(triageRpc).toHaveBeenCalledWith('set_report_incident_triage', { p_pack_id: 'p1', p_line_key: key, p_decision: 'incident', p_incident_type: 'perimeter_compromise', p_note: 'Police confirmed a break-in.' });
+    expect(within(section).getByRole('status').textContent).toMatch(/^Decision saved\. The report already sent is unchanged/);
+  });
+
   it('shows Bob\'s highlights read-only once the report has been sent', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="sent" />);
     const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
