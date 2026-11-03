@@ -197,6 +197,523 @@ comment on function public.ingest_base44_rams_kill_returns(uuid, jsonb, text[]) 
 revoke all on function public.ingest_base44_rams_kill_returns(uuid, jsonb, text[]) from public, anon, authenticated;
 grant execute on function public.ingest_base44_rams_kill_returns(uuid, jsonb, text[]) to service_role;
 
+-- RAMS person and vehicle enrichment. canonical_people and canonical_vehicles are the shared
+-- identity spine, so only blank Tier 0 attributes are filled there. Everything RAMS records about
+-- a person (contact, address, date of birth, firearms licence, vehicles and insurance, hunting
+-- companions) is held provider-private below and linked back to the canonical records.
+
+create table public.rams_person_profiles (
+	id uuid primary key default gen_random_uuid(),
+	organization_id uuid not null references public.organizations(id) on delete cascade,
+	canonical_person_id uuid not null references public.canonical_people(id) on delete restrict,
+	source_system text not null default 'base44_rams' check (source_system = 'base44_rams'),
+	source_user_id text not null check (source_user_id ~ '^[A-Za-z0-9_-]{6,64}$'),
+	source_url text not null,
+	full_name text not null,
+	legal_name text,
+	nickname text,
+	email text,
+	phone text,
+	home_address text,
+	date_of_birth date,
+	firearms_licence_number text,
+	firearms_licence_expiry date,
+	firearms_licence_status text,
+	firearms_licence_document_url text,
+	account_role text,
+	admin_level text,
+	is_verified boolean,
+	client_organization_ids uuid[] not null default '{}',
+	source_created_at timestamptz,
+	source_updated_at timestamptz,
+	synced_at timestamptz not null default now(),
+	unique (source_system, source_user_id)
+);
+
+comment on table public.rams_person_profiles is 'Provider-private mirror of the person details recorded in the Base44 RAMS (OFO) app, linked to the canonical person (and through canonical_person_links). Base44 is the system of record; rows are written only by ingest_base44_rams_people. Contains personal information (address, date of birth, firearms licence); never copied into client reports.';
+comment on column public.rams_person_profiles.source_url is 'Where the record lives in Base44 RAMS; pair with source_user_id to open it.';
+
+create index rams_person_profiles_person_idx on public.rams_person_profiles (canonical_person_id);
+create index rams_person_profiles_org_email_idx on public.rams_person_profiles (organization_id, email) where email is not null;
+
+create table public.rams_person_vehicles (
+	id uuid primary key default gen_random_uuid(),
+	organization_id uuid not null references public.organizations(id) on delete cascade,
+	rams_person_profile_id uuid not null references public.rams_person_profiles(id) on delete cascade,
+	canonical_person_id uuid not null references public.canonical_people(id) on delete restrict,
+	canonical_vehicle_id uuid not null references public.canonical_vehicles(id) on delete restrict,
+	plate_as_recorded text not null,
+	make text,
+	model text,
+	colour text,
+	insurance_expiry date,
+	company_insurance boolean,
+	company_insurance_comments text,
+	insurance_document_urls text[] not null default '{}',
+	vehicle_status text,
+	archived boolean,
+	synced_at timestamptz not null default now(),
+	withdrawn_at timestamptz,
+	unique (rams_person_profile_id, canonical_vehicle_id)
+);
+
+comment on table public.rams_person_vehicles is 'Provider-private link between a canonical person and a canonical vehicle as registered by that person in Base44 RAMS, with the insurance and status details RAMS holds. Withdrawn when the vehicle leaves the person''s RAMS profile.';
+
+create index rams_person_vehicles_vehicle_idx on public.rams_person_vehicles (canonical_vehicle_id);
+create index rams_person_vehicles_person_idx on public.rams_person_vehicles (canonical_person_id);
+
+create table public.rams_person_associations (
+	id uuid primary key default gen_random_uuid(),
+	organization_id uuid not null references public.organizations(id) on delete cascade,
+	client_organization_id uuid references public.organizations(id) on delete set null,
+	canonical_person_id uuid not null references public.canonical_people(id) on delete restrict,
+	associated_canonical_person_id uuid not null references public.canonical_people(id) on delete restrict,
+	relationship text not null default 'hunting_companion' check (relationship = 'hunting_companion'),
+	source_system text not null default 'base44_rams' check (source_system = 'base44_rams'),
+	holder_source_user_id text not null,
+	companion_name text not null,
+	companion_email text,
+	companion_phone text,
+	permitted_status text,
+	booking_count integer not null default 0 check (booking_count >= 0),
+	first_booking_date date,
+	last_booking_date date,
+	last_hunting_area text,
+	synced_at timestamptz not null default now(),
+	unique (organization_id, canonical_person_id, associated_canonical_person_id, relationship),
+	check (canonical_person_id <> associated_canonical_person_id)
+);
+
+comment on table public.rams_person_associations is 'Provider-private record of the people a RAMS permit holder names as hunting companions on Base44 bookings, linked to canonical people on both sides. Written only by ingest_base44_rams_companions.';
+
+create index rams_person_associations_associated_idx on public.rams_person_associations (associated_canonical_person_id);
+
+alter table public.rams_person_profiles enable row level security;
+alter table public.rams_person_vehicles enable row level security;
+alter table public.rams_person_associations enable row level security;
+revoke all on table public.rams_person_profiles, public.rams_person_vehicles, public.rams_person_associations from public, anon, authenticated;
+grant select on table public.rams_person_profiles, public.rams_person_vehicles, public.rams_person_associations to authenticated;
+grant all on table public.rams_person_profiles, public.rams_person_vehicles, public.rams_person_associations to service_role;
+create policy rams_person_profiles_provider_admin_read on public.rams_person_profiles
+	for select to authenticated using (public.is_admin_for_org(organization_id));
+create policy rams_person_vehicles_provider_admin_read on public.rams_person_vehicles
+	for select to authenticated using (public.is_admin_for_org(organization_id));
+create policy rams_person_associations_provider_admin_read on public.rams_person_associations
+	for select to authenticated using (public.is_admin_for_org(organization_id));
+
+-- Internal: find or create the canonical person for a RAMS identity. Order: an existing record
+-- under the stable canonical key; then the provider's own records matched on email AND
+-- normalised name (the permit-import rule); otherwise a draft keyed to the RAMS identity, flagged
+-- for manual review when someone of the same name already exists. Never matches on name alone.
+create or replace function public.base44_rams_resolve_person(
+	p_provider_organization_id uuid,
+	p_canonical_key text,
+	p_name text,
+	p_email text,
+	out person_id uuid,
+	out created boolean,
+	out needs_review boolean
+)
+language plpgsql
+security definer
+set search_path to 'pg_catalog'
+as $function$
+declare
+	v_norm text := public.normalize_person_name(p_name);
+	v_email text := nullif(lower(btrim(p_email)), '');
+	v_candidates uuid[];
+	v_same_name boolean;
+begin
+	created := false;
+	needs_review := false;
+
+	select coalesce(cp.merged_into_id, cp.id) into person_id
+	from public.canonical_people cp where cp.canonical_key = p_canonical_key;
+	if person_id is not null then
+		return;
+	end if;
+
+	if v_email is not null and v_norm is not null then
+		select array_agg(distinct p.id) into v_candidates
+		from (
+			select pp.canonical_person_id as id
+			from public.person_permits pp
+			where pp.organization_id = p_provider_organization_id and lower(btrim(pp.contact_email)) = v_email
+			union
+			select rp.canonical_person_id
+			from public.rams_person_profiles rp
+			where rp.organization_id = p_provider_organization_id and rp.email = v_email
+		) m
+		join public.canonical_people p on p.id = m.id
+		where p.status = 'active' and p.merged_into_id is null
+			and public.normalize_person_name(p.display_name) = v_norm;
+		if cardinality(v_candidates) = 1 then
+			person_id := v_candidates[1];
+			return;
+		end if;
+	end if;
+
+	select exists (
+		select 1 from public.canonical_people p
+		where p.normalized_name = v_norm and p.status = 'active' and p.merged_into_id is null
+	) into v_same_name;
+
+	insert into public.canonical_people (canonical_key, display_name, normalized_name, review_state, status, metadata)
+	values (p_canonical_key, p_name, coalesce(v_norm, ''),
+		case when v_same_name then 'manual_review_required' else 'draft' end, 'active',
+		jsonb_build_object('source', 'base44_rams', 'possible_duplicate_name', v_same_name))
+	on conflict (canonical_key) do nothing
+	returning id into person_id;
+	if person_id is null then
+		select coalesce(cp.merged_into_id, cp.id) into person_id from public.canonical_people cp where cp.canonical_key = p_canonical_key;
+	else
+		created := true;
+		needs_review := v_same_name;
+	end if;
+end;
+$function$;
+
+revoke all on function public.base44_rams_resolve_person(uuid, text, text, text) from public, anon, authenticated;
+
+create or replace function public.ingest_base44_rams_people(
+	p_provider_organization_id uuid,
+	p_rows jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'pg_catalog'
+as $function$
+declare
+	r jsonb;
+	v jsonb;
+	v_user_id text;
+	v_name text;
+	v_email text;
+	v_dob date;
+	v_person uuid;
+	v_profile uuid;
+	v_vehicle uuid;
+	v_plate text;
+	v_vehicle_ids uuid[];
+	v_resolved record;
+	v_inserted boolean;
+	v_rows integer;
+	v_profiles_created integer := 0;
+	v_profiles_updated integer := 0;
+	v_people_created integer := 0;
+	v_people_review integer := 0;
+	v_people_enriched integer := 0;
+	v_vehicles_linked integer := 0;
+	v_vehicles_withdrawn integer := 0;
+	v_rejected integer := 0;
+begin
+	if p_provider_organization_id is null
+		or not exists (select 1 from public.organizations o where o.id = p_provider_organization_id) then
+		raise exception 'unknown provider organization' using errcode = '22023';
+	end if;
+	if jsonb_typeof(coalesce(p_rows, '[]'::jsonb)) <> 'array' then
+		raise exception 'p_rows must be a JSON array' using errcode = '22023';
+	end if;
+
+	for r in select x from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) x loop
+		v_user_id := nullif(btrim(r ->> 'source_user_id'), '');
+		v_name := left(nullif(regexp_replace(btrim(coalesce(r ->> 'full_name', r ->> 'legal_name', '')), '\s+', ' ', 'g'), ''), 200);
+		if v_user_id is null or v_user_id !~ '^[A-Za-z0-9_-]{6,64}$' or v_name is null
+			or public.normalize_person_name(v_name) is null then
+			v_rejected := v_rejected + 1;
+			continue;
+		end if;
+		v_email := left(nullif(lower(btrim(r ->> 'email')), ''), 254);
+		v_dob := case when (r ->> 'date_of_birth') ~ '^\d{4}-\d{2}-\d{2}$' then (r ->> 'date_of_birth')::date end;
+
+		select coalesce(cp.merged_into_id, cp.id) into v_person
+		from public.rams_person_profiles rp join public.canonical_people cp on cp.id = rp.canonical_person_id
+		where rp.source_system = 'base44_rams' and rp.source_user_id = v_user_id;
+		if v_person is null then
+			select * into v_resolved from public.base44_rams_resolve_person(
+				p_provider_organization_id, 'person:base44:' || v_user_id, v_name, v_email);
+			v_person := v_resolved.person_id;
+			if v_resolved.created then v_people_created := v_people_created + 1; end if;
+			if v_resolved.needs_review then v_people_review := v_people_review + 1; end if;
+		end if;
+
+		update public.canonical_people cp set
+			display_name = coalesce(cp.display_name, v_name),
+			date_of_birth = coalesce(cp.date_of_birth, v_dob),
+			updated_at = clock_timestamp()
+		where cp.id = v_person
+			and (cp.display_name is null or (cp.date_of_birth is null and v_dob is not null));
+		get diagnostics v_rows = row_count;
+		v_people_enriched := v_people_enriched + v_rows;
+
+		insert into public.rams_person_profiles as rp (
+			organization_id, canonical_person_id, source_user_id, source_url, full_name, legal_name, nickname, email, phone,
+			home_address, date_of_birth, firearms_licence_number, firearms_licence_expiry, firearms_licence_status,
+			firearms_licence_document_url, account_role, admin_level, is_verified, client_organization_ids,
+			source_created_at, source_updated_at, synced_at
+		) values (
+			p_provider_organization_id, v_person, v_user_id,
+			left(coalesce(nullif(btrim(r ->> 'source_url'), ''), 'https://app.base44.com'), 500),
+			v_name,
+			left(nullif(btrim(r ->> 'legal_name'), ''), 200),
+			left(nullif(btrim(r ->> 'nickname'), ''), 120),
+			v_email,
+			left(nullif(btrim(r ->> 'phone'), ''), 40),
+			left(nullif(btrim(r ->> 'home_address'), ''), 500),
+			v_dob,
+			left(nullif(btrim(r ->> 'firearms_licence_number'), ''), 60),
+			case when (r ->> 'firearms_licence_expiry') ~ '^\d{4}-\d{2}-\d{2}$' then (r ->> 'firearms_licence_expiry')::date end,
+			left(nullif(lower(btrim(r ->> 'firearms_licence_status')), ''), 40),
+			left(nullif(btrim(r ->> 'firearms_licence_document_url'), ''), 1000),
+			left(nullif(btrim(r ->> 'account_role'), ''), 60),
+			left(nullif(btrim(r ->> 'admin_level'), ''), 60),
+			case when jsonb_typeof(r -> 'is_verified') = 'boolean' then (r ->> 'is_verified')::boolean end,
+			coalesce((select array_agg(distinct o.id) from jsonb_array_elements_text(
+				case when jsonb_typeof(r -> 'client_organization_ids') = 'array' then r -> 'client_organization_ids' else '[]'::jsonb end) c
+				join public.organizations o on o.id = case when c ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then c::uuid end), '{}'),
+			case when (r ->> 'source_created_at') ~ '^\d{4}-\d{2}-\d{2}T' then (r ->> 'source_created_at')::timestamptz end,
+			case when (r ->> 'source_updated_at') ~ '^\d{4}-\d{2}-\d{2}T' then (r ->> 'source_updated_at')::timestamptz end,
+			now()
+		)
+		on conflict (source_system, source_user_id) do update set
+			canonical_person_id = excluded.canonical_person_id,
+			source_url = excluded.source_url,
+			full_name = excluded.full_name,
+			legal_name = excluded.legal_name,
+			nickname = excluded.nickname,
+			email = excluded.email,
+			phone = excluded.phone,
+			home_address = excluded.home_address,
+			date_of_birth = excluded.date_of_birth,
+			firearms_licence_number = excluded.firearms_licence_number,
+			firearms_licence_expiry = excluded.firearms_licence_expiry,
+			firearms_licence_status = excluded.firearms_licence_status,
+			firearms_licence_document_url = excluded.firearms_licence_document_url,
+			account_role = excluded.account_role,
+			admin_level = excluded.admin_level,
+			is_verified = excluded.is_verified,
+			client_organization_ids = excluded.client_organization_ids,
+			source_created_at = excluded.source_created_at,
+			source_updated_at = excluded.source_updated_at,
+			synced_at = now()
+		where rp.organization_id = p_provider_organization_id
+		returning id, (xmax = 0) into v_profile, v_inserted;
+		if v_profile is null then
+			-- The RAMS identity is already held by another provider; never overwrite it.
+			v_rejected := v_rejected + 1;
+			v_person := null;
+			continue;
+		end if;
+		if v_inserted then v_profiles_created := v_profiles_created + 1; else v_profiles_updated := v_profiles_updated + 1; end if;
+
+		insert into public.canonical_person_links (canonical_person_id, source_table, source_id, organization_id, link_kind, metadata)
+		values (v_person, 'rams_person_profiles', v_profile, p_provider_organization_id, 'imported',
+			jsonb_build_object('source', 'base44_rams', 'source_user_id', v_user_id))
+		on conflict (source_table, source_id) do update set canonical_person_id = excluded.canonical_person_id
+		where public.canonical_person_links.canonical_person_id is distinct from excluded.canonical_person_id;
+
+		v_vehicle_ids := '{}';
+		for v in select x from jsonb_array_elements(case when jsonb_typeof(r -> 'vehicles') = 'array' then r -> 'vehicles' else '[]'::jsonb end) x loop
+			v_plate := upper(regexp_replace(coalesce(v ->> 'plate', ''), '[^A-Za-z0-9]', '', 'g'));
+			continue when v_plate !~ '^[A-Z0-9]{2,8}$';
+			insert into public.canonical_vehicles (plate_number, make, model, colour, compliance_source, compliance_checked_at)
+			values (v_plate, left(nullif(btrim(v ->> 'make'), ''), 60), left(nullif(btrim(v ->> 'model'), ''), 60),
+				left(nullif(btrim(v ->> 'colour'), ''), 40), 'canonical', now())
+			on conflict (plate_number) do update set
+				make = coalesce(public.canonical_vehicles.make, excluded.make),
+				model = coalesce(public.canonical_vehicles.model, excluded.model),
+				colour = coalesce(public.canonical_vehicles.colour, excluded.colour)
+			returning id into v_vehicle;
+			v_vehicle_ids := v_vehicle_ids || v_vehicle;
+
+			insert into public.rams_person_vehicles as pv (
+				organization_id, rams_person_profile_id, canonical_person_id, canonical_vehicle_id, plate_as_recorded,
+				make, model, colour, insurance_expiry, company_insurance, company_insurance_comments,
+				insurance_document_urls, vehicle_status, archived, synced_at, withdrawn_at
+			) values (
+				p_provider_organization_id, v_profile, v_person, v_vehicle, left(btrim(v ->> 'plate'), 20),
+				left(nullif(btrim(v ->> 'make'), ''), 60), left(nullif(btrim(v ->> 'model'), ''), 60),
+				left(nullif(btrim(v ->> 'colour'), ''), 40),
+				case when (v ->> 'insurance_expiry') ~ '^\d{4}-\d{2}-\d{2}$' then (v ->> 'insurance_expiry')::date end,
+				case when jsonb_typeof(v -> 'company_insurance') = 'boolean' then (v ->> 'company_insurance')::boolean end,
+				left(nullif(btrim(v ->> 'company_insurance_comments'), ''), 1000),
+				coalesce((select array_agg(left(u, 1000)) from jsonb_array_elements_text(
+					case when jsonb_typeof(v -> 'insurance_document_urls') = 'array' then v -> 'insurance_document_urls' else '[]'::jsonb end) u
+					where u ~ '^https://'), '{}'),
+				left(nullif(lower(btrim(v ->> 'status')), ''), 40),
+				case when jsonb_typeof(v -> 'archived') = 'boolean' then (v ->> 'archived')::boolean end,
+				now(), null
+			)
+			on conflict (rams_person_profile_id, canonical_vehicle_id) do update set
+				canonical_person_id = excluded.canonical_person_id,
+				plate_as_recorded = excluded.plate_as_recorded,
+				make = excluded.make,
+				model = excluded.model,
+				colour = excluded.colour,
+				insurance_expiry = excluded.insurance_expiry,
+				company_insurance = excluded.company_insurance,
+				company_insurance_comments = excluded.company_insurance_comments,
+				insurance_document_urls = excluded.insurance_document_urls,
+				vehicle_status = excluded.vehicle_status,
+				archived = excluded.archived,
+				synced_at = now(),
+				withdrawn_at = null
+			returning (xmax = 0) into v_inserted;
+			if v_inserted then v_vehicles_linked := v_vehicles_linked + 1; end if;
+		end loop;
+
+		-- The profile carries the person's complete vehicle list, so absent vehicles have left it.
+		update public.rams_person_vehicles pv set withdrawn_at = now()
+		where pv.rams_person_profile_id = v_profile and pv.withdrawn_at is null
+			and not (pv.canonical_vehicle_id = any (v_vehicle_ids));
+		get diagnostics v_rows = row_count;
+		v_vehicles_withdrawn := v_vehicles_withdrawn + v_rows;
+
+		v_person := null;
+		v_profile := null;
+	end loop;
+
+	insert into public.audit_log (organization_id, action, target_table, metadata)
+	values (p_provider_organization_id, 'sync_base44_rams_people', 'rams_person_profiles', jsonb_build_object(
+		'source', 'base44_rams', 'received', jsonb_array_length(coalesce(p_rows, '[]'::jsonb)),
+		'profiles_created', v_profiles_created, 'profiles_updated', v_profiles_updated, 'rejected', v_rejected,
+		'people_created', v_people_created, 'people_needing_review', v_people_review, 'people_enriched', v_people_enriched,
+		'vehicles_linked', v_vehicles_linked, 'vehicles_withdrawn', v_vehicles_withdrawn));
+
+	return jsonb_build_object('profiles_created', v_profiles_created, 'profiles_updated', v_profiles_updated,
+		'rejected', v_rejected, 'people_created', v_people_created, 'people_needing_review', v_people_review,
+		'people_enriched', v_people_enriched, 'vehicles_linked', v_vehicles_linked, 'vehicles_withdrawn', v_vehicles_withdrawn);
+end;
+$function$;
+
+comment on function public.ingest_base44_rams_people(uuid, jsonb) is 'Server-only upsert of RAMS user profiles read from Base44: resolves or creates the canonical person (never by name alone), fills blank canonical name/date of birth, mirrors every supplied detail into rams_person_profiles with a canonical_person_links entry, and links the person''s registered vehicles through canonical_vehicles into rams_person_vehicles. Writes one audit_log entry per call.';
+revoke all on function public.ingest_base44_rams_people(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.ingest_base44_rams_people(uuid, jsonb) to service_role;
+
+create or replace function public.ingest_base44_rams_companions(
+	p_provider_organization_id uuid,
+	p_rows jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'pg_catalog'
+as $function$
+declare
+	r jsonb;
+	v_holder_user text;
+	v_holder uuid;
+	v_companion uuid;
+	v_name text;
+	v_email text;
+	v_resolved record;
+	v_inserted boolean;
+	v_created integer := 0;
+	v_updated integer := 0;
+	v_people_created integer := 0;
+	v_people_review integer := 0;
+	v_rejected integer := 0;
+begin
+	if p_provider_organization_id is null
+		or not exists (select 1 from public.organizations o where o.id = p_provider_organization_id) then
+		raise exception 'unknown provider organization' using errcode = '22023';
+	end if;
+	if jsonb_typeof(coalesce(p_rows, '[]'::jsonb)) <> 'array' then
+		raise exception 'p_rows must be a JSON array' using errcode = '22023';
+	end if;
+
+	for r in select x from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) x loop
+		v_holder_user := nullif(btrim(r ->> 'holder_user_id'), '');
+		v_name := left(nullif(regexp_replace(btrim(coalesce(r ->> 'full_name', '')), '\s+', ' ', 'g'), ''), 200);
+		v_email := left(nullif(lower(btrim(r ->> 'email')), ''), 254);
+		v_holder := null;
+		v_companion := null;
+		if v_holder_user is not null and v_holder_user ~ '^[A-Za-z0-9_-]{6,64}$' then
+			select coalesce(cp.merged_into_id, cp.id) into v_holder
+			from public.rams_person_profiles rp join public.canonical_people cp on cp.id = rp.canonical_person_id
+			where rp.source_system = 'base44_rams' and rp.source_user_id = v_holder_user
+				and rp.organization_id = p_provider_organization_id;
+			if v_holder is null then
+				select coalesce(cp.merged_into_id, cp.id) into v_holder
+				from public.canonical_people cp where cp.canonical_key = 'person:base44:' || v_holder_user;
+			end if;
+		end if;
+		if v_holder is null or v_name is null or public.normalize_person_name(v_name) is null then
+			v_rejected := v_rejected + 1;
+			continue;
+		end if;
+
+		-- A companion who is a RAMS user in their own right resolves to that person.
+		if v_email is not null then
+			select coalesce(cp.merged_into_id, cp.id) into v_companion
+			from public.rams_person_profiles rp join public.canonical_people cp on cp.id = rp.canonical_person_id
+			where rp.organization_id = p_provider_organization_id and rp.email = v_email
+			order by rp.synced_at desc limit 1;
+		end if;
+		if v_companion is null then
+			select * into v_resolved from public.base44_rams_resolve_person(
+				p_provider_organization_id,
+				'person:base44-companion:' || coalesce(v_email, v_holder_user || ':' || public.normalize_person_name(v_name)),
+				v_name, v_email);
+			v_companion := v_resolved.person_id;
+			if v_resolved.created then v_people_created := v_people_created + 1; end if;
+			if v_resolved.needs_review then v_people_review := v_people_review + 1; end if;
+		end if;
+		if v_companion = v_holder then
+			v_rejected := v_rejected + 1;
+			continue;
+		end if;
+
+		insert into public.rams_person_associations as a (
+			organization_id, client_organization_id, canonical_person_id, associated_canonical_person_id, holder_source_user_id,
+			companion_name, companion_email, companion_phone, permitted_status, booking_count, first_booking_date,
+			last_booking_date, last_hunting_area, synced_at
+		) values (
+			p_provider_organization_id,
+			(select o.id from public.organizations o where o.id = case
+				when (r ->> 'client_organization_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+				then (r ->> 'client_organization_id')::uuid end),
+			v_holder, v_companion, v_holder_user, v_name, v_email,
+			left(nullif(btrim(r ->> 'phone'), ''), 40),
+			left(nullif(lower(btrim(r ->> 'permitted_status')), ''), 40),
+			least(greatest(coalesce(case when (r ->> 'booking_count') ~ '^\d{1,6}$' then (r ->> 'booking_count')::integer end, 0), 0), 100000),
+			case when (r ->> 'first_booking_date') ~ '^\d{4}-\d{2}-\d{2}$' then (r ->> 'first_booking_date')::date end,
+			case when (r ->> 'last_booking_date') ~ '^\d{4}-\d{2}-\d{2}$' then (r ->> 'last_booking_date')::date end,
+			left(nullif(btrim(r ->> 'last_hunting_area'), ''), 200),
+			now()
+		)
+		on conflict (organization_id, canonical_person_id, associated_canonical_person_id, relationship) do update set
+			client_organization_id = coalesce(excluded.client_organization_id, a.client_organization_id),
+			holder_source_user_id = excluded.holder_source_user_id,
+			companion_name = excluded.companion_name,
+			companion_email = coalesce(excluded.companion_email, a.companion_email),
+			companion_phone = coalesce(excluded.companion_phone, a.companion_phone),
+			permitted_status = coalesce(excluded.permitted_status, a.permitted_status),
+			booking_count = excluded.booking_count,
+			first_booking_date = excluded.first_booking_date,
+			last_booking_date = excluded.last_booking_date,
+			last_hunting_area = excluded.last_hunting_area,
+			synced_at = now()
+		returning (xmax = 0) into v_inserted;
+		if v_inserted then v_created := v_created + 1; else v_updated := v_updated + 1; end if;
+	end loop;
+
+	insert into public.audit_log (organization_id, action, target_table, metadata)
+	values (p_provider_organization_id, 'sync_base44_rams_companions', 'rams_person_associations', jsonb_build_object(
+		'source', 'base44_rams', 'received', jsonb_array_length(coalesce(p_rows, '[]'::jsonb)),
+		'created', v_created, 'updated', v_updated, 'rejected', v_rejected,
+		'people_created', v_people_created, 'people_needing_review', v_people_review));
+
+	return jsonb_build_object('created', v_created, 'updated', v_updated, 'rejected', v_rejected,
+		'people_created', v_people_created, 'people_needing_review', v_people_review);
+end;
+$function$;
+
+comment on function public.ingest_base44_rams_companions(uuid, jsonb) is 'Server-only upsert of RAMS booking companions (one row per permit holder and companion, aggregated across bookings) into rams_person_associations, resolving both sides to canonical people. Writes one audit_log entry per call.';
+revoke all on function public.ingest_base44_rams_companions(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.ingest_base44_rams_companions(uuid, jsonb) to service_role;
+
 create or replace function public.ingest_base44_rams_permits(
 	p_provider_organization_id uuid,
 	p_rows jsonb
@@ -212,10 +729,9 @@ declare
 	v_client uuid;
 	v_permit_number text;
 	v_holder text;
-	v_normalized text;
 	v_user_id text;
 	v_person uuid;
-	v_matches integer;
+	v_resolved record;
 	v_permit uuid;
 	v_vehicle uuid;
 	v_plate text;
@@ -257,29 +773,22 @@ begin
 		where pp.organization_id = p_provider_organization_id and pp.permit_number = v_permit_number;
 
 		if v_permit is null then
-			v_normalized := lower(v_holder);
-			select count(*), min(cp.id::text)::uuid into v_matches, v_person
-			from public.canonical_people cp
-			where cp.normalized_name = v_normalized and cp.status = 'active';
-			if v_matches <> 1 then
-				insert into public.canonical_people (canonical_key, display_name, normalized_name, review_state, status, metadata)
-				values ('person:base44:' || v_user_id, v_holder, v_normalized,
-					case when v_matches > 1 then 'manual_review_required' else 'draft' end, 'active',
-					jsonb_build_object('source', 'base44_rams', 'name_matches', v_matches))
-				on conflict (canonical_key) do nothing
-				returning id into v_person;
-				if v_person is null then
-					select cp.id into v_person from public.canonical_people cp where cp.canonical_key = 'person:base44:' || v_user_id;
-				else
-					v_people_created := v_people_created + 1;
-					if v_matches > 1 then v_people_review := v_people_review + 1; end if;
-				end if;
+			select coalesce(cp.merged_into_id, cp.id) into v_person
+			from public.rams_person_profiles rp join public.canonical_people cp on cp.id = rp.canonical_person_id
+			where rp.source_system = 'base44_rams' and rp.source_user_id = v_user_id
+				and rp.organization_id = p_provider_organization_id;
+			if v_person is null then
+				select * into v_resolved from public.base44_rams_resolve_person(
+					p_provider_organization_id, 'person:base44:' || v_user_id, v_holder, r ->> 'contact_email');
+				v_person := v_resolved.person_id;
+				if v_resolved.created then v_people_created := v_people_created + 1; end if;
+				if v_resolved.needs_review then v_people_review := v_people_review + 1; end if;
 			end if;
 
 			insert into public.person_permits (
 				organization_id, client_organization_id, canonical_person_id, permit_number, permit_type, applicant_type,
-				company_name, activities, date_to, firearm_confirm, firearm_licence_valid, status, contact_email, contact_phone,
-				compliance_checked_at, compliance_source, source_document
+				company_name, activities, date_to, firearm_confirm, firearm_licence_valid, firearm_licence_number, conditions,
+				status, contact_email, contact_phone, address_text, compliance_checked_at, compliance_source, source_document
 			) values (
 				p_provider_organization_id, v_client, v_person, v_permit_number,
 				left(nullif(btrim(r ->> 'permit_type'), ''), 120), left(nullif(btrim(r ->> 'applicant_type'), ''), 120),
@@ -290,7 +799,10 @@ begin
 				v_expiry,
 				case when jsonb_typeof(r -> 'firearms_permitted') = 'boolean' then (r ->> 'firearms_permitted')::boolean end,
 				case when jsonb_typeof(r -> 'firearm_licence_valid') = 'boolean' then (r ->> 'firearm_licence_valid')::boolean end,
+				left(nullif(btrim(r ->> 'firearm_licence_number'), ''), 60),
+				left(nullif(btrim(r ->> 'conditions'), ''), 4000),
 				v_status, left(nullif(lower(btrim(r ->> 'contact_email')), ''), 254), left(nullif(btrim(r ->> 'contact_phone'), ''), 40),
+				left(nullif(btrim(r ->> 'address'), ''), 500),
 				now(), 'import', 'Base44 RAMS (OFO)'
 			) returning id into v_permit;
 			v_created := v_created + 1;
@@ -306,6 +818,9 @@ begin
 				date_to = coalesce(v_expiry, pp.date_to),
 				firearm_confirm = coalesce(case when jsonb_typeof(r -> 'firearms_permitted') = 'boolean' then (r ->> 'firearms_permitted')::boolean end, pp.firearm_confirm),
 				firearm_licence_valid = coalesce(case when jsonb_typeof(r -> 'firearm_licence_valid') = 'boolean' then (r ->> 'firearm_licence_valid')::boolean end, pp.firearm_licence_valid),
+				firearm_licence_number = coalesce(left(nullif(btrim(r ->> 'firearm_licence_number'), ''), 60), pp.firearm_licence_number),
+				conditions = coalesce(left(nullif(btrim(r ->> 'conditions'), ''), 4000), pp.conditions),
+				address_text = coalesce(left(nullif(btrim(r ->> 'address'), ''), 500), pp.address_text),
 				status = v_status,
 				contact_email = coalesce(left(nullif(lower(btrim(r ->> 'contact_email')), ''), 254), pp.contact_email),
 				contact_phone = coalesce(left(nullif(btrim(r ->> 'contact_phone'), ''), 40), pp.contact_phone),
@@ -357,7 +872,7 @@ begin
 end;
 $function$;
 
-comment on function public.ingest_base44_rams_permits(uuid, jsonb) is 'Server-only upsert of RAMS permits read from Base44 into person_permits (idempotent on organization_id, permit_number), with holder identity matched by exact normalised name (ambiguous names create a manual-review draft keyed by the Base44 user id) and permit vehicles linked through canonical_vehicles. Existing permits keep their linked person. Writes one audit_log entry per call.';
+comment on function public.ingest_base44_rams_permits(uuid, jsonb) is 'Server-only upsert of RAMS permits read from Base44 into person_permits (idempotent on organization_id, permit_number), with the holder resolved through their RAMS profile, else by email and normalised name within the provider (otherwise a draft keyed by the Base44 user id, flagged for review on a same-name clash) and permit vehicles linked through canonical_vehicles. Existing permits keep their linked person. Writes one audit_log entry per call.';
 revoke all on function public.ingest_base44_rams_permits(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.ingest_base44_rams_permits(uuid, jsonb) to service_role;
 

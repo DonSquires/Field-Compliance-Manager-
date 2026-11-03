@@ -80,7 +80,7 @@ test('kill returns map to client organisations, normalised animals and booking p
   assert.deepEqual(held, { unmapped_company: 1, sample: 1, invalid: 1 });
 });
 
-test('permits carry holder contact and vehicles but never addresses, birthdays or licence documents', async () => {
+test('permits carry holder contact, licence number, address, conditions and vehicles but never birthdays, licence documents or insurance', async () => {
   const { buildIndexes, mapPermit } = await load();
   const indexes = buildIndexes({
     users: [{ id: 'user000001', full_name: 'Holder One', email: 'one@example.test', phone_number: '021 000', home_address: '1 Secret Rd', birthday: '1980-01-01', firearms_license_url: 'https://x/licence.png', firearms_license_number: 'AB123', firearms_license_status: 'active' }],
@@ -89,13 +89,16 @@ test('permits carry holder contact and vehicles but never addresses, birthdays o
   const permit = mapPermit({
     id: 'p1', user_id: 'user000001', company_id: OFO_COMPANY, company_name: 'OneFortyOne Limited', permit_name: 'Hunting permit',
     application_type: 'Public', permit_purpose: ['Hunting', ' '], permit_number: 'ON-2026-1', expiry_date: '2027-10-29', status: 'active',
-    firearms_permitted: true, vehicles: [{ registration: 'abc123', make: 'Toyota', model: 'Hilux', color: 'White', insurance_expiry_date: '2027-01-01' }],
+    firearms_permitted: true, special_conditions: 'Gate 8 only', walk_in_only: true, vehicles: [{ registration: 'abc123', make: 'Toyota', model: 'Hilux', color: 'White', insurance_expiry_date: '2027-01-01' }],
   }, indexes);
   assert.deepEqual(permit.row.vehicles, [{ plate: 'abc123', make: 'Toyota', model: 'Hilux', colour: 'White' }]);
   assert.deepEqual(permit.row.activities, ['Hunting']);
   assert.equal(permit.row.firearm_licence_valid, true);
+  assert.equal(permit.row.firearm_licence_number, 'AB123');
+  assert.equal(permit.row.address, '1 Secret Rd');
+  assert.equal(permit.row.conditions, 'Gate 8 only\nWalk-in only.');
   const serialised = JSON.stringify(permit.row);
-  for (const secret of ['Secret Rd', '1980-01-01', 'licence.png', 'AB123', 'insurance']) assert.doesNotMatch(serialised, new RegExp(secret));
+  for (const secret of ['1980-01-01', 'licence.png', 'insurance']) assert.doesNotMatch(serialised, new RegExp(secret));
 
   assert.equal(mapPermit({ id: 'p2', user_id: 'user000002', company_id: OFO_COMPANY, permit_number: 'ON-2', status: 'expired' }, indexes).row.holder_name, 'Holder Two');
   assert.deepEqual(mapPermit({ id: 'p3', user_id: 'user000009', company_id: OFO_COMPANY, permit_number: 'ON-3', status: 'active' }, indexes), { held: 'no_holder_name' });
@@ -125,6 +128,75 @@ test('apply sends batches to the server-only RPCs and skips withdrawal when the 
   await assert.rejects(runSync({ apply: true, env: { BASE44_RAMS_READ_TOKEN: 'tok' }, fetchImpl, log: () => {} }), /SUPABASE_SERVICE_ROLE_KEY are required/);
 });
 
+test('people carry every RAMS detail and vehicle, and companions aggregate per holder across bookings', async () => {
+  const { mapPerson, mapCompanions, userSourceUrl } = await load();
+  const person = mapPerson({
+    id: 'user000001', full_name: ' Holder  One ', legal_name: 'Holder Q One', nickname: 'H1', email: 'one@example.test', phone_number: '021 000',
+    home_address: '1 Rd', birthday: '1980-01-01', firearms_license_number: 'AB123', firearms_license_expiry: '2030-02-03',
+    firearms_license_status: 'active', firearms_license_url: 'https://files.example/licence.png', role: 'user', admin_level: 'none',
+    is_verified: true, assigned_companies: [OFO_COMPANY, 'unknown'], created_date: '2026-01-01T00:00:00', updated_date: '2026-02-01T00:00:00Z',
+    vehicles: [
+      { registration: 'abc123', make: 'Toyota', model: 'Hilux', color: 'White', insurance_expiry_date: '2027-01-01', company_insurance: 'Yes',
+        company_insurance_comments: 'Fleet', insurance_urls: ['https://files.example/ins.pdf', 'javascript:alert(1)'], status: 'approved', archived: false },
+      { registration: ' ', make: 'None' },
+    ],
+  });
+  assert.equal(person.row.full_name, 'Holder One');
+  assert.equal(person.row.source_url, userSourceUrl());
+  assert.equal(person.row.date_of_birth, '1980-01-01');
+  assert.equal(person.row.firearms_licence_document_url, 'https://files.example/licence.png');
+  assert.deepEqual(person.row.client_organization_ids, [OFO_CLIENT]);
+  assert.equal(person.row.source_created_at, '2026-01-01T00:00:00Z');
+  assert.deepEqual(person.row.vehicles, [{
+    plate: 'abc123', make: 'Toyota', model: 'Hilux', colour: 'White', insurance_expiry: '2027-01-01', company_insurance: true,
+    company_insurance_comments: 'Fleet', insurance_document_urls: ['https://files.example/ins.pdf'], status: 'approved', archived: false,
+  }]);
+  assert.deepEqual(mapPerson({ id: 'svc0000001', full_name: 'Bot', is_service: true }), { held: 'service_account' });
+  assert.deepEqual(mapPerson({ id: 'user000009' }), { held: 'no_name' });
+
+  const { mapped } = mapCompanions([
+    { id: 'b1', user_id: 'user000001', company_id: OFO_COMPANY, booking_date: '2026-03-01', hunting_area: 'Denckers',
+      companions: [{ full_name: 'Mate Two', email: 'Two@Example.test', phone: '022', permitted_status: 'permitted' }, { full_name: 'No Email' }] },
+    { id: 'b2', user_id: 'user000001', company_id: OFO_COMPANY, booking_date: '2026-05-01', hunting_area: 'Wilsons',
+      companions: [{ full_name: 'Mate Two', email: 'two@example.test' }] },
+    { id: 'b3', user_id: 'user000001', booking_date: '2026-04-01', companions: [{ full_name: 'Mate Two', email: 'two@example.test', phone: '099' }] },
+    { id: 'b4', user_id: 'user000002', is_sample: true, companions: [{ full_name: 'Sample' }] },
+  ]);
+  const mate = mapped.find((row) => row.email === 'two@example.test');
+  assert.equal(mapped.length, 2);
+  assert.equal(mate.booking_count, 3);
+  assert.equal(mate.first_booking_date, '2026-03-01');
+  assert.equal(mate.last_booking_date, '2026-05-01');
+  assert.equal(mate.last_hunting_area, 'Wilsons');
+  assert.equal(mate.client_organization_id, OFO_CLIENT);
+  assert.equal(mate.phone, '022');
+  assert.equal(mate.permitted_status, 'permitted');
+});
+
+test('apply ingests people before permits, companions and returns so they share one canonical person', async () => {
+  const { runSync } = await load();
+  const rpcs = [];
+  const entities = {
+    User: [{ id: 'user000001', full_name: 'Holder One', email: 'one@example.test' }],
+    Permit: [{ id: 'p1', user_id: 'user000001', company_id: OFO_COMPANY, permit_number: 'ON-1', status: 'active' }],
+    Booking: [{ id: 'b1', user_id: 'user000001', company_id: OFO_COMPANY, booking_date: '2026-03-01', companions: [{ full_name: 'Mate Two' }] }],
+    KillReturn: [{ id: 'kill000001', company_id: OFO_COMPANY, hunting_area: 'A', hunt_date: '2026-10-01', return_type: 'nil' }],
+  };
+  const fetchImpl = async (url, init) => {
+    const entity = url.match(/\/entities\/(\w+)\?/)?.[1];
+    if (entity) return response(200, url.includes('skip=0') ? entities[entity] : []);
+    if (url.includes('/rest/v1/hunter_kill_returns')) return response(200, [], { 'content-range': '0-0/1' });
+    rpcs.push(url.split('/rpc/')[1]);
+    return response(200, {});
+  };
+  const env = { BASE44_RAMS_READ_TOKEN: 'b44-secret-value', SUPABASE_URL: 'https://fcm.test', SUPABASE_SERVICE_ROLE_KEY: 'srk-secret-value' };
+  const report = await runSync({ apply: true, env, fetchImpl, log: () => {} });
+  assert.deepEqual(rpcs, ['ingest_base44_rams_people', 'ingest_base44_rams_permits', 'ingest_base44_rams_companions',
+    'ingest_base44_rams_kill_returns', 'ingest_base44_rams_kill_returns']);
+  assert.equal(report.people.mapped, 1);
+  assert.equal(report.companions.mapped, 1);
+});
+
 test('the scheduled runner fetches the service key at runtime and only runs the read-only sync', () => {
   const runner = read('scripts/run-base44-rams-sync.ps1');
   assert.match(runner, /projects api-keys --project-ref dotczcyyzgabmtmnglqj/);
@@ -136,7 +208,14 @@ test('the mirror is RLS-protected, ingest is service-role only and the report wr
   assert.match(migration, /alter table public\.hunter_kill_returns enable row level security;/);
   assert.match(migration, /revoke all on table public\.hunter_kill_returns from public, anon, authenticated;/);
   assert.match(migration, /for select to authenticated\n\tusing \(public\.is_admin_for_org\(organization_id\)\);/);
-  for (const signature of ['ingest_base44_rams_kill_returns(uuid, jsonb, text[])', 'ingest_base44_rams_permits(uuid, jsonb)']) {
+  for (const table of ['rams_person_profiles', 'rams_person_vehicles', 'rams_person_associations']) {
+    assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security;`));
+    assert.match(migration, new RegExp(`create policy ${table}_provider_admin_read on public\\.${table}\\n\\tfor select to authenticated using \\(public\\.is_admin_for_org\\(organization_id\\)\\);`));
+  }
+  assert.match(migration, /revoke all on table public\.rams_person_profiles, public\.rams_person_vehicles, public\.rams_person_associations from public, anon, authenticated;/);
+  assert.match(migration, /revoke all on function public\.base44_rams_resolve_person\(uuid, text, text, text\) from public, anon, authenticated;/);
+  assert.doesNotMatch(migration, /grant execute on function public\.base44_rams_resolve_person/);
+  for (const signature of ['ingest_base44_rams_kill_returns(uuid, jsonb, text[])', 'ingest_base44_rams_permits(uuid, jsonb)', 'ingest_base44_rams_people(uuid, jsonb)', 'ingest_base44_rams_companions(uuid, jsonb)']) {
     const escaped = signature.replace(/[()[\]]/g, '\\$&');
     assert.match(migration, new RegExp(`revoke all on function public\\.${escaped} from public, anon, authenticated;\\ngrant execute on function public\\.${escaped} to service_role;`));
   }

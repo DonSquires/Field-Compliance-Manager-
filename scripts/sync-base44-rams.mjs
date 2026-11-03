@@ -1,8 +1,9 @@
-// Read-only Base44 RAMS (OFO) -> FCM sync: hunter kill/nil returns and permit holders.
+// Read-only Base44 RAMS (OFO) -> FCM sync: people (with vehicles and companions), permits and
+// hunter kill/nil returns.
 //
 // Base44 stays the system of record. This script only issues GET requests to Base44, using a
 // dedicated read-only integration token, and hands normalised rows to the server-only FCM RPCs
-// ingest_base44_rams_kill_returns and ingest_base44_rams_permits (service role). It fails closed
+// ingest_base44_rams_people, _permits, _companions and _kill_returns (service role). It fails closed
 // when the token is missing and never prints tokens or personal details; reports carry counts only.
 //
 // Usage:
@@ -93,6 +94,8 @@ export function buildIndexes({ users = [], bookings = [] }) {
       email: text(u.email, 254) ?? prior.email ?? null,
       phone: text(u.phone_number, 40),
       licence: u.firearms_license_status === 'active' ? true : u.firearms_license_status === 'inactive' ? false : null,
+      licenceNumber: text(u.firearms_license_number, 60),
+      address: text(u.home_address, 500),
     });
   }
   const bookingPermits = new Map(bookings
@@ -151,6 +154,9 @@ export function mapPermit(row, { people = new Map(), companies = COMPANY_CLIENTS
       contact_email: person.email,
       contact_phone: person.phone,
       firearm_licence_valid: person.licence,
+      firearm_licence_number: person.licenceNumber ?? null,
+      address: person.address ?? null,
+      conditions: [text(row.special_conditions, 3800), row.walk_in_only === true ? 'Walk-in only.' : null].filter(Boolean).join('\n') || null,
       client_organization_id: client,
       status,
       expiry_date: isoDate(row.expiry_date),
@@ -165,6 +171,98 @@ export function mapPermit(row, { people = new Map(), companies = COMPANY_CLIENTS
         : [],
     },
   };
+}
+
+const httpsUrl = (value) => {
+  const url = text(value, 1000);
+  return url && /^https:\/\//i.test(url) ? url : null;
+};
+const flag = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toLowerCase();
+  return ['yes', 'true', 'y'].includes(v) ? true : ['no', 'false', 'n'].includes(v) ? false : null;
+};
+const nameKey = (value) => (text(value, 200) ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const userSourceUrl = (appId = BASE44_APP_ID) => `https://app.base44.com/apps/${appId}/editor/workspace/data/User`;
+
+// Every person detail RAMS records about a user, for the provider-private profile.
+export function mapPerson(user, { companies = COMPANY_CLIENTS } = {}) {
+  if (!user || user.is_sample) return { held: 'sample' };
+  if (user.is_service === true) return { held: 'service_account' };
+  if (typeof user.id !== 'string') return { held: 'invalid' };
+  const fullName = text(user.full_name, 200) ?? text(user.legal_name, 200);
+  if (!fullName) return { held: 'no_name' };
+  return {
+    row: {
+      source_user_id: user.id,
+      source_url: userSourceUrl(),
+      full_name: fullName,
+      legal_name: text(user.legal_name, 200),
+      nickname: text(user.nickname, 120),
+      email: text(user.email, 254),
+      phone: text(user.phone_number, 40),
+      home_address: text(user.home_address, 500),
+      date_of_birth: isoDate(user.birthday),
+      firearms_licence_number: text(user.firearms_license_number, 60),
+      firearms_licence_expiry: isoDate(user.firearms_license_expiry),
+      firearms_licence_status: text(user.firearms_license_status, 40),
+      firearms_licence_document_url: httpsUrl(user.firearms_license_url),
+      account_role: text(user.role, 60) ?? text(user._app_role, 60),
+      admin_level: text(user.admin_level, 60),
+      is_verified: typeof user.is_verified === 'boolean' ? user.is_verified : null,
+      client_organization_ids: Array.isArray(user.assigned_companies)
+        ? [...new Set(user.assigned_companies.map((id) => companies[id]).filter(Boolean))]
+        : [],
+      source_created_at: isoTimestamp(user.created_date),
+      source_updated_at: isoTimestamp(user.updated_date),
+      vehicles: Array.isArray(user.vehicles)
+        ? user.vehicles.map((v) => ({
+          plate: text(v?.registration, 20),
+          make: text(v?.make, 60),
+          model: text(v?.model, 60),
+          colour: text(v?.color, 40),
+          insurance_expiry: isoDate(v?.insurance_expiry_date),
+          company_insurance: flag(v?.company_insurance),
+          company_insurance_comments: text(v?.company_insurance_comments, 1000),
+          insurance_document_urls: Array.isArray(v?.insurance_urls) ? v.insurance_urls.map(httpsUrl).filter(Boolean) : [],
+          status: text(v?.status, 40),
+          archived: typeof v?.archived === 'boolean' ? v.archived : null,
+        })).filter((v) => v.plate)
+        : [],
+    },
+  };
+}
+
+// One row per permit holder and named companion, aggregated across that holder's bookings.
+export function mapCompanions(bookings, { companies = COMPANY_CLIENTS } = {}) {
+  const pairs = new Map();
+  let held = 0;
+  for (const b of bookings) {
+    if (!b || b.is_sample || typeof b.user_id !== 'string' || !Array.isArray(b.companions)) continue;
+    const date = isoDate(b.booking_date);
+    for (const c of b.companions) {
+      const name = text(c?.full_name, 200);
+      const email = text(c?.email, 254)?.toLowerCase() ?? null;
+      if (!name || !nameKey(name)) { held += 1; continue; }
+      const key = `${b.user_id}|${email ?? nameKey(name)}`;
+      const prior = pairs.get(key);
+      const later = !prior || (date && (!prior.last_booking_date || date >= prior.last_booking_date));
+      pairs.set(key, {
+        holder_user_id: b.user_id,
+        client_organization_id: (later ? companies[b.company_id] : prior.client_organization_id) ?? prior?.client_organization_id ?? null,
+        full_name: later ? name : prior.full_name,
+        email: email ?? prior?.email ?? null,
+        phone: (later ? text(c?.phone, 40) : null) ?? prior?.phone ?? null,
+        permitted_status: (later ? text(c?.permitted_status, 40) : null) ?? prior?.permitted_status ?? null,
+        booking_count: (prior?.booking_count ?? 0) + 1,
+        first_booking_date: [prior?.first_booking_date, date].filter(Boolean).sort()[0] ?? null,
+        last_booking_date: later ? (date ?? prior?.last_booking_date ?? null) : prior.last_booking_date,
+        last_hunting_area: (later ? text(b.hunting_area, 200) : null) ?? prior?.last_hunting_area ?? null,
+      });
+    }
+  }
+  return { mapped: [...pairs.values()], held: held ? { invalid: held } : {} };
 }
 
 export function partition(rows, mapper, context) {
@@ -228,23 +326,31 @@ export async function runSync({ apply, env = process.env, fetchImpl = fetch, log
   const indexes = buildIndexes({ users, bookings });
   const kills = partition(killReturns, mapKillReturn, indexes);
   const permitRows = partition(permits, mapPermit, indexes);
+  const peopleRows = partition(users, mapPerson, {});
+  const companionRows = mapCompanions(bookings);
   const report = {
     at: new Date().toISOString(),
     mode: apply ? 'apply' : 'dry-run',
     source: { killReturns: killReturns.length, permits: permits.length, bookings: bookings.length, users: users.length, usersReadable },
+    people: { mapped: peopleRows.mapped.length, held: peopleRows.held, vehicles: peopleRows.mapped.reduce((n, p) => n + p.vehicles.length, 0) },
+    companions: { mapped: companionRows.mapped.length, held: companionRows.held },
     killReturns: { mapped: kills.mapped.length, held: kills.held },
     permits: { mapped: permitRows.mapped.length, held: permitRows.held },
   };
   if (!apply) return report;
 
-  const permitResult = {};
-  for (const batch of chunks(permitRows.mapped, RPC_BATCH)) {
-    sumInto(permitResult, await rpc(fetchImpl, supabase, 'ingest_base44_rams_permits', { p_provider_organization_id: PROVIDER_ORGANIZATION_ID, p_rows: batch }));
-  }
-  const killResult = {};
-  for (const batch of chunks(kills.mapped, RPC_BATCH)) {
-    sumInto(killResult, await rpc(fetchImpl, supabase, 'ingest_base44_rams_kill_returns', { p_provider_organization_id: PROVIDER_ORGANIZATION_ID, p_rows: batch, p_seen_source_ids: null }));
-  }
+  const call = async (name, rows, extra = {}) => {
+    const total = {};
+    for (const batch of chunks(rows, RPC_BATCH)) {
+      sumInto(total, await rpc(fetchImpl, supabase, name, { p_provider_organization_id: PROVIDER_ORGANIZATION_ID, p_rows: batch, ...extra }));
+    }
+    return total;
+  };
+  // People first so permits, companions and returns resolve to the same canonical person.
+  report.people.result = await call('ingest_base44_rams_people', peopleRows.mapped);
+  const permitResult = await call('ingest_base44_rams_permits', permitRows.mapped);
+  report.companions.result = await call('ingest_base44_rams_companions', companionRows.mapped);
+  const killResult = await call('ingest_base44_rams_kill_returns', kills.mapped, { p_seen_source_ids: null });
   const seen = kills.mapped.map((row) => row.source_id);
   const active = await activeMirrorCount(fetchImpl, supabase);
   if (seen.length > 0 && seen.length >= active * MIN_LISTING_RATIO) {
