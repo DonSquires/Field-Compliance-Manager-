@@ -7,7 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
-import { applyIncidentTriage, monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
+import { applyIncidentTriage, monthlyActivityBlocks, notableEventBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 import { loadReportLogo } from '../_shared/report-delivery.mjs';
 import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
@@ -15,7 +15,7 @@ import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v18';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v19';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -229,7 +229,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
 
   const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
   const activityBlocks = reportKind === 'custom' ? null : monthlyActivityBlocks(snapshot, activityLines, { summary: editorial.executive_summary, highlights: editorial.client_notes });
-  const logBlocks = activityBlocks ? siteLogBlocks(snapshot, activityLines) : [];
+  const logBlocks = activityBlocks ? notableEventBlocks(snapshot, activityLines) : [];
   const photoRefs = entryPhotoRefs([...(activityBlocks ?? []), ...logBlocks]);
   const photoBytes = photoRefs.length && loadPhotos ? await loadPhotos(photoRefs) : new Map<string, Uint8Array>();
   const photos = new Map<string, PDFImage>();

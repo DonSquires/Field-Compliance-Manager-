@@ -513,6 +513,29 @@ export function routineCheckRows(lines, label) {
     });
 }
 
+/** Work itemised in its own client section: [report key, title]. */
+const WORK_SECTIONS = /** @type {const} */ ([['maintenance', 'Maintenance and Repairs'], ['manufacture', 'Manufacture and Fabrication']]);
+const TOP_HUNTING_AREAS = 10;
+
+/**
+ * @param {Record<string, unknown>} line
+ * @param {string} key
+ */
+function isWorkLine(line, key) {
+  return !isIncidentLine(line) && !reviewSectionCode(line) && text(line.c) === key;
+}
+
+/**
+ * An entry worth listing under Notable Site Events (see notableEventBlocks).
+ * @param {Record<string, unknown>} line
+ */
+export function isNotableEvent(line) {
+  if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) return false;
+  const category = text(line.c);
+  if (category === 'pest_control' || WORK_SECTIONS.some(([key]) => key === category)) return false;
+  return Boolean(text(line.n) || text(line.ac) || num(line.ph) > 0 || (Array.isArray(line.pr) && line.pr.length > 0));
+}
+
 /** Paragraphs of reviewer text, split on blank lines. @param {string} value */
 export function textParagraphs(value) {
   return value.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
@@ -595,25 +618,9 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
   }
 
-  const routineRows = routineCheckRows(lines, label);
-  if (routineRows.length) {
-    const checks = routineRows.reduce((sum, row) => sum + row.checks, 0);
-    blocks.push(section('Routine Checks'));
-    blocks.push(note(`${counted(checks, 'routine patrol or check', 'routine patrols and checks')} recorded a status only. They are summarised here rather than listed in the site log; anything an officer described further is listed in full.`, 9, true));
-    blocks.push(table(
-      [['Check', 150], ['Checks', 55, 'right'], ['Locations', 62, 'right'], ['Recorded results', 220]],
-      routineRows.map((row) => [row.check, fmt(row.checks), fmt(row.places), row.results]),
-    ));
-  }
-
-  blocks.push(section('Activity Overview'));
-  if (categories.length) {
-    blocks.push(table(
-      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
-      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
-    ));
-  } else {
-    blocks.push(note('Nothing was recorded at your locations during the period.'));
+  const routineChecks = lines.filter(isRoutineCheck).length;
+  if (routineChecks > 0) {
+    blocks.push(note(`${counted(routineChecks, 'routine patrol or check', 'routine patrols and checks')} recorded a status only (for example secure or working) and ${routineChecks === 1 ? 'is' : 'are'} not itemised in this report.`, 9, true));
   }
 
   const incidents = obj(report.incidents) ?? {};
@@ -645,25 +652,21 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     for (const line of reviewLines) blocks.push(entryWithPlace(line, label));
   }
 
-  const places = rows(report.byPlace);
-  if (places.length) {
-    blocks.push(section('Activity by Location'));
-    blocks.push(table(
-      [['Location', 170], ['Entries', 60, 'right'], ['Photos', 60, 'right'], ['Main activity', 197]],
-      places.map((row) => {
-        const mix = Object.entries(obj(row.categories) ?? {})
-          .filter(([, count]) => num(count) > 0)
-          .sort(([leftCode, left], [rightCode, right]) => num(right) - num(left) || leftCode.localeCompare(rightCode))
-          .slice(0, 3)
-          .map(([code, count]) => `${label('category', code)} ${fmt(num(count))}`)
-          .join(', ');
-        return [text(row.place) || NO_PLACE_LABEL, fmt(num(row.entries)), fmt(num(row.photos)), mix];
-      }),
-    ));
+  for (const [key, title] of WORK_SECTIONS) {
+    const work = obj(report[key]) ?? {};
+    const workLines = lines.filter((line) => isWorkLine(line, key));
+    if (num(work.entries) <= 0 && !workLines.length) continue;
+    const orders = obj(work.workOrders) ?? {};
+    const jobs = num(orders.completed) + num(orders.open) > 0
+      ? ` Workshop jobs: ${fmt(num(orders.completed))} completed, ${fmt(num(orders.open))} scheduled or in progress.`
+      : '';
+    blocks.push(section(title));
+    blocks.push(note(`${counted(Math.max(num(work.entries), workLines.length), 'entry was', 'entries were')} recorded, listed below in date order (New Zealand time).${jobs}`, 9, true));
+    for (const line of workLines) blocks.push(entryWithPlace(line, label));
   }
 
-  blocks.push(section('Pest Control'));
   if (num(pest.entries) > 0) {
+    blocks.push(section('Pest Control'));
     blocks.push(note(`${counted(pest.entries, 'pest-control entry was', 'pest-control entries were')} recorded. Species figures count recorded entries, not population estimates.`));
     const species = rows(pest.bySpecies);
     if (species.length) {
@@ -672,93 +675,61 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
         species.map((row) => [label('species', row.code), fmt(num(row.culls)), fmt(num(row.sightings)), fmt(num(row.other)), fmt(num(row.total))]),
       ));
     }
-    const activities = rows(pest.byActivity);
-    if (activities.length) {
-      blocks.push(table(
-        [['Pest-control work', 387], ['Entries', 100, 'right']],
-        activities.map((row) => [label('activity', row.code), fmt(num(row.entries))]),
-      ));
-    }
-    const equipment = rows(pest.byEquipment);
-    if (equipment.length) {
-      blocks.push(table(
-        [['Traps, bait stations and equipment', 387], ['Entries', 100, 'right']],
-        equipment.map((row) => [label('equipment', row.code), fmt(num(row.entries))]),
-      ));
-    }
-    const ammunition = rows(pest.ammunition);
-    if (ammunition.length) {
-      blocks.push(table(
-        [['Ammunition calibre', 287], ['Entries', 100, 'right'], ['Rounds recorded', 100, 'right']],
-        ammunition.map((row) => [
-          text(row.calibre) && text(row.calibre) !== 'unspecified' ? text(row.calibre) : 'Calibre not recorded',
-          fmt(num(row.entries)),
-          typeof row.rounds === 'number' ? fmt(row.rounds) : 'Not recorded',
-        ]),
-      ));
-    }
-  } else {
-    blocks.push(note('No pest-control work was recorded at your locations during the period.'));
   }
 
-  if (hunters) {
+  if (hunters && num(hunters.returns) > 0) {
     blocks.push(section('Hunter Kill Returns'));
-    if (num(hunters.returns) > 0) {
-      blocks.push(note(`${counted(hunters.returns, 'hunter return was', 'hunter returns were')} submitted for hunts in the period: ${fmt(num(hunters.killReturns))} with kills and ${fmt(num(hunters.nilReturns))} nil. ${counted(hunters.animals, 'animal was', 'animals were')} reported. Figures are as reported by permit holders.`));
-      const species = rows(hunters.bySpecies);
-      if (species.length) {
-        blocks.push(table(
-          [['Species', 287], ['Animals reported', 100, 'right'], ['Returns', 100, 'right']],
-          species.map((row) => [text(row.species), fmt(num(row.animals)), fmt(num(row.returns))]),
-        ));
-      }
-      const areas = rows(hunters.byArea);
-      if (areas.length) {
-        blocks.push(table(
-          [['Hunting area', 187], ['Returns', 75, 'right'], ['With kills', 75, 'right'], ['Nil', 75, 'right'], ['Animals', 75, 'right']],
-          areas.map((row) => [text(row.area), fmt(num(row.returns)), fmt(num(row.kill)), fmt(num(row.nil)), fmt(num(row.animals))]),
-        ));
-      }
-    } else {
-      blocks.push(note('No hunter kill or nil returns were submitted for hunts in the period.'));
+    blocks.push(note(`${counted(hunters.returns, 'hunter return was', 'hunter returns were')} submitted for hunts in the period: ${fmt(num(hunters.killReturns))} with kills and ${fmt(num(hunters.nilReturns))} nil. ${counted(hunters.animals, 'animal was', 'animals were')} reported. Figures are as reported by permit holders.`));
+    const species = rows(hunters.bySpecies);
+    if (species.length) {
+      blocks.push(table(
+        [['Species', 287], ['Animals reported', 100, 'right'], ['Returns', 100, 'right']],
+        species.map((row) => [text(row.species), fmt(num(row.animals)), fmt(num(row.returns))]),
+      ));
+    }
+    const areas = [...rows(hunters.byArea)].sort((left, right) => num(right.animals) - num(left.animals) || text(left.area).localeCompare(text(right.area)));
+    const topAreas = areas.filter((row) => num(row.animals) > 0).slice(0, TOP_HUNTING_AREAS);
+    if (topAreas.length) {
+      blocks.push(note(`Top ${fmt(topAreas.length)} of ${counted(areas.length, 'hunting area', 'hunting areas')} by animals reported.`, 9, true));
+      blocks.push(table(
+        [['Hunting area', 187], ['Returns', 75, 'right'], ['With kills', 75, 'right'], ['Nil', 75, 'right'], ['Animals', 75, 'right']],
+        topAreas.map((row) => [text(row.area), fmt(num(row.returns)), fmt(num(row.kill)), fmt(num(row.nil)), fmt(num(row.animals))]),
+      ));
     }
   }
+  return blocks;
+}
 
-  for (const [key, title, empty] of /** @type {const} */ ([
-    ['maintenance', 'Maintenance and Repairs', 'No maintenance or repair work was recorded during the period.'],
-    ['manufacture', 'Manufacture and Fabrication', 'No manufacture or fabrication work was recorded during the period.'],
-  ])) {
-    const work = obj(report[key]) ?? {};
-    const orders = obj(work.workOrders) ?? {};
-    blocks.push(section(title));
-    if (num(work.entries) > 0) {
-      const jobs = num(orders.completed) + num(orders.open) > 0
-        ? ` Workshop jobs: ${fmt(num(orders.completed))} completed, ${fmt(num(orders.open))} scheduled or in progress.`
-        : '';
-      blocks.push(note(`${counted(work.entries, 'entry was', 'entries were')} recorded.${jobs}`));
-      const subjects = rows(work.bySubject);
-      if (subjects.length) {
-        blocks.push(table(
-          [['Item worked on', 387], ['Entries', 100, 'right']],
-          subjects.map((row) => [label('subject', row.code) || 'Not specified', fmt(num(row.entries))]),
-        ));
-      }
-    } else {
-      blocks.push(note(empty));
-    }
+/**
+ * Notable site events for the client report: entries an officer described
+ * (a comment, action or photo) that are not already reported as an incident,
+ * review, maintenance or pest-control entry, and are not a status-only routine
+ * check. Day-to-day entries with nothing described are counted, not listed.
+ * @param {unknown} data
+ * @param {unknown} activityLines
+ * @returns {ReportBlock[]}
+ */
+export function notableEventBlocks(data, activityLines) {
+  const report = readActivityReport(data);
+  if (!report) return [];
+  const label = labeller(report);
+  const { lines } = readActivityLines(activityLines);
+  const notable = lines.filter(isNotableEvent);
+  if (!notable.length) return [];
+  /** @type {ReportBlock[]} */
+  const blocks = [section('Notable Site Events')];
+  blocks.push(note('Other entries where an officer recorded something of note, by location in date order (New Zealand time).', 9, true));
+  /** @type {Map<string, Record<string, unknown>[]>} */
+  const byPlace = new Map();
+  for (const line of notable) {
+    const place = text(line.p) || NO_PLACE_LABEL;
+    byPlace.set(place, [...(byPlace.get(place) ?? []), line]);
   }
-
-  const observations = obj(report.observations) ?? {};
-  blocks.push(section('Observations'));
-  const modules = rows(observations.byModule);
-  if (modules.length) {
-    blocks.push(note(`${counted(observations.total, 'observation was', 'observations were')} recorded; ${fmt(num(observations.withPhoto))} with photos.`));
-    blocks.push(table(
-      [['Observation type', 187], ['Observations', 100, 'right'], ['With photo', 100, 'right'], ['Photos', 100, 'right']],
-      modules.map((row) => [label('module', row.module), fmt(num(row.entries)), fmt(num(row.withPhoto)), fmt(num(row.photos))]),
-    ));
-  } else {
-    blocks.push(note('No observations were recorded at your locations during the period.'));
+  const placeNames = [...byPlace.keys()].sort((left, right) => (left === NO_PLACE_LABEL ? 1 : 0) - (right === NO_PLACE_LABEL ? 1 : 0) || left.localeCompare(right));
+  for (const place of placeNames) {
+    const placeLines = byPlace.get(place) ?? [];
+    blocks.push({ kind: 'subsection', title: place, detail: counted(placeLines.length, 'entry', 'entries') });
+    for (const line of placeLines) blocks.push(entryFromLine(line, label));
   }
   return blocks;
 }

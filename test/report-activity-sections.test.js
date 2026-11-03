@@ -69,11 +69,11 @@ test('packs without a v2 client activity report keep the legacy layout', async (
   assert.deepEqual(readActivityLines({ ...lines, version: 1 }), { lines: [], notItemised: 0 });
 });
 
-test('client summary sections use plain language and carry no operational or system detail', async () => {
+test('the compact client report keeps incidents, reviews, work and pest figures, without day-to-day tables', async () => {
   const { monthlyActivityBlocks } = await load();
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines);
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
-  assert.deepEqual(titles, ['At a Glance', 'Routine Checks', 'Activity Overview', 'Incidents and Investigations', 'Activity by Location', 'Pest Control', 'Maintenance and Repairs', 'Manufacture and Fabrication', 'Observations']);
+  assert.deepEqual(titles, ['At a Glance', 'Incidents and Investigations', 'Maintenance and Repairs', 'Pest Control']);
   assert.equal(blocks.some((block) => block.kind === 'gallery'), false, 'photos stay with their entries, never in a gallery at the top');
   for (const block of tables(blocks)) {
     assert.equal(block.columns.reduce((sum, column) => sum + column.width, 0), 487, `${block.columns[0].label} spans the page`);
@@ -87,26 +87,30 @@ test('client summary sections use plain language and carry no operational or sys
   assert.deepEqual(charts.charts[0].items[0], { label: 'Patrols and site checks', value: 4 });
   assert.deepEqual(charts.charts[1].items[0], { label: 'Alpha Reserve', value: 8 });
   assert.deepEqual(charts.charts[2].items[0], { label: 'Possum', value: 1 });
-  assert.ok(blocks.indexOf(charts) < blocks.findIndex((block) => block.kind === 'section' && block.title === 'Activity Overview'));
+  assert.ok(blocks.indexOf(charts) < blocks.findIndex((block) => block.kind === 'section' && block.title === 'Incidents and Investigations'));
+  const areas = Array.from({ length: 14 }, (_, index) => ({ area: `Area ${index + 1}`, returns: 2, kill: 1, nil: 1, animals: index }));
   const withHunters = monthlyActivityBlocks({ activityReport: {
     ...report,
-    hunterReturns: { animals: 15, bySpecies: [{ species: 'Possum', animals: 12 }, { species: 'Goat', animals: 3 }] },
+    hunterReturns: { returns: 28, killReturns: 14, nilReturns: 14, animals: 15, bySpecies: [{ species: 'Possum', animals: 12 }, { species: 'Goat', animals: 3 }], byArea: areas },
   } }, lines);
   assert.deepEqual(withHunters.find((block) => block.kind === 'charts').charts.at(-1), {
     title: 'Hunter animals by species',
     items: [{ label: 'Possum', value: 12 }, { label: 'Goat', value: 3 }],
   });
+  const areaTable = tables(withHunters).find((block) => block.columns[0].label === 'Hunting area');
+  assert.deepEqual(areaTable.rows.map((row) => row[0]), ['Area 14', 'Area 13', 'Area 12', 'Area 11', 'Area 10', 'Area 9', 'Area 8', 'Area 7', 'Area 6', 'Area 5']);
+  assert.match(allText(withHunters), /Top 10 of 14 hunting areas by animals reported\./);
 
   const text = allText(blocks);
   assert.doesNotMatch(text, FORBIDDEN);
   assert.doesNotMatch(text, /accountedFor|eventsInScope|Not yet classified/);
-  assert.match(text, /"Patrols and site checks","4","1"/);
-  assert.match(text, /"Alpha Reserve","8","4","Patrols and site checks 4, Pest control 2, Incidents 1"/);
   assert.match(text, /"Feral goat","0","1","0","1"/);
-  assert.match(text, /"Calibre not recorded","1","Not recorded"/);
+  assert.doesNotMatch(text, /Activity by Location|Activity Overview|Main activity|Calibre|Bait station|Manufacture|Observation type/);
+  assert.match(text, /2 routine patrols and checks recorded a status only \(for example secure or working\) and are not itemised in this report\./);
   assert.match(text, /Workshop jobs: 0 completed, 1 scheduled or in progress\./);
-  assert.match(text, /No manufacture or fabrication work was recorded/);
-  assert.match(text, /"General","1","1","1"/);
+  const at = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
+  const work = blocks.slice(at('Maintenance and Repairs') + 1, at('Pest Control')).filter((block) => block.kind === 'entry');
+  assert.deepEqual(work.map((entry) => entry.title), ['Replace gate latch'], 'maintenance is itemised, not just counted');
   assert.doesNotMatch(text, /\b1 pest-control entries\b|\b1 incidents were\b/);
 });
 
@@ -161,10 +165,10 @@ test('the executive summary is the reviewer text as headings, bullets and paragr
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines, { summary: '   ', highlights: '  ' });
   assert.deepEqual(opening(blocks), [], 'nothing precedes At a Glance when no summary is written');
   assert.doesNotMatch(allText(blocks), /Of Note|of note|Selected Photos/);
-  const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Activity by Location'));
+  const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Maintenance and Repairs'));
   assert.deepEqual(incidents.filter((block) => block.kind === 'entry').map((entry) => [entry.tone, entry.tags[0]]), [['incident', 'Alpha Reserve']]);
   assert.deepEqual(incidents.find((block) => block.kind === 'entry').photos, [photo('b')], 'the photo is shown with its incident');
-  assert.ok(sectionAt(blocks, 'Activity Overview') < sectionAt(blocks, 'Incidents and Investigations'));
+  assert.ok(sectionAt(blocks, 'At a Glance') < sectionAt(blocks, 'Incidents and Investigations'));
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
 
   const privileged = { ...lines, lines: lines.lines.map((line) => (line.pr ? { ...line, pr: [{ b: 'bob-uploads', p: 'org/o/rm/photos/NZTA_camera.png' }] } : line)) };
@@ -195,7 +199,7 @@ test('line keys are stable content hashes and confirmed entries move from the si
 
   const blocks = monthlyActivityBlocks({ activityReport: report }, triaged);
   const sectionAt = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
-  const incidentEntries = blocks.slice(sectionAt('Incidents and Investigations') + 1, sectionAt('Activity by Location')).filter((block) => block.kind === 'entry');
+  const incidentEntries = blocks.slice(sectionAt('Incidents and Investigations') + 1, sectionAt('Maintenance and Repairs')).filter((block) => block.kind === 'entry');
   assert.equal(incidentEntries.length, 2);
   assert.match(allText(incidentEntries), /Freedom campers spoken to and moved on\./);
   assert.match(allText(incidentEntries), /Trespass/);
@@ -273,11 +277,8 @@ test('short status-only gate, lock and patrol checks are summarised under Routin
   ]);
 
   const blocks = monthlyActivityBlocks({ activityReport: labelled }, checks);
-  const at = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
-  assert.ok(at('At a Glance') < at('Routine Checks') && at('Routine Checks') < at('Activity Overview'));
-  const routine = blocks.slice(at('Routine Checks') + 1, at('Activity Overview'));
-  assert.match(routine[0].text, /^9 routine patrols and checks recorded a status only\./);
-  assert.deepEqual(routine[1].columns.map((column) => column.label), ['Check', 'Checks', 'Locations', 'Recorded results']);
+  assert.equal(blocks.some((block) => block.kind === 'section' && block.title === 'Routine Checks'), false, 'the client report gives routine checks one line');
+  assert.ok(blocks.some((block) => block.kind === 'text' && /^9 routine patrols and checks recorded a status only/.test(block.text)));
 
   const log = siteLogBlocks({ activityReport: labelled }, checks);
   const logged = log.filter((block) => block.kind === 'entry');
@@ -309,7 +310,7 @@ test('CCTV reviews and administration entries get their own sections and leave t
   const at = (title) => titles.indexOf(title);
   assert.ok(at('Incidents and Investigations') < at('CCTV and Camera Reviews'));
   assert.ok(at('CCTV and Camera Reviews') < at('Administration and Review'));
-  assert.ok(at('Administration and Review') < at('Activity by Location'));
+  assert.ok(at('Administration and Review') < at('Maintenance and Repairs'));
   const sectionEntries = (title) => {
     const start = blocks.findIndex((block) => block.kind === 'section' && block.title === title);
     const end = blocks.findIndex((block, index) => index > start && block.kind === 'section');
@@ -361,7 +362,7 @@ test('PDF, send gate and every web surface agree on the current renderer version
   const pdf = version(read('supabase/functions/generate-report-pack-pdf/index.ts'), /const rendererVersion = '([^']+)'/);
   const send = version(read('supabase/functions/send-report-pack/index.ts'), /const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
   const web = version(read('apps/web/src/lib/reportPackRenderer.ts'), /export const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
-  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v18');
+  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v19');
   assert.equal(send, pdf);
   assert.equal(web, pdf);
   for (const surface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {
@@ -375,7 +376,7 @@ test('monthly PDF and email read the itemised lines only for the pack they rende
   const pdf = read('supabase/functions/generate-report-pack-pdf/index.ts');
   assert.match(pdf, /select\('id,organization_id,[^']*activity_lines[^']*'\)\.eq\('id', packId\)\.single\(\)/);
   assert.match(pdf, /monthlyActivityBlocks\(snapshot, activityLines, \{ summary: editorial\.executive_summary, highlights: editorial\.client_notes \}\)/);
-  assert.match(pdf, /siteLogBlocks\(snapshot, activityLines\)/);
+  assert.match(pdf, /notableEventBlocks\(snapshot, activityLines\)/);
   const send = read('supabase/functions/send-report-pack/index.ts');
   assert.match(send, /activityEmailSummary\(d, \{ confirmedIncidents: pack\.confirmed_incidents \?\? 0 \}\)/);
   assert.match(send, /confirmedIncidentCount\(applyIncidentTriage\(emailPack\.activity_lines, confirmed\)\)/);
@@ -385,4 +386,16 @@ test('monthly PDF and email read the itemised lines only for the pack they rende
   for (const listSurface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {
     assert.doesNotMatch(read(listSurface), /\.select\('[^']*activity_lines/, `${listSurface} list query must not carry itemised lines`);
   }
+});
+
+test('notable site events list only described entries not reported elsewhere, by location', async () => {
+  const { notableEventBlocks, isNotableEvent } = await load();
+  const blocks = notableEventBlocks({ activityReport: report }, lines);
+  assert.equal(blocks[0].title, 'Notable Site Events');
+  assert.deepEqual(blocks.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [['Alpha Reserve', '3 entries']]);
+  assert.deepEqual(lines.lines.map(isNotableEvent), [false, false, false, false, true, true, true, false], 'pest control, incidents, routine patrols and maintenance are reported in their own sections');
+  assert.match(allText(blocks), /Freedom campers spoken to and moved on\./);
+  assert.doesNotMatch(allText(blocks), FORBIDDEN);
+  assert.deepEqual(notableEventBlocks({ activityReport: report }, { version: 2, lines: [lines.lines[2]], notItemised: 0 }), [], 'nothing notable, no section');
+  assert.deepEqual(notableEventBlocks({}, lines), []);
 });
