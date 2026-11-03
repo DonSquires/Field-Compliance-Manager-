@@ -68,3 +68,43 @@ describe('ReportPackReviewPanel executive summary drafting', () => {
     confirm.mockRestore();
   });
 });
+
+describe('ReportPackReviewPanel background refresh', () => {
+  const saved = { executive_summary: 'Saved words.', client_notes: 'Saved notes.', follow_up: 'Saved follow-up.' };
+  const box = (name: string) => screen.getByRole('textbox', { name }) as HTMLTextAreaElement;
+  const typeAll = () => {
+    fireEvent.change(box('Executive summary'), { target: { value: 'Typed summary.' } });
+    fireEvent.change(box('Client notes'), { target: { value: 'Typed notes.' } });
+    fireEvent.change(box('Follow-up'), { target: { value: 'Typed follow-up.' } });
+  };
+
+  beforeEach(() => invoke.mockReset());
+
+  it('keeps unsaved writing when the page reloads the same pack', () => {
+    const { rerender } = render(<ReportPackReviewPanel pack={pack({ editorial: saved })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    typeAll();
+    rerender(<ReportPackReviewPanel pack={pack({ editorial: { ...saved }, updated_at: '2026-11-02T00:00:00Z' })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(box('Executive summary').value).toBe('Typed summary.');
+    expect(box('Client notes').value).toBe('Typed notes.');
+    expect(box('Follow-up').value).toBe('Typed follow-up.');
+    expect(screen.queryByText(/saved review changed while you were editing/)).toBeNull();
+  });
+
+  it('keeps unsaved writing and warns when the saved review changed elsewhere', () => {
+    const { rerender } = render(<ReportPackReviewPanel pack={pack({ editorial: saved })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    typeAll();
+    rerender(<ReportPackReviewPanel pack={pack({ editorial: { ...saved, client_notes: 'Changed elsewhere.' } })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(box('Client notes').value).toBe('Typed notes.');
+    expect(screen.getByText(/saved review changed while you were editing/)).toBeTruthy();
+  });
+
+  it('shows the newer saved review when nothing was edited, and resets for a different pack', () => {
+    const { rerender } = render(<ReportPackReviewPanel pack={pack({ editorial: saved })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    rerender(<ReportPackReviewPanel pack={pack({ editorial: { ...saved, follow_up: 'Newer follow-up.' } })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(box('Follow-up').value).toBe('Newer follow-up.');
+    typeAll();
+    rerender(<ReportPackReviewPanel pack={pack({ id: 'pack-9', editorial: { executive_summary: 'Other pack.' } })} onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(box('Executive summary').value).toBe('Other pack.');
+    expect(box('Client notes').value).toBe('');
+  });
+});

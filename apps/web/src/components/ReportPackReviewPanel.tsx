@@ -100,6 +100,21 @@ function subjectSummaryFrom(data: Record<string, unknown> | null): Record<string
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+interface EditorialFields { title: string; executiveSummary: string; clientNotes: string; followUp: string }
+
+function editorialFields(pack: ReviewableReportPack): EditorialFields {
+  return {
+    title: pack.editorial?.title ?? defaultTitle(pack),
+    executiveSummary: pack.editorial?.executive_summary ?? '',
+    clientNotes: pack.editorial?.client_notes ?? '',
+    followUp: pack.editorial?.follow_up ?? '',
+  };
+}
+
+function sameFields(a: EditorialFields, b: EditorialFields): boolean {
+  return a.title === b.title && a.executiveSummary === b.executiveSummary && a.clientNotes === b.clientNotes && a.followUp === b.followUp;
+}
+
 export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackReviewPanelProps) {
   const [title, setTitle] = useState(pack.editorial?.title ?? defaultTitle(pack));
   const [executiveSummary, setExecutiveSummary] = useState(pack.editorial?.executive_summary ?? '');
@@ -120,13 +135,30 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
   const summaryText = useRef(executiveSummary);
   summaryText.current = executiveSummary;
 
+  const savedFields = editorialFields(pack);
+  const loaded = useRef({ packId: pack.id, fields: savedFields });
+  const edits = useRef(savedFields);
+  edits.current = { title, executiveSummary, clientNotes, followUp };
+  const [staleNotice, setStaleNotice] = useState(false);
+
+  // Background reloads hand the panel a fresh pack object; only reset the form when a different
+  // pack is opened, or when the saved review changed and the reviewer has no unsaved edits.
   useEffect(() => {
-    setTitle(pack.editorial?.title ?? defaultTitle(pack));
-    setExecutiveSummary(pack.editorial?.executive_summary ?? '');
-    setClientNotes(pack.editorial?.client_notes ?? '');
-    setFollowUp(pack.editorial?.follow_up ?? '');
+    const previous = loaded.current;
+    if (previous.packId === pack.id && sameFields(previous.fields, savedFields)) return;
+    const unsaved = previous.packId === pack.id && !sameFields(previous.fields, edits.current);
+    loaded.current = { packId: pack.id, fields: savedFields };
+    if (unsaved) {
+      setStaleNotice(true);
+      return;
+    }
+    setTitle(savedFields.title);
+    setExecutiveSummary(savedFields.executiveSummary);
+    setClientNotes(savedFields.clientNotes);
+    setFollowUp(savedFields.followUp);
+    setStaleNotice(false);
     setError(null);
-  }, [pack]);
+  }, [pack.id, savedFields.title, savedFields.executiveSummary, savedFields.clientNotes, savedFields.followUp]);
 
   useEffect(() => {
     currentPackId.current = pack.id;
@@ -220,6 +252,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
         <p className="report-review-warning"><ShieldCheck size={17} aria-hidden="true" /> Saving changes returns this live report to draft until it is published again.</p>
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
+      {staleNotice && <div className="alert alert-warning" role="status">This report's saved review changed while you were editing. Your unsaved wording is kept; saving it will replace the newer saved version.</div>}
 
       {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} updatedAt={pack.updated_at} data={pack.data} status={pack.status} summary={executiveSummary} highlights={clientNotes} />}
       {pack.report_kind === 'custom' ? (
