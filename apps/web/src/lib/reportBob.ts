@@ -59,3 +59,55 @@ export async function draftSummaryIfEmpty(packId: string): Promise<SummaryDraftR
   if (error || !data) return { saved: false, skipped: null, error: await functionErrorMessage(error, 'Bob could not draft the executive summary.') };
   return { saved: data.saved === true, skipped: typeof data.skipped === 'string' ? data.skipped : null, error: null };
 }
+
+export type ReviewWording = { title: string; executive_summary: string; client_notes: string; follow_up: string };
+
+export interface PrivacyCheckResult {
+  cleared: boolean;
+  remaining: number;
+  reworded: number;
+  /** The reviewer's wording with personal names withheld, when wording was sent. */
+  editorial: ReviewWording | null;
+  updatedAt: string | null;
+  error: string | null;
+}
+
+const wordingOf = (value: unknown, fallback: ReviewWording): ReviewWording => {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const pick = (field: keyof ReviewWording) => (typeof record[field] === 'string' ? record[field] as string : fallback[field]);
+  return { title: pick('title'), executive_summary: pick('executive_summary'), client_notes: pick('client_notes'), follow_up: pick('follow_up') };
+};
+
+/**
+ * Bob's privacy oracle (check-report-privacy): withholds personal names and
+ * contact details from everything the client will read. The entries are
+ * checked in passes first; the reviewer's unsaved wording, when given, is
+ * checked last and returned reworded so exactly that wording is published.
+ */
+export async function runPrivacyCheck(packId: string, options: { editorial?: ReviewWording } = {}): Promise<PrivacyCheckResult> {
+  const result: PrivacyCheckResult = { cleared: false, remaining: 0, reworded: 0, editorial: null, updatedAt: null, error: null };
+  const check = async (editorial?: ReviewWording) => {
+    const { data, error } = await supabase.functions.invoke('check-report-privacy', { body: { pack_id: packId, ...(editorial ? { editorial } : {}) } });
+    if (error || !data) {
+      result.error = await functionErrorMessage(error, 'Bob could not complete the privacy check.');
+      return null;
+    }
+    result.reworded += (Number(data.reworded) || 0) + (Number(data.editorial_reworded) || 0);
+    result.remaining = Number(data.remaining) || 0;
+    if (typeof data.updated_at === 'string') result.updatedAt = data.updated_at;
+    return data as { checked?: unknown; editorial?: unknown };
+  };
+  for (let pass = 0; pass < MAX_SCAN_PASSES; pass += 1) {
+    const data = await check();
+    if (!data) return result;
+    if (result.remaining === 0 || (Number(data.checked) || 0) <= 0) break;
+  }
+  if (result.remaining > 0) return result;
+  if (options.editorial) {
+    const data = await check(options.editorial);
+    if (!data) return result;
+    result.editorial = wordingOf(data.editorial, options.editorial);
+  }
+  result.cleared = result.remaining === 0;
+  return result;
+}

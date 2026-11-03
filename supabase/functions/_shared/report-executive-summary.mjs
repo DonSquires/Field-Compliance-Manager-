@@ -182,38 +182,30 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
 }
 
 export const EXECUTIVE_SUMMARY_INSTRUCTIONS = [
-  'You are an expert corporate security analyst. Your task is to analyze monthly security accountability logs and extract a concise, exception-based Executive Summary tailored for corporate clients.',
+  'You are an expert corporate security analyst writing the executive summary of a monthly security accountability report for a corporate client. Read the brief and write what the client\'s leadership needs to know: what significant happened, and which way things are trending.',
   '',
-  'Strictly adhere to the following formatting and stylistic rules:',
-  '1. Tone: Maintain a highly professional, objective, precise, and concise corporate tone.',
-  '2. Style: Strictly avoid narrative storytelling, conversational preambles, introductory filler, or concluding remarks. Exclude all high-level operational statistics and data volumes (such as total counts of patrols, entries, culls, or hunter returns), as these are provided separately in a dedicated metrics section. Numbers are used only where they describe a specific matter or a comparison in the Pest Control and Trends sections.',
-  '3. Formatting: Structure the response strictly with clear headers and bullet points. Headers are whole lines in bold. Bullets start with "* ". Bold key numbers, specific locations, vehicle registrations, and critical entities with **double asterisks**. No other markdown, tables or code blocks.',
-  '4. Language: Use professional security terminology (e.g., "perimeter compromise", "infrastructure vulnerabilities", "unauthorized access").',
-  '',
-  'Structure the output exactly as follows:',
-  '',
+  'Output exactly this, and nothing else:',
   '**Executive Summary: <month and year from the brief>**',
   '',
-  '**Significant Security Breaches & Critical Infrastructure Issues**',
-  'Bullet-point only the most serious operational risks, failures, and incidents recorded during the period. Do not summarize routine log entries. Focus strictly on systemic vulnerabilities or severe asset threats, under these bullets where applicable (omit a bullet that has nothing to report; group related entries into one bullet):',
-  '* **Targeted Commercial Theft:** theft, missing fuel, stolen machinery or tools, with specific locations, suspected entities, and vehicle descriptions/registrations.',
-  '* **Perimeter Compromise & Trespass:** gates bypassed, locks forced, roadblock logs winched or manipulated, and confirmed instances of active trespassing.',
-  '* **Lock & Hardware Failures:** electronic lock failures, low batteries, hardware cut or bypassed by patrols to gain entry, or missing/vandalized perimeter infrastructure.',
-  '* **Surveillance Tampering & Blind Spots:** compromised, discovered or stolen security cameras, missing or wiped SD cards, and gaps in the arterial camera network.',
-  'If nothing serious was recorded, write one bullet saying no significant security breaches or infrastructure failures were recorded.',
+  '<paragraph 1>',
   '',
-  '**Pest Control**',
-  '2 to 4 bullets: the most common pest observed, culled or killed; any significant or reduced numbers by species; and how this compares with the previous two months (thisMonth versus previousMonths). Treat hunter-reported animals as reported by permit holders, separately from contractor culls. Where a previous month is not comparable, say there is no comparable prior data for it.',
+  '<paragraph 2>',
   '',
-  '**Trends**',
-  '2 to 4 bullets: how incidents and potential incidents were spread across the month (thisMonth.byWeek), any concentration by location or type, and how the period compares with the previous two months for incidents, confirmed incident types and observations. Where there is no comparable prior data, say so in one bullet rather than guessing.',
+  'Paragraph 1, significant occurrences (3 to 5 sentences): synthesise the most serious matters of the period into a judgement about risk, grouping related entries rather than retelling them one by one. Cover, where the brief supports it: targeted commercial theft (fuel, machinery, tools, with locations and vehicle descriptions or registrations); perimeter compromise and trespass (gates bypassed, locks forced, roadblocks moved, unauthorised access); lock and hardware failures (electronic locks, batteries, hardware cut or replaced); and surveillance tampering or blind spots (cameras or SD cards interfered with, coverage gaps). Say what each matter means for the client\'s assets or exposure. If nothing serious was recorded, say so in one sentence.',
+  'Paragraph 2, trends (3 to 5 sentences): how incidents and potential incidents were spread across the month (thisMonth.byWeek) and whether they concentrated by location or type; how this period compares with the previous two months (previousMonths) for incidents and incident types; and pest control: the most common species culled or reported, any marked rise or fall by species against the previous two months, keeping contractor culls separate from hunter-reported animals. Where a previous month has no comparable data, say that once rather than guessing.',
+  '',
+  'Style rules:',
+  '- Write a summary, not a copy. Never quote, paste or closely paraphrase log entries, and never list entries one after another. Each sentence must combine or interpret facts.',
+  '- Professional, objective, precise corporate tone using security terminology (perimeter compromise, unauthorised access, infrastructure vulnerability). No storytelling, preamble, filler, recommendations or closing remarks.',
+  '- Plain prose only: no bullets, numbered lists, sub-headings, tables or code. Bold (**double asterisks**) may mark a key location, registration or figure, sparingly.',
+  '- Do not restate volume statistics already shown in the report\'s metrics (total entries, patrols, checks, culls, hunter returns). Use a number only when it describes a specific matter or a comparison.',
+  '- Use New Zealand English. Keep the summary between 150 and 320 words.',
   '',
   'Rules for the facts:',
   '- Use only facts in the brief. Never invent, round or total figures that are not given.',
-  '- If entriesNotItemised is above zero, that many entries for the month were not itemised and are missing from entries and thisMonth.byWeek. Do not describe the spread across the month or any location as complete; say once in Trends that the weekly spread covers the itemised entries only.',
-  '- Entries with review "Confirmed incident on review" are incidents. Entries with review "Cleared on review: not an incident" must not be reported as breaches. Entries marked "not yet reviewed" are potential incidents: report them only if the entry itself clearly describes a serious matter, and do not call them confirmed.',
-  '- Never name or describe an identifiable person. Where an entry says a person has been identified, say "a person has been identified". Vehicle descriptions and registrations may be given.',
-  '- Use New Zealand English spelling apart from the fixed headings and the terms above. Keep the summary under 450 words.',
+  '- If entriesNotItemised is above zero, the weekly spread covers the itemised entries only; say so briefly and do not describe it as complete.',
+  '- Entries with review "Confirmed incident on review" are incidents. Entries with review "Cleared on review: not an incident" must not be reported as incidents or breaches. Entries marked "not yet reviewed" are potential incidents: mention them only if the entry clearly describes a serious matter, and never call them confirmed.',
+  '- Privacy: never name, initial or otherwise identify a private individual (suspect, offender, member of the public, landowner, hunter, contractor or staff member), and never give phone numbers, emails or home addresses. Write "a person", "an identified person" or "a suspect" instead. Text shown as "[name withheld]" or "[details withheld]" must not be reconstructed. Vehicle descriptions and registrations may be given. Place and block names (many are family names, such as Smiths) are places, not people.',
 ].join('\n');
 
 /**
@@ -247,8 +239,16 @@ export function cleanExecutiveSummary(raw) {
 }
 
 /**
- * Bob's draft must open with the Executive Summary header and set out its
- * points as bullets. A missing header is supplied from the brief's month.
+ * The prose paragraphs of a summary, without its bold header line.
+ * @param {string} summary
+ */
+export function summaryParagraphs(summary) {
+  return summary.split(/\n\s*\n/).map((block) => block.trim()).filter((block) => block && !/^\*\*[^*]+\*\*$/.test(block));
+}
+
+/**
+ * Bob's draft must open with the Executive Summary header followed by two
+ * prose paragraphs. A missing header is supplied from the brief's month.
  * @param {string} summary
  * @param {unknown} brief
  */
@@ -343,7 +343,8 @@ export async function draftExecutiveSummary({ brief, env, fetchImpl = fetch, tim
     accept: (content) => {
       const summary = finaliseExecutiveSummary(cleanExecutiveSummary(content), brief);
       if (summary.length < 120) throw new Error('empty draft');
-      if (!/^\* /m.test(summary)) throw new Error('model did not return bullet points');
+      if (/^\* /m.test(summary)) throw new Error('model returned bullet points instead of two paragraphs');
+      if (summaryParagraphs(summary).length < 2) throw new Error('model did not return two paragraphs');
       return summary;
     },
   });

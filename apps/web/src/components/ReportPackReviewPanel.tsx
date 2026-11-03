@@ -3,6 +3,7 @@ import { FileCheck2, ShieldCheck, Sparkles } from 'lucide-react';
 import { CustomReportSnapshot } from './CustomReportSnapshot';
 import { ReportActivityReview } from './ReportActivityReview';
 import { readActivityReport } from '../lib/reportActivity';
+import { runPrivacyCheck } from '../lib/reportBob';
 import { supabase } from '../lib/supabase';
 import './ReportPackReviewPanel.css';
 
@@ -207,13 +208,30 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
     }
     setSavingAction(action);
     setError(null);
+    let wording = { title, executive_summary: executiveSummary, client_notes: clientNotes, follow_up: followUp };
+    let expectedUpdatedAt = pack.updated_at;
+    let withheldNote = '';
+    // Everything the client reads passes Bob's privacy oracle first; the PDF and email refuse unchecked wording.
+    if (action === 'publish' && pack.report_kind === 'monthly') {
+      const privacy = await runPrivacyCheck(pack.id, { editorial: wording });
+      if (!privacy.cleared || !privacy.editorial) {
+        setError(privacy.error
+          ? `Bob's privacy check could not finish (${privacy.error}). The report was not published; try again.`
+          : `Bob still has ${privacy.remaining === 1 ? '1 entry' : `${privacy.remaining} entries`} to check for personal names. Publish again to continue.`);
+        setSavingAction(null);
+        return;
+      }
+      wording = privacy.editorial;
+      if (privacy.updatedAt) expectedUpdatedAt = privacy.updatedAt;
+      if (privacy.reworded > 0) withheldNote = ` Bob withheld personal names or contact details in ${privacy.reworded === 1 ? '1 place' : `${privacy.reworded} places`}.`;
+    }
     const { data, error: reviewError } = await supabase.rpc('review_monthly_report_pack', {
       p_pack_id: pack.id,
-      p_expected_updated_at: pack.updated_at,
-      p_title: title,
-      p_executive_summary: executiveSummary,
-      p_client_notes: clientNotes,
-      p_follow_up: followUp,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_title: wording.title,
+      p_executive_summary: wording.executive_summary,
+      p_client_notes: wording.client_notes,
+      p_follow_up: wording.follow_up,
       p_action: action,
     });
     if (reviewError || !data) {
@@ -228,7 +246,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
         ? `Reviewed report published to ${pack.agreementName}'s live client portal.`
         : `Reviewed report approved for email delivery to ${pack.agreementName}.`;
     }
-    await onSaved(message);
+    await onSaved(message + withheldNote);
     setSavingAction(null);
   };
 

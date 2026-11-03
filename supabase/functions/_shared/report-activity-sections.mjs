@@ -52,17 +52,20 @@ export function incidentTypeLabel(code) {
   return /** @type {Record<string, string>} */ (INCIDENT_TYPE_LABELS)[key] || (key ? humaniseCode(key) : 'Incident');
 }
 
-const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key']);
+const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key', 'lk', 'pv']);
+const STORED_LINE_KEY = /^v1:[0-9a-f]{14}$/;
 
 /**
  * Content key of one frozen activity line. Snapshot lines carry no record id,
  * so triage decisions are keyed on every content field the client sees and Bob
  * assesses. Photo and video counts and refs are left out because media can
- * arrive after a pack is generated. Must match activityLineKey in
+ * arrive after a pack is generated. A line reworded by Bob's privacy check
+ * keeps its original key in lk. Must match activityLineKey in
  * apps/web/src/lib/reportActivity.ts.
  * @param {Record<string, unknown>} line
  */
 export function activityLineKey(line) {
+  if (typeof line.lk === 'string' && STORED_LINE_KEY.test(line.lk)) return line.lk;
   const source = JSON.stringify(Object.keys(line)
     .filter((field) => !LINE_KEY_IGNORED.has(field))
     .sort()
@@ -113,14 +116,42 @@ export function isIncidentLine(line) {
   return text(line.k) === 'incident' || Boolean(text(line.tri));
 }
 
+/** Categories withheld from the client report (owner ruling 2026-11-05: admin records are removed). */
+const WITHHELD_CATEGORIES = new Set(['administration', 'travel_admin']);
+
 /**
- * CCTV and camera reviews and administration/desk entries have their own
- * sections near the top of the report rather than being scattered through the
- * site log by location. Incidents keep their own section.
+ * Administration and desk entries, withheld from the client report. Packs
+ * generated before the ruling still carry them, so the renderer drops them too.
+ * @param {Record<string, unknown>} line
+ */
+export function isAdministrationLine(line) {
+  return text(line.k) !== 'incident' && !text(line.tri) && WITHHELD_CATEGORIES.has(text(line.c));
+}
+
+/** @param {unknown} value */
+function compact(value) {
+  return text(value).toLowerCase().replace(/[^a-z]/g, '');
+}
+
+/**
+ * A camera card review or other observation. Card reviews are observations
+ * (owner ruling 2026-11-05) and are listed with their photos.
+ * @param {Record<string, unknown>} line
+ */
+export function isObservationLine(line) {
+  if (isIncidentLine(line)) return false;
+  const category = text(line.c);
+  return text(line.k) === 'observation' || category === 'camera_activation' || category === 'vehicle_observation'
+    || compact(line.ti) === 'cardreview';
+}
+
+/**
+ * Observations, including camera card reviews, have their own section near
+ * the top of the report rather than being scattered through the site log by
+ * location. Incidents keep their own section.
  */
 export const REVIEW_SECTIONS = /** @type {const} */ ([
-  { code: 'camera_activation', title: 'CCTV and Camera Reviews', one: 'CCTV or camera entry was', many: 'CCTV and camera entries were' },
-  { code: 'administration', title: 'Administration and Review', one: 'administration entry was', many: 'administration entries were' },
+  { code: 'observation', title: 'Observations', one: 'observation was', many: 'observations were' },
 ]);
 
 /**
@@ -128,9 +159,25 @@ export const REVIEW_SECTIONS = /** @type {const} */ ([
  * @param {Record<string, unknown>} line
  */
 export function reviewSectionCode(line) {
-  if (isIncidentLine(line)) return '';
-  const code = text(line.c);
-  return REVIEW_SECTIONS.some((review) => review.code === code) ? code : '';
+  return isObservationLine(line) ? 'observation' : '';
+}
+
+/**
+ * Observations for At a Glance: recorded observations plus camera card reviews.
+ * @param {Record<string, unknown>} totals
+ */
+export function observationCount(totals) {
+  return num(totals.observations) + num(totals.cameraActivations);
+}
+
+/**
+ * Reported entries less any administration still carried by an older pack.
+ * @param {Record<string, unknown>} report
+ */
+function reportedEntries(report) {
+  const withheld = rows(report.categories).filter((row) => WITHHELD_CATEGORIES.has(text(row.code)))
+    .reduce((sum, row) => sum + num(row.entries), 0);
+  return Math.max(0, num(obj(report.totals)?.entries) - withheld);
 }
 
 /** @param {string} value @returns {ReportTextRun[]} */
@@ -280,7 +327,7 @@ export function readActivityReport(data) {
 export function readActivityLines(activityLines) {
   const document = obj(activityLines);
   return {
-    lines: document?.version === ACTIVITY_REPORT_VERSION ? rows(document.lines) : [],
+    lines: document?.version === ACTIVITY_REPORT_VERSION ? rows(document.lines).filter((line) => !isAdministrationLine(line)) : [],
     notItemised: document?.version === ACTIVITY_REPORT_VERSION ? num(document.notItemised) : 0,
   };
 }
@@ -584,11 +631,10 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   blocks.push(section('At a Glance'));
   const metrics = [
     { label: 'Locations with activity', value: fmt(num(totals.places)) },
-    { label: 'Entries recorded', value: fmt(num(totals.entries)) },
+    { label: 'Entries recorded', value: fmt(reportedEntries(report)) },
     { label: 'Incidents', value: fmt(num(totals.incidents) + confirmedLines.length) },
-    { label: 'Observations', value: fmt(num(totals.observations)) },
+    { label: 'Observations', value: fmt(observationCount(totals)) },
     { label: 'Patrols', value: fmt(num(totals.patrolVisits)) },
-    { label: 'CCTV activity', value: fmt(num(totals.cameraActivations)) },
     { label: 'Photos', value: fmt(num(totals.photos)) },
     { label: 'Pest culls recorded', value: fmt(speciesCulls(report)) },
   ];
@@ -597,7 +643,7 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   blocks.push({ kind: 'metrics', items: metrics });
   if (text(report.basis)) blocks.push(note(text(report.basis), 8.5, true));
 
-  const categories = rows(report.categories);
+  const categories = rows(report.categories).filter((row) => !WITHHELD_CATEGORIES.has(text(row.code)));
   const activityChart = summaryChart('Activity type highlights', categories,
     (row) => label('category', text(row.code)), (row) => row.entries);
   const camera = categories.find((row) => text(row.code) === 'camera_activation');
@@ -760,7 +806,7 @@ export function siteLogBlocks(data, activityLines) {
       : 'Nothing was recorded at your locations during the period.'));
     return blocks;
   }
-  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents, CCTV and camera reviews, and administration entries are listed in their own sections above; routine checks are summarised under Routine Checks.', 9, true));
+  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents and observations, including camera card reviews, are listed in their own sections above; routine checks are summarised under Routine Checks.', 9, true));
   /** @type {Map<string, Record<string, unknown>[]>} */
   const byPlace = new Map();
   for (const line of lines) {
@@ -791,13 +837,18 @@ export function activityEmailSummary(data, options = {}) {
   if (!report) return null;
   const label = labeller(report);
   const reported = obj(report.totals) ?? {};
-  const totals = { ...reported, incidents: num(reported.incidents) + Math.max(0, Math.trunc(num(options.confirmedIncidents))) };
+  const totals = {
+    ...reported,
+    entries: reportedEntries(report),
+    observations: observationCount(reported),
+    incidents: num(reported.incidents) + Math.max(0, Math.trunc(num(options.confirmedIncidents))),
+  };
   const hunters = obj(report.hunterReturns);
   const hunterSentence = hunters && num(hunters.returns) > 0
     ? ` Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`
     : '';
   return {
     headline: `${counted(totals.entries, 'entry', 'entries')} recorded across ${counted(totals.places, 'location', 'locations')}, including ${counted(totals.incidents, 'incident', 'incidents')}, ${counted(totals.observations, 'observation', 'observations')} and ${counted(totals.photos, 'photo', 'photos')}.${hunterSentence}`,
-    categories: rows(report.categories).map((row) => [label('category', row.code), fmt(num(row.entries))]),
+    categories: rows(report.categories).filter((row) => !WITHHELD_CATEGORIES.has(text(row.code))).map((row) => [label('category', row.code), fmt(num(row.entries))]),
   };
 }
