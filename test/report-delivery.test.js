@@ -84,7 +84,11 @@ test('report logo loads only safe PNG/JPEG within limits and never blocks render
 
   assert.equal(await loadReportLogo('https://example.com/missing.png', async () => new Response('no', { status: 404 })), null);
   assert.equal(await loadReportLogo('https://example.com/down.png', async () => { throw new Error('offline'); }), null);
-  const hanging = (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
+  // AbortSignal.timeout's timer is unref'd in Node; a real fetch keeps the loop alive, so this stub must too.
+  const hanging = (_url, init) => new Promise((_resolve, reject) => {
+    const keepAlive = setTimeout(() => {}, 10000);
+    init.signal.addEventListener('abort', () => { clearTimeout(keepAlive); reject(init.signal.reason); });
+  });
   const started = Date.now();
   assert.equal(await loadReportLogo('https://example.com/slow.png', hanging, { timeoutMs: 50 }), null);
   assert.ok(Date.now() - started < 2000);
