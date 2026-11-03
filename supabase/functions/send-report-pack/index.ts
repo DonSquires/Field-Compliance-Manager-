@@ -27,7 +27,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v15';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v16';
 // Larger PDFs are sent as the signed download link only, keeping the message
 // under common mailbox size limits once base64-encoded.
 const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -89,7 +89,9 @@ function editorialHtml(editorial: JsonMap) {
     ['Notes', editorial.client_notes],
     ['Follow-up', editorial.follow_up]
   ];
-  return sections.flatMap(([heading, value])=>typeof value === 'string' && value ? [`<h3>${heading}</h3><p>${escapeHtml(value)}</p>`] : []).join('');
+  return sections.flatMap(([heading, value])=>typeof value === 'string' && value.trim()
+    ? [`<h3>${heading}</h3>${value.replace(/\r\n/g, '\n').split(/\n\s*\n/).map((paragraph)=>paragraph.trim()).filter(Boolean).map((paragraph)=>`<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`).join('')}`]
+    : []).join('');
 }
 
 function customSummaryHtml(pack: ReportPackEmail, pdfLink: string) {

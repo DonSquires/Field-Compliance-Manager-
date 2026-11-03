@@ -27,7 +27,6 @@ export type ReportBlock =
 export {
   ACTIVITY_REPORT_VERSION,
   NO_PLACE_LABEL,
-  OF_NOTE_LIMIT,
   PRIVILEGED_PHOTO,
   SUMMARY_PHOTO_LIMIT,
   activityEmailSummary,
@@ -40,4 +39,5 @@ export {
   reportDate,
   siteLogBlocks,
   summaryParagraphs,
+  textParagraphs,
 } from './report-activity-sections.mjs';

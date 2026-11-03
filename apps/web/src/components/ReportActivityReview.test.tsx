@@ -144,10 +144,10 @@ describe('ReportActivityReview', () => {
 
   it('opens with the reviewer text and a photo gallery whose viewer caption follows each photo', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" summary="A quiet month overall." highlights="  " />);
-    const summary = screen.getByRole('region', { name: 'Summary' });
+    const summary = screen.getByRole('region', { name: 'Executive summary' });
     const paragraphs = [...summary.querySelectorAll('.report-activity-summary-text')].map((node) => node.textContent);
     expect(paragraphs[0]).toBe('A quiet month overall.');
-    expect(paragraphs.length).toBeGreaterThan(1);
+    expect(paragraphs.some((paragraph) => /were recorded across/.test(paragraph ?? ''))).toBe(false);
     const gallery = await within(summary).findByRole('list', { name: 'Selected photos' });
     const captions = [...gallery.querySelectorAll('li > span')].map((node) => node.textContent);
     expect(captions.length).toBeGreaterThan(1);
@@ -261,8 +261,8 @@ describe('ReportActivityReview', () => {
     const alert = await within(incidentsSection()).findByRole('alert');
     expect(alert.textContent).not.toContain('network');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
-    const notable = screen.getByRole('region', { name: 'Observations, CCTV and photographed work' });
-    expect((await within(notable).findAllByRole('article')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(within(incidentsSection()).queryByRole('alert')).toBeNull());
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
 
     const log = group(/^Site log/);
     expect(log.querySelector('summary')?.textContent).toContain('8 entries by location, with comments and photos');

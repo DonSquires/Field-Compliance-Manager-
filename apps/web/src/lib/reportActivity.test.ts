@@ -7,7 +7,6 @@ import {
   countedText,
   describeActivityLine,
   isReportPhotoRef,
-  ofNoteLines,
   readActivityAccounting,
   readActivityLines,
   readActivityReport,
@@ -16,6 +15,7 @@ import {
   siteLogGroups,
   summaryParagraphs,
   summaryPhotos,
+  textParagraphs,
   type ActivityLine,
 } from './reportActivity';
 import { activityLinesFixture, activityReportFixture } from './reportActivity.fixture';
@@ -133,7 +133,7 @@ describe('parity with the client PDF renderer', () => {
   it('produces the same entries, locations and routine fold as report-activity-sections.mjs', async () => {
     const sections = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(readFileSync(SECTIONS_PATH)).toString('base64')}`) as {
       siteLogBlocks: (data: unknown, lines: unknown) => PdfBlock[];
-      monthlyActivityBlocks: (data: unknown, lines: unknown) => PdfBlock[] | null;
+      monthlyActivityBlocks: (data: unknown, lines: unknown, options?: { summary?: string; highlights?: string }) => PdfBlock[] | null;
     };
     const data = { activityReport: activityReportFixture };
     const asWeb = (block: PdfEntry) => {
@@ -150,21 +150,22 @@ describe('parity with the client PDF renderer', () => {
     expect(logBlocks.flatMap((block) => (block.kind === 'text' && 'text' in block && /routine patrol/.test(block.text) ? [block.text] : [])))
       .toEqual(groups.filter((group) => group.routine.length > 0).map((group) => routineSummary(group.routine)));
 
-    const ofNoteBlocks = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? []).filter(isEntry);
+    const incidentBlocks = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? []).filter(isEntry);
     const withPlace = (entry: ActivityLine) => {
       const described = describeActivityLine(report, entry);
       return { ...described, tags: [entry.place, ...described.tags] };
     };
-    expect(ofNoteBlocks.map(asWeb)).toEqual([
-      ...lines.filter((entry) => entry.kind === 'incident').map(withPlace),
-      ...ofNoteLines(lines).listed.map(withPlace),
-    ]);
+    expect(incidentBlocks.map(asWeb)).toEqual(lines.filter((entry) => entry.kind === 'incident').map(withPlace));
 
     const monthly = sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [];
     const summaryEnd = monthly.findIndex((block) => block.kind === 'section' && 'title' in block && block.title === 'At a Glance');
     const summaryText = monthly.slice(1, summaryEnd).flatMap((block) => (block.kind === 'text' && 'text' in block ? [block.text] : []));
     const gallery = summaryPhotos(report, lines);
-    expect(summaryText).toEqual([...summaryParagraphs(report, lines), ...(gallery.length ? ['Selected photos from the period. Each is shown again with its entry.'] : [])]);
+    expect(summaryText).toEqual([...summaryParagraphs(report), ...(gallery.length ? ['Selected photos from the period. Each is shown again with its entry.'] : [])]);
+    const written = sections.monthlyActivityBlocks(data, activityLinesFixture, { summary: 'First.\n\nSecond.' }) ?? [];
+    const writtenEnd = written.findIndex((block) => block.kind === 'section' && 'title' in block && block.title === 'At a Glance');
+    expect(written.slice(1, writtenEnd).flatMap((block) => (block.kind === 'text' && 'text' in block ? [block.text] : [])).slice(0, 2))
+      .toEqual(textParagraphs('First.\n\nSecond.'));
     const pdfGallery = monthly.find((block): block is { kind: 'gallery'; photos: Array<{ ref: { b: string; p: string }; caption: string }> } => block.kind === 'gallery');
     expect(pdfGallery?.photos.map((photo) => ({ ref: { bucket: photo.ref.b, path: photo.ref.p }, caption: photo.caption })) ?? []).toEqual(gallery);
   });

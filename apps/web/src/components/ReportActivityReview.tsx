@@ -11,7 +11,6 @@ import {
   humaniseCode,
   isReportPhotoRef,
   NO_PLACE_LABEL,
-  ofNoteLines,
   readActivityAccounting,
   readActivityLines,
   readActivityReport,
@@ -19,6 +18,7 @@ import {
   siteLogGroups,
   summaryParagraphs,
   summaryPhotos,
+  textParagraphs,
   type AccountingProblem,
   type ActivityAccounting,
   type ActivityEntry,
@@ -568,7 +568,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     setLines(parsed ? { state: 'ready', ...parsed } : { state: 'missing' });
   }, [packId, updatedAt]);
 
-  // The summary photos and Of Note entries lead the report, so the itemised lines load straight away.
+  // The summary photos and incident entries come from the itemised lines, so they load straight away.
   useEffect(() => {
     void loadLines();
   }, [loadLines]);
@@ -593,18 +593,16 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   const incidentEntries = useMemo(() => readyLines
     .filter((line) => line.kind === 'incident')
     .map((line) => ({ line, entry: describeActivityLine(report, line) })), [readyLines, report]);
-  const ofNote = useMemo(() => {
-    const { listed, total } = ofNoteLines(readyLines);
-    return { total, entries: listed.map((line) => ({ line, entry: describeActivityLine(report, line) })) };
-  }, [readyLines, report]);
   const gallery = useMemo(() => summaryPhotos(report, readyLines), [readyLines, report]);
-  const summary = useMemo(() => summaryParagraphs(report, readyLines), [readyLines, report]);
+  const figureSummary = useMemo(() => summaryParagraphs(report), [report]);
+  const writtenSummary = textParagraphs(reviewerSummary);
+  const openingParagraphs = writtenSummary.length ? writtenSummary : figureSummary;
   useEffect(() => {
     requestPhotos([
       ...gallery.map((photo) => photo.ref),
-      ...[...incidentEntries, ...ofNote.entries].flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
+      ...incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
     ]);
-  }, [gallery, incidentEntries, ofNote, requestPhotos]);
+  }, [gallery, incidentEntries, requestPhotos]);
 
   const incidentSummary = [
     `${counted(incidents.total, 'incident was', 'incidents were')} recorded at these locations`,
@@ -645,10 +643,11 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       )}
 
       <section className="report-activity-section report-activity-summary" aria-labelledby={`${headingId}-summary`}>
-        <h5 id={`${headingId}-summary`}>Summary</h5>
-        {[reviewerSummary, highlights].map((value) => value.trim()).filter(Boolean).map((value, index) => <p key={`reviewer-${index}`} className="report-activity-summary-text">{value}</p>)}
-        <p className="report-review-source-note">Your executive summary and highlights open the client report, followed by these sentences built from the recorded figures.</p>
-        {summary.map((paragraph) => <p key={paragraph} className="report-activity-summary-text">{paragraph}</p>)}
+        <h5 id={`${headingId}-summary`}>Executive summary</h5>
+        <p className="report-review-source-note">{writtenSummary.length
+          ? 'Your executive summary and highlights open the client report.'
+          : 'No executive summary is written yet, so the client report opens with these sentences built from the recorded figures.'}</p>
+        {[...openingParagraphs, ...textParagraphs(highlights)].map((paragraph, index) => <p key={`summary-${index}`} className="report-activity-summary-text">{paragraph}</p>)}
         {gallery.length > 0 && (
           <ul className="report-activity-gallery" aria-label="Selected photos">
             {gallery.map((photo, index) => {
@@ -701,48 +700,6 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
         </div>
       )}
 
-      <section className="report-activity-section report-of-note" aria-labelledby={`${headingId}-of-note`}>
-        <h5 id={`${headingId}-of-note`}>Of note</h5>
-        <section className="report-incidents" aria-labelledby={`${headingId}-incidents`}>
-          <div className="report-section-head">
-            <h6 id={`${headingId}-incidents`}>Incidents and investigations</h6>
-            {incidents.total > 0 && <Chip tone="danger">{counted(incidents.total, 'incident', 'incidents')}</Chip>}
-          </div>
-          {incidents.total === 0 ? (
-            <Empty>No incidents were recorded at these locations during the period.</Empty>
-          ) : (
-            <>
-              <p className="report-incident-summary">{incidentSummary}.</p>
-              {(incidents.bySeverity.length > 0 || incidents.byStatus.length > 0) && (
-                <ul className="report-incident-breakdown" aria-label="Incidents by severity and status">
-                  {incidents.bySeverity.map((row) => <li key={`severity-${row.code}`}><Chip tone={tagTone(`${label('severity', row.code)} severity`)}>{label('severity', row.code)} severity · {count(row.entries)}</Chip></li>)}
-                  {incidents.byStatus.map((row) => <li key={`status-${row.code}`}><Chip tone={tagTone(label('incidentStatus', row.code))}>{label('incidentStatus', row.code)} · {count(row.entries)}</Chip></li>)}
-                </ul>
-              )}
-            </>
-          )}
-          <div aria-live="polite">
-            <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
-            {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
-            {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
-          </div>
-        </section>
-        <section className="report-of-note-entries" aria-labelledby={`${headingId}-notable`}>
-          <div className="report-section-head">
-            <h6 id={`${headingId}-notable`}>Observations, CCTV and photographed work</h6>
-            {ofNote.total > 0 && <Chip>{counted(ofNote.total, 'entry', 'entries')}</Chip>}
-          </div>
-          {lines.state === 'ready' && (ofNote.entries.length === 0 ? (
-            <Empty>{lines.lines.length ? 'No observations, CCTV activity or photographed work were recorded during the period.' : 'Itemised entries are not available for this report.'}</Empty>
-          ) : (
-            <>
-              {ofNote.entries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
-              {ofNote.total > ofNote.entries.length && <p className="report-review-source-note">{counted(ofNote.total - ofNote.entries.length, 'further entry is', 'further entries are')} in the site log.</p>}
-            </>
-          ))}
-        </section>
-      </section>
-
       <section className="report-activity-section" aria-labelledby={`${headingId}-overview`}>
         <h5 id={`${headingId}-overview`}>Activity overview</h5>
         {report.categories.length > 0 ? (
@@ -752,6 +709,31 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
             rows={report.categories.map((row) => [label('category', row.code), count(row.entries), count(row.photos)])}
           />
         ) : <Empty>Nothing was recorded at the locations covered by this agreement during the period.</Empty>}
+      </section>
+
+      <section className="report-activity-section report-incidents" aria-labelledby={`${headingId}-incidents`}>
+        <div className="report-section-head">
+          <h5 id={`${headingId}-incidents`}>Incidents and investigations</h5>
+          {incidents.total > 0 && <Chip tone="danger">{counted(incidents.total, 'incident', 'incidents')}</Chip>}
+        </div>
+        {incidents.total === 0 ? (
+          <Empty>No incidents were recorded at these locations during the period.</Empty>
+        ) : (
+          <>
+            <p className="report-incident-summary">{incidentSummary}.</p>
+            {(incidents.bySeverity.length > 0 || incidents.byStatus.length > 0) && (
+              <ul className="report-incident-breakdown" aria-label="Incidents by severity and status">
+                {incidents.bySeverity.map((row) => <li key={`severity-${row.code}`}><Chip tone={tagTone(`${label('severity', row.code)} severity`)}>{label('severity', row.code)} severity · {count(row.entries)}</Chip></li>)}
+                {incidents.byStatus.map((row) => <li key={`status-${row.code}`}><Chip tone={tagTone(label('incidentStatus', row.code))}>{label('incidentStatus', row.code)} · {count(row.entries)}</Chip></li>)}
+              </ul>
+            )}
+          </>
+        )}
+        <div aria-live="polite">
+          <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
+          {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
+          {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
+        </div>
       </section>
 
       <Group title="Activity by location" meta={counted(report.byPlace.length, 'location', 'locations')}>

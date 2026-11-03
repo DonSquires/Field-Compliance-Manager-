@@ -73,7 +73,7 @@ test('client summary sections use plain language and carry no operational or sys
   const { monthlyActivityBlocks } = await load();
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines);
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
-  assert.deepEqual(titles, ['Summary', 'At a Glance', 'Of Note', 'Activity Overview', 'Activity by Location', 'Pest Control', 'Maintenance and Repairs', 'Manufacture and Fabrication', 'Observations']);
+  assert.deepEqual(titles, ['Executive Summary', 'At a Glance', 'Activity Overview', 'Incidents and Investigations', 'Activity by Location', 'Pest Control', 'Maintenance and Repairs', 'Manufacture and Fabrication', 'Observations']);
   for (const block of tables(blocks)) {
     assert.equal(block.columns.reduce((sum, column) => sum + column.width, 0), 487, `${block.columns[0].label} spans the page`);
     for (const row of block.rows) assert.equal(row.length, block.columns.length);
@@ -135,19 +135,32 @@ test('incidents are itemised with investigation reference and status, never inve
   assert.match(allText(unlisted), /2 further incidents are held on file\./);
 });
 
-test('the summary leads with the reviewer text, the period in figures and selected photos, then what is of note', async () => {
-  const { monthlyActivityBlocks, summaryParagraphs, OF_NOTE_LIMIT } = await load();
-  const blocks = monthlyActivityBlocks({ activityReport: report }, lines, { summary: 'A quiet month overall.', highlights: '  ' });
-  const sectionAt = (title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
-  const summary = blocks.slice(sectionAt('Summary') + 1, sectionAt('At a Glance'));
-  assert.deepEqual(summary.filter((block) => block.kind === 'text').map((block) => block.text), [
-    'A quiet month overall.',
-    '9 entries were recorded across 2 locations during the period. The most active location was Alpha Reserve with 8 entries.',
-    'Work included 4 patrols and site checks, 1 CCTV activation, 1 pest cull and 1 maintenance entry.',
-    '1 incident was recorded, 1 of high or critical severity. 1 observation was logged, 1 with photos. The entries that stand out are listed under Of Note.',
+test('the executive summary is the reviewer text, or the period in figures, then highlights and selected photos', async () => {
+  const { monthlyActivityBlocks, summaryParagraphs } = await load();
+  const sectionAt = (blocks, title) => blocks.findIndex((block) => block.kind === 'section' && block.title === title);
+  const summaryText = (blocks) => blocks.slice(sectionAt(blocks, 'Executive Summary') + 1, sectionAt(blocks, 'At a Glance'))
+    .filter((block) => block.kind === 'text').map((block) => block.text);
+
+  const written = monthlyActivityBlocks({ activityReport: report }, lines, {
+    summary: '  Operations covered two locations.\n\nOne gate was damaged by a vehicle overnight.  ',
+    highlights: 'Gate repair is booked.',
+  });
+  assert.deepEqual(summaryText(written), [
+    'Operations covered two locations.',
+    'One gate was damaged by a vehicle overnight.',
+    'Gate repair is booked.',
     'Selected photos from the period. Each is shown again with its entry.',
   ]);
-  const gallery = summary.find((block) => block.kind === 'gallery');
+
+  const blocks = monthlyActivityBlocks({ activityReport: report }, lines, { summary: '   ', highlights: '  ' });
+  assert.deepEqual(summaryText(blocks), [
+    '9 entries were recorded across 2 locations during the period. The most active location was Alpha Reserve with 8 entries.',
+    'Work included 4 patrols and site checks, 1 CCTV activation, 1 pest cull and 1 maintenance entry.',
+    '1 incident was recorded, 1 of high or critical severity. 1 observation was logged, 1 with photos.',
+    'Selected photos from the period. Each is shown again with its entry.',
+  ]);
+  assert.doesNotMatch(allText(blocks), /Of Note|of note/);
+  const gallery = blocks.slice(sectionAt(blocks, 'Executive Summary'), sectionAt(blocks, 'At a Glance')).find((block) => block.kind === 'gallery');
   assert.deepEqual(gallery.photos.map((photo) => [photo.ref.p.split('/').at(-1), photo.caption]), [
     ['b.png', '2 Oct · Alpha Reserve · CCTV review'],
     ['d.png', '7 Oct · Alpha Reserve · Other site activity'],
@@ -155,36 +168,24 @@ test('the summary leads with the reviewer text, the period in figures and select
     ['c.png', '5 Oct · Alpha Reserve · Patrols and site checks'],
   ]);
 
-  const ofNote = blocks.slice(sectionAt('Of Note') + 1, sectionAt('Activity Overview'));
-  assert.deepEqual(ofNote.filter((block) => block.kind === 'subsection').map((block) => [block.title, block.detail]), [
-    ['Incidents and investigations', '1 incident'],
-    ['Observations, CCTV and photographed work', '3 entries'],
-  ]);
-  const notable = ofNote.filter((block) => block.kind === 'entry' && block.tone === 'default');
-  assert.deepEqual(notable.map((entry) => entry.when), ['Thu 1 Oct 2026 · 09:15', 'Mon 5 Oct 2026 · 18:30', 'Wed 7 Oct 2026 · 10:10']);
-  assert.ok(notable.every((entry) => entry.tags[0] === 'Alpha Reserve'));
+  const incidents = blocks.slice(sectionAt(blocks, 'Incidents and Investigations') + 1, sectionAt(blocks, 'Activity by Location'));
+  assert.deepEqual(incidents.filter((block) => block.kind === 'entry').map((entry) => [entry.tone, entry.tags[0]]), [['incident', 'Alpha Reserve']]);
+  assert.ok(sectionAt(blocks, 'Activity Overview') < sectionAt(blocks, 'Incidents and Investigations'));
   assert.doesNotMatch(allText(blocks), FORBIDDEN);
-
-  const many = { version: 2, notItemised: 0, lines: Array.from({ length: OF_NOTE_LIMIT + 3 }, (_, index) => ({ d: '2026-10-09', t: `${String(index).padStart(2, '0')}:00`, p: 'Beta Forest', k: 'observation', c: 'unclassified', n: `Seen ${index}` })) };
-  const capped = monthlyActivityBlocks({ activityReport: report }, many);
-  assert.equal(capped.filter((block) => block.kind === 'entry').length, OF_NOTE_LIMIT);
-  assert.match(allText(capped), /3 further entries are in the site log\./);
 
   const privileged = { ...lines, lines: lines.lines.map((line) => (line.pr ? { ...line, pr: [{ b: 'bob-uploads', p: 'org/o/rm/photos/NZTA_camera.png' }] } : line)) };
   const hidden = monthlyActivityBlocks({ activityReport: report }, privileged);
   assert.equal(hidden.some((block) => block.kind === 'gallery'), false);
   assert.doesNotMatch(allText(hidden), /NZTA/);
 
-  assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 } }, []), ['Nothing was recorded at your locations during the period.']);
-  assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 }, hunterReturns: { returns: 2, animals: 5, bySpecies: [] } }, []), [
+  assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 } }), ['Nothing was recorded at your locations during the period.']);
+  assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 }, hunterReturns: { returns: 2, animals: 5, bySpecies: [] } }), [
     'Nothing was recorded at your locations during the period.',
     'Permit holders submitted 2 hunter returns reporting 5 animals.',
   ]);
   const burst = { version: 2, notItemised: 0, lines: [{ d: '2026-10-03', t: '08:00', p: 'Beta Forest', k: 'observation', c: 'unclassified', n: 'Dumped rubbish', ph: 8, pr: Array.from({ length: 8 }, (_, index) => ({ b: 'scans', p: `org/burst/${index}.jpg` })) }] };
   const burstGallery = monthlyActivityBlocks({ activityReport: report }, burst).find((block) => block.kind === 'gallery');
   assert.equal(burstGallery.photos.length, 6);
-  const noLines = monthlyActivityBlocks({ activityReport: report }, null);
-  assert.match(allText(noLines), /Itemised entries are not available for this report\./);
 });
 
 test('the site log groups entries by location with comments, actions and photos, and folds routine patrols', async () => {
@@ -241,7 +242,7 @@ test('PDF, send gate and every web surface agree on the current renderer version
   const pdf = version(read('supabase/functions/generate-report-pack-pdf/index.ts'), /const rendererVersion = '([^']+)'/);
   const send = version(read('supabase/functions/send-report-pack/index.ts'), /const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
   const web = version(read('apps/web/src/lib/reportPackRenderer.ts'), /export const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
-  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v15');
+  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v16');
   assert.equal(send, pdf);
   assert.equal(web, pdf);
   for (const surface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {

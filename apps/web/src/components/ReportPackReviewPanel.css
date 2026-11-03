@@ -42,6 +42,15 @@
 .report-review-form textarea:focus-visible { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
 .report-review-form small { color: var(--color-text-secondary, #94a3b8); font-size: 12px; font-weight: 400; text-align: right; }
 .report-review-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.report-review-summary-field { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; }
+.report-review-summary-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.report-review-summary-head label { color: var(--color-text-primary, #e2e8f0); font-size: 13px; font-weight: 600; }
+.report-review-summary-head .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.report-review-draft-status:empty { display: none; }
+.report-review-draft-status,
+.report-review-draft-error { margin: 0; font-size: 12px; line-height: 1.45; }
+.report-review-draft-status { color: var(--color-text-secondary, #94a3b8); }
+.report-review-draft-error { color: var(--color-danger, #f87171); }
 
 @media (max-width: 760px) {
   .report-review-heading { align-items: stretch; flex-direction: column; }
@@ -51,7 +60,9 @@
   .report-review-source div:nth-child(n + 3) { border-top: 1px solid var(--color-border, #334155); }
   .report-review-form { grid-template-columns: 1fr; }
   .report-review-form label:first-child,
+  .report-review-summary-field,
   .report-review-actions { grid-column: 1; }
+  .report-review-summary-head .btn { min-height: 44px; }
   .report-review-actions { align-items: stretch; flex-direction: column-reverse; }
   .report-review-actions .btn { min-height: 44px; }
 }

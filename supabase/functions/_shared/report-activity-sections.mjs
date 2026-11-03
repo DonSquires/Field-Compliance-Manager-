@@ -27,7 +27,6 @@
 export const ACTIVITY_REPORT_VERSION = 2;
 export const NO_PLACE_LABEL = 'Not location-specific';
 export const SUMMARY_PHOTO_LIMIT = 6;
-export const OF_NOTE_LIMIT = 20;
 // Photos named for NZTA are privileged and never go into a client report.
 export const PRIVILEGED_PHOTO = /nzta/i;
 
@@ -115,7 +114,7 @@ export function readActivityLines(activityLines) {
 }
 
 /** @param {Record<string, unknown>} report */
-function labeller(report) {
+export function labeller(report) {
   const labels = obj(report.labels) ?? {};
   /** @param {string} dim @param {unknown} code */
   return (dim, code) => {
@@ -282,8 +281,8 @@ function summaryChart(title, source, itemLabel, itemValue) {
 
 /**
  * An entry worth calling out to the client: an observation, a CCTV activation
- * or anything with a photo. Incidents have their own list and routine patrols
- * are only counted.
+ * or anything with a photo. Incidents have their own section and routine
+ * patrols are only counted.
  * @param {Record<string, unknown>} line
  */
 export function isNotableLine(line) {
@@ -338,14 +337,19 @@ function summaryPhotos(lines, label) {
   return picks;
 }
 
+/** Paragraphs of reviewer text, split on blank lines. @param {string} value */
+export function textParagraphs(value) {
+  return value.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+}
+
 /**
  * The period in plain sentences, built only from the frozen figures so every
- * statement can be traced to the tables and site log that follow.
+ * statement can be traced to the tables and site log that follow. Used only
+ * when the reviewer has not written an executive summary.
  * @param {Record<string, unknown>} report
- * @param {Record<string, unknown>[]} lines
  * @returns {string[]}
  */
-export function summaryParagraphs(report, lines) {
+export function summaryParagraphs(report) {
   const totals = obj(report.totals) ?? {};
   const hunters = obj(report.hunterReturns);
   const hunterText = hunters && num(hunters.returns) > 0
@@ -376,18 +380,16 @@ export function summaryParagraphs(report, lines) {
   const observationText = num(observations.total) > 0
     ? ` ${counted(observations.total, 'observation was', 'observations were')} logged, ${fmt(num(observations.withPhoto))} with photos.`
     : '';
-  const notable = lines.filter(isNotableLine).length;
-  const noteText = notable + num(incidents.total) > 0 ? ' The entries that stand out are listed under Of Note.' : '';
-  paragraphs.push(`${incidentText}${observationText}${noteText}`);
+  paragraphs.push(`${incidentText}${observationText}`);
   return paragraphs;
 }
 
 /**
- * Client summary sections for a monthly pack, in reading order: a summary
- * (the reviewer's own words, then the period in figures and a few photos), at
- * a glance, what is of note (incidents, then observations, CCTV activity and
- * photographed work), then the activity tables. Returns null when the pack has
- * no client activity report so the caller keeps its legacy layout.
+ * Client summary sections for a monthly pack, in reading order: the executive
+ * summary (the reviewer's own words, or the period in figures when none is
+ * written, then a few photos), at a glance with its charts, then the activity
+ * tables with incidents and investigations itemised. Returns null when the pack
+ * has no client activity report so the caller keeps its legacy layout.
  * @param {unknown} data
  * @param {unknown} [activityLines]
  * @param {{ summary?: unknown, highlights?: unknown }} [options] the reviewer's executive summary and highlights, shown first
@@ -403,12 +405,11 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   /** @type {ReportBlock[]} */
   const blocks = [];
 
-  blocks.push(section('Summary'));
-  const reviewerSummary = text(options?.summary);
-  if (reviewerSummary) blocks.push(note(reviewerSummary));
-  const highlights = text(options?.highlights);
-  if (highlights) blocks.push(note(highlights));
-  for (const paragraph of summaryParagraphs(report, lines)) blocks.push(note(paragraph));
+  blocks.push(section('Executive Summary'));
+  const reviewerSummary = textParagraphs(text(options?.summary));
+  const highlights = textParagraphs(text(options?.highlights));
+  const opening = reviewerSummary.length ? reviewerSummary : summaryParagraphs(report);
+  for (const paragraph of [...opening, ...highlights]) blocks.push(note(paragraph));
   const gallery = summaryPhotos(lines, label);
   if (gallery.length) {
     blocks.push({ kind: 'gallery', photos: gallery });
@@ -452,9 +453,18 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
   }
 
+  blocks.push(section('Activity Overview'));
+  if (categories.length) {
+    blocks.push(table(
+      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
+      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
+    ));
+  } else {
+    blocks.push(note('Nothing was recorded at your locations during the period.'));
+  }
+
   const incidents = obj(report.incidents) ?? {};
-  blocks.push(section('Of Note'));
-  blocks.push({ kind: 'subsection', title: 'Incidents and investigations', detail: num(incidents.total) > 0 ? counted(incidents.total, 'incident', 'incidents') : '' });
+  blocks.push(section('Incidents and Investigations'));
   if (num(incidents.total) > 0) {
     const parts = [counted(incidents.total, 'incident was', 'incidents were') + ' recorded at your locations'];
     if (num(incidents.investigations) > 0) parts.push(`${counted(incidents.investigations, 'investigation is', 'investigations are')} linked`);
@@ -470,35 +480,6 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     if (unlisted > 0) blocks.push(note(`${counted(unlisted, 'further incident is', 'further incidents are')} held on file.`, 9, true));
   } else {
     blocks.push(note('No incidents were recorded at your locations during the period.'));
-  }
-
-  const notable = lines.filter(isNotableLine);
-  const listed = notable
-    .map((line, index) => ({ line, index }))
-    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index)
-    .slice(0, OF_NOTE_LIMIT)
-    .sort((left, right) => left.index - right.index)
-    .map(({ line }) => line);
-  blocks.push({ kind: 'subsection', title: 'Observations, CCTV and photographed work', detail: notable.length ? counted(notable.length, 'entry', 'entries') : '' });
-  if (listed.length) {
-    for (const line of listed) blocks.push(entryWithPlace(line, label));
-    if (notable.length > listed.length) {
-      blocks.push(note(`${counted(notable.length - listed.length, 'further entry is', 'further entries are')} in the site log.`, 9, true));
-    }
-  } else {
-    blocks.push(note(lines.length
-      ? 'No observations, CCTV activity or photographed work were recorded during the period.'
-      : 'Itemised entries are not available for this report.'));
-  }
-
-  blocks.push(section('Activity Overview'));
-  if (categories.length) {
-    blocks.push(table(
-      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
-      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
-    ));
-  } else {
-    blocks.push(note('Nothing was recorded at your locations during the period.'));
   }
 
   const places = rows(report.byPlace);
