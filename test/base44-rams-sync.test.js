@@ -161,12 +161,15 @@ test('people carry every RAMS detail and vehicle, and companions aggregate per h
       companions: [{ full_name: 'Mate Two', email: 'two@example.test' }] },
     { id: 'b3', user_id: 'user000001', booking_date: '2026-04-01', companions: [{ full_name: 'Mate Two', email: 'two@example.test', phone: '099' }] },
     { id: 'b4', user_id: 'user000002', is_sample: true, companions: [{ full_name: 'Sample' }] },
+    { id: 'b5', user_id: 'user000001', booking_date: '2026-06-01', companions: [{ full_name: 'Partner Three', email: 'two@example.test' }] },
   ]);
-  const mate = mapped.find((row) => row.email === 'two@example.test');
-  assert.equal(mapped.length, 2);
+  const mate = mapped.find((row) => row.email === 'two@example.test' && row.full_name === 'Mate Two');
+  // A shared email never merges differently named companions.
+  assert.equal(mapped.length, 3);
   assert.equal(mate.booking_count, 3);
   assert.equal(mate.first_booking_date, '2026-03-01');
   assert.equal(mate.last_booking_date, '2026-05-01');
+  assert.ok(mapped.some((row) => row.full_name === 'Partner Three' && row.booking_count === 1));
   assert.equal(mate.last_hunting_area, 'Wilsons');
   assert.equal(mate.client_organization_id, OFO_CLIENT);
   assert.equal(mate.phone, '022');
@@ -213,7 +216,7 @@ test('the mirror is RLS-protected, ingest is service-role only and the report wr
     assert.match(migration, new RegExp(`create policy ${table}_provider_admin_read on public\\.${table}\\n\\tfor select to authenticated using \\(public\\.is_admin_for_org\\(organization_id\\)\\);`));
   }
   assert.match(migration, /revoke all on table public\.rams_person_profiles, public\.rams_person_vehicles, public\.rams_person_associations from public, anon, authenticated;/);
-  assert.match(migration, /revoke all on function public\.base44_rams_resolve_person\(uuid, text, text, text\) from public, anon, authenticated;/);
+  assert.match(migration, /revoke all on function public\.base44_rams_resolve_person\(uuid, text, text, text\) from public, anon, authenticated, service_role;/);
   assert.doesNotMatch(migration, /grant execute on function public\.base44_rams_resolve_person/);
   for (const signature of ['ingest_base44_rams_kill_returns(uuid, jsonb, text[])', 'ingest_base44_rams_permits(uuid, jsonb)', 'ingest_base44_rams_people(uuid, jsonb)', 'ingest_base44_rams_companions(uuid, jsonb)']) {
     const escaped = signature.replace(/[()[\]]/g, '\\$&');

@@ -373,7 +373,7 @@ begin
 end;
 $function$;
 
-revoke all on function public.base44_rams_resolve_person(uuid, text, text, text) from public, anon, authenticated;
+revoke all on function public.base44_rams_resolve_person(uuid, text, text, text) from public, anon, authenticated, service_role;
 
 create or replace function public.ingest_base44_rams_people(
 	p_provider_organization_id uuid,
@@ -644,22 +644,16 @@ begin
 			continue;
 		end if;
 
-		-- A companion who is a RAMS user in their own right resolves to that person.
-		if v_email is not null then
-			select coalesce(cp.merged_into_id, cp.id) into v_companion
-			from public.rams_person_profiles rp join public.canonical_people cp on cp.id = rp.canonical_person_id
-			where rp.organization_id = p_provider_organization_id and rp.email = v_email
-			order by rp.synced_at desc limit 1;
-		end if;
-		if v_companion is null then
-			select * into v_resolved from public.base44_rams_resolve_person(
-				p_provider_organization_id,
-				'person:base44-companion:' || coalesce(v_email, v_holder_user || ':' || public.normalize_person_name(v_name)),
-				v_name, v_email);
-			v_companion := v_resolved.person_id;
-			if v_resolved.created then v_people_created := v_people_created + 1; end if;
-			if v_resolved.needs_review then v_people_review := v_people_review + 1; end if;
-		end if;
+		-- A companion who is a RAMS user in their own right resolves through the resolver's
+		-- provider email + normalised-name rule; email alone never identifies a person.
+		select * into v_resolved from public.base44_rams_resolve_person(
+			p_provider_organization_id,
+			'person:base44-companion:' || p_provider_organization_id::text || ':'
+				|| coalesce(v_email, 'holder:' || v_holder_user) || ':' || public.normalize_person_name(v_name),
+			v_name, v_email);
+		v_companion := v_resolved.person_id;
+		if v_resolved.created then v_people_created := v_people_created + 1; end if;
+		if v_resolved.needs_review then v_people_review := v_people_review + 1; end if;
 		if v_companion = v_holder then
 			v_rejected := v_rejected + 1;
 			continue;

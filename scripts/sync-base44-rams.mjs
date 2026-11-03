@@ -245,7 +245,7 @@ export function mapCompanions(bookings, { companies = COMPANY_CLIENTS } = {}) {
       const name = text(c?.full_name, 200);
       const email = text(c?.email, 254)?.toLowerCase() ?? null;
       if (!name || !nameKey(name)) { held += 1; continue; }
-      const key = `${b.user_id}|${email ?? nameKey(name)}`;
+      const key = `${b.user_id}|${email ?? ''}|${nameKey(name)}`;
       const prior = pairs.get(key);
       const later = !prior || (date && (!prior.last_booking_date || date >= prior.last_booking_date));
       pairs.set(key, {
