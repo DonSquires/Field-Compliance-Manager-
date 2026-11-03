@@ -95,6 +95,27 @@ describe('ReportActivityReview', () => {
     await screen.findByText('Trespass');
   });
 
+  it('shows accessible summary charts for activity, locations, culls and hunter returns', async () => {
+    const report = {
+      ...activityReportFixture,
+      hunterReturns: {
+        animals: 15,
+        bySpecies: [{ species: 'Possum', animals: 12 }, { species: 'Goat', animals: 3 }],
+      },
+    };
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ ...data, activityReport: report }} status="draft" />);
+    const charts = screen.getByRole('group', { name: 'Activity statistics charts' });
+    expect(within(charts).getByText('Activity type highlights')).toBeTruthy();
+    expect(within(charts).getByText('Top locations')).toBeTruthy();
+    expect(within(charts).getByText('Pest culls by species')).toBeTruthy();
+    const hunterChart = within(charts).getByText('Hunter animals by species').closest('figure')!;
+    expect(within(hunterChart).getByText('Possum')).toBeTruthy();
+    expect(within(hunterChart).getByText('12')).toBeTruthy();
+    expect(within(hunterChart).getByRole('list').querySelectorAll('li')).toHaveLength(2);
+    expect(within(charts).getByText(/Charts highlight the highest recorded counts/)).toBeTruthy();
+    await screen.findByText('Trespass');
+  });
+
   it('leads with incidents and investigations, loading their detail and photos straight away', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="generated" />);
     const incidents = incidentsSection();

@@ -81,6 +81,20 @@ test('client summary sections use plain language and carry no operational or sys
   const metrics = blocks.find((block) => block.kind === 'metrics');
   assert.deepEqual(metrics.items.map((item) => item.label), ['Locations with activity', 'Entries recorded', 'Incidents', 'Observations', 'Patrols', 'CCTV activity', 'Photos', 'Pest culls recorded']);
   assert.equal(metrics.items.find((item) => item.label === 'Pest culls recorded').value, '1');
+  const charts = blocks.find((block) => block.kind === 'charts');
+  assert.deepEqual(charts.charts.map((chart) => chart.title), ['Activity type highlights', 'Top locations', 'Pest culls by species']);
+  assert.deepEqual(charts.charts[0].items[0], { label: 'Patrols and site checks', value: 4 });
+  assert.deepEqual(charts.charts[1].items[0], { label: 'Alpha Reserve', value: 8 });
+  assert.deepEqual(charts.charts[2].items[0], { label: 'Possum', value: 1 });
+  assert.ok(blocks.indexOf(charts) < blocks.findIndex((block) => block.kind === 'section' && block.title === 'Activity Overview'));
+  const withHunters = monthlyActivityBlocks({ activityReport: {
+    ...report,
+    hunterReturns: { animals: 15, bySpecies: [{ species: 'Possum', animals: 12 }, { species: 'Goat', animals: 3 }] },
+  } }, lines);
+  assert.deepEqual(withHunters.find((block) => block.kind === 'charts').charts.at(-1), {
+    title: 'Hunter animals by species',
+    items: [{ label: 'Possum', value: 12 }, { label: 'Goat', value: 3 }],
+  });
 
   const text = allText(blocks);
   assert.doesNotMatch(text, FORBIDDEN);
@@ -175,7 +189,7 @@ test('PDF, send gate and every web surface agree on the current renderer version
   const pdf = version(read('supabase/functions/generate-report-pack-pdf/index.ts'), /const rendererVersion = '([^']+)'/);
   const send = version(read('supabase/functions/send-report-pack/index.ts'), /const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
   const web = version(read('apps/web/src/lib/reportPackRenderer.ts'), /export const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
-  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v12');
+  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v13');
   assert.equal(send, pdf);
   assert.equal(web, pdf);
   for (const surface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {

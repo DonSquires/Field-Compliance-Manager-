@@ -105,6 +105,46 @@ test('matches the leading location segment of "<Location> - <Area> - <Client>" f
   });
 });
 
+test('falls back to a shared distinctive place word for drifted folder names', () => {
+  return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
+  const homestead = parsePhotoName('261003 094018.png');
+  const index = indexPhotoTargets([
+    { id: 'manuka-card-review', observed_at: '2026-10-02T20:40:00Z', place_aliases: ['Manuka Island Forest (OneFortyOne)', 'Homestead Rd', 'MANU'] },
+    { id: 'other-forest', observed_at: '2026-10-02T20:40:00Z', place_aliases: ['Serpentine (OneFortyOne)', 'Serpentine Gate'] },
+  ]);
+  const typo = matchPhotoTarget(homestead, 'Photos/Homstead Rd - Manuka Island - OFO/261003 094018.png', index);
+  assert.equal(typo.status, 'matched');
+  assert.equal(typo.target.id, 'manuka-card-review');
+  assert.equal(typo.matchType, 'place_near');
+  const serpentine = matchPhotoTarget(homestead, 'Photos/Serpentine Rd - Rai Forest - OFO/261003 094018.png', index);
+  assert.equal(serpentine.target.id, 'other-forest');
+  assert.equal(matchPhotoTarget(homestead, 'Photos/Gate Rd - Forest - OFO/261003 094018.png', index).status, 'unmatched');
+  assert.equal(matchPhotoTarget(homestead, 'Photos/Manuka Serpentine/261003 094018.png', index).status, 'unmatched');
+  });
+});
+
+test('matches the four OFO card-review photos from exact-minute event place aliases', () => {
+  return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
+    const index = indexPhotoTargets([
+      { id: 'homestead-0940', observed_at: '2026-10-02T20:40:00Z', place_aliases: ['Manuka Island Forest (OneFortyOne)', 'Homestead Rd'] },
+      { id: 'homestead-1340', observed_at: '2026-10-03T00:40:00Z', place_aliases: ['Manuka Island Forest (OneFortyOne)', 'Homestead Rd'] },
+      { id: 'homestead-1624', observed_at: '2026-10-04T03:24:00Z', place_aliases: ['Manuka Island Forest (OneFortyOne)', 'Homestead Rd'] },
+      { id: 'serpentine-1548', observed_at: '2026-10-11T02:48:00Z', place_aliases: ['Serpentine (OneFortyOne)', 'Serpentine Gate'] },
+    ]);
+    const files = [
+      ['Photos/Homstead Rd - Manuka Island - OFO/261003 094018.png', 'homestead-0940'],
+      ['Photos/Homstead Rd - Manuka Island - OFO/261003 134044.png', 'homestead-1340'],
+      ['Photos/Homstead Rd - Manuka Island - OFO/261004 1624.png', 'homestead-1624'],
+      ['Photos/Serpentine Rd - Rai Forest - OFO/261011 154832 cyclists x 2 and dog.jpg', 'serpentine-1548'],
+    ];
+    for (const [file, expectedId] of files) {
+      const match = matchPhotoTarget(parsePhotoName(file), file, index);
+      assert.equal(match.status, 'matched', file);
+      assert.equal(match.target.id, expectedId, file);
+    }
+  });
+});
+
 test('holds multiple same-minute plate or place candidates as ambiguous', () => {
   return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
   const parsed = parsePhotoName('260920 163612 GKJ550.jpg');

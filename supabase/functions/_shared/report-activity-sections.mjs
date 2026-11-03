@@ -253,6 +253,14 @@ function speciesCulls(report) {
   return rows(obj(report.pestControl)?.bySpecies).reduce((sum, row) => sum + num(row.culls), 0);
 }
 
+function summaryChart(title, source, itemLabel, itemValue) {
+  const items = source.map((row) => ({ label: itemLabel(row), value: num(itemValue(row)) }))
+    .filter((item) => item.label && item.value > 0)
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+    .slice(0, 5);
+  return items.length ? { title, items } : null;
+}
+
 /**
  * Client summary sections for a monthly pack: at a glance, incidents and
  * investigations (with each incident itemised), activity by location, pest
@@ -288,6 +296,25 @@ export function monthlyActivityBlocks(data, activityLines) {
   if (text(report.basis)) blocks.push(note(text(report.basis), 8.5, true));
 
   const categories = rows(report.categories);
+  const activityChart = summaryChart('Activity type highlights', categories,
+    (row) => label('category', text(row.code)), (row) => row.entries);
+  const camera = categories.find((row) => text(row.code) === 'camera_activation');
+  if (activityChart && num(camera?.entries) > 0 && !activityChart.items.some((item) => item.label === label('category', 'camera_activation'))) {
+    activityChart.items.push({ label: label('category', 'camera_activation'), value: num(camera.entries) });
+  }
+  const charts = [
+    activityChart,
+    summaryChart('Top locations', rows(report.byPlace),
+      (row) => text(row.place) || NO_PLACE_LABEL, (row) => row.entries),
+    summaryChart('Pest culls by species', rows(pest.bySpecies),
+      (row) => label('species', text(row.code)), (row) => row.culls),
+    summaryChart('Hunter animals by species', rows(hunters?.bySpecies),
+      (row) => text(row.species), (row) => row.animals),
+  ].filter(Boolean);
+  if (charts.length) {
+    blocks.push({ kind: 'charts', charts });
+    blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
+  }
   blocks.push(section('Activity Overview'));
   if (categories.length) {
     blocks.push(table(

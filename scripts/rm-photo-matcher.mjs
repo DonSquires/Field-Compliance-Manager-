@@ -141,15 +141,60 @@ export function indexPhotoTargets(targets) {
 
 export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
   const candidates = targetsByMinute.get(parsed.minuteKey) ?? [];
-  // Library folders are named "<Location> - <Area> - <Client>", so the leading location
-  // segment is compared as well as the whole folder name.
   const folderPlaces = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1)
-    .flatMap((folder) => [folder, folder.split(/\s+-\s+/)[0]])
-    .map(normalizePlace).filter(Boolean);
-  const matched = candidates.filter((target) => parsed.plate
+    .flatMap((folder) => folder.split(/\s+-\s+/))
+    .map(normalizePlace)
+    .filter(Boolean);
+  const folderTokenGroups = folderPlaces.map((place) => distinctivePlaceTokens([place]))
+    .filter((tokens) => tokens.length);
+  let matchType = parsed.plate ? 'rego' : 'place';
+  let matched = candidates.filter((target) => parsed.plate
     ? target.plateCandidates.has(parsed.plate)
     : folderPlaces.some((place) => target.placeAliases.has(place)));
+  if (!parsed.plate && matched.length === 0) {
+    // Hand-named folders can contain abbreviations or a one-character typo. Require every
+    // significant word in one folder segment to match the same place alias at this exact minute.
+    matched = candidates.filter((target) => {
+      const aliases = [...target.placeAliases].map((alias) => distinctivePlaceTokens([alias]));
+      return folderTokenGroups.some((tokens) => aliases.some((alias) => tokens.every((token) => alias.some((word) => placeTokensMatch(token, word)))));
+    });
+    matchType = 'place_near';
+  }
   const unique = [...new Map(matched.map((target) => [target.id, target])).values()];
-  if (unique.length === 1) return { status: 'matched', target: unique[0], matchType: parsed.plate ? 'rego' : 'place' };
+  if (unique.length === 1) return { status: 'matched', target: unique[0], matchType };
   return { status: unique.length > 1 ? 'ambiguous' : 'unmatched', target: null };
+}
+
+const GENERIC_PLACE_WORDS = new Set([
+  'road', 'street', 'lane', 'drive', 'gate', 'gates', 'forest', 'forests', 'reserve', 'block', 'track',
+  'camera', 'cameras', 'cctv', 'photos', 'photo', 'images', 'image', 'footage', 'site', 'area', 'north',
+  'south', 'east', 'west', 'upper', 'lower', 'main', 'entrance', 'onefortyone', 'private', 'general',
+]);
+
+function distinctivePlaceTokens(places) {
+  const tokens = new Set();
+  for (const place of places) {
+    for (const token of String(place ?? '').split(' ')) {
+      if (token.length >= 4 && !/^[0-9]+$/.test(token) && !GENERIC_PLACE_WORDS.has(token)) tokens.add(token);
+    }
+  }
+  return [...tokens];
+}
+
+function placeTokensMatch(a, b) {
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 6 || Math.abs(a.length - b.length) > 1) return false;
+  // At most one inserted, deleted or substituted letter.
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i += 1; j += 1; continue; }
+    edits += 1;
+    if (edits > 1) return false;
+    if (a.length > b.length) i += 1;
+    else if (b.length > a.length) j += 1;
+    else { i += 1; j += 1; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
 }

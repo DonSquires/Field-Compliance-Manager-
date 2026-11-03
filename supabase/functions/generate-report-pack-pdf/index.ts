@@ -13,7 +13,7 @@ import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v12';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v13';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -321,6 +321,37 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
     });
     y -= rowCount * (tileHeight + gap) + 6;
   };
+  const drawCharts = (block: Extract<ReportBlock, { kind: 'charts' }>) => {
+    const gap = 10;
+    const cardWidth = (WIDTH - gap) / 2;
+    const rowHeight = 14;
+    const labelWidth = 80;
+    const valueWidth = 28;
+    for (let start = 0; start < block.charts.length; start += 2) {
+      const charts = block.charts.slice(start, start + 2);
+      const rowCount = Math.max(...charts.map((chart) => chart.items.length));
+      const height = 25 + rowCount * rowHeight;
+      ensure(height + 10);
+      const top = y + 6;
+      charts.forEach((chart, index) => {
+        const x = LEFT + index * (cardWidth + gap);
+        page.drawRectangle({ x, y: top - height, width: cardWidth, height, color: STRIPE, borderColor: RULE, borderWidth: 0.5 });
+        drawRuns(fit(chart.title, bold, 8.5, cardWidth - 16), x + 8, top - 13, bold, 8.5, BRAND);
+        const maxValue = Math.max(1, ...chart.items.map((item) => item.value));
+        const trackX = x + 8 + labelWidth + 5;
+        const trackWidth = cardWidth - 16 - labelWidth - 5 - valueWidth - 4;
+        chart.items.forEach((item, row) => {
+          const baseline = top - 28 - row * rowHeight;
+          drawRuns(fit(item.label, normal, 7.5, labelWidth), x + 8, baseline, normal, 7.5, INK);
+          page.drawRectangle({ x: trackX, y: baseline + 1, width: trackWidth, height: 4, color: BRAND_SOFT });
+          page.drawRectangle({ x: trackX, y: baseline + 1, width: trackWidth * Math.min(1, item.value / maxValue), height: 4, color: BRAND });
+          const value = new Intl.NumberFormat('en-NZ', { maximumFractionDigits: 0 }).format(item.value);
+          drawRuns(value, x + cardWidth - 8 - textWidth(value, normal, 7.5), baseline, normal, 7.5, MUTED);
+        });
+      });
+      y = top - height - 10;
+    }
+  };
   const drawEntry = (block: Extract<ReportBlock, { kind: 'entry' }>) => {
     const incident = block.tone === 'incident';
     const innerX = LEFT + 12;
@@ -389,6 +420,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
       else if (block.kind === 'subsection') drawSubsection(block.title, block.detail);
       else if (block.kind === 'table') drawTable(block);
       else if (block.kind === 'metrics') drawMetrics(block.items);
+      else if (block.kind === 'charts') drawCharts(block);
       else if (block.kind === 'entry') drawEntry(block);
       else { draw(block.text, block.bold ? bold : normal, block.size ?? 10, block.muted ? MUTED : INK); y -= 2; }
     }

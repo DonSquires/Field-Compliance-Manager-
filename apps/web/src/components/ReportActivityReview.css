@@ -17,6 +17,17 @@
 .report-activity-metrics .is-alert { border-color: var(--color-danger, #ef4444); box-shadow: inset 3px 0 0 var(--color-danger, #ef4444); }
 .report-activity-metrics .is-alert strong { color: var(--color-danger, #f87171); }
 
+.report-activity-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.report-activity-chart { min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--color-border, #334155); border-radius: 6px; background: var(--color-bg-secondary, transparent); }
+.report-activity-chart figcaption { margin-bottom: 8px; color: var(--color-text-primary, #e2e8f0); font-size: 12px; font-weight: 600; }
+.report-activity-chart ol { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.report-activity-chart li { display: grid; grid-template-columns: minmax(64px, 1fr) minmax(48px, 1.15fr) auto; align-items: center; gap: 8px; min-width: 0; font-size: 11px; }
+.report-activity-chart-label { overflow: hidden; color: var(--color-text-secondary, #cbd5e1); text-overflow: ellipsis; white-space: nowrap; }
+.report-activity-chart-track { display: block; height: 6px; overflow: hidden; border-radius: 999px; background: var(--color-bg-tertiary, #1e293b); }
+.report-activity-chart-track span { display: block; height: 100%; border-radius: inherit; background: var(--color-primary, #60a5fa); }
+.report-activity-chart li strong { min-width: 2ch; color: var(--color-text-primary, #e2e8f0); font-variant-numeric: tabular-nums; text-align: right; }
+.report-activity-chart-note { grid-column: 1 / -1; margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 11px; }
+
 .report-activity-section { margin-top: 20px; }
 .report-activity-section > h5,
 .report-section-head { padding-bottom: 6px; border-bottom: 1px solid var(--color-border, #334155); }
@@ -119,6 +130,7 @@
   .report-activity-more,
   .report-log-status .btn { width: 100%; min-height: 44px; justify-content: center; }
   .report-activity-metrics { grid-template-columns: 1fr 1fr; }
+  .report-activity-charts { grid-template-columns: 1fr; }
   .report-activity-table .reports-table { min-width: 0; }
   .report-activity-table .reports-table th,
   .report-activity-table .reports-table td { padding: 8px 6px; overflow-wrap: break-word; }
