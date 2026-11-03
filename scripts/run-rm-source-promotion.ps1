@@ -1,10 +1,10 @@
-# Scheduled R&M source promotion: new/changed workbook rows and structured-name photos.
+# Scheduled R&M source promotion: all mapped client workbooks and structured-name photos.
 # The owner approved unattended commits (seeded R&M spreadsheets are verified source truth).
 # The service-role key is fetched at runtime from the linked Supabase CLI and never written to disk.
 param(
   [Parameter(Mandatory = $true)][string]$SourceRoot,
   [Parameter(Mandatory = $true)][string]$StateDir,
-  [int]$PhotoLimit = 200
+  [ValidateRange(1, 5000)][int]$PhotoLimit = 5000
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
