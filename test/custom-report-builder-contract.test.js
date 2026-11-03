@@ -9,6 +9,7 @@ const builder = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/compone
 const snapshot = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CustomReportSnapshot.tsx'), 'utf8');
 const hub = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ReportsHubPage.tsx'), 'utf8');
 const pdf = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/generate-report-pack-pdf/index.ts'), 'utf8');
+const pdfTextFonts = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/_shared/pdf-text-fonts.mjs'), 'utf8');
 const email = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/send-report-pack/index.ts'), 'utf8');
 
 test('custom report generation is agreement anchored and provider-admin governed', () => {
@@ -87,7 +88,8 @@ test('PDF and email artifacts carry the frozen custom scope', () => {
   assert.match(pdf, /Frozen report scope/);
   assert.match(pdf, /report_scope/);
   assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v12/);
-  assert.match(pdf, /widthOfTextAtSize/);
+  assert.match(pdf, /pdfTextWidth\(text, fonts, size\)/);
+  assert.match(pdfTextFonts, /widthOfTextAtSize\(character, 1\)/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /provider-private draft for review/);
   assert.match(pdf, /published in the authorized client portal/);

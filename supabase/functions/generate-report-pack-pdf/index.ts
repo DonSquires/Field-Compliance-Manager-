@@ -6,7 +6,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
-import { pdfTextFontRuns } from '../_shared/pdf-text-fonts.ts';
+import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
 import { monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 
@@ -99,46 +99,8 @@ function customScopeLines(reportScope: unknown): string[] {
   ];
 }
 
-function textWidth(text: string, fonts: PdfFontPair, size: number) {
-  return pdfTextFontRuns(text, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)
-    .reduce((width, run) => width + run.font.widthOfTextAtSize(run.text, size), 0);
-}
-
-function splitTokenToWidth(token: string, fonts: PdfFontPair, size: number, maxWidth: number) {
-  const chunks: string[] = [];
-  let chunk = '';
-  for (const character of Array.from(token)) {
-    const candidate = `${chunk}${character}`;
-    if (chunk && textWidth(candidate, fonts, size) > maxWidth) {
-      chunks.push(chunk);
-      chunk = character;
-    } else {
-      chunk = candidate;
-    }
-  }
-  if (chunk) chunks.push(chunk);
-  return chunks;
-}
-
-function wrapText(text: string, fonts: PdfFontPair, size: number, maxWidth: number) {
-  const lines: string[] = [];
-  for (const paragraph of text.split('\n')) {
-    const tokens = paragraph.trim().split(/\s+/).filter(Boolean).flatMap((token) => splitTokenToWidth(token, fonts, size, maxWidth));
-    let line = '';
-    for (const token of tokens) {
-      const candidate = line ? `${line} ${token}` : token;
-      if (line && textWidth(candidate, fonts, size) > maxWidth) {
-        lines.push(line);
-        line = token;
-      } else {
-        line = candidate;
-      }
-    }
-    if (line) lines.push(line);
-    if (!tokens.length) lines.push(' ');
-  }
-  return lines;
-}
+const textWidth = (text: string, fonts: PdfFontPair, size: number) => pdfTextWidth(text, fonts, size);
+const wrapText = (text: string, fonts: PdfFontPair, size: number, maxWidth: number) => wrapPdfText(text, fonts, size, maxWidth);
 
 interface ReportRenderInput {
   templateTitle: string;
@@ -276,7 +238,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
     let cursor = x;
     for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
       page.drawText(run.text, { x: cursor, y: baseline, size, font: run.font, color });
-      cursor += run.font.widthOfTextAtSize(run.text, size);
+      cursor += pdfFontTextWidth(run.font, run.text, size);
     }
   };
   const fit = (value: string, fonts: PdfFontPair, size: number, maxWidth: number) => {

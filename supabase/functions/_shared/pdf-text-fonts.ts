@@ -10,4 +10,4 @@ export interface PdfTextFontPair<TFont> {
   latinExtendedCodePoints: ReadonlySet<number>;
 }
 
-export { pdfTextFontRuns, pdfTextFontPair, pdfTextWidth, wrapPdfText } from './pdf-text-fonts.mjs';
+export { pdfFontTextWidth, pdfTextFontRuns, pdfTextFontPair, pdfTextWidth, wrapPdfText } from './pdf-text-fonts.mjs';

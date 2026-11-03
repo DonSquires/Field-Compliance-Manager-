@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const send = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/send-report-pack/index.ts'), 'utf8');
 const pdf = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/generate-report-pack-pdf/index.ts'), 'utf8');
+const pdfTextFonts = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/_shared/pdf-text-fonts.mjs'), 'utf8');
 const pdfFonts = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/_shared/pdf-noto-fonts.ts'), 'utf8');
 const pdfFontData = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/_shared/pdf-noto-font-data.ts'), 'utf8');
 const client = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ClientPortalPage.tsx'), 'utf8');
@@ -53,7 +54,8 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdf, /agreementName: reportAgreementName\(pack\)/);
   assert.match(pdf, /remove\(\[path\]\)/);
   assert.match(pdf, /remove\(\[pack\.pdf_path\]\)/);
-  assert.match(pdf, /widthOfTextAtSize/);
+  assert.match(pdf, /pdfTextWidth\(text, fonts, size\)/);
+  assert.match(pdfTextFonts, /widthOfTextAtSize\(character, 1\)/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /return expected !== 0 \|\| completed !== 0/);
   assert.match(send, /fcm-report-pack-pdf-lib-a4-v12/);
