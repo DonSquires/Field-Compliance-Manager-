@@ -538,7 +538,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
   const drawCover = () => {
     const logoSize = logoImage ? logoImage.scaleToFit(150, 44) : null;
     const headerWidth = logoSize ? WIDTH - logoSize.width - 18 : WIDTH;
-    const titleLines = wrapText(reportTitle, bold, 20, headerWidth).slice(0, 3);
+    const titleLines = wrapText(reportTitle, bold, 20, headerWidth).slice(0, logoSize ? 4 : 3);
     const bandHeight = Math.max(40 + (providerName ? 22 : 0) + titleLines.length * 25, logoSize ? logoSize.height + 36 : 0);
     page.drawRectangle({ x: 0, y: PAGE_SIZE[1] - bandHeight, width: PAGE_SIZE[0], height: bandHeight, color: BRAND });
     if (logoImage && logoSize) {

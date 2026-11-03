@@ -18,7 +18,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
-import { reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
+import { fetchCappedBytes, reportEmailMimeContent, reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -249,11 +249,11 @@ async function createReportDownloadUrl(admin: SupabaseClient, pdfPath: string) {
   return data.signedUrl;
 }
 
-async function loadReportAttachment(admin: SupabaseClient, pdfPath: string) {
-  const { data, error } = await admin.storage.from('bob-uploads').download(pdfPath);
-  if (error || !data) throw new RequestError(error?.message ?? 'Reviewed PDF could not be loaded for attachment', 502);
-  if (data.size > MAX_PDF_ATTACHMENT_BYTES) return null;
-  return new Uint8Array(await data.arrayBuffer());
+// The attachment is best effort: a PDF that is too large or cannot be fetched
+// is sent as the signed download link only, and never triggers the failed
+// delivery path that removes the reviewed PDF.
+async function loadReportAttachment(pdfUrl: string) {
+  return await fetchCappedBytes(pdfUrl, { maxBytes: MAX_PDF_ATTACHMENT_BYTES, timeoutMs: 20000 });
 }
 
 async function sendEmail(pack: ReportPackEmail, recipient: string, pdfUrl: string, pdfBytes: Uint8Array | null) {
@@ -271,7 +271,7 @@ async function sendEmail(pack: ReportPackEmail, recipient: string, pdfUrl: strin
       from: SMTP_FROM,
       to: recipient,
       subject: reportEmailSubject({ title, periodStart: pack.period_start, periodEnd: pack.period_end }),
-      html: summaryHtml(pack, pdfUrl, pdfBytes !== null),
+      mimeContent: reportEmailMimeContent(summaryHtml(pack, pdfUrl, pdfBytes !== null)),
       attachments: pdfBytes
         ? [{ filename: reportPdfFilename({ title, periodStart: pack.period_start, periodEnd: pack.period_end }), content: pdfBytes, encoding: 'binary', contentType: 'application/pdf' }]
         : []
@@ -299,7 +299,7 @@ async function handleReportDelivery(req: Request) {
 
   try {
     const pdfUrl = await createReportDownloadUrl(admin, pack.pdf_path);
-    const pdfBytes = await loadReportAttachment(admin, pack.pdf_path);
+    const pdfBytes = await loadReportAttachment(pdfUrl);
     await sendEmail(pack, claim.recipient, pdfUrl, pdfBytes);
   } catch (sendError) {
     const message = sendError instanceof Error ? sendError.message : 'SMTP send failed';
