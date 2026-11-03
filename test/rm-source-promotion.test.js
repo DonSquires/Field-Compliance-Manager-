@@ -61,6 +61,13 @@ test('the reviewed R&M source map is valid', async () => {
   assert.doesNotThrow(() => validateSourceMap(map));
 });
 
+test('daily source promotion scans all mapped clients and imports records and photos', async () => {
+  const runner = await readFile(new URL('../scripts/run-rm-source-promotion.ps1', import.meta.url), 'utf8');
+  assert.match(runner, /\[ValidateRange\(1,\s*5000\)\]\[int\]\$PhotoLimit\s*=\s*5000/);
+  assert.match(runner, /--commit --photos --photo-limit \$PhotoLimit/);
+  assert.doesNotMatch(runner, /--only/);
+});
+
 test('unmapped and held workbooks never reach the writer', async () => {
   const calls = [];
   const held = await promoteWorkbookVersion({ version: { relative_path: 'Patrol Log Entries/All Log Spreadsheets/ACTIVE DIGGER log.xlsx', sha256: SHA },
