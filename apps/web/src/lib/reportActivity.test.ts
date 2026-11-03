@@ -11,12 +11,12 @@ import {
   readActivityLines,
   readActivityReport,
   reportDate,
-  routineSummary,
+  isRoutineCheck,
+  routineCheckRows,
   REVIEW_SECTIONS,
   reviewSectionCode,
   siteLogGroups,
   summaryMarkup,
-  summaryPhotos,
   textParagraphs,
   activityLineKey,
   applyIncidentTriage,
@@ -125,19 +125,28 @@ describe('describeActivityLine', () => {
 });
 
 describe('siteLogGroups', () => {
-  it('groups by location, folds routine patrols and keeps incidents and CCTV reviews out of the site log', () => {
+  it('groups by location and keeps incidents, CCTV reviews and routine checks out of the site log', () => {
     const groups = siteLogGroups(lines);
     expect(groups.map((group) => group.place)).toEqual(['Alpha Reserve']);
     expect(lines.some((entry) => reviewSectionCode(entry) === 'camera_activation')).toBe(true);
-    expect(groups[0].lines).toHaveLength(7);
-    expect(groups[0].routine).toHaveLength(2);
-    expect(groups[0].entries.some((entry) => entry.kind === 'incident')).toBe(false);
-    expect(routineSummary(groups[0].routine)).toBe('2 routine patrols with nothing further to report (7, 9 Sep).');
+    expect(lines.filter(isRoutineCheck)).toHaveLength(2);
+    expect(groups[0].lines.some((entry) => entry.kind === 'incident' || isRoutineCheck(entry))).toBe(false);
+  });
+
+  it('treats only short status-only patrols and checks as routine', () => {
+    const base = line(0);
+    const check = (patch: Partial<ActivityLine>) => isRoutineCheck({ ...base, kind: 'event', category: 'inspection', action: '', photos: 0, photoRefs: [], materials: [], note: '', confirmedType: null, ...patch } as ActivityLine);
+    expect(check({ note: 'Secure' })).toBe(true);
+    expect(check({ note: '4 vehicles all permitted.' })).toBe(true);
+    expect(check({ note: 'Large log beside gate freshly pulled out' })).toBe(false);
+    expect(check({ note: 'Secure', photos: 1 })).toBe(false);
+    expect(check({ note: 'Secure', action: 'Relocked' })).toBe(false);
+    expect(check({ category: 'work_order' })).toBe(false);
   });
 });
 
 describe('parity with the client PDF renderer', () => {
-  it('produces the same entries, locations and routine fold as report-activity-sections.mjs', async () => {
+  it('produces the same entries, locations and routine checks as report-activity-sections.mjs', async () => {
     const sections = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(readFileSync(SECTIONS_PATH)).toString('base64')}`) as {
       siteLogBlocks: (data: unknown, lines: unknown) => PdfBlock[];
       monthlyActivityBlocks: (data: unknown, lines: unknown, options?: { summary?: string; highlights?: string }) => PdfBlock[] | null;
@@ -154,11 +163,14 @@ describe('parity with the client PDF renderer', () => {
 
     const logBlocks = sections.siteLogBlocks(data, activityLinesFixture);
     const groups = siteLogGroups(lines);
-    expect(logBlocks.filter(isEntry).map(asWeb)).toEqual(groups.flatMap((group) => group.entries.map((entry) => describeActivityLine(report, entry))));
+    expect(logBlocks.filter(isEntry).map(asWeb)).toEqual(groups.flatMap((group) => group.lines.map((entry) => describeActivityLine(report, entry))));
     expect(logBlocks.filter((block): block is { kind: 'subsection'; title: string; detail?: string } => block.kind === 'subsection'))
       .toEqual(groups.map((group) => ({ kind: 'subsection', title: group.place, detail: countedText(group.lines.length, 'entry', 'entries') })));
-    expect(logBlocks.flatMap((block) => (block.kind === 'text' && 'text' in block && /routine patrol/.test(block.text) ? [block.text] : [])))
-      .toEqual(groups.filter((group) => group.routine.length > 0).map((group) => routineSummary(group.routine)));
+    expect(logBlocks.some((block) => block.kind === 'text' && 'text' in block && /routine patrol/.test(block.text))).toBe(false);
+    const routineTable = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [])
+      .find((block): block is { kind: 'table'; rows: string[][] } => block.kind === 'table' && 'rows' in block && (block as { columns?: Array<{ label: string }> }).columns?.[0]?.label === 'Check');
+    expect(routineCheckRows(report, lines).length).toBeGreaterThan(0);
+    expect(routineTable?.rows).toEqual(routineCheckRows(report, lines).map((row) => [row.check, String(row.checks), String(row.places), row.results]));
 
     const incidentBlocks = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? []).filter(isEntry);
     const withPlace = (entry: ActivityLine) => {
@@ -171,7 +183,6 @@ describe('parity with the client PDF renderer', () => {
     ].map(withPlace));
 
     const monthly = sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [];
-    const gallery = summaryPhotos(report, lines);
     expect(monthly.some((block) => block.kind === 'rich')).toBe(false);
     const summary = '**Executive Summary: October 2026**\n\n**Significant Issues**\n* **Smiths:** gate forced.\n- Lock failed.\n\nFirst.\nSecond line.';
     const written = sections.monthlyActivityBlocks(data, activityLinesFixture, { summary }) ?? [];
@@ -193,8 +204,7 @@ describe('parity with the client PDF renderer', () => {
       ...triagedWeb.filter(isIncidentLine),
       ...REVIEW_SECTIONS.flatMap((review) => triagedWeb.filter((entry) => reviewSectionCode(entry) === review.code)),
     ].map(withPlace));
-    const pdfGallery = monthly.find((block): block is { kind: 'gallery'; photos: Array<{ ref: { b: string; p: string }; caption: string }> } => block.kind === 'gallery');
-    expect(pdfGallery?.photos.map((photo) => ({ ref: { bucket: photo.ref.b, path: photo.ref.p }, caption: photo.caption })) ?? []).toEqual(gallery);
+    expect(monthly.some((block) => block.kind === 'gallery')).toBe(false);
   });
 });
 

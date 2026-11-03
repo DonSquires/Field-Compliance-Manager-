@@ -89,7 +89,7 @@ export interface ActivityEntry {
   tone: 'incident' | 'default';
 }
 
-export interface SiteLogGroup { place: string; lines: ActivityLine[]; entries: ActivityLine[]; routine: ActivityLine[] }
+export interface SiteLogGroup { place: string; lines: ActivityLine[] }
 
 const object = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? value as Json : null);
 const list = (value: unknown): Json[] => (Array.isArray(value) ? value.map(object).filter((item): item is Json => item !== null) : []);
@@ -386,19 +386,6 @@ export function reportDate(value: string): string {
   return `${DAYS[day.getUTCDay()]} ${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
 }
 
-function dayList(dates: string[]): string {
-  const byMonth = new Map<string, number[]>();
-  for (const value of dates) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) continue;
-    const key = `${match[1]}-${match[2]}`;
-    const days = byMonth.get(key) ?? [];
-    if (!days.includes(Number(match[3]))) days.push(Number(match[3]));
-    byMonth.set(key, days);
-  }
-  return [...byMonth.entries()].map(([key, days]) => `${days.join(', ')} ${MONTHS[Number(key.slice(5)) - 1]}`).join('; ');
-}
-
 const normText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 const sameText = (left: string, right: string) => Boolean(left && right && normText(left) === normText(right));
 // A short imported label such as "Pest" adds nothing to a category of "Pest control".
@@ -483,61 +470,63 @@ export function reviewSectionCode(line: ActivityLine): string {
   return REVIEW_SECTIONS.some((review) => review.code === line.category) ? line.category : '';
 }
 
-/** Site-log grouping as in the PDF: incidents, CCTV reviews and administration excluded (they have their own sections), locations A-Z, "Not location-specific" last. */
+/** Longest note, in words, that still reads as a status rather than a report (ROUTINE_STATUS_WORDS in the PDF). */
+export const ROUTINE_STATUS_WORDS = 4;
+const ROUTINE_CHECK_CATEGORIES = new Set(['patrol_visit', 'inspection']);
+const ROUTINE_RESULTS_SHOWN = 4;
+
+/**
+ * A patrol or check whose only record is a short status (no action, nothing used, no photo, not an incident).
+ * Summarised under Routine checks rather than listed; structural, not a keyword list.
+ */
+export function isRoutineCheck(line: ActivityLine): boolean {
+  if (isIncidentLine(line) || line.kind !== 'event' || !ROUTINE_CHECK_CATEGORIES.has(line.category)) return false;
+  if (line.action || line.photos > 0 || line.photoRefs.length > 0 || line.materials.length > 0) return false;
+  const status = line.note.trim();
+  return !status || (status.length <= 40 && (status.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= ROUTINE_STATUS_WORDS);
+}
+
+export interface RoutineCheckRow { check: string; checks: number; places: number; results: string }
+
+/** Routine checks by type with their recorded results, most common first (routineCheckRows in the PDF). */
+export function routineCheckRows(report: Pick<ActivityReport, 'labels'>, lines: ActivityLine[]): RoutineCheckRow[] {
+  const byCheck = new Map<string, { check: string; checks: number; places: Set<string>; results: Map<string, { text: string; count: number }> }>();
+  for (const line of lines) {
+    if (!isRoutineCheck(line)) continue;
+    const category = activityLabel(report, 'category', line.category);
+    const subject = line.subject && !['other', 'general'].includes(line.subject) ? activityLabel(report, 'subject', line.subject) : '';
+    const check = subject && !sameText(subject, category) ? `${category} ? ${subject}` : category;
+    const row = byCheck.get(check) ?? { check, checks: 0, places: new Set<string>(), results: new Map() };
+    row.checks += 1;
+    row.places.add(line.place || NO_PLACE_LABEL);
+    const status = line.note.trim().replace(/[.\s]+$/, '');
+    const result = status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Nothing to report';
+    const seen = row.results.get(result.toLowerCase()) ?? { text: result, count: 0 };
+    seen.count += 1;
+    row.results.set(result.toLowerCase(), seen);
+    byCheck.set(check, row);
+  }
+  return [...byCheck.values()]
+    .sort((left, right) => right.checks - left.checks || left.check.localeCompare(right.check))
+    .map((row) => {
+      const results = [...row.results.values()].sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
+      const shown = results.slice(0, ROUTINE_RESULTS_SHOWN).map((item) => `${item.text} ${formatActivityNumber(item.count)}`);
+      const rest = results.slice(ROUTINE_RESULTS_SHOWN).reduce((sum, item) => sum + item.count, 0);
+      if (rest > 0) shown.push(`other ${formatActivityNumber(rest)}`);
+      return { check: row.check, checks: row.checks, places: row.places.size, results: shown.join(' ? ') };
+    });
+}
+
+/** Site-log grouping as in the PDF: incidents, CCTV reviews, administration and routine checks excluded (they have their own sections), locations A-Z, "Not location-specific" last. */
 export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
   const byPlace = new Map<string, ActivityLine[]>();
   for (const line of lines) {
-    if (isIncidentLine(line) || reviewSectionCode(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) continue;
     byPlace.set(line.place, [...(byPlace.get(line.place) ?? []), line]);
   }
   return [...byPlace.keys()]
     .sort((left, right) => (left === NO_PLACE_LABEL ? 1 : 0) - (right === NO_PLACE_LABEL ? 1 : 0) || left.localeCompare(right))
-    .map((place) => {
-      const placeLines = byPlace.get(place) ?? [];
-      return { place, lines: placeLines, entries: placeLines.filter((line) => !isRoutineLine(line)), routine: placeLines.filter(isRoutineLine) };
-    });
-}
-
-export function routineSummary(routine: ActivityLine[]): string {
-  return `${countedText(routine.length, 'routine patrol', 'routine patrols')} with nothing further to report (${dayList(routine.map((line) => line.date))}).`;
-}
-
-export const SUMMARY_PHOTO_LIMIT = 6;
-
-/** An observation, CCTV activation or anything photographed; incidents are listed separately and routine patrols only counted. */
-export function isNotableLine(line: ActivityLine): boolean {
-  if (isIncidentLine(line) || isRoutineLine(line)) return false;
-  return line.kind === 'observation' || line.category === 'camera_activation' || line.photos > 0;
-}
-
-const noteRank = (line: ActivityLine) => (isIncidentLine(line) ? 0 : line.category === 'camera_activation' ? 1 : line.kind === 'observation' ? 2 : 3);
-const shortDate = (value: string) => {
-  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
-  return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
-};
-
-/** Summary photos: one per entry in order of importance before any entry gets a second. */
-export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: ActivityLine[]): Array<{ ref: ReportPhotoRef; caption: string }> {
-  const ranked = lines
-    .filter((line) => isIncidentLine(line) || isNotableLine(line))
-    .map((line, index) => ({ line, index }))
-    .filter((item) => item.line.photoRefs.length > 0)
-    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
-  const picks: Array<{ ref: ReportPhotoRef; caption: string }> = [];
-  const seen = new Set<string>();
-  for (let round = 0; picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
-    if (!ranked.some(({ line }) => line.photoRefs.length > round)) break;
-    for (const { line } of ranked) {
-      const ref = line.photoRefs[round];
-      const key = ref ? `${ref.bucket}/${ref.path}` : '';
-      if (!ref || seen.has(key) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
-      seen.add(key);
-      const what = line.kind === 'incident' ? activityLabel(report, 'incidentType', line.incidentType) || 'Incident'
-        : line.confirmedType ? incidentTypeLabel(line.confirmedType) : activityLabel(report, 'category', line.category);
-      picks.push({ ref, caption: [shortDate(line.date), line.place, what].filter(Boolean).join(' · ') });
-    }
-  }
-  return picks;
+    .map((place) => ({ place, lines: byPlace.get(place) ?? [] }));
 }
 
 /** Paragraphs of reviewer text, split on blank lines. */

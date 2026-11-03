@@ -145,20 +145,17 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 
-  it('opens with the reviewer text and a photo gallery whose viewer caption follows each photo', async () => {
+  it('opens with the reviewer text, keeps photos with their entries and summarises routine checks', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" summary="A quiet month overall." highlights="  " />);
     const summary = screen.getByRole('region', { name: 'Executive summary' });
     const paragraphs = [...summary.querySelectorAll('.report-activity-summary-text')].map((node) => node.textContent);
     expect(paragraphs[0]).toBe('A quiet month overall.');
     expect(paragraphs.some((paragraph) => /were recorded across/.test(paragraph ?? ''))).toBe(false);
-    const gallery = await within(summary).findByRole('list', { name: 'Selected photos' });
-    const captions = [...gallery.querySelectorAll('li > span')].map((node) => node.textContent);
-    expect(captions.length).toBeGreaterThan(1);
-    fireEvent.click(within(gallery).getAllByRole('button')[0]);
-    const viewer = await screen.findByRole('dialog', { name: `Photo 1 of ${captions.length}` });
-    expect(within(viewer).getByText(captions[0]!)).toBeTruthy();
-    fireEvent.click(within(viewer).getByRole('button', { name: /Next/ }));
-    expect(within(screen.getByRole('dialog')).getByText(captions[1]!)).toBeTruthy();
+    expect(within(summary).queryByRole('list', { name: 'Selected photos' })).toBeNull();
+    expect(summary.querySelector('img, .report-photo-thumb')).toBeNull();
+    const routine = (await screen.findByRole('heading', { name: 'Routine checks' })).closest('section') as HTMLElement;
+    expect(within(routine).getByText(/recorded a status only/)).toBeTruthy();
+    expect(within(within(routine).getByRole('region', { name: 'Routine checks by type' })).getAllByRole('row').length).toBeGreaterThan(1);
   });
 
   it('opens photos in an accessible viewer, steps through them and returns focus', async () => {
@@ -255,7 +252,7 @@ describe('ReportActivityReview', () => {
     expect(accountingRpc).not.toHaveBeenCalled();
   });
 
-  it('loads entries straight away when there are no incidents, then filters, searches and folds routine patrols', async () => {
+  it('loads entries straight away when there are no incidents, then filters and searches, leaving routine checks to their summary', async () => {
     maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'network' } });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: noIncidents }} status="draft" />);
     expect(within(incidentsSection()).getByText('No incidents were recorded at these locations during the period.')).toBeTruthy();
@@ -268,7 +265,7 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(2);
 
     const log = group(/^Site log/);
-    expect(log.querySelector('summary')?.textContent).toContain('7 entries by location, with comments and photos');
+    expect(log.querySelector('summary')?.textContent).toContain('5 entries by location, with comments and photos');
     const cctv = screen.getByRole('heading', { name: 'CCTV and camera reviews' }).closest('section') as HTMLElement;
     expect(within(cctv).getByText('Motion alert reviewed; wildlife only.')).toBeTruthy();
     await setOpen(log, true);
@@ -277,14 +274,13 @@ describe('ReportActivityReview', () => {
     expect(within(log).getByRole('heading', { name: 'Alpha Reserve' })).toBeTruthy();
     expect(within(log).queryByRole('heading', { name: 'Not location-specific' })).toBeNull();
     expect(within(log).queryByText('Motion alert reviewed; wildlife only.')).toBeNull();
-    expect(within(log).getByText('2 routine patrols with nothing further to report (7, 9 Sep).')).toBeTruthy();
+    expect(within(log).queryByText(/routine patrol/)).toBeNull();
     expect(within(log).queryByText('Trespass')).toBeNull();
     expect(within(log).getByText('Ref WO-1')).toBeTruthy();
 
     fireEvent.change(within(log).getByLabelText('Type of activity'), { target: { value: 'maintenance' } });
     expect(status.textContent).toBe('1 entry matches these filters');
     expect(within(log).getByText('Repair north gate latch')).toBeTruthy();
-    expect(within(log).queryByText(/routine patrols/)).toBeNull();
     expect(within(log).queryByRole('heading', { name: 'Not location-specific' })).toBeNull();
 
     fireEvent.click(within(log).getByRole('button', { name: 'Clear filters' }));
