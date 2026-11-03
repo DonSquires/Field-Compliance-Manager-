@@ -471,11 +471,23 @@ export function describeActivityLine(report: Pick<ActivityReport, 'labels'>, lin
   };
 }
 
-/** Site-log grouping as in the PDF: incidents excluded (they have their own section), locations A-Z, "Not location-specific" last. */
+/** CCTV/camera reviews and administration entries have their own sections, as in the PDF (REVIEW_SECTIONS). */
+export const REVIEW_SECTIONS = [
+  { code: 'camera_activation', title: 'CCTV and camera reviews', one: 'CCTV or camera entry', many: 'CCTV and camera entries' },
+  { code: 'administration', title: 'Administration and review', one: 'administration entry', many: 'administration entries' },
+] as const;
+
+/** The review section an entry belongs in, or '' when it stays in the site log. */
+export function reviewSectionCode(line: ActivityLine): string {
+  if (isIncidentLine(line)) return '';
+  return REVIEW_SECTIONS.some((review) => review.code === line.category) ? line.category : '';
+}
+
+/** Site-log grouping as in the PDF: incidents, CCTV reviews and administration excluded (they have their own sections), locations A-Z, "Not location-specific" last. */
 export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
   const byPlace = new Map<string, ActivityLine[]>();
   for (const line of lines) {
-    if (isIncidentLine(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line)) continue;
     byPlace.set(line.place, [...(byPlace.get(line.place) ?? []), line]);
   }
   return [...byPlace.keys()]

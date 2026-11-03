@@ -2,8 +2,11 @@
  * draft-report-executive-summary -- Bob drafts the exception-based executive
  * summary for a monthly client report from the pack's frozen, client-facing
  * snapshot, the reviewer's incident triage and the figures of the two months
- * before. The draft is returned to the provider reviewer only; it is never
- * saved here and reaches the client only through review_monthly_report_pack.
+ * before. By default the draft is returned to the provider reviewer only.
+ * With save_if_empty it is stored as an unreviewed Bob draft on a draft pack
+ * that has no executive summary yet, so the provider's DRAFT preview shows it
+ * (audit action monthly_report_pack_summary_draft_saved); a reviewer still
+ * edits, saves and publishes it through review_monthly_report_pack.
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -37,6 +40,7 @@ async function handleDraft(req: Request) {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const packId = typeof body.pack_id === 'string' ? body.pack_id.trim() : '';
   if (!packId) throw new RequestError('pack_id is required', 400);
+  const saveIfEmpty = body.save_if_empty === true;
 
   const authorization = req.headers.get('Authorization') ?? '';
   if (!authorization) throw new RequestError('Unauthorized', 401);
@@ -48,12 +52,17 @@ async function handleDraft(req: Request) {
   if (!profile || profile.deactivated_at || !canDraft.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
 
   const { data: pack, error: packError } = await admin.from('monthly_report_packs')
-    .select('id,organization_id,service_agreement_id,period_start,period_end,status,report_kind,data,activity_lines,agreement:service_agreement_id(name,client:client_organization_id(name))')
+    .select('id,organization_id,service_agreement_id,period_start,period_end,status,report_kind,data,activity_lines,editorial,updated_at,agreement:service_agreement_id(name,client:client_organization_id(name))')
     .eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayDraft } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayDraft !== true) throw new RequestError('Forbidden', 403);
   if (!['draft', 'generated'].includes(pack.status)) throw new RequestError('Sent report packs cannot be changed', 409);
+  const editorial = pack.editorial && typeof pack.editorial === 'object' ? pack.editorial as Record<string, unknown> : {};
+  const hasSummary = typeof editorial.executive_summary === 'string' && editorial.executive_summary.trim() !== '';
+  if (saveIfEmpty && (pack.status !== 'draft' || hasSummary)) {
+    return json({ ok: true, saved: false, skipped: hasSummary ? 'summary_exists' : 'published' });
+  }
 
   const [triageResult, trendResult] = await Promise.all([
     readPackTriage<Record<string, unknown>>(admin, pack, 'line_key,bob_flagged,bob_incident_type,bob_reason,decision,incident_type'),
@@ -81,13 +90,29 @@ async function handleDraft(req: Request) {
     throw new RequestError(error instanceof Error ? error.message : 'Bob could not draft the summary', 502);
   }
 
+  let saved = false;
+  if (saveIfEmpty) {
+    const { data: updated, error: saveError } = await admin.from('monthly_report_packs')
+      .update({
+        editorial: { ...editorial, executive_summary: draft.summary.slice(0, 4000) },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', pack.id)
+      .eq('status', 'draft')
+      .eq('updated_at', pack.updated_at)
+      .select('id');
+    if (saveError) throw new RequestError(`Summary drafted but could not be stored: ${saveError.message}`, 500);
+    saved = (updated ?? []).length === 1;
+  }
+
   const { error: auditError } = await admin.from('audit_log').insert({
     organization_id: pack.organization_id,
     actor_user_id: user.id,
-    action: 'monthly_report_pack_summary_drafted',
+    action: saved ? 'monthly_report_pack_summary_draft_saved' : 'monthly_report_pack_summary_drafted',
     target_table: 'monthly_report_packs',
     target_id: pack.id,
     metadata: {
+      saved,
       provider: draft.provider,
       model: draft.model,
       entries_sent: brief.entries.length,
@@ -97,7 +122,7 @@ async function handleDraft(req: Request) {
     },
   });
   if (auditError) throw new RequestError(`Summary drafted but audit receipt failed: ${auditError.message}`, 502);
-  return json({ ok: true, summary: draft.summary, provider: draft.provider, model: draft.model });
+  return json({ ok: true, saved, summary: draft.summary, provider: draft.provider, model: draft.model });
 }
 
 serve(async (req) => {

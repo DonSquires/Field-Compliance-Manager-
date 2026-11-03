@@ -19,6 +19,7 @@ import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportP
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { CURRENT_REPORT_PDF_RENDERER } from '../lib/reportPackRenderer';
+import { draftSummaryIfEmpty, functionErrorMessage, runIncidentScan } from '../lib/reportBob';
 import './PageStyles.css';
 
 interface BreachAlert {
@@ -123,6 +124,7 @@ function reportPdfFilename(pack: MonthlyReportPack): string {
 interface ReportPackRowProps {
   pack: MonthlyReportPack;
   busy: boolean;
+  busyStage: string | null;
   onReview: () => void;
   onOpenPdf: () => void;
   onDownloadPdf: () => void;
@@ -130,7 +132,7 @@ interface ReportPackRowProps {
   onSend: () => void;
 }
 
-function reportPdfAction(pack: MonthlyReportPack, busy: boolean, onOpenPdf: () => void, onDownloadPdf: () => void, onGeneratePdf: () => void): React.ReactNode {
+function reportPdfAction(pack: MonthlyReportPack, busy: boolean, busyStage: string | null, onOpenPdf: () => void, onDownloadPdf: () => void, onGeneratePdf: () => void): React.ReactNode {
   if (pack.status === 'sent' && hasCurrentPdf(pack)) {
     return <><button type="button" className="btn btn-sm btn-secondary" onClick={onOpenPdf} disabled={busy}>{busy ? 'Opening...' : 'Open PDF'}</button> <button type="button" className="btn btn-sm btn-secondary" onClick={onDownloadPdf} disabled={busy} aria-label="Download sent report PDF" title="Download PDF"><Download size={16} aria-hidden="true" /></button></>;
   }
@@ -138,7 +140,7 @@ function reportPdfAction(pack: MonthlyReportPack, busy: boolean, onOpenPdf: () =
     return <><button type="button" className="btn btn-sm btn-secondary" onClick={onOpenPdf} disabled={busy}>{busy ? 'Opening...' : 'Preview PDF'}</button> <button type="button" className="btn btn-sm btn-secondary" onClick={onDownloadPdf} disabled={busy} aria-label="Download report PDF" title="Download PDF"><Download size={16} aria-hidden="true" /></button></>;
   }
   if (pack.status === 'sent') return '-';
-  return <button type="button" className="btn btn-sm btn-secondary" onClick={onGeneratePdf} disabled={busy}>{busy ? 'Rendering...' : 'Generate preview'}</button>;
+  return <button type="button" className="btn btn-sm btn-secondary" onClick={onGeneratePdf} disabled={busy} aria-live="polite">{busy ? (busyStage ?? 'Rendering...') : 'Generate preview'}</button>;
 }
 
 function reportDeliveryAction(pack: MonthlyReportPack, busy: boolean, onSend: () => void): React.ReactNode {
@@ -159,7 +161,7 @@ function reportReviewAction(pack: MonthlyReportPack, onReview: () => void): Reac
   return <button type="button" className="btn btn-sm btn-secondary" onClick={onReview}>{pack.reviewed_at ? 'Edit review' : 'Review'}</button>;
 }
 
-function ReportPackRow({ pack, busy, onReview, onOpenPdf, onDownloadPdf, onGeneratePdf, onSend }: ReportPackRowProps) {
+function ReportPackRow({ pack, busy, busyStage, onReview, onOpenPdf, onDownloadPdf, onGeneratePdf, onSend }: ReportPackRowProps) {
   return (
     <tr>
       <td>{reportAgreementName(pack)}</td>
@@ -167,7 +169,7 @@ function ReportPackRow({ pack, busy, onReview, onOpenPdf, onDownloadPdf, onGener
       <td>{reportKindLabel(pack)}</td>
       <td><span className={`status-badge status-${pack.status}`}>{reportStatusLabel(pack)}</span></td>
       <td>{reportReviewAction(pack, onReview)}</td>
-      <td>{reportPdfAction(pack, busy, onOpenPdf, onDownloadPdf, onGeneratePdf)}</td>
+      <td>{reportPdfAction(pack, busy, busyStage, onOpenPdf, onDownloadPdf, onGeneratePdf)}</td>
       <td>{reportDeliveryAction(pack, busy, onSend)}</td>
     </tr>
   );
@@ -207,6 +209,7 @@ const ReportsHubPage: React.FC = () => {
   const [generatingRollup, setGeneratingRollup] = useState(false);
   const [showCustomReportBuilder, setShowCustomReportBuilder] = useState(false);
   const [busyPackId, setBusyPackId] = useState<string | null>(null);
+  const [busyStage, setBusyStage] = useState<string | null>(null);
   const [reviewingPackId, setReviewingPackId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -391,9 +394,25 @@ const ReportsHubPage: React.FC = () => {
     setBusyPackId(pack.id);
     setError(null);
     setNotice(null);
+    const bobNotes: string[] = [];
+    if (pack.report_kind !== 'custom' && pack.status !== 'sent') {
+      setBusyStage('Bob is reviewing...');
+      const scan = await runIncidentScan(pack.id);
+      if (scan.error) bobNotes.push(`Bob could not finish checking for potential incidents (${scan.error}); use Ask Bob in the review to continue.`);
+      else if (scan.flagged > 0) bobNotes.push(`Bob highlighted ${scan.flagged === 1 ? '1 possible incident' : `${scan.flagged} possible incidents`} for your review.`);
+      else if (scan.remaining > 0) bobNotes.push('Bob has more entries to check; use Ask Bob in the review to continue.');
+      if (pack.status === 'draft') {
+        setBusyStage('Bob is drafting the summary...');
+        const draft = await draftSummaryIfEmpty(pack.id);
+        if (draft.error) bobNotes.push(`Bob could not draft the executive summary (${draft.error}).`);
+        else if (draft.saved) bobNotes.push('Bob drafted the executive summary; check and edit it in the review before publishing.');
+      }
+    }
+    setBusyStage('Rendering...');
     const { error: renderError } = await supabase.functions.invoke('generate-report-pack-pdf', { body: { pack_id: pack.id } });
-    if (renderError) setError(renderError.message);
-    else { setNotice(`PDF preview for ${pack.period_start} to ${pack.period_end} is ready to review.`); await loadReports(); }
+    if (renderError) setError([await functionErrorMessage(renderError, 'The PDF preview could not be generated.'), ...bobNotes].join(' '));
+    else { setNotice([`PDF preview for ${pack.period_start} to ${pack.period_end} is ready to review.`, ...bobNotes].join(' ')); await loadReports(); }
+    setBusyStage(null);
     setBusyPackId(null);
   };
 
@@ -598,6 +617,7 @@ const ReportsHubPage: React.FC = () => {
                   key={pack.id}
                   pack={pack}
                   busy={busyPackId === pack.id}
+                  busyStage={busyPackId === pack.id ? busyStage : null}
                   onReview={() => setReviewingPackId(pack.id)}
                   onOpenPdf={() => void openReportPackPdf(pack)}
                   onDownloadPdf={() => void downloadReportPackPdf(pack)}

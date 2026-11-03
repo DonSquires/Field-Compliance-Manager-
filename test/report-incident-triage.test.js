@@ -106,7 +106,11 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.match(sql, /set pdf_source_updated_at = null/, 'a changed decision makes generated PDFs stale');
 
   const view = read('apps/web/src/components/ReportActivityReview.tsx');
-  assert.match(view, /functions\.invoke\('flag-report-potential-incidents'/);
+  const bob = read('apps/web/src/lib/reportBob.ts');
+  assert.match(view, /runIncidentScan\(packId/);
+  assert.match(bob, /functions\.invoke\('flag-report-potential-incidents'/);
   assert.match(view, /rpc\('set_report_incident_triage'/);
   assert.match(view, /rpc\('list_report_incident_triage'/);
+  const hub = read('apps/web/src/pages/ReportsHubPage.tsx');
+  assert.match(hub, /await runIncidentScan\(pack\.id\)[\s\S]*functions\.invoke\('generate-report-pack-pdf'/, 'Generate preview has Bob check for potential incidents before rendering');
 });

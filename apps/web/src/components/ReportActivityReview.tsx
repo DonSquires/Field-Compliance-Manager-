@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleDashed, FileText, ImageOff, MapPin, RefreshCw, ShieldAlert, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { runIncidentScan } from '../lib/reportBob';
 import {
   activityAccountingProblem,
   activityLabel,
@@ -19,6 +20,8 @@ import {
   readActivityLines,
   readActivityReport,
   readIncidentTriage,
+  REVIEW_SECTIONS,
+  reviewSectionCode,
   routineSummary,
   siteLogGroups,
   executiveSummaryMarkup,
@@ -70,23 +73,11 @@ type TriageFilter = 'all' | 'awaiting' | 'confirmed' | 'cleared';
 type ReviewTarget = { line: ActivityLine; row: IncidentTriage };
 type Review = (target: ReviewTarget) => void;
 
-/** Scan passes per click: each covers about a minute of Bob's reading. */
-const MAX_SCAN_PASSES = 8;
-
 function triageState(row: IncidentTriage | undefined): 'flagged' | 'confirmed' | 'cleared' | null {
   if (!row) return null;
   if (row.decision === 'incident') return 'confirmed';
   if (row.decision === 'not_incident') return 'cleared';
   return row.bobFlagged ? 'flagged' : null;
-}
-
-async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
-  const context = (error as { context?: unknown } | null)?.context;
-  if (context instanceof Response) {
-    const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
-    if (typeof body?.error === 'string' && body.error) return body.error;
-  }
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 const photoKey = (ref: ReportPhotoRef) => `${ref.bucket}/${ref.path}`;
@@ -767,26 +758,16 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   useEffect(() => { void loadTriage(); }, [loadTriage]);
 
   const runScan = async (again: boolean) => {
-    const rescanBefore = again ? new Date().toISOString() : undefined;
-    let checked = 0;
-    let flagged = 0;
-    let remaining = 0;
-    let notItemised = 0;
-    for (let pass = 0; pass < MAX_SCAN_PASSES; pass += 1) {
-      setScan({ state: 'running', message: checked ? `Bob has read ${counted(checked, 'entry', 'entries')} so far and is still reading…` : 'Bob is reading the logged activity and officer notes…' });
-      const { data: result, error } = await supabase.functions.invoke('flag-report-potential-incidents', { body: { pack_id: packId, ...(rescanBefore ? { rescan_before: rescanBefore } : {}) } });
-      if (error || !result) {
-        await loadTriage();
-        setScan({ state: 'error', message: `${checked ? `Bob read ${counted(checked, 'entry', 'entries')} before stopping. ` : ''}${await functionErrorMessage(error, 'Bob could not check the entries.')} Try again to continue.` });
-        return;
-      }
-      checked += Number(result.checked) || 0;
-      flagged += Number(result.flagged) || 0;
-      remaining = Number(result.remaining) || 0;
-      notItemised = Number(result.not_itemised) || 0;
-      if (remaining === 0 || !(Number(result.checked) > 0)) break;
-    }
+    const result = await runIncidentScan(packId, {
+      rescanBefore: again ? new Date().toISOString() : undefined,
+      onProgress: (checked) => setScan({ state: 'running', message: checked ? `Bob has read ${counted(checked, 'entry', 'entries')} so far and is still reading…` : 'Bob is reading the logged activity and officer notes…' }),
+    });
+    const { checked, flagged, remaining, notItemised } = result;
     await loadTriage();
+    if (result.error) {
+      setScan({ state: 'error', message: `${checked ? `Bob read ${counted(checked, 'entry', 'entries')} before stopping. ` : ''}${result.error} Try again to continue.` });
+      return;
+    }
     const outcome = checked === 0
       ? 'Bob had no new entries to check.'
       : `Bob read ${counted(checked, 'entry', 'entries')} and highlighted ${counted(flagged, 'possible incident', 'possible incidents')} for your review.`;
@@ -817,6 +798,12 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     || (triageFilter === 'confirmed' && item.reviewState === 'confirmed')
     || (triageFilter === 'cleared' && item.reviewState === 'cleared')), [reviewEntries, triageFilter]);
   const reviewingEntry = useMemo(() => (reviewing ? describeActivityLine(report, reviewing.line) : null), [reviewing, report]);
+  const reviewSections = useMemo(() => REVIEW_SECTIONS.map((review) => ({
+    ...review,
+    entries: triagedLines.filter((line) => reviewSectionCode(line) === review.code)
+      .map((line) => ({ line, entry: describeActivityLine(report, line) })),
+  })).filter((review) => review.entries.length > 0), [triagedLines, report]);
+  const reviewSectionCount = reviewSections.reduce((sum, review) => sum + review.entries.length, 0);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const saveReview = (row: IncidentTriage, pdfStale: boolean) => {
     setTriage((current) => new Map(current).set(row.lineKey, row));
@@ -831,8 +818,9 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       ...gallery.map((photo) => photo.ref),
       ...incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
       ...shownReviews.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
+      ...reviewSections.flatMap((review) => review.entries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY))),
     ]);
-  }, [gallery, incidentEntries, shownReviews, requestPhotos]);
+  }, [gallery, incidentEntries, shownReviews, reviewSections, requestPhotos]);
 
   const totalIncidents = incidents.total + confirmedCount;
   const incidentSummary = [
@@ -856,7 +844,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   const hunters = report.hunterReturns;
   if (hunters) metrics.push(['Hunter-reported kills', hunters.animals]);
   const summaryCharts = reportSummaryCharts(report, label);
-  const logEntries = Math.max(totals.entries - totals.incidents, 0);
+  const logEntries = Math.max(totals.entries - totals.incidents - confirmedCount - reviewSectionCount, 0);
   const accountedBadge = accountedFor.reconciled
     ? (accountedFor.entries === 1 ? '1 record accounted for' : `All ${count(accountedFor.entries)} records accounted for`)
     : 'Totals need review';
@@ -1030,6 +1018,20 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           </>
         )}
       </section>
+
+      {reviewSections.map((review) => (
+        <section key={review.code} className="report-activity-section report-review-section" aria-labelledby={`${headingId}-${review.code}`}>
+          <div className="report-section-head">
+            <h5 id={`${headingId}-${review.code}`}>{review.title}</h5>
+            <Chip tone="info">{counted(review.entries.length, review.one, review.many)}</Chip>
+          </div>
+          <p className="report-review-source-note">In date order (New Zealand time). These entries are listed here rather than in the site log.</p>
+          {review.entries.map(({ line, entry }) => {
+            const row = triage.get(line.key);
+            return <EntryCard key={line.key} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} triage={row} onReview={row ? () => setReviewing({ line, row }) : undefined} />;
+          })}
+        </section>
+      ))}
 
       <Group title="Activity by location" meta={counted(report.byPlace.length, 'location', 'locations')}>
         {report.byPlace.length > 0 ? (

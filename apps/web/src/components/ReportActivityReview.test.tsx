@@ -268,12 +268,15 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(2);
 
     const log = group(/^Site log/);
-    expect(log.querySelector('summary')?.textContent).toContain('8 entries by location, with comments and photos');
+    expect(log.querySelector('summary')?.textContent).toContain('7 entries by location, with comments and photos');
+    const cctv = screen.getByRole('heading', { name: 'CCTV and camera reviews' }).closest('section') as HTMLElement;
+    expect(within(cctv).getByText('Motion alert reviewed; wildlife only.')).toBeTruthy();
     await setOpen(log, true);
 
-    const status = await within(log).findByText('6 entries with comments, work or photos');
+    const status = await within(log).findByText('5 entries with comments, work or photos');
     expect(within(log).getByRole('heading', { name: 'Alpha Reserve' })).toBeTruthy();
-    expect(within(log).getByRole('heading', { name: 'Not location-specific' })).toBeTruthy();
+    expect(within(log).queryByRole('heading', { name: 'Not location-specific' })).toBeNull();
+    expect(within(log).queryByText('Motion alert reviewed; wildlife only.')).toBeNull();
     expect(within(log).getByText('2 routine patrols with nothing further to report (7, 9 Sep).')).toBeTruthy();
     expect(within(log).queryByText('Trespass')).toBeNull();
     expect(within(log).getByText('Ref WO-1')).toBeTruthy();
@@ -300,7 +303,7 @@ describe('ReportActivityReview', () => {
     await setOpen(log, false);
     await setOpen(log, true);
     expect(maybeSingle).toHaveBeenCalledTimes(2);
-    expect(within(log).getByText('6 entries with comments, work or photos')).toBeTruthy();
+    expect(within(log).getByText('5 entries with comments, work or photos')).toBeTruthy();
   });
 
   it('refuses newer site log detail and reloads only after the displayed snapshot changes', async () => {
