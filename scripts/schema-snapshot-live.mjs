@@ -23,8 +23,8 @@ async function sql(query) {
       ? [path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js')]
       : [];
     const result = spawnSync(command, [...commandArgs,
-      'supabase', 'db', 'query', '--linked', '--project-ref', PROJECT_REF,
-      '--output-format', 'json', query,
+      'supabase', 'db', 'query', `--remote=${PROJECT_REF}`,
+      '--read-only', '--output-format', 'json', query,
     ], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
     if (result.status !== 0) {
       const detail = result.error?.message ?? result.stderr ?? result.stdout ?? 'unknown process error';
