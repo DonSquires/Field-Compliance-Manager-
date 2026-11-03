@@ -20,7 +20,6 @@ export const NAME_WITHHELD = '[name withheld]';
 export const DETAILS_WITHHELD = '[details withheld]';
 export const LINE_TEXT_FIELDS = /** @type {const} */ (['ti', 'n', 'ac']);
 export const EDITORIAL_TEXT_FIELDS = /** @type {const} */ (['title', 'executive_summary', 'client_notes', 'follow_up']);
-const FIELD_LIMIT = 1500;
 
 /** @param {unknown} value @returns {Record<string, unknown> | null} */
 const obj = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? /** @type {Record<string, unknown>} */ (value) : null);
@@ -122,7 +121,8 @@ export function privacySystemPrompt(terms) {
 export function privacyBatchMessage(batch) {
   return `Entries (JSON). "i" is the entry number to use in your answer:\n${JSON.stringify(batch.map((candidate, i) => ({
     i,
-    ...Object.fromEntries(Object.entries(candidate.fields).map(([field, value]) => [field, value.slice(0, FIELD_LIMIT)])),
+    // Each field is sent whole: a digest is recorded for the full wording, so Bob must have read all of it.
+    ...candidate.fields,
   })))}`;
 }
 
@@ -164,10 +164,16 @@ export function parsePrivacyFindings(content, batchSize) {
   return result;
 }
 
+// A protected name is kept only where it is used as a place: before a place word or after a locating word.
+const PLACE_AFTER = /^\s*(?:\(|block|forest|gate|road|rd\b|track|valley|creek|ridge|hut|boundary|area|compartment|station|farm|bridge|landing|skid|cpt\b)/i;
+const BLOCK_LETTER_AFTER = /^\s+[A-C]\b/;
+const PLACE_BEFORE = /\b(?:at|in|to|from|near|via|into|towards|toward|within|across|around|through|past)\s+$/i;
+
 /**
- * Rewords the text with each finding withheld. A finding that is, or is part
- * of, a protected place or organisation is ignored. Names match whole words,
- * case-insensitively; adjacent withheld markers collapse into one.
+ * Rewords the text with each finding withheld. A name that is also a
+ * protected place or organisation is withheld only where the wording does not
+ * use it as a place. Names match whole words, case-insensitively; adjacent
+ * withheld markers collapse into one.
  * @param {string} value
  * @param {{ names?: string[], details?: string[] }} findings
  * @param {string[]} [terms]
@@ -182,14 +188,18 @@ export function withholdFindings(value, findings, terms = []) {
     ...(findings.details ?? []).map((item) => ({ item, marker: DETAILS_WITHHELD })),
   ]
     .filter(({ item }) => item.length >= 2 && item !== NAME_WITHHELD && item !== DETAILS_WITHHELD)
-    .filter(({ item, marker }) => marker === DETAILS_WITHHELD || !guarded.has(fold(item)))
     .sort((left, right) => right.item.length - left.item.length);
   let result = value;
   for (const { item, marker } of replacements) {
+    const placeName = marker === NAME_WITHHELD && guarded.has(fold(item));
     const pattern = marker === NAME_WITHHELD
       ? new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(item)}(?![\\p{L}\\p{N}])`, 'giu')
       : new RegExp(escapeRegExp(item), 'gi');
-    result = result.replace(pattern, marker);
+    result = result.replace(pattern, (match, offset, whole) => {
+      const after = whole.slice(offset + match.length);
+      if (placeName && (PLACE_AFTER.test(after) || BLOCK_LETTER_AFTER.test(after) || PLACE_BEFORE.test(whole.slice(0, offset)))) return match;
+      return marker;
+    });
   }
   const collapse = new RegExp(`(${escapeRegExp(NAME_WITHHELD)})(\\s+${escapeRegExp(NAME_WITHHELD)})+`, 'g');
   return result.replace(collapse, NAME_WITHHELD);
