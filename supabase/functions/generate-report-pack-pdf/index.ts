@@ -7,14 +7,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
-import { monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
+import { applyIncidentTriage, monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 import { loadReportLogo } from '../_shared/report-delivery.mjs';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v16';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v17';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -32,6 +32,7 @@ interface PdfReportPack {
   agreement: PdfAgreement | PdfAgreement[] | null;
   provider: { name: string; logo_url?: string | null } | Array<{ name: string; logo_url?: string | null }> | null;
   organization_id: string;
+  service_agreement_id: string | null;
   period_start: string;
   period_end: string;
   template_code: string;
@@ -460,9 +461,45 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
     if (!incident) page.drawLine({ start: { x: LEFT, y: top - height }, end: { x: RIGHT, y: top - height }, thickness: 0.3, color: RULE });
     y = top - height - 16;
   };
+  const drawRich = (block: Extract<ReportBlock, { kind: 'rich' }>) => {
+    const heading = block.style === 'heading';
+    const size = heading ? 10.5 : 10;
+    const leading = size + 5;
+    const indent = block.style === 'bullet' ? 14 : 0;
+    const maxWidth = WIDTH - indent;
+    const space = textWidth(' ', normal, size);
+    const words = block.runs.flatMap((run) => run.text.split(/\s+/).filter(Boolean)
+      .map((word) => ({ word, fonts: heading || run.bold ? bold : normal })));
+    const lines: Array<Array<{ word: string; fonts: PdfFontPair; width: number }>> = [[]];
+    let lineWidth = 0;
+    for (const item of words) {
+      const width = textWidth(item.word, item.fonts, size);
+      const current = lines[lines.length - 1];
+      if (current.length && lineWidth + space + width > maxWidth) {
+        lines.push([]);
+        lineWidth = 0;
+      }
+      const target = lines[lines.length - 1];
+      lineWidth += (target.length ? space : 0) + width;
+      target.push({ ...item, width });
+    }
+    if (heading) { y -= 4; ensure(leading * 3); }
+    lines.forEach((line, index) => {
+      ensure(leading);
+      if (index === 0 && indent) drawRuns('•', LEFT + 3, y, bold, size, BRAND);
+      let x = LEFT + indent;
+      for (const item of line) {
+        drawRuns(item.word, x, y, item.fonts, size, heading ? BRAND : INK);
+        x += item.width + space;
+      }
+      y -= leading;
+    });
+    y -= block.style === 'bullet' ? 1 : 4;
+  };
   const drawBlocks = (blocks: ReportBlock[]) => {
     for (const block of blocks) {
       if (block.kind === 'section') drawSection(block.title);
+      else if (block.kind === 'rich') drawRich(block);
       else if (block.kind === 'subsection') drawSubsection(block.title, block.detail);
       else if (block.kind === 'table') drawTable(block);
       else if (block.kind === 'metrics') drawMetrics(block.items);
@@ -614,7 +651,7 @@ async function loadRenderContext(req: Request, packId: string): Promise<{ admin:
   const admin = createClient(url, serviceKey);
   const { data: profile } = await admin.from('user_profiles').select('role,organization_id,deactivated_at').eq('id', user.id).single();
   if (!profile || profile.deactivated_at || !canRender.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
-  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name,client:client_organization_id(name)),provider:organization_id(name,logo_url)').eq('id', packId).single();
+  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,service_agreement_id,period_start,period_end,template_code,status,data,activity_lines,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name,client:client_organization_id(name)),provider:organization_id(name,logo_url)').eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayRender } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayRender !== true) throw new RequestError('Forbidden', 403);
@@ -649,6 +686,14 @@ async function storeRenderedPdf(admin: SupabaseClient, userId: string, pack: Pdf
   return updated;
 }
 
+async function loadConfirmedIncidents(admin: SupabaseClient, pack: PdfReportPack) {
+  const { data, error } = await admin.from('report_incident_triage').select('line_key,decision,incident_type')
+    .eq('service_agreement_id', pack.service_agreement_id).eq('decision', 'incident')
+    .gte('line_date', pack.period_start).lte('line_date', pack.period_end);
+  if (error) throw new RequestError(`Incident review could not be read: ${error.message}`, 500);
+  return data ?? [];
+}
+
 async function handlePdfGeneration(req: Request) {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const packId = typeof body.pack_id === 'string' ? body.pack_id.trim() : '';
@@ -659,6 +704,9 @@ async function handlePdfGeneration(req: Request) {
   const templateTitle = typeof template?.name === 'string' && template.name.trim()
     ? template.name.trim()
     : pack.report_kind === 'custom' ? 'Custom report' : `${pack.template_code.replaceAll('_', ' ')} report`;
+  const activityLines = pack.report_kind === 'custom' || !pack.service_agreement_id
+    ? pack.activity_lines
+    : applyIncidentTriage(pack.activity_lines, await loadConfirmedIncidents(admin, pack));
   const bytes = await renderPdf({
     templateTitle,
     agreementName: reportAgreementName(pack),
@@ -669,7 +717,7 @@ async function handlePdfGeneration(req: Request) {
     snapshotGeneratedAt: pack.generated_at,
     editorial: pack.editorial ?? {},
     data: pack.data ?? {},
-    activityLines: pack.activity_lines ?? null,
+    activityLines: (activityLines ?? null) as Record<string, unknown> | null,
     reportKind: pack.report_kind ?? 'monthly',
     reportScope: pack.report_scope ?? {},
     status: pack.status,

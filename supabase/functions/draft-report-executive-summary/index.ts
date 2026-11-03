@@ -1,7 +1,8 @@
 /**
- * draft-report-executive-summary -- Bob drafts the two-paragraph executive
+ * draft-report-executive-summary -- Bob drafts the exception-based executive
  * summary for a monthly client report from the pack's frozen, client-facing
- * snapshot. The draft is returned to the provider reviewer only; it is never
+ * snapshot, the reviewer's incident triage and the figures of the two months
+ * before. The draft is returned to the provider reviewer only; it is never
  * saved here and reaches the client only through review_monthly_report_pack.
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -46,18 +47,32 @@ async function handleDraft(req: Request) {
   if (!profile || profile.deactivated_at || !canDraft.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
 
   const { data: pack, error: packError } = await admin.from('monthly_report_packs')
-    .select('id,organization_id,period_start,period_end,status,report_kind,data,activity_lines,agreement:service_agreement_id(name,client:client_organization_id(name))')
+    .select('id,organization_id,service_agreement_id,period_start,period_end,status,report_kind,data,activity_lines,agreement:service_agreement_id(name,client:client_organization_id(name))')
     .eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayDraft } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayDraft !== true) throw new RequestError('Forbidden', 403);
   if (!['draft', 'generated'].includes(pack.status)) throw new RequestError('Sent report packs cannot be changed', 409);
 
+  const [triageResult, trendResult] = await Promise.all([
+    admin.from('report_incident_triage')
+      .select('line_key,bob_flagged,bob_incident_type,bob_reason,decision,incident_type')
+      .eq('service_agreement_id', pack.service_agreement_id)
+      .gte('line_date', pack.period_start)
+      .lte('line_date', pack.period_end),
+    admin.rpc('report_pack_trend_context', { p_pack_id: pack.id }),
+  ]);
+  if (triageResult.error) throw new RequestError(`Incident review could not be read: ${triageResult.error.message}`, 500);
+  if (trendResult.error) throw new RequestError(`Previous months could not be read: ${trendResult.error.message}`, 500);
+
   const agreement = Array.isArray(pack.agreement) ? pack.agreement[0] : pack.agreement;
   const brief = pack.report_kind === 'custom' ? null : executiveSummaryBrief(pack.data, pack.activity_lines, {
     clientName: relationName(agreement?.client),
     agreementName: relationName(agreement),
     period: `${pack.period_start} to ${pack.period_end}`,
+    periodStart: pack.period_start,
+    triage: triageResult.data ?? [],
+    trend: trendResult.data,
   });
   if (!brief) throw new RequestError('This report has no site activity to summarise', 409);
 
@@ -75,7 +90,14 @@ async function handleDraft(req: Request) {
     action: 'monthly_report_pack_summary_drafted',
     target_table: 'monthly_report_packs',
     target_id: pack.id,
-    metadata: { provider: draft.provider, model: draft.model, entries_sent: brief.entries.length, entries_not_included: brief.entriesNotIncluded },
+    metadata: {
+      provider: draft.provider,
+      model: draft.model,
+      entries_sent: brief.entries.length,
+      entries_not_included: brief.entriesNotIncluded,
+      triage_rows: (triageResult.data ?? []).length,
+      comparable_prior_months: brief.previousMonths.filter((month) => month.comparable).length,
+    },
   });
   if (auditError) throw new RequestError(`Summary drafted but audit receipt failed: ${auditError.message}`, 502);
   return json({ ok: true, summary: draft.summary, provider: draft.provider, model: draft.model });

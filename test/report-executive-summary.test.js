@@ -27,26 +27,47 @@ const lines = {
     { d: '2026-10-05', p: 'Kings Ridge', k: 'observation', c: 'unclassified', n: 'Roadblock log winched aside.' },
   ],
 };
-const context = { clientName: 'Forest Co', agreementName: 'Security', period: '2026-10-01 to 2026-10-31' };
+const context = { clientName: 'Forest Co', agreementName: 'Security', period: '2026-10-01 to 2026-10-31', periodStart: '2026-10-01' };
 
-test('the brief carries the frozen figures and the non-routine entries only', async () => {
+test('the brief carries this month, the reviewer decisions and the non-routine entries only', async () => {
   const { executiveSummaryBrief } = await load();
+  const { activityLineKey } = await import('../supabase/functions/_shared/report-activity-sections.mjs');
   assert.equal(executiveSummaryBrief({}, lines, context), null);
-  const brief = executiveSummaryBrief({ activityReport: report }, lines, context);
+  const triage = [
+    { line_key: activityLineKey(lines.lines[1]), bob_flagged: true, bob_incident_type: 'lock_failure', decision: 'incident', incident_type: 'lock_failure' },
+    { line_key: activityLineKey(lines.lines[4]), bob_flagged: true, bob_incident_type: 'trespass', decision: 'unreviewed' },
+  ];
+  const brief = executiveSummaryBrief({ activityReport: report }, lines, { ...context, triage });
   assert.equal(brief.client, 'Forest Co');
   assert.equal(brief.period, '2026-10-01 to 2026-10-31');
-  assert.deepEqual({ ...brief.figures, activityTypes: undefined, incidentsBySeverity: undefined, hunterAnimalsBySpecies: undefined }, {
-    locationsWithActivity: 2, entriesRecorded: 6, patrolsAndSiteChecks: 3, cctvActivations: 1, pestControlEntries: 1, pestCulls: 3,
-    maintenanceEntries: 1, incidents: 1, observations: 1, photos: 2, hunterReturns: 4, hunterAnimals: 9,
-    activityTypes: undefined, incidentsBySeverity: undefined, hunterAnimalsBySpecies: undefined,
-  });
-  assert.deepEqual(brief.figures.incidentsBySeverity, [{ severity: 'High', count: 1 }]);
-  assert.deepEqual(brief.figures.activityTypes[0], { type: 'Patrols and site checks', entries: 3 });
+  assert.equal(brief.month, 'October 2026');
+  assert.equal(brief.figures, undefined);
+  assert.deepEqual(brief.thisMonth.cullsAndSightingsBySpecies.map((row) => row.culls), [2, 1]);
+  assert.deepEqual(brief.thisMonth.hunterReportedAnimalsBySpecies, [{ species: 'Possum', animals: 7 }]);
+  assert.equal(brief.thisMonth.confirmedIncidentsByType.length, 1);
+  assert.equal(brief.thisMonth.byWeek[0].incidents, 2);
+  assert.equal(brief.thisMonth.byWeek[0].potentialIncidents, 1);
+  assert.deepEqual(brief.previousMonths, []);
   assert.deepEqual(brief.entries.map((entry) => entry.date), ['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05']);
-  assert.deepEqual(brief.entries[0], { date: '2026-10-02', location: 'Smiths', type: 'Patrols and site checks', detail: 'Lock would not open despite full battery.', action: 'Chain cut and temporary lock fitted.' });
+  assert.equal(brief.entries[0].location, 'Smiths');
+  assert.equal(brief.entries[0].action, 'Chain cut and temporary lock fitted.');
+  assert.match(brief.entries[0].review, /^Confirmed incident on review/);
+  assert.match(brief.entries[3].review, /not yet reviewed/);
   assert.equal(brief.entries[1].severity, 'High');
   assert.ok(brief.entries[2].detail.length <= 600);
   assert.equal(brief.entriesNotIncluded, 0);
+});
+
+test('prior months without recorded activity are marked as not comparable', async () => {
+  const { priorMonthFigures } = await load();
+  assert.deepEqual(priorMonthFigures({ months: [
+    { month: '2026-08-01', report: { version: 2, totals: { entries: 0 } } },
+    { month: '2026-09-01', report: { ...report, totals: { ...report.totals, entries: 4 } }, confirmedIncidents: [{ type: 'theft', count: 2 }] },
+  ] }).map((month) => [month.month, month.comparable, month.confirmedIncidentsByType?.[0]?.count]), [
+    ['August 2026', false, undefined],
+    ['September 2026', true, 2],
+  ]);
+  assert.deepEqual(priorMonthFigures(null), []);
 });
 
 test('when entries exceed the limit, incidents are kept ahead of routine notes', async () => {
@@ -61,28 +82,36 @@ test('when entries exceed the limit, incidents are kept ahead of routine notes',
   assert.equal(brief.entriesNotIncluded, 6);
 });
 
-test('the instructions require two plain paragraphs, no storytelling and no named people', async () => {
+test('the instructions follow the analyst brief: exception-based, no volumes, pest and trend comparisons, no named people', async () => {
   const { EXECUTIVE_SUMMARY_INSTRUCTIONS } = await load();
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /exactly two paragraphs/i);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Do not tell a story/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /expert corporate security analyst/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Exclude all high-level operational statistics/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Significant Security Breaches & Critical Infrastructure Issues/);
+  for (const bullet of ['Targeted Commercial Theft', 'Perimeter Compromise & Trespass', 'Lock & Hardware Failures', 'Surveillance Tampering & Blind Spots']) {
+    assert.ok(EXECUTIVE_SUMMARY_INSTRUCTIONS.includes(`**${bullet}:**`), bullet);
+  }
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Pest Control\*\*[\s\S]*previous two months/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Trends\*\*[\s\S]*previous two months/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Never name or describe an identifiable person/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Use only facts in the brief/);
 });
 
-test('model output is cleaned to two plain paragraphs within the review limit', async () => {
-  const { cleanExecutiveSummary, EXECUTIVE_SUMMARY_MAX_CHARS } = await load();
+test('model output keeps headers, bullets and bold, without reasoning or other markdown', async () => {
+  const { cleanExecutiveSummary, finaliseExecutiveSummary, EXECUTIVE_SUMMARY_MAX_CHARS } = await load();
   assert.equal(
-    cleanExecutiveSummary('<think>plan</think>## Executive Summary\n\n**Operations** covered 2 sites.\n\n- Diesel was stolen.\n- A lock failed.\n\nRepairs are booked.'),
-    'Operations covered 2 sites.\n\nDiesel was stolen. A lock failed. Repairs are booked.',
+    cleanExecutiveSummary('<think>plan</think>```markdown\n## Significant Issues\n\n- **Smiths:** diesel `taken`.\n1. A lock failed.\n\n\n\nRepairs are booked.```'),
+    '**Significant Issues**\n\n* **Smiths:** diesel taken.\n* A lock failed.\n\nRepairs are booked.',
   );
-  const long = cleanExecutiveSummary(`${'One sentence here. '.repeat(400)}\n\nTail.`);
+  assert.equal(finaliseExecutiveSummary('* A point.', { month: 'October 2026' }), '**Executive Summary: October 2026**\n\n* A point.');
+  assert.equal(finaliseExecutiveSummary('**Executive Summary: May**\n\n* A point.', { month: 'October 2026' }), '**Executive Summary: May**\n\n* A point.');
+  const long = cleanExecutiveSummary(`${'* One bullet point here.\n'.repeat(400)}`);
   assert.ok(long.length <= EXECUTIVE_SUMMARY_MAX_CHARS);
-  assert.match(long, /\.$/);
+  assert.match(long, /here\.$/);
   assert.equal(cleanExecutiveSummary(null), '');
 });
 
 const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
-const PARAGRAPHS = 'During the period 3 patrols and site checks were completed across 2 locations.\n\nDiesel was taken at Smiths and a lock failed.';
+const PARAGRAPHS = '**Executive Summary: October 2026**\n\n**Significant Security Breaches & Critical Infrastructure Issues**\n* **Targeted Commercial Theft:** diesel was taken at **Smiths**.\n* **Lock & Hardware Failures:** a lock failed.';
 
 test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () => {
   const { draftExecutiveSummary } = await load();
@@ -123,7 +152,7 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
     fetchImpl: async (url) => url.includes('ollama')
       ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
       : reply({ choices: [{ message: { content: 'Another single paragraph. It also exceeds the minimum length check and should be rejected.' } }] }),
-  }), /model did not return exactly two paragraphs/);
+  }), /model did not return bullet points/);
 });
 
 test('the edge function and review panel keep drafting governed and unsaved until review', () => {

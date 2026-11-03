@@ -13,10 +13,14 @@ import {
   reportDate,
   routineSummary,
   siteLogGroups,
-  summaryParagraphs,
+  summaryMarkup,
   summaryPhotos,
   textParagraphs,
+  activityLineKey,
+  applyIncidentTriage,
+  isIncidentLine,
   type ActivityLine,
+  type IncidentTriage,
 } from './reportActivity';
 import { activityLinesFixture, activityReportFixture } from './reportActivity.fixture';
 
@@ -134,6 +138,9 @@ describe('parity with the client PDF renderer', () => {
     const sections = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(readFileSync(SECTIONS_PATH)).toString('base64')}`) as {
       siteLogBlocks: (data: unknown, lines: unknown) => PdfBlock[];
       monthlyActivityBlocks: (data: unknown, lines: unknown, options?: { summary?: string; highlights?: string }) => PdfBlock[] | null;
+      summaryMarkup: (value: unknown) => unknown;
+      activityLineKey: (line: unknown) => string;
+      applyIncidentTriage: (lines: unknown, triage: unknown[]) => unknown;
     };
     const data = { activityReport: activityReportFixture };
     const asWeb = (block: PdfEntry) => {
@@ -158,14 +165,25 @@ describe('parity with the client PDF renderer', () => {
     expect(incidentBlocks.map(asWeb)).toEqual(lines.filter((entry) => entry.kind === 'incident').map(withPlace));
 
     const monthly = sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [];
-    const summaryEnd = monthly.findIndex((block) => block.kind === 'section' && 'title' in block && block.title === 'At a Glance');
-    const summaryText = monthly.slice(1, summaryEnd).flatMap((block) => (block.kind === 'text' && 'text' in block ? [block.text] : []));
     const gallery = summaryPhotos(report, lines);
-    expect(summaryText).toEqual([...summaryParagraphs(report), ...(gallery.length ? ['Selected photos from the period. Each is shown again with its entry.'] : [])]);
-    const written = sections.monthlyActivityBlocks(data, activityLinesFixture, { summary: 'First.\n\nSecond.' }) ?? [];
+    expect(monthly.some((block) => block.kind === 'rich')).toBe(false);
+    const summary = '**Executive Summary: October 2026**\n\n**Significant Issues**\n* **Smiths:** gate forced.\n- Lock failed.\n\nFirst.\nSecond line.';
+    const written = sections.monthlyActivityBlocks(data, activityLinesFixture, { summary }) ?? [];
     const writtenEnd = written.findIndex((block) => block.kind === 'section' && 'title' in block && block.title === 'At a Glance');
-    expect(written.slice(1, writtenEnd).flatMap((block) => (block.kind === 'text' && 'text' in block ? [block.text] : [])).slice(0, 2))
-      .toEqual(textParagraphs('First.\n\nSecond.'));
+    const rich = written.slice(1, writtenEnd).flatMap((block) => (block.kind === 'rich' && 'runs' in block && 'style' in block ? [{ style: block.style, runs: block.runs }] : []));
+    expect(rich).toEqual(summaryMarkup(summary).slice(1));
+    expect(sections.summaryMarkup(summary)).toEqual(summaryMarkup(summary));
+
+    for (const raw of activityLinesFixture.lines) expect(activityLineKey(raw)).toBe(sections.activityLineKey(raw));
+    expect(activityLineKey({ d: '2026-10-14', t: '09:30', p: 'Smiths', k: 'event', c: 'patrol_visit', ti: '', n: 'Gate chain cut, log winched aside', ac: 'Reported' })).toBe('v1:139f17095d0d50');
+    expect(activityLineKey({})).toBe('v1:068a37861c86a7');
+
+    const target = lines.find((entry) => entry.kind !== 'incident' && entry.note)!;
+    const decision = { lineKey: target.key, decision: 'incident', incidentType: 'trespass' } as IncidentTriage;
+    const triagedPdf = sections.applyIncidentTriage(activityLinesFixture, [{ line_key: target.key, decision: 'incident', incident_type: 'trespass' }]);
+    const triagedWeb = applyIncidentTriage(lines, new Map([[target.key, decision]]));
+    const confirmedBlocks = (sections.monthlyActivityBlocks(data, triagedPdf) ?? []).filter(isEntry);
+    expect(confirmedBlocks.map(asWeb)).toEqual(triagedWeb.filter(isIncidentLine).map(withPlace));
     const pdfGallery = monthly.find((block): block is { kind: 'gallery'; photos: Array<{ ref: { b: string; p: string }; caption: string }> } => block.kind === 'gallery');
     expect(pdfGallery?.photos.map((photo) => ({ ref: { bucket: photo.ref.b, path: photo.ref.p }, caption: photo.caption })) ?? []).toEqual(gallery);
   });

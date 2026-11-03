@@ -17,7 +17,7 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
-import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
+import { activityEmailSummary, summaryMarkup } from '../_shared/report-activity-sections.ts';
 import { fetchCappedBytes, reportEmailMimeContent, reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -27,7 +27,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v16';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v17';
 // Larger PDFs are sent as the signed download link only, keeping the message
 // under common mailbox size limits once base64-encoded.
 const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -83,6 +83,23 @@ function customScopeLabel(reportScope: JsonMap, key: string, valueKey: string, f
   return labels.length ? labels.join(', ') : fallback;
 }
 
+function markupHtml(value: string) {
+  const runs = (items: Array<{ text: string; bold: boolean }>) => items.map((run) => run.bold ? `<strong>${escapeHtml(run.text)}</strong>` : escapeHtml(run.text)).join('');
+  const html: string[] = [];
+  let bullets: string[] = [];
+  const flushBullets = () => {
+    if (bullets.length) html.push(`<ul>${bullets.join('')}</ul>`);
+    bullets = [];
+  };
+  for (const item of summaryMarkup(value)) {
+    if (item.style === 'bullet') { bullets.push(`<li>${runs(item.runs)}</li>`); continue; }
+    flushBullets();
+    html.push(item.style === 'heading' ? `<p><strong>${runs(item.runs.map((run) => ({ ...run, bold: false })))}</strong></p>` : `<p>${runs(item.runs)}</p>`);
+  }
+  flushBullets();
+  return html.join('');
+}
+
 function editorialHtml(editorial: JsonMap) {
   const sections: Array<[string, unknown]> = [
     ['Executive summary', editorial.executive_summary],
@@ -90,7 +107,7 @@ function editorialHtml(editorial: JsonMap) {
     ['Follow-up', editorial.follow_up]
   ];
   return sections.flatMap(([heading, value])=>typeof value === 'string' && value.trim()
-    ? [`<h3>${heading}</h3>${value.replace(/\r\n/g, '\n').split(/\n\s*\n/).map((paragraph)=>paragraph.trim()).filter(Boolean).map((paragraph)=>`<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`).join('')}`]
+    ? [`<h3>${heading}</h3>${markupHtml(value)}`]
     : []).join('');
 }
 
