@@ -18,6 +18,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 import { activityEmailSummary } from '../_shared/report-activity-sections.ts';
+import { reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -26,7 +27,10 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v14';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v15';
+// Larger PDFs are sent as the signed download link only, keeping the message
+// under common mailbox size limits once base64-encoded.
+const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -58,6 +62,7 @@ interface ReportPackEmail {
   pdf_renderer_version: string | null;
   pdf_source_updated_at: string | null;
   updated_at: string;
+  provider?: { name: string; logo_url: string | null } | Array<{ name: string; logo_url: string | null }> | null;
   sent_to: string | null;
 }
 
@@ -157,9 +162,18 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
   `;
 }
 
-function summaryHtml(pack: ReportPackEmail, pdfUrl: string) {
-  const pdfLink = `<p><a href="${escapeHtml(pdfUrl)}">Download the reviewed PDF report</a> (link expires in 7 days).</p>`;
-  return pack.report_kind === 'custom' ? customSummaryHtml(pack, pdfLink) : monthlySummaryHtml(pack, pdfLink);
+function summaryHtml(pack: ReportPackEmail, pdfUrl: string, attached: boolean) {
+  const pdfLink = attached
+    ? `<p>The reviewed PDF report is attached. You can also <a href="${escapeHtml(pdfUrl)}">download it here</a> (link expires in 7 days).</p>`
+    : `<p><a href="${escapeHtml(pdfUrl)}">Download the reviewed PDF report</a> (link expires in 7 days).</p>`;
+  const logoUrl = reportLogoUrl(providerRow(pack)?.logo_url);
+  const providerName = providerRow(pack)?.name ?? '';
+  const header = logoUrl ? `<p><img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(providerName)}" height="48" style="height:48px;width:auto;"></p>` : '';
+  return header + (pack.report_kind === 'custom' ? customSummaryHtml(pack, pdfLink) : monthlySummaryHtml(pack, pdfLink));
+}
+
+function providerRow(pack: ReportPackEmail) {
+  return Array.isArray(pack.provider) ? pack.provider[0] ?? null : pack.provider ?? null;
 }
 
 const json = (body: unknown, status = 200)=>new Response(JSON.stringify(body), {
@@ -184,7 +198,7 @@ async function loadDeliveryContext(req: Request, packId: string) {
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: callerProfile } = await admin.from('user_profiles').select('role, organization_id, deactivated_at').eq('id', caller.id).single();
   if (!callerProfile || callerProfile.deactivated_at || !CAN_SEND.has(callerProfile.role)) throw new RequestError('Forbidden: insufficient role', 403);
-  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, editorial, pdf_path, pdf_renderer_version, pdf_source_updated_at, updated_at, sent_to').eq('id', packId).single();
+  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, editorial, pdf_path, pdf_renderer_version, pdf_source_updated_at, updated_at, sent_to, provider:organization_id(name, logo_url)').eq('id', packId).single();
   if (!pack) throw new RequestError('Pack not found', 404);
   const { data: maySend } = await callerClient.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (maySend !== true) throw new RequestError('Cannot send packs for other organizations', 403);
@@ -235,7 +249,14 @@ async function createReportDownloadUrl(admin: SupabaseClient, pdfPath: string) {
   return data.signedUrl;
 }
 
-async function sendEmail(pack: ReportPackEmail, recipient: string, pdfUrl: string) {
+async function loadReportAttachment(admin: SupabaseClient, pdfPath: string) {
+  const { data, error } = await admin.storage.from('bob-uploads').download(pdfPath);
+  if (error || !data) throw new RequestError(error?.message ?? 'Reviewed PDF could not be loaded for attachment', 502);
+  if (data.size > MAX_PDF_ATTACHMENT_BYTES) return null;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+async function sendEmail(pack: ReportPackEmail, recipient: string, pdfUrl: string, pdfBytes: Uint8Array | null) {
   const client = new SMTPClient({
     connection: {
       hostname: SMTP_HOST,
@@ -244,13 +265,20 @@ async function sendEmail(pack: ReportPackEmail, recipient: string, pdfUrl: strin
       auth: { username: SMTP_USER, password: SMTP_PASS }
     }
   });
-  await client.send({
-    from: SMTP_FROM,
-    to: recipient,
-    subject: `${typeof pack.editorial?.title === 'string' && pack.editorial.title ? pack.editorial.title : 'Report Pack'} — ${pack.period_start} to ${pack.period_end}`,
-    html: summaryHtml(pack, pdfUrl)
-  });
-  await client.close();
+  const title = typeof pack.editorial?.title === 'string' ? pack.editorial.title : '';
+  try {
+    await client.send({
+      from: SMTP_FROM,
+      to: recipient,
+      subject: reportEmailSubject({ title, periodStart: pack.period_start, periodEnd: pack.period_end }),
+      html: summaryHtml(pack, pdfUrl, pdfBytes !== null),
+      attachments: pdfBytes
+        ? [{ filename: reportPdfFilename({ title, periodStart: pack.period_start, periodEnd: pack.period_end }), content: pdfBytes, encoding: 'binary', contentType: 'application/pdf' }]
+        : []
+    });
+  } finally {
+    await client.close();
+  }
 }
 
 async function handleReportDelivery(req: Request) {
@@ -271,7 +299,8 @@ async function handleReportDelivery(req: Request) {
 
   try {
     const pdfUrl = await createReportDownloadUrl(admin, pack.pdf_path);
-    await sendEmail(pack, claim.recipient, pdfUrl);
+    const pdfBytes = await loadReportAttachment(admin, pack.pdf_path);
+    await sendEmail(pack, claim.recipient, pdfUrl, pdfBytes);
   } catch (sendError) {
     const message = sendError instanceof Error ? sendError.message : 'SMTP send failed';
       const { error: cleanupError } = await admin.storage.from('bob-uploads').remove([pack.pdf_path]);
