@@ -145,6 +145,31 @@ test('matches the four OFO card-review photos from exact-minute event place alia
   });
 });
 
+test('typo fallback stays on the leading location and keeps distinguishing words', () => {
+  return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
+    const parsed = parsePhotoName('261003 094018.png');
+    const at = '2026-10-02T20:40:00Z';
+    const typoOnly = indexPhotoTargets([{ id: 'homestead', observed_at: at, place_aliases: ['Homestead Rd'] }]);
+    const typo = matchPhotoTarget(parsed, 'Photos/Homstead Rd/261003 094018.png', typoOnly);
+    assert.equal(typo.target?.id, 'homestead');
+    assert.equal(typo.matchType, 'place_near');
+
+    const suffixTargets = indexPhotoTargets([
+      { id: 'serpentine', observed_at: at, place_aliases: ['Serpentine Rd'] },
+      { id: 'rai', observed_at: at, place_aliases: ['Rai Forest'] },
+    ]);
+    assert.equal(matchPhotoTarget(parsed, 'Photos/Serpentin Rd - Rai Forest - OFO/261003 094018.png', suffixTargets).target?.id, 'serpentine');
+    assert.equal(matchPhotoTarget(parsed, 'Photos/Serpentine Rd - Rai Forest - OFO/261003 094018.png', suffixTargets).target?.id, 'serpentine');
+
+    const north = indexPhotoTargets([{ id: 'north', observed_at: at, place_aliases: ['Homestead North Rd'] }]);
+    assert.equal(matchPhotoTarget(parsed, 'Photos/Homestead South Rd/261003 094018.png', north).status, 'unmatched');
+
+    const island = indexPhotoTargets([{ id: 'manuka', observed_at: at, place_aliases: ['Manuka Island'] }]);
+    assert.equal(matchPhotoTarget(parsed, 'Photos/Rabbit Island - OFO/261003 094018.png', island).status, 'unmatched');
+    assert.equal(matchPhotoTarget(parsed, 'Photos/Gate Rd - Island - OFO/261003 094018.png', island).status, 'unmatched');
+  });
+});
+
 test('holds multiple same-minute plate or place candidates as ambiguous', () => {
   return loadMatcher().then(({ indexPhotoTargets, matchPhotoTarget, parsePhotoName }) => {
   const parsed = parsePhotoName('260920 163612 GKJ550.jpg');

@@ -141,23 +141,23 @@ export function indexPhotoTargets(targets) {
 
 export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
   const candidates = targetsByMinute.get(parsed.minuteKey) ?? [];
-  const folderPlaces = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1)
-    .flatMap((folder) => folder.split(/\s+-\s+/))
-    .map(normalizePlace)
-    .filter(Boolean);
-  const folderTokenGroups = folderPlaces.map((place) => distinctivePlaceTokens([place]))
-    .filter((tokens) => tokens.length);
+  // Library folders are named "<Location> - <Area> - <Client>"; only the whole folder name and
+  // its leading location identify a place. Area/client suffixes are never location aliases.
+  const folders = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1);
+  const leadingPlaces = folders.map((folder) => normalizePlace(folder.split(/\s+-\s+/)[0])).filter(Boolean);
+  const folderPlaces = [...folders.map(normalizePlace), ...leadingPlaces].filter(Boolean);
   let matchType = parsed.plate ? 'rego' : 'place';
   let matched = candidates.filter((target) => parsed.plate
     ? target.plateCandidates.has(parsed.plate)
     : folderPlaces.some((place) => target.placeAliases.has(place)));
   if (!parsed.plate && matched.length === 0) {
-    // Hand-named folders can contain abbreviations or a one-character typo. Require every
-    // significant word in one folder segment to match the same place alias at this exact minute.
-    matched = candidates.filter((target) => {
-      const aliases = [...target.placeAliases].map((alias) => distinctivePlaceTokens([alias]));
-      return folderTokenGroups.some((tokens) => aliases.some((alias) => tokens.every((token) => alias.some((word) => placeTokensMatch(token, word)))));
-    });
+    // Hand-named folders can carry a one-character typo. The leading location and one alias of
+    // this exact-minute target must have the same distinctive words, paired in both directions.
+    const leadingTokenGroups = leadingPlaces.map((place) => distinctivePlaceTokens([place]))
+      .filter((tokens) => tokens.length);
+    matched = candidates.filter((target) => [...target.placeAliases]
+      .map((alias) => distinctivePlaceTokens([alias]))
+      .some((aliasTokens) => leadingTokenGroups.some((tokens) => sameDistinctiveTokens(tokens, aliasTokens))));
     matchType = 'place_near';
   }
   const unique = [...new Map(matched.map((target) => [target.id, target])).values()];
@@ -167,9 +167,15 @@ export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
 
 const GENERIC_PLACE_WORDS = new Set([
   'road', 'street', 'lane', 'drive', 'gate', 'gates', 'forest', 'forests', 'reserve', 'block', 'track',
-  'camera', 'cameras', 'cctv', 'photos', 'photo', 'images', 'image', 'footage', 'site', 'area', 'north',
-  'south', 'east', 'west', 'upper', 'lower', 'main', 'entrance', 'onefortyone', 'private', 'general',
+  'camera', 'cameras', 'cctv', 'photos', 'photo', 'images', 'image', 'footage', 'site', 'area',
+  'main', 'entrance', 'onefortyone', 'private', 'general',
 ]);
+
+function sameDistinctiveTokens(left, right) {
+  if (!left.length || !right.length) return false;
+  return left.every((token) => right.some((word) => placeTokensMatch(token, word)))
+    && right.every((word) => left.some((token) => placeTokensMatch(token, word)));
+}
 
 function distinctivePlaceTokens(places) {
   const tokens = new Set();
