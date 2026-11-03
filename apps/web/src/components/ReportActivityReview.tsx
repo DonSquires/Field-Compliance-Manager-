@@ -21,7 +21,7 @@ import {
   readIncidentTriage,
   routineSummary,
   siteLogGroups,
-  summaryMarkup,
+  executiveSummaryMarkup,
   summaryPhotos,
   textParagraphs,
   type AccountingProblem,
@@ -30,10 +30,10 @@ import {
   type ActivityLine,
   type ActivityReport,
   type IncidentTriage,
-  type MarkupItem,
   type ReportPhotoRef,
   type TriageDecision,
 } from '../lib/reportActivity';
+import { MarkupText } from './ReportMarkupText';
 import './ReportActivityReview.css';
 
 const ENTRY_PAGE = 60;
@@ -87,25 +87,6 @@ async function functionErrorMessage(error: unknown, fallback: string): Promise<s
     if (typeof body?.error === 'string' && body.error) return body.error;
   }
   return error instanceof Error && error.message ? error.message : fallback;
-}
-
-function MarkupText({ items }: { items: MarkupItem[] }) {
-  const blocks: ReactNode[] = [];
-  let bullets: MarkupItem[] = [];
-  const runs = (item: MarkupItem) => item.runs.map((run, index) => (run.bold ? <strong key={index}>{run.text}</strong> : <span key={index}>{run.text}</span>));
-  const flush = () => {
-    if (bullets.length) blocks.push(<ul key={`list-${blocks.length}`} className="report-activity-summary-list">{bullets.map((item, index) => <li key={index}>{runs(item)}</li>)}</ul>);
-    bullets = [];
-  };
-  for (const item of items) {
-    if (item.style === 'bullet') { bullets.push(item); continue; }
-    flush();
-    blocks.push(item.style === 'heading'
-      ? <p key={`heading-${blocks.length}`} className="report-activity-summary-heading">{item.runs.map((run) => run.text).join('')}</p>
-      : <p key={`text-${blocks.length}`} className="report-activity-summary-text">{runs(item)}</p>);
-  }
-  flush();
-  return <>{blocks}</>;
 }
 
 const photoKey = (ref: ReportPhotoRef) => `${ref.bucket}/${ref.path}`;
@@ -320,7 +301,7 @@ function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError, triage, onRe
   );
 }
 
-function TriageDialog({ target, entry, editable, packId, urls, onClose, onSaved }: { target: ReviewTarget; entry: ActivityEntry; editable: boolean; packId: string; urls: PhotoUrls; onClose: () => void; onSaved: (row: IncidentTriage) => void }) {
+function TriageDialog({ target, entry, editable, packId, urls, onOpenPhoto, onPhotoError, onClose, onSaved }: { target: ReviewTarget; entry: ActivityEntry; editable: boolean; packId: string; urls: PhotoUrls; onOpenPhoto: OpenPhoto; onPhotoError: PhotoError; onClose: () => void; onSaved: (row: IncidentTriage, pdfStale: boolean) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const noteId = useId();
@@ -357,7 +338,7 @@ function TriageDialog({ target, entry, editable, packId, urls, onClose, onSaved 
       setError(saveError?.message ? `The decision was not saved: ${saveError.message}` : 'The decision was not saved. Try again.');
       return;
     }
-    onSaved(saved);
+    onSaved(saved, Boolean((data as { pdf_needs_regenerating?: unknown } | null)?.pdf_needs_regenerating));
   };
   const options: Array<{ value: TriageDecision; label: string; hint: string; icon: ReactNode }> = [
     { value: 'unreviewed', label: 'Not reviewed', hint: 'Leave for later', icon: <CircleDashed size={18} aria-hidden="true" /> },
@@ -398,7 +379,7 @@ function TriageDialog({ target, entry, editable, packId, urls, onClose, onSaved 
           </div>
         )}
         {!row.bobFlagged && row.decision === 'unreviewed' && <p className="report-review-source-note">Bob did not flag this entry.</p>}
-        <EntryCard entry={entry} urls={urls} onOpenPhoto={() => undefined} onPhotoError={() => undefined} />
+        <EntryCard entry={entry} place={line.place} urls={urls} onOpenPhoto={onOpenPhoto} onPhotoError={onPhotoError} />
         {decision === 'incident' && (
           <label className="report-log-field" htmlFor={typeId}>
             <span>Type of incident</span>
@@ -790,6 +771,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     let checked = 0;
     let flagged = 0;
     let remaining = 0;
+    let notItemised = 0;
     for (let pass = 0; pass < MAX_SCAN_PASSES; pass += 1) {
       setScan({ state: 'running', message: checked ? `Bob has read ${counted(checked, 'entry', 'entries')} so far and is still reading…` : 'Bob is reading the logged activity and officer notes…' });
       const { data: result, error } = await supabase.functions.invoke('flag-report-potential-incidents', { body: { pack_id: packId, ...(rescanBefore ? { rescan_before: rescanBefore } : {}) } });
@@ -801,15 +783,17 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       checked += Number(result.checked) || 0;
       flagged += Number(result.flagged) || 0;
       remaining = Number(result.remaining) || 0;
+      notItemised = Number(result.not_itemised) || 0;
       if (remaining === 0 || !(Number(result.checked) > 0)) break;
     }
     await loadTriage();
     const outcome = checked === 0
       ? 'Bob had no new entries to check.'
       : `Bob read ${counted(checked, 'entry', 'entries')} and highlighted ${counted(flagged, 'possible incident', 'possible incidents')} for your review.`;
+    const unread = notItemised > 0 ? ` ${counted(notItemised, 'further entry was', 'further entries were')} not itemised in this report, so Bob could not read them.` : '';
     setScan(remaining > 0
-      ? { state: 'error', message: `${outcome} ${counted(remaining, 'entry is', 'entries are')} still to check. Select the button again to continue.` }
-      : { state: 'done', message: outcome });
+      ? { state: 'error', message: `${outcome}${unread} ${counted(remaining, 'entry is', 'entries are')} still to check. Select the button again to continue.` }
+      : { state: 'done', message: `${outcome}${unread}` });
   };
 
   const triagedLines = useMemo(() => applyIncidentTriage(readyLines, triage), [readyLines, triage]);
@@ -817,6 +801,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     .filter(isIncidentLine)
     .map((line) => ({ line, entry: describeActivityLine(report, line) })), [triagedLines, report]);
   const confirmedCount = useMemo(() => triagedLines.filter((line) => line.kind !== 'incident' && line.confirmedType).length, [triagedLines]);
+  const checkedCount = useMemo(() => readyLines.filter((line) => line.kind !== 'incident' && triage.has(line.key)).length, [readyLines, triage]);
   const reviewEntries = useMemo(() => readyLines.flatMap((line) => {
     const row = line.kind === 'incident' ? undefined : triage.get(line.key);
     const reviewState = triageState(row);
@@ -832,13 +817,15 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
     || (triageFilter === 'confirmed' && item.reviewState === 'confirmed')
     || (triageFilter === 'cleared' && item.reviewState === 'cleared')), [reviewEntries, triageFilter]);
   const reviewingEntry = useMemo(() => (reviewing ? describeActivityLine(report, reviewing.line) : null), [reviewing, report]);
-  const saveReview = (row: IncidentTriage) => {
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const saveReview = (row: IncidentTriage, pdfStale: boolean) => {
     setTriage((current) => new Map(current).set(row.lineKey, row));
     setReviewing(null);
+    setReviewNotice(pdfStale ? 'Decision saved. The client report changed, so generate the PDF again before sending it.' : 'Decision saved.');
   };
 
   const gallery = useMemo(() => summaryPhotos(report, triagedLines), [triagedLines, report]);
-  const summaryItems = useMemo(() => summaryMarkup(reviewerSummary), [reviewerSummary]);
+  const summaryItems = useMemo(() => executiveSummaryMarkup(reviewerSummary), [reviewerSummary]);
   useEffect(() => {
     requestPhotos([
       ...gallery.map((photo) => photo.ref),
@@ -1012,6 +999,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           {scan.state !== 'idle' && (
             <p className={scan.state === 'error' ? 'report-review-warning' : 'report-review-source-note'} role={scan.state === 'error' ? 'alert' : 'status'}>{scan.message}</p>
           )}
+          {reviewNotice && <p className="report-review-source-note" role="status">{reviewNotice}</p>}
           {triageLoad.state === 'error' && (
             <div className="alert alert-error" role="alert">
               {triageLoad.message} <button type="button" className="btn btn-secondary" onClick={() => void loadTriage()}>Try again</button>
@@ -1020,7 +1008,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
         </div>
         {triageLoad.state === 'loading' && triage.size === 0 && <p className="report-activity-empty" role="status">Loading Bob&rsquo;s highlights…</p>}
         {triageLoad.state === 'ready' && reviewEntries.length === 0 && (
-          <Empty>{triage.size > 0 ? 'Bob checked the entries and found nothing that looks like an incident.' : editable ? 'Bob has not checked this report yet.' : 'Bob did not check this report.'}</Empty>
+          <Empty>{checkedCount > 0 ? 'Bob checked the entries and found nothing that looks like an incident.' : editable ? 'Bob has not checked this report yet.' : 'Bob did not check this report.'}</Empty>
         )}
         {reviewEntries.length > 0 && (
           <>
@@ -1180,7 +1168,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       </Group>
 
       {viewer && <PhotoViewer viewer={viewer} urls={urls} onPhotoError={photoFailed} onRetry={retryPhoto} onClose={() => setViewer(null)} onIndex={(index) => setViewer((current) => (current ? { ...current, index } : current))} />}
-      {reviewing && reviewingEntry && <TriageDialog target={reviewing} entry={reviewingEntry} editable={editable} packId={packId} urls={urls} onClose={() => setReviewing(null)} onSaved={saveReview} />}
+      {reviewing && reviewingEntry && <TriageDialog target={reviewing} entry={reviewingEntry} editable={editable} packId={packId} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} onClose={() => setReviewing(null)} onSaved={saveReview} />}
     </section>
   );
 }

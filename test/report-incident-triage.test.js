@@ -55,7 +55,8 @@ test('the prompt is judgement guided by cards and reviewer decisions, not a keyw
     ],
   );
   assert.match(prompt, /### Perimeter compromise\nForced or bypassed barriers are incidents\./);
-  assert.match(prompt, /"Gate open, closed and locked\." -> not an incident; reviewer note: Routine for this client\./);
+  assert.match(prompt, /"Gate open, closed and locked\." -> not an incident\n/);
+  assert.doesNotMatch(prompt, /Routine for this client|reviewer note/, 'provider-only reviewer notes never reach the model');
   assert.match(prompt, /"Fuel missing from tank\." -> incident \(theft\)/);
   assert.doesNotMatch(prompt, /Never decided/);
   assert.equal(triageSystemPrompt([], []), TRIAGE_INSTRUCTIONS);
@@ -98,6 +99,11 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.match(edge, /report_potential_incidents_flagged/);
   assert.match(edge, /triageSystemPrompt/);
   assert.doesNotMatch(edge, /decision:\s*'incident'/, 'Bob never records a decision');
+  assert.doesNotMatch(edge, /decision_note/, 'reviewer notes are not read for prompts');
+  assert.match(edge, /select\('excerpt,decision,incident_type'\)\s*\.eq\('service_agreement_id', pack\.service_agreement_id\)/, 'worked examples are scoped to this agreement');
+  assert.match(edge, /readPackTriage/, 'triage reads page past the 1,000-row cap');
+  assert.match(sql, /already been sent, so its decision cannot be changed/);
+  assert.match(sql, /set pdf_source_updated_at = null/, 'a changed decision makes generated PDFs stale');
 
   const view = read('apps/web/src/components/ReportActivityReview.tsx');
   assert.match(view, /functions\.invoke\('flag-report-potential-incidents'/);

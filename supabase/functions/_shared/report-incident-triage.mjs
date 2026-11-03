@@ -77,9 +77,10 @@ export const TRIAGE_INSTRUCTIONS = [
 
 /**
  * The system prompt: instructions, Bob's cards and the reviewer's recent
- * decisions as worked examples.
+ * decisions as worked examples. Reviewer notes are provider-only free text and
+ * are never sent to a model; only the redacted excerpt and the decision are.
  * @param {Array<{ title?: unknown, content?: unknown }>} cards
- * @param {Array<{ excerpt?: unknown, decision?: unknown, incident_type?: unknown, decision_note?: unknown }>} examples
+ * @param {Array<{ excerpt?: unknown, decision?: unknown, incident_type?: unknown }>} examples
  */
 export function triageSystemPrompt(cards, examples) {
   const cardText = (Array.isArray(cards) ? cards : [])
@@ -89,7 +90,7 @@ export function triageSystemPrompt(cards, examples) {
   const exampleText = (Array.isArray(examples) ? examples : [])
     .filter((row) => text(row.excerpt) && (row.decision === 'incident' || row.decision === 'not_incident'))
     .slice(0, TRIAGE_EXAMPLE_LIMIT)
-    .map((row) => `- "${clip(text(row.excerpt), 300)}" -> ${row.decision === 'incident' ? `incident (${text(row.incident_type) || 'other'})` : 'not an incident'}${text(row.decision_note) ? `; reviewer note: ${clip(text(row.decision_note), 200)}` : ''}`)
+    .map((row) => `- "${clip(text(row.excerpt), 300)}" -> ${row.decision === 'incident' ? `incident (${text(row.incident_type) || 'other'})` : 'not an incident'}`)
     .join('\n');
   return [
     TRIAGE_INSTRUCTIONS,

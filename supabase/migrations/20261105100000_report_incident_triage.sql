@@ -37,7 +37,7 @@ create table public.report_incident_triage (
   )
 );
 
-comment on table public.report_incident_triage is 'Bob''s potential-incident flags on client report activity lines and the provider reviewer''s decision (incident / not_incident). Keyed by agreement and a content key of the frozen line (v1: hash of date, time, place, kind, category, title, note, action). excerpt is the already-redacted client-facing line text. Written only by the flag-report-potential-incidents edge function (Bob fields) and set_report_incident_triage (decision fields).';
+comment on table public.report_incident_triage is 'Bob''s potential-incident flags on client report activity lines and the provider reviewer''s decision (incident / not_incident). Keyed by agreement and a content key of the frozen line (v1: hash of every content field except photo and video counts and refs). excerpt is the already-redacted client-facing line text. Written only by the flag-report-potential-incidents edge function (Bob fields) and set_report_incident_triage (decision fields).';
 
 create index report_incident_triage_agreement_date_idx on public.report_incident_triage (service_agreement_id, line_date);
 create index report_incident_triage_org_idx on public.report_incident_triage (organization_id);
@@ -113,6 +113,9 @@ declare
   v_pack record;
   v_row public.report_incident_triage%rowtype;
   v_previous text;
+  v_previous_type text;
+  v_line_date date;
+  v_stale_pdfs integer := 0;
   v_type text := nullif(btrim(coalesce(p_incident_type, '')), '');
   v_note text := nullif(btrim(coalesce(p_note, '')), '');
 begin
@@ -143,7 +146,7 @@ begin
     raise exception 'Sent report packs cannot be changed';
   end if;
 
-  select t.decision into v_previous
+  select t.decision, t.incident_type, t.line_date into v_previous, v_previous_type, v_line_date
   from public.report_incident_triage t
   where t.service_agreement_id = v_pack.service_agreement_id
     and t.line_key = p_line_key
@@ -151,6 +154,16 @@ begin
   for update;
   if not found then
     raise exception 'That entry has not been checked by Bob for this report';
+  end if;
+  -- A decision delivered in a sent report is part of that record and is fixed.
+  if exists (
+    select 1
+    from public.monthly_report_packs sent
+    where sent.service_agreement_id = v_pack.service_agreement_id
+      and sent.status = 'sent'
+      and v_line_date between sent.period_start and sent.period_end
+  ) then
+    raise exception 'This entry is in a report that has already been sent, so its decision cannot be changed';
   end if;
 
   update public.report_incident_triage t
@@ -163,6 +176,19 @@ begin
   where t.service_agreement_id = v_pack.service_agreement_id
     and t.line_key = p_line_key
   returning * into v_row;
+
+  -- The decision changes what the client report shows, so any PDF already
+  -- generated for an unsent pack covering this entry is no longer current and
+  -- must be generated again before sending. The pack trigger refuses this
+  -- while an email delivery is in progress.
+  update public.monthly_report_packs pack
+  set pdf_source_updated_at = null
+  where pack.service_agreement_id = v_pack.service_agreement_id
+    and pack.status in ('draft', 'generated')
+    and v_line_date between pack.period_start and pack.period_end
+    and pack.pdf_source_updated_at is not null
+    and (v_row.decision, v_row.incident_type) is distinct from (v_previous, v_previous_type);
+  get diagnostics v_stale_pdfs = row_count;
 
   insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   values (
@@ -178,7 +204,8 @@ begin
       'decision', v_row.decision,
       'incident_type', v_row.incident_type,
       'bob_flagged', v_row.bob_flagged,
-      'bob_incident_type', v_row.bob_incident_type
+      'bob_incident_type', v_row.bob_incident_type,
+      'pdfs_invalidated', v_stale_pdfs
     )
   );
 
@@ -192,12 +219,13 @@ begin
     'decision', v_row.decision,
     'incident_type', v_row.incident_type,
     'decision_note', v_row.decision_note,
-    'decided_at', v_row.decided_at
+    'decided_at', v_row.decided_at,
+    'pdf_needs_regenerating', v_stale_pdfs > 0
   );
 end;
 $function$;
 
-comment on function public.set_report_incident_triage(uuid, text, text, text, text) is 'Records a provider reviewer''s decision on an activity line Bob has checked: unreviewed, incident (with a type) or not_incident. Report provider custodians only, packs in draft or generated status only; writes an audit_log receipt.';
+comment on function public.set_report_incident_triage(uuid, text, text, text, text) is 'Records a provider reviewer''s decision on an activity line Bob has checked: unreviewed, incident (with a type) or not_incident. Report provider custodians only, packs in draft or generated status only, and never for an entry already delivered in a sent pack. A changed decision clears pdf_source_updated_at on unsent packs covering the entry so their PDF must be generated again; writes an audit_log receipt.';
 revoke all on function public.set_report_incident_triage(uuid, text, text, text, text) from public, anon, authenticated, service_role;
 grant execute on function public.set_report_incident_triage(uuid, text, text, text, text) to authenticated;
 

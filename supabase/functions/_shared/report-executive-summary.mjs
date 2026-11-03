@@ -114,7 +114,7 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
   const report = readActivityReport(data);
   if (!report) return null;
   const label = labeller(report);
-  const { lines } = readActivityLines(activityLines);
+  const { lines, notItemised } = readActivityLines(activityLines);
   /** @type {Map<string, TriageRow>} */
   const triageByKey = new Map((Array.isArray(context.triage) ? context.triage : [])
     .filter((row) => typeof row?.line_key === 'string')
@@ -177,6 +177,7 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
     previousMonths: priorMonthFigures(context.trend),
     entries: chosen,
     entriesNotIncluded: Math.max(written.length - chosen.length, 0),
+    entriesNotItemised: notItemised,
   };
 }
 
@@ -209,6 +210,7 @@ export const EXECUTIVE_SUMMARY_INSTRUCTIONS = [
   '',
   'Rules for the facts:',
   '- Use only facts in the brief. Never invent, round or total figures that are not given.',
+  '- If entriesNotItemised is above zero, that many entries for the month were not itemised and are missing from entries and thisMonth.byWeek. Do not describe the spread across the month or any location as complete; say once in Trends that the weekly spread covers the itemised entries only.',
   '- Entries with review "Confirmed incident on review" are incidents. Entries with review "Cleared on review: not an incident" must not be reported as breaches. Entries marked "not yet reviewed" are potential incidents: report them only if the entry itself clearly describes a serious matter, and do not call them confirmed.',
   '- Never name or describe an identifiable person. Where an entry says a person has been identified, say "a person has been identified". Vehicle descriptions and registrations may be given.',
   '- Use New Zealand English spelling apart from the fixed headings and the terms above. Keep the summary under 450 words.',

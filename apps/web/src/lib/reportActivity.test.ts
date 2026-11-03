@@ -175,8 +175,8 @@ describe('parity with the client PDF renderer', () => {
     expect(sections.summaryMarkup(summary)).toEqual(summaryMarkup(summary));
 
     for (const raw of activityLinesFixture.lines) expect(activityLineKey(raw)).toBe(sections.activityLineKey(raw));
-    expect(activityLineKey({ d: '2026-10-14', t: '09:30', p: 'Smiths', k: 'event', c: 'patrol_visit', ti: '', n: 'Gate chain cut, log winched aside', ac: 'Reported' })).toBe('v1:139f17095d0d50');
-    expect(activityLineKey({})).toBe('v1:068a37861c86a7');
+    expect(activityLineKey({ d: '2026-10-14', t: '09:30', p: 'Smiths', k: 'event', c: 'patrol_visit', ti: '', n: 'Gate chain cut, log winched aside', ac: 'Reported' })).toBe('v1:0fe9500921b782');
+    expect(activityLineKey({})).toBe('v1:15202279b28c9e');
 
     const target = lines.find((entry) => entry.kind !== 'incident' && entry.note)!;
     const decision = { lineKey: target.key, decision: 'incident', incidentType: 'trespass' } as IncidentTriage;

@@ -17,6 +17,8 @@ import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ClientPeoplePanel } from '../components/ClientPeoplePanel';
 import { CustomReportSnapshot } from '../components/CustomReportSnapshot';
 import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
+import { MarkupText } from '../components/ReportMarkupText';
+import { executiveSummaryMarkup } from '../lib/reportActivity';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
@@ -453,7 +455,7 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
   return (
     <article className="client-report-row">
       <span><CalendarRange size={19} /></span>
-      <div className="client-report-copy"><strong>{title}</strong><small>{report.report_kind === 'custom' ? `Custom report · ${periodLabel}` : periodLabel}</small>{report.editorial?.executive_summary && <p>{report.editorial.executive_summary}</p>}</div>
+      <div className="client-report-copy"><strong>{title}</strong><small>{report.report_kind === 'custom' ? `Custom report · ${periodLabel}` : periodLabel}</small>{report.editorial?.executive_summary && <div className="client-report-summary"><MarkupText items={executiveSummaryMarkup(report.editorial.executive_summary)} /></div>}</div>
       <div><strong>{availableLabel}</strong><small>{publishedLabel}</small></div>
       {pdfIsCurrent && report.pdf_path && <GeneratedArtifactActions bucket="bob-uploads" path={report.pdf_path} fileName={`report-${report.id.slice(0, 8)}-${report.period_start}.pdf`} label="Report PDF" />}
       <CheckCircle2 size={18} className="is-success" aria-label="Published report" />

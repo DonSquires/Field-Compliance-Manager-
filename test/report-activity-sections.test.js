@@ -187,9 +187,11 @@ test('the executive summary is the reviewer text as headings, bullets and paragr
 
 test('line keys are stable content hashes and confirmed entries move from the site log to Incidents', async () => {
   const { activityLineKey, applyIncidentTriage, isIncidentLine, monthlyActivityBlocks, siteLogBlocks } = await load();
-  assert.equal(activityLineKey({ d: '2026-10-14', t: '09:30', p: 'Smiths', k: 'event', c: 'patrol_visit', ti: '', n: 'Gate chain cut, log winched aside', ac: 'Reported' }), 'v1:139f17095d0d50');
-  assert.equal(activityLineKey({}), 'v1:068a37861c86a7');
+  assert.equal(activityLineKey({ d: '2026-10-14', t: '09:30', p: 'Smiths', k: 'event', c: 'patrol_visit', ti: '', n: 'Gate chain cut, log winched aside', ac: 'Reported' }), 'v1:0fe9500921b782');
+  assert.equal(activityLineKey({}), 'v1:15202279b28c9e');
   assert.equal(activityLineKey({ d: ' 2026-10-14 ', n: 'x', ph: 3 }), activityLineKey({ d: '2026-10-14', n: 'x' }), 'whitespace and photo counts do not change the key');
+  assert.equal(activityLineKey({ n: 'x', d: '2026-10-14', vid: 1, pr: [{ b: 'scans', p: 'a.jpg' }] }), activityLineKey({ d: '2026-10-14', n: 'x' }), 'field order and media do not change the key');
+  assert.notEqual(activityLineKey({ d: '2026-10-14', c: 'pest_control', sp: 'goat' }), activityLineKey({ d: '2026-10-14', c: 'pest_control', sp: 'pig' }), 'every content field distinguishes entries');
   assert.notEqual(activityLineKey(lines.lines[5]), activityLineKey(lines.lines[4]));
 
   const campers = lines.lines[5];
@@ -260,6 +262,22 @@ test('the client email summary is a headline and entries by type of activity', a
   assert.doesNotMatch(JSON.stringify(email), FORBIDDEN);
   const single = { ...report, totals: { ...report.totals, entries: 1, places: 1, incidents: 0, observations: 0, photos: 1 } };
   assert.equal(activityEmailSummary({ activityReport: single }).headline, '1 entry recorded across 1 location, including 0 incidents, 0 observations and 1 photo.');
+  assert.match(activityEmailSummary({ activityReport: report }, { confirmedIncidents: 2 }).headline, /including 3 incidents,/, 'entries confirmed on review count as incidents');
+});
+
+test('confirmed entries are counted once and the summary title is not repeated under the section heading', async () => {
+  const { activityLineKey, applyIncidentTriage, confirmedIncidentCount, executiveSummaryMarkup, summaryMarkup } = await load();
+  const gate = lines.lines.find((line) => line.k !== 'incident');
+  const recorded = lines.lines.find((line) => line.k === 'incident');
+  const triaged = applyIncidentTriage(lines, [
+    { line_key: activityLineKey(gate), decision: 'incident', incident_type: 'trespass' },
+    { line_key: activityLineKey(recorded), decision: 'incident', incident_type: 'theft' },
+  ]);
+  assert.equal(confirmedIncidentCount(triaged), 1, 'recorded incidents are already in the totals');
+  assert.equal(confirmedIncidentCount(lines), 0);
+  const summary = '**Executive Summary: October 2026**\n\n**Significant Issues**\n* Gate forced.';
+  assert.deepEqual(executiveSummaryMarkup(summary), summaryMarkup(summary).slice(1));
+  assert.deepEqual(executiveSummaryMarkup('**Significant Issues**\n* Gate forced.'), summaryMarkup('**Significant Issues**\n* Gate forced.'));
 });
 
 test('PDF, send gate and every web surface agree on the current renderer version', () => {
@@ -283,7 +301,9 @@ test('monthly PDF and email read the itemised lines only for the pack they rende
   assert.match(pdf, /monthlyActivityBlocks\(snapshot, activityLines, \{ summary: editorial\.executive_summary, highlights: editorial\.client_notes \}\)/);
   assert.match(pdf, /siteLogBlocks\(snapshot, activityLines\)/);
   const send = read('supabase/functions/send-report-pack/index.ts');
-  assert.match(send, /activityEmailSummary\(d\)/);
+  assert.match(send, /activityEmailSummary\(d, \{ confirmedIncidents: pack\.confirmed_incidents \?\? 0 \}\)/);
+  assert.match(send, /confirmedIncidentCount\(applyIncidentTriage\(emailPack\.activity_lines, confirmed\)\)/);
+  assert.match(send, /\['Executive summary', editorial\.executive_summary, executiveSummaryMarkup\]/);
   const monthlyEmail = send.slice(send.indexOf('function monthlySummaryHtml'), send.indexOf('function summaryHtml'));
   assert.doesNotMatch(monthlyEmail, /patrolTravelKm|Hours|reconcile/);
   for (const listSurface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {

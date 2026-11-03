@@ -8,6 +8,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { draftExecutiveSummary, executiveSummaryBrief } from '../_shared/report-executive-summary.mjs';
+import { readPackTriage } from '../_shared/report-incident-triage-store.ts';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -55,14 +56,10 @@ async function handleDraft(req: Request) {
   if (!['draft', 'generated'].includes(pack.status)) throw new RequestError('Sent report packs cannot be changed', 409);
 
   const [triageResult, trendResult] = await Promise.all([
-    admin.from('report_incident_triage')
-      .select('line_key,bob_flagged,bob_incident_type,bob_reason,decision,incident_type')
-      .eq('service_agreement_id', pack.service_agreement_id)
-      .gte('line_date', pack.period_start)
-      .lte('line_date', pack.period_end),
+    readPackTriage<Record<string, unknown>>(admin, pack, 'line_key,bob_flagged,bob_incident_type,bob_reason,decision,incident_type'),
     admin.rpc('report_pack_trend_context', { p_pack_id: pack.id }),
   ]);
-  if (triageResult.error) throw new RequestError(`Incident review could not be read: ${triageResult.error.message}`, 500);
+  if (triageResult.error) throw new RequestError(`Incident review could not be read: ${triageResult.error}`, 500);
   if (trendResult.error) throw new RequestError(`Previous months could not be read: ${trendResult.error.message}`, 500);
 
   const agreement = Array.isArray(pack.agreement) ? pack.agreement[0] : pack.agreement;
@@ -71,7 +68,7 @@ async function handleDraft(req: Request) {
     agreementName: relationName(agreement),
     period: `${pack.period_start} to ${pack.period_end}`,
     periodStart: pack.period_start,
-    triage: triageResult.data ?? [],
+    triage: triageResult.data,
     trend: trendResult.data,
   });
   if (!brief) throw new RequestError('This report has no site activity to summarise', 409);

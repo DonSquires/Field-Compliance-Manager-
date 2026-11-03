@@ -56,6 +56,8 @@ test('the brief carries this month, the reviewer decisions and the non-routine e
   assert.equal(brief.entries[1].severity, 'High');
   assert.ok(brief.entries[2].detail.length <= 600);
   assert.equal(brief.entriesNotIncluded, 0);
+  assert.equal(brief.entriesNotItemised, 0);
+  assert.equal(executiveSummaryBrief({ activityReport: report }, { ...lines, notItemised: 12 }, context).entriesNotItemised, 12);
 });
 
 test('prior months without recorded activity are marked as not comparable', async () => {
@@ -94,6 +96,7 @@ test('the instructions follow the analyst brief: exception-based, no volumes, pe
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Trends\*\*[\s\S]*previous two months/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Never name or describe an identifiable person/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Use only facts in the brief/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /entriesNotItemised is above zero[\s\S]*itemised entries only/);
 });
 
 test('model output keeps headers, bullets and bold, without reasoning or other markdown', async () => {

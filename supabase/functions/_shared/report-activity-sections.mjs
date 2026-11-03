@@ -53,15 +53,22 @@ export function incidentTypeLabel(code) {
   return /** @type {Record<string, string>} */ (INCIDENT_TYPE_LABELS)[key] || (key ? humaniseCode(key) : 'Incident');
 }
 
+const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key']);
+
 /**
  * Content key of one frozen activity line. Snapshot lines carry no record id,
- * so triage decisions are keyed on what the client sees. Must match
- * activityLineKey in apps/web/src/lib/reportActivity.ts.
+ * so triage decisions are keyed on every content field the client sees and Bob
+ * assesses. Photo and video counts and refs are left out because media can
+ * arrive after a pack is generated. Must match activityLineKey in
+ * apps/web/src/lib/reportActivity.ts.
  * @param {Record<string, unknown>} line
  */
 export function activityLineKey(line) {
-  const part = (value) => (typeof value === 'string' ? value.trim() : '');
-  const source = JSON.stringify([line.d, line.t, line.p, line.k, line.c, line.ti, line.n, line.ac].map(part));
+  const source = JSON.stringify(Object.keys(line)
+    .filter((field) => !LINE_KEY_IGNORED.has(field))
+    .sort()
+    .map((field) => [field, typeof line[field] === 'string' ? /** @type {string} */ (line[field]).trim() : line[field] ?? null])
+    .filter(([, value]) => value !== '' && value !== null));
   // cyrb53 (public domain): a fast 53-bit string hash.
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
@@ -155,6 +162,25 @@ export function summaryMarkup(value) {
   }
   flush();
   return items;
+}
+
+/**
+ * The executive summary without Bob's own "Executive Summary: ..." title, for
+ * surfaces that already show an Executive Summary heading.
+ * @param {unknown} value
+ */
+export function executiveSummaryMarkup(value) {
+  const items = summaryMarkup(value);
+  if (items[0]?.style === 'heading' && /^executive summary\b/i.test(items[0].runs.map((run) => run.text).join(''))) items.shift();
+  return items;
+}
+
+/**
+ * Logged entries a reviewer confirmed as incidents, after applyIncidentTriage.
+ * @param {unknown} activityLines
+ */
+export function confirmedIncidentCount(activityLines) {
+  return readActivityLines(activityLines).lines.filter((line) => text(line.k) !== 'incident' && Boolean(text(line.tri))).length;
 }
 
 const numberFormats = new Map();
@@ -483,8 +509,7 @@ export function textParagraphs(value) {
  * @returns {ReportBlock[]}
  */
 export function executiveSummaryBlocks(summary, highlights) {
-  const items = summaryMarkup(summary);
-  if (items[0]?.style === 'heading' && /^executive summary\b/i.test(items[0].runs.map((run) => run.text).join(''))) items.shift();
+  const items = executiveSummaryMarkup(summary);
   const all = [...items, ...summaryMarkup(highlights)];
   if (!all.length) return [];
   return [section('Executive Summary'), ...all.map((item) => /** @type {ReportRichBlock} */ ({ kind: 'rich', runs: item.runs, style: item.style }))];
@@ -756,13 +781,15 @@ export function siteLogBlocks(data, activityLines) {
 /**
  * Short email summary: one headline sentence plus entries by type of activity.
  * @param {unknown} data
+ * @param {{ confirmedIncidents?: number }} [options] logged entries a reviewer confirmed as incidents, counted with recorded incidents
  * @returns {{ headline: string, categories: string[][] } | null}
  */
-export function activityEmailSummary(data) {
+export function activityEmailSummary(data, options = {}) {
   const report = readActivityReport(data);
   if (!report) return null;
   const label = labeller(report);
-  const totals = obj(report.totals) ?? {};
+  const reported = obj(report.totals) ?? {};
+  const totals = { ...reported, incidents: num(reported.incidents) + Math.max(0, Math.trunc(num(options.confirmedIncidents))) };
   const hunters = obj(report.hunterReturns);
   const hunterSentence = hunters && num(hunters.returns) > 0
     ? ` Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`

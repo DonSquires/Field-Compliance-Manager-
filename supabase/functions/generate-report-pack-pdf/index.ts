@@ -10,6 +10,7 @@ import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '..
 import { applyIncidentTriage, monthlyActivityBlocks, siteLogBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 import { loadReportLogo } from '../_shared/report-delivery.mjs';
+import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -687,11 +688,9 @@ async function storeRenderedPdf(admin: SupabaseClient, userId: string, pack: Pdf
 }
 
 async function loadConfirmedIncidents(admin: SupabaseClient, pack: PdfReportPack) {
-  const { data, error } = await admin.from('report_incident_triage').select('line_key,decision,incident_type')
-    .eq('service_agreement_id', pack.service_agreement_id).eq('decision', 'incident')
-    .gte('line_date', pack.period_start).lte('line_date', pack.period_end);
-  if (error) throw new RequestError(`Incident review could not be read: ${error.message}`, 500);
-  return data ?? [];
+  const { data, error } = await readConfirmedIncidents(admin, pack);
+  if (error) throw new RequestError(`Incident review could not be read: ${error}`, 500);
+  return data;
 }
 
 async function handlePdfGeneration(req: Request) {

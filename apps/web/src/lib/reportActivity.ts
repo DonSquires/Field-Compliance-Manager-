@@ -139,13 +139,20 @@ export function incidentTypeLabel(code: string): string {
   return INCIDENT_TYPE_LABELS[code] || (code ? humaniseCode(code) : 'Incident');
 }
 
+const LINE_KEY_IGNORED = new Set(['pr', 'ph', 'vid', 'tri', 'key']);
+
 /**
- * Content key of one frozen activity line (snapshot lines carry no record id).
- * Must match activityLineKey in supabase/functions/_shared/report-activity-sections.mjs.
+ * Content key of one frozen activity line (snapshot lines carry no record id):
+ * every content field except photo and video counts and refs, which can change
+ * as media arrives. Must match activityLineKey in
+ * supabase/functions/_shared/report-activity-sections.mjs.
  */
 export function activityLineKey(line: Json): string {
-  const part = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-  const source = JSON.stringify([line.d, line.t, line.p, line.k, line.c, line.ti, line.n, line.ac].map(part));
+  const source = JSON.stringify(Object.keys(line)
+    .filter((field) => !LINE_KEY_IGNORED.has(field))
+    .sort()
+    .map((field) => [field, typeof line[field] === 'string' ? (line[field] as string).trim() : line[field] ?? null])
+    .filter(([, value]) => value !== '' && value !== null));
   // cyrb53 (public domain): a fast 53-bit string hash.
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
@@ -251,6 +258,13 @@ export function summaryMarkup(value: string): MarkupItem[] {
     }
   }
   flush();
+  return items;
+}
+
+/** The executive summary without Bob's own "Executive Summary: ..." title, for surfaces that already show one. */
+export function executiveSummaryMarkup(value: string): MarkupItem[] {
+  const items = summaryMarkup(value);
+  if (items[0]?.style === 'heading' && /^executive summary\b/i.test(items[0].runs.map((run) => run.text).join(''))) items.shift();
   return items;
 }
 

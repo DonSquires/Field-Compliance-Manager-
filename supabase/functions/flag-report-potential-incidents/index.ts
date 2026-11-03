@@ -12,6 +12,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { completeWithProviders } from '../_shared/report-executive-summary.mjs';
+import { readActivityLines } from '../_shared/report-activity-sections.ts';
+import { readPackTriage } from '../_shared/report-incident-triage-store.ts';
 import {
   TRIAGE_BATCH_SIZE,
   TRIAGE_EXAMPLE_LIMIT,
@@ -72,13 +74,11 @@ async function handleFlag(req: Request) {
   if (pack.report_kind === 'custom') throw new RequestError('This report has no site activity to check', 409);
 
   const candidates = triageCandidates(pack.data, pack.activity_lines);
-  const { data: existing, error: existingError } = await admin.from('report_incident_triage')
-    .select('line_key,decision,bob_assessed_at')
-    .eq('service_agreement_id', pack.service_agreement_id)
-    .gte('line_date', pack.period_start)
-    .lte('line_date', pack.period_end);
-  if (existingError) throw new RequestError(`Incident review could not be read: ${existingError.message}`, 500);
-  const existingByKey = new Map(((existing ?? []) as ExistingRow[]).map((row) => [row.line_key, row]));
+  // Entries beyond the pack's itemised lines cannot be read; say so rather than imply a full check.
+  const notItemised = readActivityLines(pack.activity_lines).notItemised;
+  const existingResult = await readPackTriage<ExistingRow>(admin, pack, 'line_key,decision,bob_assessed_at');
+  if (existingResult.error) throw new RequestError(`Incident review could not be read: ${existingResult.error}`, 500);
+  const existingByKey = new Map(existingResult.data.map((row) => [row.line_key, row]));
   const pending = candidates.filter((candidate) => {
     const row = existingByKey.get(candidate.key);
     if (!row) return true;
@@ -91,8 +91,10 @@ async function handleFlag(req: Request) {
       .eq('category', 'report_incident_triage').eq('is_active', true)
       .or(`organization_id.is.null,organization_id.eq.${pack.organization_id}`)
       .order('key'),
-    admin.from('report_incident_triage').select('excerpt,decision,incident_type,decision_note')
-      .eq('organization_id', pack.organization_id).neq('decision', 'unreviewed')
+    // Worked examples come from this agreement only: one client's "routine
+    // here" decisions must not shape another client's highlights.
+    admin.from('report_incident_triage').select('excerpt,decision,incident_type')
+      .eq('service_agreement_id', pack.service_agreement_id).neq('decision', 'unreviewed')
       .order('decided_at', { ascending: false }).limit(TRIAGE_EXAMPLE_LIMIT),
   ]);
   if (cardsResult.error) throw new RequestError(`Bob's cards could not be read: ${cardsResult.error.message}`, 500);
@@ -171,12 +173,12 @@ async function handleFlag(req: Request) {
     action: 'report_potential_incidents_flagged',
     target_table: 'monthly_report_packs',
     target_id: pack.id,
-    metadata: { candidates: candidates.length, pending: pending.length, checked, flagged, remaining, failed_batches: failedBatches, rescan, models: [...models] },
+    metadata: { candidates: candidates.length, pending: pending.length, checked, flagged, remaining, failed_batches: failedBatches, rescan, not_itemised: notItemised, models: [...models] },
   });
   if (auditError) throw new RequestError(`Entries checked but audit receipt failed: ${auditError.message}`, 502);
   if (checked === 0 && pending.length > 0 && failedBatches > 0) throw new RequestError(failures[0] ?? 'Bob could not check the entries', 502);
 
-  return json({ ok: true, candidates: candidates.length, checked, flagged, remaining, failed_batches: failedBatches, models: [...models] });
+  return json({ ok: true, candidates: candidates.length, checked, flagged, remaining, not_itemised: notItemised, failed_batches: failedBatches, models: [...models] });
 }
 
 serve(async (req) => {

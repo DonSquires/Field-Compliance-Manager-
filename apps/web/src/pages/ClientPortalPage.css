@@ -292,6 +292,8 @@
 .client-report-row .is-success { color: var(--color-status-normal); }
 .client-report-row .is-danger { color: var(--color-status-critical-text); }
 .client-report-copy p { margin: 3px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
+.client-report-summary .report-activity-summary-heading { margin-top: 8px; color: var(--color-text-primary); font-weight: 700; }
+.client-report-summary ul { margin: 3px 0 0; padding-left: 18px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
 .client-custom-report { grid-column: 1 / -1; width: 100%; min-width: 0; padding-top: 9px; border-top: 1px solid var(--color-border); }
 .client-custom-report summary { width: max-content; color: var(--color-brand-primary); font-size: 12px; font-weight: 700; cursor: pointer; }
 .client-custom-report summary:focus-visible { outline: 2px solid var(--color-brand-primary); outline-offset: 3px; }

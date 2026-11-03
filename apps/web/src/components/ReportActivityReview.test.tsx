@@ -388,14 +388,14 @@ describe('ReportActivityReview', () => {
     await screen.findByText('Trespass');
   });
   it('asks Bob to check the logged activity and reports what he highlighted', async () => {
-    invoke.mockResolvedValueOnce({ data: { checked: 6, flagged: 1, remaining: 0 }, error: null });
+    invoke.mockResolvedValueOnce({ data: { checked: 6, flagged: 1, remaining: 0, not_itemised: 3 }, error: null });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
     expect(await within(section).findByText('Bob has not checked this report yet.')).toBeTruthy();
     const ask = within(section).getByRole('button', { name: 'Ask Bob to check for potential incidents' }) as HTMLButtonElement;
     await waitFor(() => expect(ask.disabled).toBe(false));
     fireEvent.click(ask);
-    expect(await within(section).findByText('Bob read 6 entries and highlighted 1 possible incident for your review.')).toBeTruthy();
+    expect(await within(section).findByText('Bob read 6 entries and highlighted 1 possible incident for your review. 3 further entries were not itemised in this report, so Bob could not read them.')).toBeTruthy();
     expect(invoke).toHaveBeenCalledWith('flag-report-potential-incidents', { body: { pack_id: 'p1' } });
     expect(triageRpc.mock.calls.filter(([name]) => name === 'list_report_incident_triage')).toHaveLength(2);
   });
@@ -406,7 +406,7 @@ describe('ReportActivityReview', () => {
     const flagged = { line_key: key, bob_flagged: true, bob_incident_type: 'perimeter_compromise', bob_reason: 'An open gate on patrol suggests unauthorised access.', bob_confidence: 0.7, decision: 'unreviewed', incident_type: null, decision_note: null, decided_at: null };
     triageRpc.mockImplementation(async (name: string) => (name === 'list_report_incident_triage'
       ? { data: [flagged], error: null }
-      : { data: { ...flagged, decision: 'incident', incident_type: 'perimeter_compromise', decided_at: '2026-10-03T00:00:00Z' }, error: null }));
+      : { data: { ...flagged, decision: 'incident', incident_type: 'perimeter_compromise', decided_at: '2026-10-03T00:00:00Z', pdf_needs_regenerating: true }, error: null }));
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
     const card = (await within(section).findByText('Gate found open and secured.')).closest('article')!;
@@ -431,6 +431,7 @@ describe('ReportActivityReview', () => {
     expect(within(confirmed).getByText('Confirmed incident · Perimeter compromise')).toBeTruthy();
     expect(within(incidentsSection()).getByText('Gate found open and secured.')).toBeTruthy();
     expect(within(incidentsSection()).getByText(/1 further logged entry was confirmed as an incident on review/)).toBeTruthy();
+    expect(within(section).getByRole('status').textContent).toBe('Decision saved. The client report changed, so generate the PDF again before sending it.');
   });
 
   it('shows Bob\'s highlights read-only once the report has been sent', async () => {
