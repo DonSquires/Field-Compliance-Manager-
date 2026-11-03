@@ -363,7 +363,8 @@ export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: Act
     .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
   const picks: Array<{ ref: ReportPhotoRef; caption: string }> = [];
   const seen = new Set<string>();
-  for (let round = 0; round < 3 && picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+  for (let round = 0; picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+    if (!ranked.some(({ line }) => line.photoRefs.length > round)) break;
     for (const { line } of ranked) {
       const ref = line.photoRefs[round];
       const key = ref ? `${ref.bucket}/${ref.path}` : '';
@@ -379,7 +380,11 @@ export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: Act
 /** The period in plain sentences, built only from the frozen figures. */
 export function summaryParagraphs(report: ActivityReport, lines: ActivityLine[]): string[] {
   const { totals, incidents, observations } = report;
-  if (totals.entries === 0) return ['Nothing was recorded at your locations during the period.'];
+  const hunters = report.hunterReturns;
+  const hunterText = hunters && hunters.returns > 0
+    ? `Permit holders submitted ${countedText(hunters.returns, 'hunter return', 'hunter returns')} reporting ${countedText(hunters.animals, 'animal', 'animals')}.`
+    : '';
+  if (totals.entries === 0) return ['Nothing was recorded at your locations during the period.', hunterText].filter(Boolean);
   const paragraphs: string[] = [];
   const top = report.byPlace.filter((row) => row.place && row.place !== NO_PLACE_LABEL).sort((left, right) => right.entries - left.entries)[0];
   paragraphs.push(`${countedText(totals.entries, 'entry was', 'entries were')} recorded across ${countedText(totals.places, 'location', 'locations')} during the period.`
@@ -391,11 +396,7 @@ export function summaryParagraphs(report: ActivityReport, lines: ActivityLine[])
     culls > 0 ? countedText(culls, 'pest cull', 'pest culls') : '',
     report.maintenance.entries > 0 ? countedText(report.maintenance.entries, 'maintenance entry', 'maintenance entries') : '',
   ].filter(Boolean);
-  const hunters = report.hunterReturns;
-  const hunterText = hunters && hunters.returns > 0
-    ? ` Permit holders submitted ${countedText(hunters.returns, 'hunter return', 'hunter returns')} reporting ${countedText(hunters.animals, 'animal', 'animals')}.`
-    : '';
-  if (work.length || hunterText) paragraphs.push(`${work.length ? `Work included ${joinList(work)}.` : ''}${hunterText}`.trim());
+  if (work.length || hunterText) paragraphs.push([work.length ? `Work included ${joinList(work)}.` : '', hunterText].filter(Boolean).join(' '));
   const serious = incidents.bySeverity.filter((row) => row.code === 'high' || row.code === 'critical').reduce((sum, row) => sum + row.entries, 0);
   const incidentText = incidents.total > 0
     ? `${countedText(incidents.total, 'incident was', 'incidents were')} recorded${serious > 0 ? `, ${formatActivityNumber(serious)} of high or critical severity` : ''}.`

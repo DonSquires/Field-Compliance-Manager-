@@ -176,6 +176,13 @@ test('the summary leads with the reviewer text, the period in figures and select
   assert.doesNotMatch(allText(hidden), /NZTA/);
 
   assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 } }, []), ['Nothing was recorded at your locations during the period.']);
+  assert.deepEqual(summaryParagraphs({ ...report, totals: { ...report.totals, entries: 0 }, hunterReturns: { returns: 2, animals: 5, bySpecies: [] } }, []), [
+    'Nothing was recorded at your locations during the period.',
+    'Permit holders submitted 2 hunter returns reporting 5 animals.',
+  ]);
+  const burst = { version: 2, notItemised: 0, lines: [{ d: '2026-10-03', t: '08:00', p: 'Beta Forest', k: 'observation', c: 'unclassified', n: 'Dumped rubbish', ph: 8, pr: Array.from({ length: 8 }, (_, index) => ({ b: 'scans', p: `org/burst/${index}.jpg` })) }] };
+  const burstGallery = monthlyActivityBlocks({ activityReport: report }, burst).find((block) => block.kind === 'gallery');
+  assert.equal(burstGallery.photos.length, 6);
   const noLines = monthlyActivityBlocks({ activityReport: report }, null);
   assert.match(allText(noLines), /Itemised entries are not available for this report\./);
 });

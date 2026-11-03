@@ -40,7 +40,8 @@ const REFRESH_HINT = 'This report pack changed since you opened it. Refresh the 
 type Column = { label: string; numeric?: boolean };
 type Label = (dim: string, code: string) => string;
 type PhotoUrls = Record<string, string | null | undefined>;
-type OpenPhoto = (photos: ReportPhotoRef[], index: number, caption: string) => void;
+// A gallery passes one caption per photo so the viewer's caption follows the photo being shown.
+type OpenPhoto = (photos: ReportPhotoRef[], index: number, caption: string | string[]) => void;
 type PhotoError = (ref: ReportPhotoRef, url: string) => void;
 type ChipTone = 'neutral' | 'danger' | 'warning' | 'info' | 'success';
 
@@ -257,7 +258,7 @@ function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError }: { entry: A
   );
 }
 
-interface ViewerState { photos: ReportPhotoRef[]; index: number; caption: string }
+interface ViewerState { photos: ReportPhotoRef[]; index: number; caption: string | string[] }
 
 function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: { viewer: ViewerState; urls: PhotoUrls; onClose: () => void; onIndex: (index: number) => void; onPhotoError: PhotoError; onRetry: (ref: ReportPhotoRef) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -274,6 +275,7 @@ function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: 
   const total = viewer.photos.length;
   const ref = viewer.photos[viewer.index];
   const url = ref ? urls[photoKey(ref)] : null;
+  const caption = Array.isArray(viewer.caption) ? viewer.caption[viewer.index] ?? '' : viewer.caption;
   const step = (delta: number) => onIndex((viewer.index + delta + total) % total);
   return createPortal(
     <dialog
@@ -291,12 +293,12 @@ function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: 
       <header className="report-photo-viewer-head">
         <div>
           <h2 id={titleId}>Photo {viewer.index + 1} of {total}</h2>
-          <p>{viewer.caption}</p>
+          <p>{caption}</p>
         </div>
         <button type="button" className="report-photo-viewer-close" onClick={onClose} aria-label="Close photo"><X size={18} aria-hidden="true" /></button>
       </header>
       <div className="report-photo-viewer-stage">
-        {url ? <img src={url} alt={`${viewer.caption}, photo ${viewer.index + 1} of ${total}`} onError={() => onPhotoError(ref, url)} /> : (
+        {url ? <img src={url} alt={`${caption}, photo ${viewer.index + 1} of ${total}`} onError={() => onPhotoError(ref, url)} /> : (
           <div className="report-photo-state" role="status">
             <p>{url === null ? 'This photo could not be loaded.' : 'Loading photo…'}</p>
             {url === null && ref && <button type="button" className="btn btn-secondary" onClick={() => onRetry(ref)}><RefreshCw size={16} aria-hidden="true" /> Retry photo</button>}
@@ -535,7 +537,7 @@ function AccountingResult({ result, status, label }: { result: ActivityAccountin
 }
 
 
-function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string }) {
+function ActivityReportBody({ packId, updatedAt, report, status, headingId, reviewerSummary, highlights }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string; reviewerSummary: string; highlights: string }) {
   const [lines, setLines] = useState<LinesState>({ state: 'idle' });
   const [accounting, setAccounting] = useState<AccountingState>({ state: 'idle' });
   const [logOpen, setLogOpen] = useState(false);
@@ -644,7 +646,8 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
 
       <section className="report-activity-section report-activity-summary" aria-labelledby={`${headingId}-summary`}>
         <h5 id={`${headingId}-summary`}>Summary</h5>
-        <p className="report-review-source-note">The client report opens with your executive summary and highlights, then these sentences built from the recorded figures.</p>
+        {[reviewerSummary, highlights].map((value) => value.trim()).filter(Boolean).map((value, index) => <p key={`reviewer-${index}`} className="report-activity-summary-text">{value}</p>)}
+        <p className="report-review-source-note">Your executive summary and highlights open the client report, followed by these sentences built from the recorded figures.</p>
         {summary.map((paragraph) => <p key={paragraph} className="report-activity-summary-text">{paragraph}</p>)}
         {gallery.length > 0 && (
           <ul className="report-activity-gallery" aria-label="Selected photos">
@@ -655,7 +658,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
                   <button
                     type="button"
                     className="report-photo-thumb"
-                    onClick={() => openPhoto(gallery.map((item) => item.ref), index, photo.caption)}
+                    onClick={() => openPhoto(gallery.map((item) => item.ref), index, gallery.map((item) => item.caption))}
                     aria-label={url === null ? `Photo unavailable: ${photo.caption}. Open to retry` : `Open photo: ${photo.caption}`}
                   >
                     {url ? <img src={url} alt="" loading="lazy" decoding="async" onError={() => photoFailed(photo.ref, url)} /> : url === null ? <ImageOff size={20} aria-hidden="true" /> : <span className="report-photo-loading" aria-hidden="true" />}
@@ -897,9 +900,12 @@ interface ReportActivityReviewProps {
   updatedAt: string;
   data: Record<string, unknown> | null;
   status: string;
+  /** The reviewer's executive summary and highlights, which open the client report. */
+  summary?: string;
+  highlights?: string;
 }
 
-export function ReportActivityReview({ packId, updatedAt, data, status }: ReportActivityReviewProps) {
+export function ReportActivityReview({ packId, updatedAt, data, status, summary = '', highlights = '' }: ReportActivityReviewProps) {
   const report = useMemo(() => readActivityReport(data), [data]);
   const headingId = `report-activity-${packId}`;
   if (!report) {
@@ -913,5 +919,5 @@ export function ReportActivityReview({ packId, updatedAt, data, status }: Report
       </section>
     );
   }
-  return <ActivityReportBody key={`${packId}:${updatedAt}`} packId={packId} updatedAt={updatedAt} report={report} status={status} headingId={headingId} />;
+  return <ActivityReportBody key={`${packId}:${updatedAt}`} packId={packId} updatedAt={updatedAt} report={report} status={status} headingId={headingId} reviewerSummary={summary} highlights={highlights} />;
 }

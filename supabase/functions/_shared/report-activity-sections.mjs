@@ -325,7 +325,8 @@ function summaryPhotos(lines, label) {
   /** @type {ReportGalleryPhoto[]} */
   const picks = [];
   const seen = new Set();
-  for (let round = 0; round < 3 && picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+  for (let round = 0; picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+    if (!ranked.some((item) => item.refs.length > round)) break;
     for (const { line, refs } of ranked) {
       const ref = refs[round];
       if (!ref || seen.has(`${ref.b}/${ref.p}`) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
@@ -346,7 +347,11 @@ function summaryPhotos(lines, label) {
  */
 export function summaryParagraphs(report, lines) {
   const totals = obj(report.totals) ?? {};
-  if (num(totals.entries) === 0) return ['Nothing was recorded at your locations during the period.'];
+  const hunters = obj(report.hunterReturns);
+  const hunterText = hunters && num(hunters.returns) > 0
+    ? `Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`
+    : '';
+  if (num(totals.entries) === 0) return ['Nothing was recorded at your locations during the period.', hunterText].filter(Boolean);
   const paragraphs = [];
   const top = rows(report.byPlace).filter((row) => text(row.place) && text(row.place) !== NO_PLACE_LABEL)
     .sort((left, right) => num(right.entries) - num(left.entries))[0];
@@ -360,11 +365,7 @@ export function summaryParagraphs(report, lines) {
     culls > 0 ? counted(culls, 'pest cull', 'pest culls') : '',
     num(obj(report.maintenance)?.entries) > 0 ? counted(obj(report.maintenance)?.entries, 'maintenance entry', 'maintenance entries') : '',
   ].filter(Boolean);
-  const hunters = obj(report.hunterReturns);
-  const hunterText = hunters && num(hunters.returns) > 0
-    ? ` Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`
-    : '';
-  if (work.length || hunterText) paragraphs.push(`${work.length ? `Work included ${joinList(work)}.` : ''}${hunterText}`.trim());
+  if (work.length || hunterText) paragraphs.push([work.length ? `Work included ${joinList(work)}.` : '', hunterText].filter(Boolean).join(' '));
 
   const incidents = obj(report.incidents) ?? {};
   const serious = rows(incidents.bySeverity).filter((row) => ['high', 'critical'].includes(text(row.code))).reduce((sum, row) => sum + num(row.entries), 0);

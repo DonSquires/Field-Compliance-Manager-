@@ -142,6 +142,22 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 
+  it('opens with the reviewer text and a photo gallery whose viewer caption follows each photo', async () => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" summary="A quiet month overall." highlights="  " />);
+    const summary = screen.getByRole('region', { name: 'Summary' });
+    const paragraphs = [...summary.querySelectorAll('.report-activity-summary-text')].map((node) => node.textContent);
+    expect(paragraphs[0]).toBe('A quiet month overall.');
+    expect(paragraphs.length).toBeGreaterThan(1);
+    const gallery = await within(summary).findByRole('list', { name: 'Selected photos' });
+    const captions = [...gallery.querySelectorAll('li > span')].map((node) => node.textContent);
+    expect(captions.length).toBeGreaterThan(1);
+    fireEvent.click(within(gallery).getAllByRole('button')[0]);
+    const viewer = await screen.findByRole('dialog', { name: `Photo 1 of ${captions.length}` });
+    expect(within(viewer).getByText(captions[0]!)).toBeTruthy();
+    fireEvent.click(within(viewer).getByRole('button', { name: /Next/ }));
+    expect(within(screen.getByRole('dialog')).getByText(captions[1]!)).toBeTruthy();
+  });
+
   it('opens photos in an accessible viewer, steps through them and returns focus', async () => {
     const lines = {
       ...activityLinesFixture,
