@@ -183,10 +183,13 @@ export function activityLabel(report: Pick<ActivityReport, 'labels'>, dim: strin
   return report.labels[dim]?.[value] || FIXED_LABELS[dim]?.[value] || humaniseCode(value);
 }
 
+// Photos named for NZTA are privileged and never go into a client report.
+export const PRIVILEGED_PHOTO = /nzta/i;
+
 function photoRefs(value: unknown): ReportPhotoRef[] {
   return list(value)
     .map((ref) => ({ bucket: str(ref.b), path: str(ref.p) }))
-    .filter((ref) => ref.bucket && ref.path && !/^https?:/i.test(ref.path));
+    .filter((ref) => ref.bucket && ref.path && !/^https?:/i.test(ref.path) && !PRIVILEGED_PHOTO.test(ref.path));
 }
 
 export function readActivityLines(value: unknown): { lines: ActivityLine[]; notItemised: number } | null {
@@ -321,6 +324,88 @@ export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
 
 export function routineSummary(routine: ActivityLine[]): string {
   return `${countedText(routine.length, 'routine patrol', 'routine patrols')} with nothing further to report (${dayList(routine.map((line) => line.date))}).`;
+}
+
+export const SUMMARY_PHOTO_LIMIT = 6;
+export const OF_NOTE_LIMIT = 20;
+
+/** An observation, CCTV activation or anything photographed; incidents are listed separately and routine patrols only counted. */
+export function isNotableLine(line: ActivityLine): boolean {
+  if (line.kind === 'incident' || isRoutineLine(line)) return false;
+  return line.kind === 'observation' || line.category === 'camera_activation' || line.photos > 0;
+}
+
+const noteRank = (line: ActivityLine) => (line.kind === 'incident' ? 0 : line.category === 'camera_activation' ? 1 : line.kind === 'observation' ? 2 : 3);
+const joinList = (parts: string[]) => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
+const shortDate = (value: string) => {
+  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
+};
+
+/** The notable entries listed under Of Note: most important first when capped, then back in date order. */
+export function ofNoteLines(lines: ActivityLine[]): { listed: ActivityLine[]; total: number } {
+  const notable = lines.filter(isNotableLine);
+  const listed = notable
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index)
+    .slice(0, OF_NOTE_LIMIT)
+    .sort((left, right) => left.index - right.index)
+    .map(({ line }) => line);
+  return { listed, total: notable.length };
+}
+
+/** Summary photos: one per entry in order of importance before any entry gets a second. */
+export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: ActivityLine[]): Array<{ ref: ReportPhotoRef; caption: string }> {
+  const ranked = lines
+    .filter((line) => line.kind === 'incident' || isNotableLine(line))
+    .map((line, index) => ({ line, index }))
+    .filter((item) => item.line.photoRefs.length > 0)
+    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
+  const picks: Array<{ ref: ReportPhotoRef; caption: string }> = [];
+  const seen = new Set<string>();
+  for (let round = 0; round < 3 && picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+    for (const { line } of ranked) {
+      const ref = line.photoRefs[round];
+      const key = ref ? `${ref.bucket}/${ref.path}` : '';
+      if (!ref || seen.has(key) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
+      seen.add(key);
+      const what = line.kind === 'incident' ? activityLabel(report, 'incidentType', line.incidentType) || 'Incident' : activityLabel(report, 'category', line.category);
+      picks.push({ ref, caption: [shortDate(line.date), line.place, what].filter(Boolean).join(' · ') });
+    }
+  }
+  return picks;
+}
+
+/** The period in plain sentences, built only from the frozen figures. */
+export function summaryParagraphs(report: ActivityReport, lines: ActivityLine[]): string[] {
+  const { totals, incidents, observations } = report;
+  if (totals.entries === 0) return ['Nothing was recorded at your locations during the period.'];
+  const paragraphs: string[] = [];
+  const top = report.byPlace.filter((row) => row.place && row.place !== NO_PLACE_LABEL).sort((left, right) => right.entries - left.entries)[0];
+  paragraphs.push(`${countedText(totals.entries, 'entry was', 'entries were')} recorded across ${countedText(totals.places, 'location', 'locations')} during the period.`
+    + (top && totals.places > 1 ? ` The most active location was ${top.place} with ${countedText(top.entries, 'entry', 'entries')}.` : ''));
+  const culls = report.pest.bySpecies.reduce((sum, row) => sum + row.culls, 0);
+  const work = [
+    totals.patrolVisits > 0 ? countedText(totals.patrolVisits, 'patrol or site check', 'patrols and site checks') : '',
+    totals.cameraActivations > 0 ? countedText(totals.cameraActivations, 'CCTV activation', 'CCTV activations') : '',
+    culls > 0 ? countedText(culls, 'pest cull', 'pest culls') : '',
+    report.maintenance.entries > 0 ? countedText(report.maintenance.entries, 'maintenance entry', 'maintenance entries') : '',
+  ].filter(Boolean);
+  const hunters = report.hunterReturns;
+  const hunterText = hunters && hunters.returns > 0
+    ? ` Permit holders submitted ${countedText(hunters.returns, 'hunter return', 'hunter returns')} reporting ${countedText(hunters.animals, 'animal', 'animals')}.`
+    : '';
+  if (work.length || hunterText) paragraphs.push(`${work.length ? `Work included ${joinList(work)}.` : ''}${hunterText}`.trim());
+  const serious = incidents.bySeverity.filter((row) => row.code === 'high' || row.code === 'critical').reduce((sum, row) => sum + row.entries, 0);
+  const incidentText = incidents.total > 0
+    ? `${countedText(incidents.total, 'incident was', 'incidents were')} recorded${serious > 0 ? `, ${formatActivityNumber(serious)} of high or critical severity` : ''}.`
+    : 'No incidents were recorded.';
+  const observationText = observations.total > 0
+    ? ` ${countedText(observations.total, 'observation was', 'observations were')} logged, ${formatActivityNumber(observations.withPhoto)} with photos.`
+    : '';
+  const noteText = lines.filter(isNotableLine).length + incidents.total > 0 ? ' The entries that stand out are listed under Of Note.' : '';
+  paragraphs.push(`${incidentText}${observationText}${noteText}`);
+  return paragraphs;
 }
 
 export interface ActivityAccounting {

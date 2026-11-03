@@ -21,8 +21,9 @@ test('report-pack PDFs keep snapshot provenance in document metadata, not on cli
 });
 
 test('monthly PDFs render agreement-scoped client sections without provider-wide or operational totals', () => {
-  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v13'/);
+  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v14'/);
   assert.match(source, /else if \(block\.kind === 'charts'\) drawCharts\(block\)/);
+  assert.match(source, /else if \(block\.kind === 'gallery'\) drawGallery\(block\)/);
   assert.match(source, /embedPdfNotoFonts\(pdf\)/);
   assert.doesNotMatch(source, /noto-sans-[^'" ]+\.woff/);
   assert.doesNotMatch(source, /pdf\.embedFont\(/);
@@ -30,7 +31,7 @@ test('monthly PDFs render agreement-scoped client sections without provider-wide
   assert.match(source, /editorial\.title\.trim\(\)/);
   assert.match(source, /templateTitle = typeof template\?\.name === 'string'/);
   assert.match(source, /\$\{templateTitle\} - \$\{period\}/);
-  assert.match(source, /monthlyActivityBlocks\(snapshot, activityLines\)/);
+  assert.match(source, /monthlyActivityBlocks\(snapshot, activityLines, \{ summary: editorial\.executive_summary, highlights: editorial\.client_notes \}\)/);
   assert.match(source, /siteLogBlocks\(snapshot, activityLines\)/);
   assert.match(source, /Patrol and Activity Summary/);
   assert.match(source, /Site Coverage/);

@@ -13,7 +13,7 @@ import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v13';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v14';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -185,17 +185,19 @@ const ALERT_TINT = rgb(0.99, 0.95, 0.94);
 const STRIPE = rgb(0.97, 0.98, 0.98);
 const WHITE = rgb(1, 1, 1);
 
+// Summary gallery photos come first so they are fetched and converted first.
 function entryPhotoRefs(blocks: ReportBlock[]) {
   const seen = new Set<string>();
   const refs: ReportPhotoRef[] = [];
+  const add = (ref: ReportPhotoRef) => {
+    const key = reportPhotoKey(ref);
+    if (seen.has(key) || refs.length >= MAX_REPORT_PHOTOS) return;
+    seen.add(key);
+    refs.push(ref);
+  };
+  for (const block of blocks) if (block.kind === 'gallery') block.photos.forEach((photo) => add(photo.ref));
   for (const block of blocks) {
-    if (block.kind !== 'entry') continue;
-    for (const ref of block.photos.slice(0, PHOTOS_PER_ENTRY)) {
-      const key = reportPhotoKey(ref);
-      if (seen.has(key) || refs.length >= MAX_REPORT_PHOTOS) continue;
-      seen.add(key);
-      refs.push(ref);
-    }
+    if (block.kind === 'entry') block.photos.slice(0, PHOTOS_PER_ENTRY).forEach(add);
   }
   return refs;
 }
@@ -217,7 +219,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
   pdf.setKeywords([`report-pack:${packId}`, `snapshot-generated:${snapshotGeneratedAt ?? 'not-recorded'}`, `renderer:${rendererVersion}`, `scope:${reportKind}`]);
 
   const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
-  const activityBlocks = reportKind === 'custom' ? null : monthlyActivityBlocks(snapshot, activityLines);
+  const activityBlocks = reportKind === 'custom' ? null : monthlyActivityBlocks(snapshot, activityLines, { summary: editorial.executive_summary, highlights: editorial.client_notes });
   const logBlocks = activityBlocks ? siteLogBlocks(snapshot, activityLines) : [];
   const photoRefs = entryPhotoRefs([...(activityBlocks ?? []), ...logBlocks]);
   const photoBytes = photoRefs.length && loadPhotos ? await loadPhotos(photoRefs) : new Map<string, Uint8Array>();
@@ -352,6 +354,35 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
       y = top - height - 10;
     }
   };
+  const drawGallery = (block: Extract<ReportBlock, { kind: 'gallery' }>) => {
+    const columns = 3;
+    const gap = 10;
+    const cellWidth = (WIDTH - gap * (columns - 1)) / columns;
+    const maxHeight = 120;
+    const shown = block.photos.flatMap((photo) => {
+      const image = photos.get(reportPhotoKey(photo.ref));
+      if (!image) return [];
+      const scale = Math.min(cellWidth / image.width, maxHeight / image.height);
+      return [{ image, width: image.width * scale, height: image.height * scale, caption: wrapText(photo.caption, normal, 7.5, cellWidth).slice(0, 2) }];
+    });
+    for (let start = 0; start < shown.length; start += columns) {
+      const row = shown.slice(start, start + columns);
+      const imageHeight = Math.max(...row.map((photo) => photo.height));
+      const height = imageHeight + 4 + Math.max(...row.map((photo) => photo.caption.length)) * 10;
+      ensure(height + 8);
+      const top = y + 6;
+      row.forEach((photo, index) => {
+        const x = LEFT + index * (cellWidth + gap);
+        page.drawImage(photo.image, { x, y: top - photo.height, width: photo.width, height: photo.height });
+        page.drawRectangle({ x, y: top - photo.height, width: photo.width, height: photo.height, borderColor: RULE, borderWidth: 0.5 });
+        photo.caption.forEach((line, lineIndex) => drawRuns(line, x, top - imageHeight - 10 - lineIndex * 10, normal, 7.5, MUTED));
+      });
+      y = top - height - 10;
+    }
+    if (shown.length < block.photos.length) {
+      draw(`${block.photos.length - shown.length} selected ${block.photos.length - shown.length === 1 ? 'photo is' : 'photos are'} held on file.`, normal, 8, MUTED);
+    }
+  };
   const drawEntry = (block: Extract<ReportBlock, { kind: 'entry' }>) => {
     const incident = block.tone === 'incident';
     const innerX = LEFT + 12;
@@ -421,6 +452,7 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
       else if (block.kind === 'table') drawTable(block);
       else if (block.kind === 'metrics') drawMetrics(block.items);
       else if (block.kind === 'charts') drawCharts(block);
+      else if (block.kind === 'gallery') drawGallery(block);
       else if (block.kind === 'entry') drawEntry(block);
       else { draw(block.text, block.bold ? bold : normal, block.size ?? 10, block.muted ? MUTED : INK); y -= 2; }
     }
@@ -431,11 +463,11 @@ export async function renderPdf({ templateTitle, agreementName, providerName, cl
       ? 'Not recorded'
       : new Intl.NumberFormat('en-NZ', { maximumFractionDigits }).format(value);
 
-    if (typeof editorial.executive_summary === 'string' && editorial.executive_summary) {
+    if (!activityBlocks && typeof editorial.executive_summary === 'string' && editorial.executive_summary) {
       drawSection('Overview');
       draw(editorial.executive_summary);
     }
-    if (typeof editorial.client_notes === 'string' && editorial.client_notes) {
+    if (!activityBlocks && typeof editorial.client_notes === 'string' && editorial.client_notes) {
       drawSection('Highlights');
       draw(editorial.client_notes);
     }
