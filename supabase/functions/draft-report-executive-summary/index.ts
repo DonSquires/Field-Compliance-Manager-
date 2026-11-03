@@ -69,7 +69,7 @@ async function handleDraft(req: Request) {
     throw new RequestError(error instanceof Error ? error.message : 'Bob could not draft the summary', 502);
   }
 
-  await admin.from('audit_log').insert({
+  const { error: auditError } = await admin.from('audit_log').insert({
     organization_id: pack.organization_id,
     actor_user_id: user.id,
     action: 'monthly_report_pack_summary_drafted',
@@ -77,6 +77,7 @@ async function handleDraft(req: Request) {
     target_id: pack.id,
     metadata: { provider: draft.provider, model: draft.model, entries_sent: brief.entries.length, entries_not_included: brief.entriesNotIncluded },
   });
+  if (auditError) throw new RequestError(`Summary drafted but audit receipt failed: ${auditError.message}`, 502);
   return json({ ok: true, summary: draft.summary, provider: draft.provider, model: draft.model });
 }
 

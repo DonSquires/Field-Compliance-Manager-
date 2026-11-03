@@ -116,6 +116,7 @@ test('the edge function and review panel keep drafting governed and unsaved unti
   assert.match(edge, /'grand_master', 'master', 'admin', 'admin_officer'/);
   assert.match(edge, /Sent report packs cannot be changed/);
   assert.match(edge, /monthly_report_pack_summary_drafted/);
+  assert.match(edge, /if \(auditError\) throw new RequestError/);
   assert.doesNotMatch(edge, /\.update\(|\.rpc\('review_monthly_report_pack'/);
   const panel = read('apps/web/src/components/ReportPackReviewPanel.tsx');
   assert.match(panel, /functions\.invoke\('draft-report-executive-summary'/);
