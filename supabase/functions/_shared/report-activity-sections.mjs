@@ -677,7 +677,11 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     }
   }
 
-  if (hunters && num(hunters.returns) > 0) {
+  if (hunters && num(hunters.returns) <= 0) {
+    // A client with a permit-return feed is told when nobody returned, so silence is not mistaken for a gap.
+    blocks.push(section('Hunter Kill Returns'));
+    blocks.push(note('No hunter kill or nil returns were submitted for hunts in the period.'));
+  } else if (hunters) {
     blocks.push(section('Hunter Kill Returns'));
     blocks.push(note(`${counted(hunters.returns, 'hunter return was', 'hunter returns were')} submitted for hunts in the period: ${fmt(num(hunters.killReturns))} with kills and ${fmt(num(hunters.nilReturns))} nil. ${counted(hunters.animals, 'animal was', 'animals were')} reported. Figures are as reported by permit holders.`));
     const species = rows(hunters.bySpecies);

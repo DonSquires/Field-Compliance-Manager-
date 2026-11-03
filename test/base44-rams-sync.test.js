@@ -263,7 +263,8 @@ test('client PDF and email show hunter returns by species and area only when the
   const metrics = blocks.find((block) => block.kind === 'metrics');
   assert.deepEqual(metrics.items.at(-1), { label: 'Hunter-reported kills', value: '5' });
   const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title ?? block.text);
-  assert.ok(titles.indexOf('Hunter Kill Returns') === titles.indexOf('Pest Control') + 1, 'hunter returns follow pest control');
+  assert.equal(titles.includes('Pest Control'), false, 'an empty pest-control section is omitted from the compact report');
+  assert.equal(titles.at(-1), 'Hunter Kill Returns', 'hunter returns close the client sections');
   const tables = blocks.filter((block) => block.kind === 'table').map((block) => JSON.stringify(block));
   assert.ok(tables.some((table) => /Animals reported/.test(table) && /Pig/.test(table)));
   assert.ok(tables.some((table) => /Hunting area/.test(table) && /Denckers/.test(table)));
