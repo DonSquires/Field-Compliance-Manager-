@@ -126,8 +126,19 @@ export function privacyBatchMessage(batch) {
   })))}`;
 }
 
-/** @param {unknown} value */
-const items = (value) => (Array.isArray(value) ? value.map(text).filter((item) => item.length >= 2 && item.length <= 120) : []);
+/**
+ * A findings list. Anything other than a missing value or a list of strings is
+ * rejected, so a malformed answer is never certified as clean.
+ * @param {unknown} value
+ * @param {string} field
+ */
+const items = (value, field) => {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error(`model JSON has an invalid ${field} list`);
+  }
+  return value.map(text).filter((item) => item.length >= 2 && item.length <= 120);
+};
 
 /**
  * Bob's findings for one batch, validated. Throws when the answer is not the
@@ -154,11 +165,11 @@ export function parsePrivacyFindings(content, batchSize) {
   const result = new Map();
   for (const entry of entries) {
     const value = obj(entry);
-    if (!value) continue;
+    if (!value) throw new Error('model JSON has an invalid entry');
     const index = typeof value.i === 'number' ? value.i : Number(value.i);
-    if (!Number.isInteger(index) || index < 0 || index >= batchSize) continue;
-    const names = items(value.names);
-    const details = items(value.details);
+    if (!Number.isInteger(index) || index < 0 || index >= batchSize) throw new Error('model JSON has an invalid entry number');
+    const names = items(value.names, 'names');
+    const details = items(value.details, 'details');
     if (names.length || details.length) result.set(index, { names, details });
   }
   return result;

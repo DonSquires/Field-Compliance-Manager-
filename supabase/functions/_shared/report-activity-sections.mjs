@@ -125,12 +125,50 @@ const WITHHELD_CATEGORIES = new Set(['administration', 'travel_admin']);
  * @param {Record<string, unknown>} line
  */
 export function isAdministrationLine(line) {
-  return text(line.k) !== 'incident' && !text(line.tri) && WITHHELD_CATEGORIES.has(text(line.c));
+  // Older packs file midnight card reviews under administration; they are observations and stay in.
+  return text(line.k) !== 'incident' && !text(line.tri) && WITHHELD_CATEGORIES.has(text(line.c))
+    && compact(line.ti) !== 'cardreview';
 }
 
 /** @param {unknown} value */
 function compact(value) {
   return text(value).toLowerCase().replace(/[^a-z]/g, '');
+}
+
+/**
+ * The frozen report with administration removed from every aggregate the
+ * client sees. Packs generated after the ruling carry none, so this is a no-op
+ * for them; older packs lose the administration entries, categories and
+ * administration-only locations consistently.
+ * @param {Record<string, unknown>} report
+ */
+function withoutWithheld(report) {
+  const categories = rows(report.categories);
+  const withheld = categories.filter((row) => WITHHELD_CATEGORIES.has(text(row.code)))
+    .reduce((sum, row) => sum + num(row.entries), 0);
+  if (!withheld) return report;
+  const totals = obj(report.totals) ?? {};
+  const byPlace = rows(report.byPlace).map((row) => {
+    const placeCategories = obj(row.categories) ?? {};
+    const removed = Object.entries(placeCategories).filter(([code]) => WITHHELD_CATEGORIES.has(code))
+      .reduce((sum, [, value]) => sum + num(value), 0);
+    if (!removed) return row;
+    return {
+      ...row,
+      entries: Math.max(0, num(row.entries) - removed),
+      categories: Object.fromEntries(Object.entries(placeCategories).filter(([code]) => !WITHHELD_CATEGORIES.has(code))),
+    };
+  }).filter((row) => num(row.entries) > 0);
+  return {
+    ...report,
+    totals: {
+      ...totals,
+      entries: Math.max(0, num(totals.entries) - withheld),
+      places: Array.isArray(report.byPlace) ? byPlace.length : num(totals.places),
+    },
+    categories: categories.filter((row) => !WITHHELD_CATEGORIES.has(text(row.code))),
+    byPlace,
+  };
 }
 
 /**
@@ -317,7 +355,7 @@ const FIXED_LABELS = {
 export function readActivityReport(data) {
   const report = obj(obj(data)?.activityReport);
   if (!report || report.version !== ACTIVITY_REPORT_VERSION || !obj(report.totals)) return null;
-  return report;
+  return withoutWithheld(report);
 }
 
 /**

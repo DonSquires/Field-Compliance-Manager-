@@ -338,6 +338,34 @@ test('card reviews are observations listed with their photos, and administration
   assert.doesNotMatch(allText(olderBlocks.filter((block) => block.kind === 'charts')), /Administration/);
 });
 
+test('older packs keep card reviews filed as administration and drop administration from every aggregate', async () => {
+  const { readActivityReport, readActivityLines, isAdministrationLine, reviewSectionCode } = await load();
+  const cardReview = { d: '2026-10-01', t: '00:00', p: 'Smiths', k: 'event', c: 'administration', ti: 'Card review', n: 'Card swapped; two vehicles at the gate.', ph: 1, pr: [photo('f')] };
+  assert.equal(isAdministrationLine(cardReview), false, 'a card review is an observation even when an older pack filed it as administration');
+  assert.equal(reviewSectionCode(cardReview), 'observation');
+  assert.equal(readActivityLines({ version: 2, notItemised: 0, lines: [cardReview] }).lines.length, 1);
+
+  const firstPlace = report.byPlace[0];
+  const older = {
+    ...report,
+    totals: { ...report.totals, entries: report.totals.entries + 4, places: report.totals.places + 1 },
+    categories: [...report.categories, { code: 'administration', entries: 4, photos: 0 }],
+    byPlace: [
+      { ...firstPlace, entries: firstPlace.entries + 1, categories: { ...firstPlace.categories, administration: 1 } },
+      ...report.byPlace.slice(1),
+      { place: 'General / All Forests (Admin, HQ, Travel)', entries: 3, photos: 0, categories: { administration: 3 } },
+    ],
+  };
+  const read = readActivityReport({ activityReport: older });
+  assert.equal(read.totals.entries, report.totals.entries);
+  assert.equal(read.totals.places, report.byPlace.length, 'an administration-only location is no longer counted');
+  assert.deepEqual(read.byPlace.map((row) => row.place), report.byPlace.map((row) => row.place));
+  assert.equal(read.byPlace[0].entries, firstPlace.entries);
+  assert.equal('administration' in read.byPlace[0].categories, false);
+  assert.equal(read.categories.some((row) => row.code === 'administration'), false);
+  assert.equal(readActivityReport({ activityReport: report }), report, 'packs without administration are read unchanged');
+});
+
 test('the client email summary is a headline and entries by type of activity', async () => {
   const { activityEmailSummary } = await load();
   const email = activityEmailSummary({ activityReport: report });

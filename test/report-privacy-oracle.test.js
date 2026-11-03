@@ -46,13 +46,17 @@ test('findings are withheld as whole words; plates, places and organisations sta
   assert.match(privacyBatchMessage([{ fields: { n: long } }]), /Kathlene Jackson/, 'long wording is sent to Bob whole');
 });
 
-test("Bob's answer must be the requested JSON; entries outside the batch are ignored", async () => {
+test("Bob's answer must be the requested JSON; a malformed finding is never certified as clean", async () => {
   const { parsePrivacyFindings } = await load();
-  const findings = parsePrivacyFindings('<think>x</think>```json\n{"entries":[{"i":0,"names":["Jordan Nelson"],"details":[]},{"i":"1","names":[],"details":["021 555 0101"]},{"i":7,"names":["Out"]},{"i":2,"names":[]}]}\n```', 3);
+  const findings = parsePrivacyFindings('<think>x</think>```json\n{"entries":[{"i":0,"names":["Jordan Nelson"],"details":[]},{"i":"1","names":[],"details":["021 555 0101"]},{"i":2,"names":[]}]}\n```', 3);
   assert.deepEqual([...findings.entries()], [[0, { names: ['Jordan Nelson'], details: [] }], [1, { names: [], details: ['021 555 0101'] }]]);
   assert.throws(() => parsePrivacyFindings('No names here.', 2), /did not return JSON/);
   assert.throws(() => parsePrivacyFindings('{"entries": [}', 2), /malformed JSON/);
   assert.throws(() => parsePrivacyFindings('{"found": []}', 2), /no entries list/);
+  assert.throws(() => parsePrivacyFindings('{"entries":[{"i":0,"names":"Jordan Nelson"}]}', 2), /invalid names list/);
+  assert.throws(() => parsePrivacyFindings('{"entries":[{"i":0,"details":[{"phone":"021"}]}]}', 2), /invalid details list/);
+  assert.throws(() => parsePrivacyFindings('{"entries":[{"i":7,"names":["Out"]}]}', 2), /invalid entry number/);
+  assert.throws(() => parsePrivacyFindings('{"entries":["Jordan Nelson"]}', 2), /invalid entry/);
 });
 
 test('reworded lines keep their review key, every checked line is marked, and the pack clears only when wording matches', async () => {
@@ -103,7 +107,28 @@ test('the PDF and the email refuse wording the oracle has not cleared, and the w
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'privacy check, incident scan, summary draft, privacy check, render');
 
   const panel = read('apps/web/src/components/ReportPackReviewPanel.tsx');
-  assert.match(panel, /if \(action === 'publish' && pack\.report_kind === 'monthly'\) \{\s*const privacy = await runPrivacyCheck\(pack\.id, \{ editorial: wording \}\);/);
+  assert.match(panel, /if \(action === 'publish' && pack\.report_kind === 'monthly'\) \{\s*const privacy = await runPrivacyCheck\(pack\.id, \{ editorial: wording, expectedUpdatedAt: pack\.updated_at \}\);/);
   assert.match(panel, /p_executive_summary: wording\.executive_summary/);
   assert.match(panel, /p_expected_updated_at: expectedUpdatedAt/);
+});
+
+test("the reviewer's privacy check keeps stale-edit protection and records the exact wording it cleared", () => {
+  const edge = read('supabase/functions/check-report-privacy/index.ts');
+  assert.match(edge, /if \(expectedUpdatedAt && Date\.parse\(expectedUpdatedAt\) !== Date\.parse\(String\(pack\.updated_at\)\)\) \{\s*throw new RequestError\([^)]*409\);/);
+  assert.match(edge, /cleared_editorial: clearedEditorial/);
+  const bob = read('apps/web/src/lib/reportBob.ts');
+  assert.match(bob, /updatedAt: options\.expectedUpdatedAt \?\? null/);
+  assert.match(bob, /const expected = result\.updatedAt \? \{ expected_updated_at: result\.updatedAt \} : \{\};/);
+});
+
+test('publishing to the portal enforces the privacy clearance inside the review transaction', () => {
+  const sql = read('supabase/migrations/20261105150000_report_publish_privacy_gate.sql');
+  assert.match(sql, /CREATE OR REPLACE FUNCTION "public"\."review_monthly_report_pack"/);
+  assert.match(sql, /where \(line -> 'pv'\) is distinct from to_jsonb\(1\)/);
+  assert.match(sql, /v_cleared := v_pack\.activity_lines -> 'privacy' -> 'cleared_editorial';/);
+  assert.match(sql, /Run Bob''s privacy check first: the report wording has changed/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.review_monthly_report_pack\([^)]*\) FROM PUBLIC, anon, authenticated, service_role;/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.review_monthly_report_pack\([^)]*\) TO authenticated;/);
+  const gate = sql.indexOf("v_cleared := v_pack.activity_lines");
+  assert.ok(gate > 0 && gate < sql.indexOf('update public.monthly_report_packs'), 'the gate runs before the pack is published');
 });

@@ -53,6 +53,8 @@ export interface ActivityLine {
   key: string;
   /** Incident type a reviewer confirmed for this entry; empty when not confirmed. */
   confirmedType: string;
+  /** Administration carried by an older pack: kept out of the client report unless confirmed as an incident (isReportedLine). */
+  withheld: boolean;
   date: string;
   time: string;
   place: string;
@@ -222,6 +224,11 @@ export function isIncidentLine(line: ActivityLine): boolean {
   return line.kind === 'incident' || Boolean(line.confirmedType);
 }
 
+/** Whether the client report shows this entry. Apply incident triage first, so confirmed administration entries stay in. */
+export function isReportedLine(line: ActivityLine): boolean {
+  return !line.withheld || isIncidentLine(line);
+}
+
 export interface TextRun { text: string; bold: boolean }
 export interface MarkupItem { style: 'heading' | 'bullet' | 'paragraph'; runs: TextRun[] }
 
@@ -296,20 +303,27 @@ export function readActivityReport(data: unknown): ActivityReport | null {
     labels[dim] = Object.fromEntries(Object.entries(object(map) ?? {}).map(([key, value]) => [key, str(value)]).filter(([, value]) => value !== ''));
   }
   const allCategories = list(report.categories).map(count);
-  // Administration is withheld from the client report; older packs still carry it (WITHHELD_CATEGORIES).
+  // Administration is withheld from the client report; older packs still carry it (WITHHELD_CATEGORIES),
+  // so every aggregate drops it the same way, as withoutWithheld does in the PDF.
   const withheldEntries = allCategories.filter((row) => WITHHELD_CATEGORIES.has(row.code)).reduce((sum, row) => sum + row.entries, 0);
+  const byPlace = list(report.byPlace).map((row) => {
+    const placeCategories = Object.entries(object(row.categories) ?? {}).map(([key, value]) => [key, num(value)] as const);
+    const removed = withheldEntries ? placeCategories.filter(([key]) => WITHHELD_CATEGORIES.has(key)).reduce((sum, [, value]) => sum + value, 0) : 0;
+    return {
+      place: str(row.place) || NO_PLACE_LABEL, entries: Math.max(0, num(row.entries) - removed), photos: num(row.photos),
+      categories: Object.fromEntries(withheldEntries ? placeCategories.filter(([key]) => !WITHHELD_CATEGORIES.has(key)) : placeCategories),
+    };
+  }).filter((row) => !withheldEntries || row.entries > 0);
+  const places = withheldEntries && Array.isArray(report.byPlace) ? byPlace.length : num(totals.places);
   return {
     basis: str(report.basis),
     totals: {
       entries: Math.max(0, num(totals.entries) - withheldEntries), events: num(totals.events), observations: num(totals.observations), workOrders: num(totals.workOrders),
       incidents: num(totals.incidents), patrolVisits: num(totals.patrolVisits), cameraActivations: num(totals.cameraActivations),
-      withNotes: num(totals.withNotes), places: num(totals.places), photos: num(totals.photos),
+      withNotes: num(totals.withNotes), places, photos: num(totals.photos),
     },
     categories: allCategories.filter((row) => !WITHHELD_CATEGORIES.has(row.code)),
-    byPlace: list(report.byPlace).map((row) => ({
-      place: str(row.place) || NO_PLACE_LABEL, entries: num(row.entries), photos: num(row.photos),
-      categories: Object.fromEntries(Object.entries(object(row.categories) ?? {}).map(([key, value]) => [key, num(value)])),
-    })),
+    byPlace,
     pest: {
       entries: num(pest.entries),
       bySpecies: list(pest.bySpecies).map((row) => ({ code: str(row.code), culls: num(row.culls), sightings: num(row.sightings), other: num(row.other), total: num(row.total) })),
@@ -358,8 +372,8 @@ export function readActivityLines(value: unknown): { lines: ActivityLine[]; notI
   if (!document || document.version !== ACTIVITY_REPORT_VERSION) return null;
   return {
     notItemised: num(document.notItemised),
-    lines: list(document.lines).filter((line) => !isAdministrationLine(line)).map((line) => ({
-      key: activityLineKey(line), confirmedType: '',
+    lines: list(document.lines).map((line) => ({
+      key: activityLineKey(line), confirmedType: '', withheld: isAdministrationLine(line),
       date: str(line.d), time: str(line.t), place: str(line.p) || NO_PLACE_LABEL, kind: str(line.k), category: str(line.c), module: str(line.mo),
       activity: str(line.a), subject: str(line.s), species: str(line.sp), equipment: str(line.eq), job: str(line.j),
       materials: list(line.m).map((item) => ({ type: str(item.t), calibre: str(item.cal), quantity: typeof item.q === 'number' ? item.q : null })),
@@ -472,7 +486,9 @@ export const WITHHELD_CATEGORIES: ReadonlySet<string> = new Set(['administration
 
 /** Administration and desk entries carried by packs generated before the ruling (isAdministrationLine in the PDF). */
 function isAdministrationLine(line: Json): boolean {
-  return str(line.k) !== 'incident' && !str(line.tri) && WITHHELD_CATEGORIES.has(str(line.c));
+  // Older packs file midnight card reviews under administration; they are observations and stay in.
+  return str(line.k) !== 'incident' && !str(line.tri) && WITHHELD_CATEGORIES.has(str(line.c))
+    && str(line.ti).toLowerCase().replace(/[^a-z]/g, '') !== 'cardreview';
 }
 
 /** A camera card review or other observation; card reviews are observations (isObservationLine in the PDF). */

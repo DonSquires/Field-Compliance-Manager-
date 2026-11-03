@@ -7,6 +7,7 @@ import {
   activityAccountingProblem,
   activityLabel,
   applyIncidentTriage,
+  isReportedLine,
   countedText,
   describeActivityLine,
   formatActivityNumber,
@@ -785,7 +786,8 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       : { state: 'done', message: `${outcome}${unread}` });
   };
 
-  const triagedLines = useMemo(() => applyIncidentTriage(readyLines, triage), [readyLines, triage]);
+  // Triage first: an administration entry confirmed as an incident stays in the report.
+  const triagedLines = useMemo(() => applyIncidentTriage(readyLines, triage).filter(isReportedLine), [readyLines, triage]);
   const incidentEntries = useMemo(() => triagedLines
     .filter(isIncidentLine)
     .map((line) => ({ line, entry: describeActivityLine(report, line) })), [triagedLines, report]);
