@@ -173,7 +173,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
 
-      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} updatedAt={pack.updated_at} data={pack.data} status={pack.status} />}
+      {pack.report_kind === 'monthly' && <ReportActivityReview key={`${pack.id}:${pack.updated_at}`} packId={pack.id} updatedAt={pack.updated_at} data={pack.data} status={pack.status} summary={executiveSummary} highlights={clientNotes} />}
       {pack.report_kind === 'custom' ? (
         <CustomReportSnapshot data={pack.data} reportScope={pack.report_scope} idPrefix={`report-${pack.id}`} />
       ) : tiles.length > 0 && (

@@ -21,17 +21,23 @@ export type ReportBlock =
   | { kind: 'table'; columns: ReportTableColumn[]; rows: string[][]; size?: number }
   | { kind: 'metrics'; items: Array<{ label: string; value: string }> }
   | { kind: 'charts'; charts: Array<{ title: string; items: Array<{ label: string; value: number }> }> }
+  | { kind: 'gallery'; photos: Array<{ ref: ReportPhotoRef; caption: string }> }
   | { kind: 'entry'; when: string; tags: string[]; title: string; lines: ReportEntryLine[]; photos: ReportPhotoRef[]; photoCount: number; tone: 'incident' | 'default' };
 
 export {
   ACTIVITY_REPORT_VERSION,
   NO_PLACE_LABEL,
+  OF_NOTE_LIMIT,
+  PRIVILEGED_PHOTO,
+  SUMMARY_PHOTO_LIMIT,
   activityEmailSummary,
   humaniseCode,
+  isNotableLine,
   isRoutineLine,
   monthlyActivityBlocks,
   readActivityLines,
   readActivityReport,
   reportDate,
   siteLogBlocks,
+  summaryParagraphs,
 } from './report-activity-sections.mjs';

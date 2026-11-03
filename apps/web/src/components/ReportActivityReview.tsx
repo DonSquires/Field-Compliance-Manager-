@@ -11,11 +11,14 @@ import {
   humaniseCode,
   isReportPhotoRef,
   NO_PLACE_LABEL,
+  ofNoteLines,
   readActivityAccounting,
   readActivityLines,
   readActivityReport,
   routineSummary,
   siteLogGroups,
+  summaryParagraphs,
+  summaryPhotos,
   type AccountingProblem,
   type ActivityAccounting,
   type ActivityEntry,
@@ -37,7 +40,8 @@ const REFRESH_HINT = 'This report pack changed since you opened it. Refresh the 
 type Column = { label: string; numeric?: boolean };
 type Label = (dim: string, code: string) => string;
 type PhotoUrls = Record<string, string | null | undefined>;
-type OpenPhoto = (photos: ReportPhotoRef[], index: number, caption: string) => void;
+// A gallery passes one caption per photo so the viewer's caption follows the photo being shown.
+type OpenPhoto = (photos: ReportPhotoRef[], index: number, caption: string | string[]) => void;
 type PhotoError = (ref: ReportPhotoRef, url: string) => void;
 type ChipTone = 'neutral' | 'danger' | 'warning' | 'info' | 'success';
 
@@ -254,7 +258,7 @@ function EntryCard({ entry, place, urls, onOpenPhoto, onPhotoError }: { entry: A
   );
 }
 
-interface ViewerState { photos: ReportPhotoRef[]; index: number; caption: string }
+interface ViewerState { photos: ReportPhotoRef[]; index: number; caption: string | string[] }
 
 function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: { viewer: ViewerState; urls: PhotoUrls; onClose: () => void; onIndex: (index: number) => void; onPhotoError: PhotoError; onRetry: (ref: ReportPhotoRef) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -271,6 +275,7 @@ function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: 
   const total = viewer.photos.length;
   const ref = viewer.photos[viewer.index];
   const url = ref ? urls[photoKey(ref)] : null;
+  const caption = Array.isArray(viewer.caption) ? viewer.caption[viewer.index] ?? '' : viewer.caption;
   const step = (delta: number) => onIndex((viewer.index + delta + total) % total);
   return createPortal(
     <dialog
@@ -288,12 +293,12 @@ function PhotoViewer({ viewer, urls, onClose, onIndex, onPhotoError, onRetry }: 
       <header className="report-photo-viewer-head">
         <div>
           <h2 id={titleId}>Photo {viewer.index + 1} of {total}</h2>
-          <p>{viewer.caption}</p>
+          <p>{caption}</p>
         </div>
         <button type="button" className="report-photo-viewer-close" onClick={onClose} aria-label="Close photo"><X size={18} aria-hidden="true" /></button>
       </header>
       <div className="report-photo-viewer-stage">
-        {url ? <img src={url} alt={`${viewer.caption}, photo ${viewer.index + 1} of ${total}`} onError={() => onPhotoError(ref, url)} /> : (
+        {url ? <img src={url} alt={`${caption}, photo ${viewer.index + 1} of ${total}`} onError={() => onPhotoError(ref, url)} /> : (
           <div className="report-photo-state" role="status">
             <p>{url === null ? 'This photo could not be loaded.' : 'Loading photo…'}</p>
             {url === null && ref && <button type="button" className="btn btn-secondary" onClick={() => onRetry(ref)}><RefreshCw size={16} aria-hidden="true" /> Retry photo</button>}
@@ -532,7 +537,7 @@ function AccountingResult({ result, status, label }: { result: ActivityAccountin
 }
 
 
-function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string }) {
+function ActivityReportBody({ packId, updatedAt, report, status, headingId, reviewerSummary, highlights }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string; reviewerSummary: string; highlights: string }) {
   const [lines, setLines] = useState<LinesState>({ state: 'idle' });
   const [accounting, setAccounting] = useState<AccountingState>({ state: 'idle' });
   const [logOpen, setLogOpen] = useState(false);
@@ -563,10 +568,10 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
     setLines(parsed ? { state: 'ready', ...parsed } : { state: 'missing' });
   }, [packId, updatedAt]);
 
-  // Incidents lead the report, so their detail loads straight away; the site log waits until it is opened.
+  // The summary photos and Of Note entries lead the report, so the itemised lines load straight away.
   useEffect(() => {
-    if (incidents.total > 0) void loadLines();
-  }, [incidents.total, loadLines]);
+    void loadLines();
+  }, [loadLines]);
 
   const checkAccounting = async () => {
     setAccounting({ state: 'loading' });
@@ -584,12 +589,22 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
     setViewer({ photos, index, caption });
   };
 
-  const incidentEntries = useMemo(() => (lines.state === 'ready' ? lines.lines : [])
+  const readyLines = useMemo(() => (lines.state === 'ready' ? lines.lines : []), [lines]);
+  const incidentEntries = useMemo(() => readyLines
     .filter((line) => line.kind === 'incident')
-    .map((line) => ({ line, entry: describeActivityLine(report, line) })), [lines, report]);
+    .map((line) => ({ line, entry: describeActivityLine(report, line) })), [readyLines, report]);
+  const ofNote = useMemo(() => {
+    const { listed, total } = ofNoteLines(readyLines);
+    return { total, entries: listed.map((line) => ({ line, entry: describeActivityLine(report, line) })) };
+  }, [readyLines, report]);
+  const gallery = useMemo(() => summaryPhotos(report, readyLines), [readyLines, report]);
+  const summary = useMemo(() => summaryParagraphs(report, readyLines), [readyLines, report]);
   useEffect(() => {
-    requestPhotos(incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)));
-  }, [incidentEntries, requestPhotos]);
+    requestPhotos([
+      ...gallery.map((photo) => photo.ref),
+      ...[...incidentEntries, ...ofNote.entries].flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
+    ]);
+  }, [gallery, incidentEntries, ofNote, requestPhotos]);
 
   const incidentSummary = [
     `${counted(incidents.total, 'incident was', 'incidents were')} recorded at these locations`,
@@ -629,6 +644,34 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         <p className="report-review-warning" role="note"><AlertTriangle size={17} aria-hidden="true" /> The record, category and location totals in this pack do not agree. Regenerate the draft and open the completeness check before publishing.</p>
       )}
 
+      <section className="report-activity-section report-activity-summary" aria-labelledby={`${headingId}-summary`}>
+        <h5 id={`${headingId}-summary`}>Summary</h5>
+        {[reviewerSummary, highlights].map((value) => value.trim()).filter(Boolean).map((value, index) => <p key={`reviewer-${index}`} className="report-activity-summary-text">{value}</p>)}
+        <p className="report-review-source-note">Your executive summary and highlights open the client report, followed by these sentences built from the recorded figures.</p>
+        {summary.map((paragraph) => <p key={paragraph} className="report-activity-summary-text">{paragraph}</p>)}
+        {gallery.length > 0 && (
+          <ul className="report-activity-gallery" aria-label="Selected photos">
+            {gallery.map((photo, index) => {
+              const url = urls[photoKey(photo.ref)];
+              return (
+                <li key={photoKey(photo.ref)}>
+                  <button
+                    type="button"
+                    className="report-photo-thumb"
+                    onClick={() => openPhoto(gallery.map((item) => item.ref), index, gallery.map((item) => item.caption))}
+                    aria-label={url === null ? `Photo unavailable: ${photo.caption}. Open to retry` : `Open photo: ${photo.caption}`}
+                  >
+                    {url ? <img src={url} alt="" loading="lazy" decoding="async" onError={() => photoFailed(photo.ref, url)} /> : url === null ? <ImageOff size={20} aria-hidden="true" /> : <span className="report-photo-loading" aria-hidden="true" />}
+                  </button>
+                  <span>{photo.caption}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <h5 className="report-activity-glance-heading">At a glance</h5>
       <div className="report-activity-metrics" role="group" aria-label="Report at a glance">
         {metrics.map(([name, value, alert]) => <div key={name} className={alert ? 'is-alert' : undefined}><span>{name}</span><strong>{count(value)}</strong></div>)}
       </div>
@@ -658,6 +701,48 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         </div>
       )}
 
+      <section className="report-activity-section report-of-note" aria-labelledby={`${headingId}-of-note`}>
+        <h5 id={`${headingId}-of-note`}>Of note</h5>
+        <section className="report-incidents" aria-labelledby={`${headingId}-incidents`}>
+          <div className="report-section-head">
+            <h6 id={`${headingId}-incidents`}>Incidents and investigations</h6>
+            {incidents.total > 0 && <Chip tone="danger">{counted(incidents.total, 'incident', 'incidents')}</Chip>}
+          </div>
+          {incidents.total === 0 ? (
+            <Empty>No incidents were recorded at these locations during the period.</Empty>
+          ) : (
+            <>
+              <p className="report-incident-summary">{incidentSummary}.</p>
+              {(incidents.bySeverity.length > 0 || incidents.byStatus.length > 0) && (
+                <ul className="report-incident-breakdown" aria-label="Incidents by severity and status">
+                  {incidents.bySeverity.map((row) => <li key={`severity-${row.code}`}><Chip tone={tagTone(`${label('severity', row.code)} severity`)}>{label('severity', row.code)} severity · {count(row.entries)}</Chip></li>)}
+                  {incidents.byStatus.map((row) => <li key={`status-${row.code}`}><Chip tone={tagTone(label('incidentStatus', row.code))}>{label('incidentStatus', row.code)} · {count(row.entries)}</Chip></li>)}
+                </ul>
+              )}
+            </>
+          )}
+          <div aria-live="polite">
+            <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
+            {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
+            {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
+          </div>
+        </section>
+        <section className="report-of-note-entries" aria-labelledby={`${headingId}-notable`}>
+          <div className="report-section-head">
+            <h6 id={`${headingId}-notable`}>Observations, CCTV and photographed work</h6>
+            {ofNote.total > 0 && <Chip>{counted(ofNote.total, 'entry', 'entries')}</Chip>}
+          </div>
+          {lines.state === 'ready' && (ofNote.entries.length === 0 ? (
+            <Empty>{lines.lines.length ? 'No observations, CCTV activity or photographed work were recorded during the period.' : 'Itemised entries are not available for this report.'}</Empty>
+          ) : (
+            <>
+              {ofNote.entries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
+              {ofNote.total > ofNote.entries.length && <p className="report-review-source-note">{counted(ofNote.total - ofNote.entries.length, 'further entry is', 'further entries are')} in the site log.</p>}
+            </>
+          ))}
+        </section>
+      </section>
+
       <section className="report-activity-section" aria-labelledby={`${headingId}-overview`}>
         <h5 id={`${headingId}-overview`}>Activity overview</h5>
         {report.categories.length > 0 ? (
@@ -667,31 +752,6 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
             rows={report.categories.map((row) => [label('category', row.code), count(row.entries), count(row.photos)])}
           />
         ) : <Empty>Nothing was recorded at the locations covered by this agreement during the period.</Empty>}
-      </section>
-
-      <section className="report-activity-section report-incidents" aria-labelledby={`${headingId}-incidents`}>
-        <div className="report-section-head">
-          <h5 id={`${headingId}-incidents`}>Incidents and investigations</h5>
-          {incidents.total > 0 && <Chip tone="danger">{counted(incidents.total, 'incident', 'incidents')}</Chip>}
-        </div>
-        {incidents.total === 0 ? (
-          <Empty>No incidents were recorded at these locations during the period.</Empty>
-        ) : (
-          <>
-            <p className="report-incident-summary">{incidentSummary}.</p>
-            {(incidents.bySeverity.length > 0 || incidents.byStatus.length > 0) && (
-              <ul className="report-incident-breakdown" aria-label="Incidents by severity and status">
-                {incidents.bySeverity.map((row) => <li key={`severity-${row.code}`}><Chip tone={tagTone(`${label('severity', row.code)} severity`)}>{label('severity', row.code)} severity · {count(row.entries)}</Chip></li>)}
-                {incidents.byStatus.map((row) => <li key={`status-${row.code}`}><Chip tone={tagTone(label('incidentStatus', row.code))}>{label('incidentStatus', row.code)} · {count(row.entries)}</Chip></li>)}
-              </ul>
-            )}
-            <div aria-live="polite">
-              <LinesNotice lines={lines} status={status} entries={totals.entries} onRetry={() => void loadLines()} />
-              {incidentEntries.map(({ line, entry }, index) => <EntryCard key={index} entry={entry} place={line.place} urls={urls} onOpenPhoto={openPhoto} onPhotoError={photoFailed} />)}
-              {unlistedIncidents > 0 && <p className="report-review-source-note">{counted(unlistedIncidents, 'further incident is', 'further incidents are')} held on file.</p>}
-            </div>
-          </>
-        )}
       </section>
 
       <Group title="Activity by location" meta={counted(report.byPlace.length, 'location', 'locations')}>
@@ -840,9 +900,12 @@ interface ReportActivityReviewProps {
   updatedAt: string;
   data: Record<string, unknown> | null;
   status: string;
+  /** The reviewer's executive summary and highlights, which open the client report. */
+  summary?: string;
+  highlights?: string;
 }
 
-export function ReportActivityReview({ packId, updatedAt, data, status }: ReportActivityReviewProps) {
+export function ReportActivityReview({ packId, updatedAt, data, status, summary = '', highlights = '' }: ReportActivityReviewProps) {
   const report = useMemo(() => readActivityReport(data), [data]);
   const headingId = `report-activity-${packId}`;
   if (!report) {
@@ -856,5 +919,5 @@ export function ReportActivityReview({ packId, updatedAt, data, status }: Report
       </section>
     );
   }
-  return <ActivityReportBody key={`${packId}:${updatedAt}`} packId={packId} updatedAt={updatedAt} report={report} status={status} headingId={headingId} />;
+  return <ActivityReportBody key={`${packId}:${updatedAt}`} packId={packId} updatedAt={updatedAt} report={report} status={status} headingId={headingId} reviewerSummary={summary} highlights={highlights} />;
 }

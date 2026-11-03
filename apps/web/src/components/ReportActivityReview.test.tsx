@@ -25,6 +25,7 @@ const noIncidents = {
 };
 
 const group = (name: RegExp) => screen.getByText(name, { selector: 'summary' }).closest('details')!;
+const signCalls = (bucket: string) => createSignedUrls.mock.calls.filter(([called]) => called === bucket).length;
 const incidentsSection = () => screen.getByRole('region', { name: 'Incidents and investigations' });
 // Waits for the browser's own toggle event rather than dispatching a synthetic one.
 const setOpen = async (details: HTMLDetailsElement, open: boolean) => {
@@ -141,6 +142,22 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 
+  it('opens with the reviewer text and a photo gallery whose viewer caption follows each photo', async () => {
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" summary="A quiet month overall." highlights="  " />);
+    const summary = screen.getByRole('region', { name: 'Summary' });
+    const paragraphs = [...summary.querySelectorAll('.report-activity-summary-text')].map((node) => node.textContent);
+    expect(paragraphs[0]).toBe('A quiet month overall.');
+    expect(paragraphs.length).toBeGreaterThan(1);
+    const gallery = await within(summary).findByRole('list', { name: 'Selected photos' });
+    const captions = [...gallery.querySelectorAll('li > span')].map((node) => node.textContent);
+    expect(captions.length).toBeGreaterThan(1);
+    fireEvent.click(within(gallery).getAllByRole('button')[0]);
+    const viewer = await screen.findByRole('dialog', { name: `Photo 1 of ${captions.length}` });
+    expect(within(viewer).getByText(captions[0]!)).toBeTruthy();
+    fireEvent.click(within(viewer).getByRole('button', { name: /Next/ }));
+    expect(within(screen.getByRole('dialog')).getByText(captions[1]!)).toBeTruthy();
+  });
+
   it('opens photos in an accessible viewer, steps through them and returns focus', async () => {
     const lines = {
       ...activityLinesFixture,
@@ -199,7 +216,7 @@ describe('ReportActivityReview', () => {
     fireEvent.click(within(viewer).getByRole('button', { name: 'Retry photo' }));
     await waitFor(() => expect(within(viewer).getByRole('img').getAttribute('src')).toBe(signed('bob-uploads', 'org/incidents/fence-1.jpg')));
     expect(createSignedUrls).toHaveBeenLastCalledWith('bob-uploads', ['org/incidents/fence-1.jpg'], 900);
-    expect(createSignedUrls).toHaveBeenCalledTimes(2);
+    expect(signCalls('bob-uploads')).toBe(2);
     expect(within(incidents).getByRole('button', { name: 'Photo 2 unavailable. Open to retry' })).toBeTruthy();
     expect(document.body.textContent).not.toContain('PRIVATE_STORAGE_DETAIL');
     expect(console.warn).toHaveBeenCalledWith('Report photos could not be loaded.');
@@ -230,23 +247,26 @@ describe('ReportActivityReview', () => {
     await act(async () => finish({ data: [{ path: 'org/incidents/fence-1.jpg', signedUrl: 'https://storage.test/renewed', error: null }], error: null }));
     expect(within(viewer).getByRole('img').getAttribute('src')).toBe('https://storage.test/renewed');
     expect(card.querySelector('img')?.getAttribute('src')).toBe('https://storage.test/renewed');
-    expect(createSignedUrls).toHaveBeenCalledTimes(2);
+    expect(signCalls('bob-uploads')).toBe(2);
     expect(maybeSingle).toHaveBeenCalledTimes(1);
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('waits for the site log to open when there are no incidents, then filters, searches and folds routine patrols', async () => {
+  it('loads entries straight away when there are no incidents, then filters, searches and folds routine patrols', async () => {
     maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'network' } });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={{ activityReport: noIncidents }} status="draft" />);
     expect(within(incidentsSection()).getByText('No incidents were recorded at these locations during the period.')).toBeTruthy();
-    expect(from).not.toHaveBeenCalled();
+    expect(from).toHaveBeenCalledWith('monthly_report_packs');
+
+    const alert = await within(incidentsSection()).findByRole('alert');
+    expect(alert.textContent).not.toContain('network');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    const notable = screen.getByRole('region', { name: 'Observations, CCTV and photographed work' });
+    expect((await within(notable).findAllByRole('article')).length).toBeGreaterThan(0);
 
     const log = group(/^Site log/);
     expect(log.querySelector('summary')?.textContent).toContain('8 entries by location, with comments and photos');
     await setOpen(log, true);
-    const alert = await within(log).findByRole('alert');
-    expect(alert.textContent).not.toContain('network');
-    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
 
     const status = await within(log).findByText('6 entries with comments, work or photos');
     expect(within(log).getByRole('heading', { name: 'Alpha Reserve' })).toBeTruthy();
@@ -269,7 +289,7 @@ describe('ReportActivityReview', () => {
     fireEvent.click(within(log).getByRole('button', { name: 'Clear filters' }));
     fireEvent.click(within(log).getByRole('checkbox', { name: 'With photos only' }));
     expect(status.textContent).toBe('2 entries match these filters');
-    await waitFor(() => expect(createSignedUrls).toHaveBeenCalledWith('scans', ['org/pest/ridge.jpg', 'org/obs/1.jpg', 'org/obs/2.jpg', 'org/obs/3.jpg'], 900));
+    await waitFor(() => expect(createSignedUrls.mock.calls.filter(([bucket]) => bucket === 'scans').flatMap(([, paths]) => paths).sort()).toEqual(['org/obs/1.jpg', 'org/obs/2.jpg', 'org/obs/3.jpg', 'org/pest/ridge.jpg']));
 
     fireEvent.change(within(log).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'nothing like this' } });
     expect(within(log).getByText('No entries match these filters.')).toBeTruthy();

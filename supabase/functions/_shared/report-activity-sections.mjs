@@ -18,11 +18,18 @@
  * @typedef {{ kind: 'metrics', items: ReportMetric[] }} ReportMetricsBlock
  * @typedef {{ label?: string, text: string }} ReportEntryLine
  * @typedef {{ kind: 'entry', when: string, tags: string[], title: string, lines: ReportEntryLine[], photos: ReportPhotoRef[], photoCount: number, tone: 'incident' | 'default' }} ReportEntryBlock
- * @typedef {ReportSectionBlock | ReportSubsectionBlock | ReportTextBlock | ReportTableBlock | ReportMetricsBlock | ReportEntryBlock} ReportBlock
+ * @typedef {{ kind: 'charts', charts: Array<{ title: string, items: Array<{ label: string, value: number }> }> }} ReportChartsBlock
+ * @typedef {{ ref: ReportPhotoRef, caption: string }} ReportGalleryPhoto
+ * @typedef {{ kind: 'gallery', photos: ReportGalleryPhoto[] }} ReportGalleryBlock
+ * @typedef {ReportSectionBlock | ReportSubsectionBlock | ReportTextBlock | ReportTableBlock | ReportMetricsBlock | ReportChartsBlock | ReportGalleryBlock | ReportEntryBlock} ReportBlock
  */
 
 export const ACTIVITY_REPORT_VERSION = 2;
 export const NO_PLACE_LABEL = 'Not location-specific';
+export const SUMMARY_PHOTO_LIMIT = 6;
+export const OF_NOTE_LIMIT = 20;
+// Photos named for NZTA are privileged and never go into a client report.
+export const PRIVILEGED_PHOTO = /nzta/i;
 
 const numberFormats = new Map();
 
@@ -181,7 +188,7 @@ function materialsText(line, label) {
 function photoRefs(line) {
   return rows(line.pr)
     .map((ref) => ({ b: text(ref.b), p: text(ref.p) }))
-    .filter((ref) => ref.b && ref.p && !/^https?:/i.test(ref.p));
+    .filter((ref) => ref.b && ref.p && !/^https?:/i.test(ref.p) && !PRIVILEGED_PHOTO.test(ref.p));
 }
 
 /**
@@ -248,6 +255,18 @@ function entryFromLine(line, label) {
   };
 }
 
+/**
+ * Outside the site log an entry is not under its location heading, so the
+ * location leads its tags.
+ * @param {Record<string, unknown>} line
+ * @param {ReturnType<typeof labeller>} label
+ * @returns {ReportEntryBlock}
+ */
+function entryWithPlace(line, label) {
+  const entry = entryFromLine(line, label);
+  return { ...entry, tags: [text(line.p) || NO_PLACE_LABEL, ...entry.tags] };
+}
+
 /** @param {Record<string, unknown>} report */
 function speciesCulls(report) {
   return rows(obj(report.pestControl)?.bySpecies).reduce((sum, row) => sum + num(row.culls), 0);
@@ -262,22 +281,139 @@ function summaryChart(title, source, itemLabel, itemValue) {
 }
 
 /**
- * Client summary sections for a monthly pack: at a glance, incidents and
- * investigations (with each incident itemised), activity by location, pest
- * control, maintenance, manufacture and observations. Returns null when the
- * pack has no client activity report so the caller keeps its legacy layout.
+ * An entry worth calling out to the client: an observation, a CCTV activation
+ * or anything with a photo. Incidents have their own list and routine patrols
+ * are only counted.
+ * @param {Record<string, unknown>} line
+ */
+export function isNotableLine(line) {
+  if (text(line.k) === 'incident' || isRoutineLine(line)) return false;
+  return text(line.k) === 'observation' || text(line.c) === 'camera_activation' || num(line.ph) > 0;
+}
+
+/** Incidents first, then CCTV activations, observations and other photographed work. @param {Record<string, unknown>} line */
+function noteRank(line) {
+  if (text(line.k) === 'incident') return 0;
+  if (text(line.c) === 'camera_activation') return 1;
+  return text(line.k) === 'observation' ? 2 : 3;
+}
+
+/** @param {string[]} parts */
+function joinList(parts) {
+  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+}
+
+/** @param {string} value "2026-10-14" -> "14 Oct" */
+function shortDate(value) {
+  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
+}
+
+/**
+ * Up to SUMMARY_PHOTO_LIMIT photos for the summary: one per entry in order of
+ * importance before any entry gets a second.
+ * @param {Record<string, unknown>[]} lines
+ * @param {ReturnType<typeof labeller>} label
+ * @returns {ReportGalleryPhoto[]}
+ */
+function summaryPhotos(lines, label) {
+  const ranked = lines
+    .filter((line) => text(line.k) === 'incident' || isNotableLine(line))
+    .map((line, index) => ({ line, index, refs: photoRefs(line) }))
+    .filter((item) => item.refs.length)
+    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index);
+  /** @type {ReportGalleryPhoto[]} */
+  const picks = [];
+  const seen = new Set();
+  for (let round = 0; picks.length < SUMMARY_PHOTO_LIMIT; round += 1) {
+    if (!ranked.some((item) => item.refs.length > round)) break;
+    for (const { line, refs } of ranked) {
+      const ref = refs[round];
+      if (!ref || seen.has(`${ref.b}/${ref.p}`) || picks.length >= SUMMARY_PHOTO_LIMIT) continue;
+      seen.add(`${ref.b}/${ref.p}`);
+      const what = text(line.k) === 'incident' ? label('incidentType', line.it) || 'Incident' : label('category', line.c);
+      picks.push({ ref, caption: [shortDate(text(line.d)), text(line.p) || NO_PLACE_LABEL, what].filter(Boolean).join(' · ') });
+    }
+  }
+  return picks;
+}
+
+/**
+ * The period in plain sentences, built only from the frozen figures so every
+ * statement can be traced to the tables and site log that follow.
+ * @param {Record<string, unknown>} report
+ * @param {Record<string, unknown>[]} lines
+ * @returns {string[]}
+ */
+export function summaryParagraphs(report, lines) {
+  const totals = obj(report.totals) ?? {};
+  const hunters = obj(report.hunterReturns);
+  const hunterText = hunters && num(hunters.returns) > 0
+    ? `Permit holders submitted ${counted(hunters.returns, 'hunter return', 'hunter returns')} reporting ${counted(hunters.animals, 'animal', 'animals')}.`
+    : '';
+  if (num(totals.entries) === 0) return ['Nothing was recorded at your locations during the period.', hunterText].filter(Boolean);
+  const paragraphs = [];
+  const top = rows(report.byPlace).filter((row) => text(row.place) && text(row.place) !== NO_PLACE_LABEL)
+    .sort((left, right) => num(right.entries) - num(left.entries))[0];
+  paragraphs.push(`${counted(totals.entries, 'entry was', 'entries were')} recorded across ${counted(totals.places, 'location', 'locations')} during the period.`
+    + (top && num(totals.places) > 1 ? ` The most active location was ${text(top.place)} with ${counted(top.entries, 'entry', 'entries')}.` : ''));
+
+  const culls = speciesCulls(report);
+  const work = [
+    num(totals.patrolVisits) > 0 ? counted(totals.patrolVisits, 'patrol or site check', 'patrols and site checks') : '',
+    num(totals.cameraActivations) > 0 ? counted(totals.cameraActivations, 'CCTV activation', 'CCTV activations') : '',
+    culls > 0 ? counted(culls, 'pest cull', 'pest culls') : '',
+    num(obj(report.maintenance)?.entries) > 0 ? counted(obj(report.maintenance)?.entries, 'maintenance entry', 'maintenance entries') : '',
+  ].filter(Boolean);
+  if (work.length || hunterText) paragraphs.push([work.length ? `Work included ${joinList(work)}.` : '', hunterText].filter(Boolean).join(' '));
+
+  const incidents = obj(report.incidents) ?? {};
+  const serious = rows(incidents.bySeverity).filter((row) => ['high', 'critical'].includes(text(row.code))).reduce((sum, row) => sum + num(row.entries), 0);
+  const incidentText = num(incidents.total) > 0
+    ? `${counted(incidents.total, 'incident was', 'incidents were')} recorded${serious > 0 ? `, ${fmt(serious)} of high or critical severity` : ''}.`
+    : 'No incidents were recorded.';
+  const observations = obj(report.observations) ?? {};
+  const observationText = num(observations.total) > 0
+    ? ` ${counted(observations.total, 'observation was', 'observations were')} logged, ${fmt(num(observations.withPhoto))} with photos.`
+    : '';
+  const notable = lines.filter(isNotableLine).length;
+  const noteText = notable + num(incidents.total) > 0 ? ' The entries that stand out are listed under Of Note.' : '';
+  paragraphs.push(`${incidentText}${observationText}${noteText}`);
+  return paragraphs;
+}
+
+/**
+ * Client summary sections for a monthly pack, in reading order: a summary
+ * (the reviewer's own words, then the period in figures and a few photos), at
+ * a glance, what is of note (incidents, then observations, CCTV activity and
+ * photographed work), then the activity tables. Returns null when the pack has
+ * no client activity report so the caller keeps its legacy layout.
  * @param {unknown} data
  * @param {unknown} [activityLines]
+ * @param {{ summary?: unknown, highlights?: unknown }} [options] the reviewer's executive summary and highlights, shown first
  * @returns {ReportBlock[] | null}
  */
-export function monthlyActivityBlocks(data, activityLines) {
+export function monthlyActivityBlocks(data, activityLines, options = {}) {
   const report = readActivityReport(data);
   if (!report) return null;
   const label = labeller(report);
   const totals = obj(report.totals) ?? {};
   const pest = obj(report.pestControl) ?? {};
+  const { lines } = readActivityLines(activityLines);
   /** @type {ReportBlock[]} */
   const blocks = [];
+
+  blocks.push(section('Summary'));
+  const reviewerSummary = text(options?.summary);
+  if (reviewerSummary) blocks.push(note(reviewerSummary));
+  const highlights = text(options?.highlights);
+  if (highlights) blocks.push(note(highlights));
+  for (const paragraph of summaryParagraphs(report, lines)) blocks.push(note(paragraph));
+  const gallery = summaryPhotos(lines, label);
+  if (gallery.length) {
+    blocks.push({ kind: 'gallery', photos: gallery });
+    blocks.push(note('Selected photos from the period. Each is shown again with its entry.', 8, true));
+  }
 
   blocks.push(section('At a Glance'));
   const metrics = [
@@ -315,18 +451,10 @@ export function monthlyActivityBlocks(data, activityLines) {
     blocks.push({ kind: 'charts', charts });
     blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
   }
-  blocks.push(section('Activity Overview'));
-  if (categories.length) {
-    blocks.push(table(
-      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
-      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
-    ));
-  } else {
-    blocks.push(note('Nothing was recorded at your locations during the period.'));
-  }
 
   const incidents = obj(report.incidents) ?? {};
-  blocks.push(section('Incidents and Investigations'));
+  blocks.push(section('Of Note'));
+  blocks.push({ kind: 'subsection', title: 'Incidents and investigations', detail: num(incidents.total) > 0 ? counted(incidents.total, 'incident', 'incidents') : '' });
   if (num(incidents.total) > 0) {
     const parts = [counted(incidents.total, 'incident was', 'incidents were') + ' recorded at your locations'];
     if (num(incidents.investigations) > 0) parts.push(`${counted(incidents.investigations, 'investigation is', 'investigations are')} linked`);
@@ -336,12 +464,41 @@ export function monthlyActivityBlocks(data, activityLines) {
     const severity = breakdown('bySeverity', 'severity');
     const status = breakdown('byStatus', 'incidentStatus');
     if (severity || status) blocks.push(note([severity && `Severity: ${severity}`, status && `Status: ${status}`].filter(Boolean).join('   |   '), 9, true));
-    const incidentLines = readActivityLines(activityLines).lines.filter((line) => text(line.k) === 'incident');
-    for (const line of incidentLines) blocks.push(entryFromLine(line, label));
+    const incidentLines = lines.filter((line) => text(line.k) === 'incident');
+    for (const line of incidentLines) blocks.push(entryWithPlace(line, label));
     const unlisted = num(incidents.total) - incidentLines.length;
     if (unlisted > 0) blocks.push(note(`${counted(unlisted, 'further incident is', 'further incidents are')} held on file.`, 9, true));
   } else {
     blocks.push(note('No incidents were recorded at your locations during the period.'));
+  }
+
+  const notable = lines.filter(isNotableLine);
+  const listed = notable
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index)
+    .slice(0, OF_NOTE_LIMIT)
+    .sort((left, right) => left.index - right.index)
+    .map(({ line }) => line);
+  blocks.push({ kind: 'subsection', title: 'Observations, CCTV and photographed work', detail: notable.length ? counted(notable.length, 'entry', 'entries') : '' });
+  if (listed.length) {
+    for (const line of listed) blocks.push(entryWithPlace(line, label));
+    if (notable.length > listed.length) {
+      blocks.push(note(`${counted(notable.length - listed.length, 'further entry is', 'further entries are')} in the site log.`, 9, true));
+    }
+  } else {
+    blocks.push(note(lines.length
+      ? 'No observations, CCTV activity or photographed work were recorded during the period.'
+      : 'Itemised entries are not available for this report.'));
+  }
+
+  blocks.push(section('Activity Overview'));
+  if (categories.length) {
+    blocks.push(table(
+      [['Type of activity', 307], ['Entries', 90, 'right'], ['Photos', 90, 'right']],
+      categories.map((row) => [label('category', row.code), fmt(num(row.entries)), fmt(num(row.photos))]),
+    ));
+  } else {
+    blocks.push(note('Nothing was recorded at your locations during the period.'));
   }
 
   const places = rows(report.byPlace);
