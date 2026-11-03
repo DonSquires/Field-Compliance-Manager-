@@ -106,8 +106,24 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
   const ollama = await draftExecutiveSummary({ brief: {}, env, fetchImpl: async () => reply({ message: { content: PARAGRAPHS } }) });
   assert.equal(ollama.provider, 'ollama_cloud');
 
+  const secondProvider = await draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async (url) => url.includes('ollama')
+      ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
+      : reply({ choices: [{ message: { content: PARAGRAPHS } }] }),
+  });
+  assert.equal(secondProvider.provider, 'openai');
+
   await assert.rejects(draftExecutiveSummary({ brief: {}, env: {}, fetchImpl }), /No drafting model is configured/);
   await assert.rejects(draftExecutiveSummary({ brief: {}, env, fetchImpl: async () => reply({ message: { content: 'Too short.' }, choices: [] }) }), /ollama_cloud: empty draft; openai: empty draft/);
+  await assert.rejects(draftExecutiveSummary({
+    brief: {},
+    env,
+    fetchImpl: async (url) => url.includes('ollama')
+      ? reply({ message: { content: 'One long paragraph with enough detail to exceed the minimum length check. It still needs to be rejected.' } })
+      : reply({ choices: [{ message: { content: 'Another single paragraph. It also exceeds the minimum length check and should be rejected.' } }] }),
+  }), /model did not return exactly two paragraphs/);
 });
 
 test('the edge function and review panel keep drafting governed and unsaved until review', () => {
