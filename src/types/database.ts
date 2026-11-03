@@ -48915,6 +48915,7 @@ export type Database = {
       }
       report_code_or_null: { Args: { p_value: string }; Returns: string }
       report_numeric_or_null: { Args: { p_value: string }; Returns: number }
+      report_photo_name_withheld: { Args: { p_name: string }; Returns: boolean }
       report_place_hazard: {
         Args: {
           p_client_request_id: string
@@ -48932,6 +48933,10 @@ export type Database = {
       report_provider_custodian_for_actor: {
         Args: { p_actor_user_id: string; p_target_organization_id: string }
         Returns: boolean
+      }
+      report_redact_identified_persons: {
+        Args: { p_text: string }
+        Returns: string
       }
       report_service_line: { Args: { p_value: string }; Returns: string }
       report_text_or_null: {
