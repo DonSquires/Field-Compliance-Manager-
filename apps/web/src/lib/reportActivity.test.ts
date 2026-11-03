@@ -12,6 +12,8 @@ import {
   readActivityReport,
   reportDate,
   routineSummary,
+  REVIEW_SECTIONS,
+  reviewSectionCode,
   siteLogGroups,
   summaryMarkup,
   summaryPhotos,
@@ -123,9 +125,10 @@ describe('describeActivityLine', () => {
 });
 
 describe('siteLogGroups', () => {
-  it('groups by location, folds routine patrols and keeps incidents out of the site log', () => {
+  it('groups by location, folds routine patrols and keeps incidents and CCTV reviews out of the site log', () => {
     const groups = siteLogGroups(lines);
-    expect(groups.map((group) => group.place)).toEqual(['Alpha Reserve', 'Not location-specific']);
+    expect(groups.map((group) => group.place)).toEqual(['Alpha Reserve']);
+    expect(lines.some((entry) => reviewSectionCode(entry) === 'camera_activation')).toBe(true);
     expect(groups[0].lines).toHaveLength(7);
     expect(groups[0].routine).toHaveLength(2);
     expect(groups[0].entries.some((entry) => entry.kind === 'incident')).toBe(false);
@@ -162,7 +165,10 @@ describe('parity with the client PDF renderer', () => {
       const described = describeActivityLine(report, entry);
       return { ...described, tags: [entry.place, ...described.tags] };
     };
-    expect(incidentBlocks.map(asWeb)).toEqual(lines.filter((entry) => entry.kind === 'incident').map(withPlace));
+    expect(incidentBlocks.map(asWeb)).toEqual([
+      ...lines.filter((entry) => entry.kind === 'incident'),
+      ...REVIEW_SECTIONS.flatMap((review) => lines.filter((entry) => reviewSectionCode(entry) === review.code)),
+    ].map(withPlace));
 
     const monthly = sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [];
     const gallery = summaryPhotos(report, lines);
@@ -183,7 +189,10 @@ describe('parity with the client PDF renderer', () => {
     const triagedPdf = sections.applyIncidentTriage(activityLinesFixture, [{ line_key: target.key, decision: 'incident', incident_type: 'trespass' }]);
     const triagedWeb = applyIncidentTriage(lines, new Map([[target.key, decision]]));
     const confirmedBlocks = (sections.monthlyActivityBlocks(data, triagedPdf) ?? []).filter(isEntry);
-    expect(confirmedBlocks.map(asWeb)).toEqual(triagedWeb.filter(isIncidentLine).map(withPlace));
+    expect(confirmedBlocks.map(asWeb)).toEqual([
+      ...triagedWeb.filter(isIncidentLine),
+      ...REVIEW_SECTIONS.flatMap((review) => triagedWeb.filter((entry) => reviewSectionCode(entry) === review.code)),
+    ].map(withPlace));
     const pdfGallery = monthly.find((block): block is { kind: 'gallery'; photos: Array<{ ref: { b: string; p: string }; caption: string }> } => block.kind === 'gallery');
     expect(pdfGallery?.photos.map((photo) => ({ ref: { bucket: photo.ref.b, path: photo.ref.p }, caption: photo.caption })) ?? []).toEqual(gallery);
   });

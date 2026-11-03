@@ -158,14 +158,22 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
   }), /model did not return bullet points/);
 });
 
-test('the edge function and review panel keep drafting governed and unsaved until review', () => {
+test('the edge function and review panel keep drafting governed; only an empty draft summary is filled', () => {
   const edge = read('supabase/functions/draft-report-executive-summary/index.ts');
   assert.match(edge, /is_report_provider_custodian_for_org/);
   assert.match(edge, /'grand_master', 'master', 'admin', 'admin_officer'/);
   assert.match(edge, /Sent report packs cannot be changed/);
   assert.match(edge, /monthly_report_pack_summary_drafted/);
+  assert.match(edge, /monthly_report_pack_summary_draft_saved/);
   assert.match(edge, /if \(auditError\) throw new RequestError/);
-  assert.doesNotMatch(edge, /\.update\(|\.rpc\('review_monthly_report_pack'/);
+  assert.doesNotMatch(edge, /\.rpc\('review_monthly_report_pack'/);
+  assert.equal((edge.match(/\.update\(/g) ?? []).length, 1, 'the only write is the save-if-empty draft');
+  assert.match(edge, /saveIfEmpty && \(pack\.status !== 'draft' \|\| hasSummary\)/, 'never overwrites a summary or touches a published pack');
+  assert.match(edge, /\.eq\('status', 'draft'\)\s*\.eq\('updated_at', pack\.updated_at\)/, 'the save is optimistic and draft-only');
+  const bob = read('apps/web/src/lib/reportBob.ts');
+  assert.match(bob, /functions\.invoke\('draft-report-executive-summary', \{ body: \{ pack_id: packId, save_if_empty: true \} \}\)/);
+  const hub = read('apps/web/src/pages/ReportsHubPage.tsx');
+  assert.match(hub, /if \(pack\.status === 'draft'\) \{[\s\S]*draftSummaryIfEmpty\(pack\.id\)/);
   const panel = read('apps/web/src/components/ReportPackReviewPanel.tsx');
   assert.match(panel, /functions\.invoke\('draft-report-executive-summary'/);
   assert.match(panel, /Redraft with Bob/);

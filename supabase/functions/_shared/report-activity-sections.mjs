@@ -114,6 +114,26 @@ export function isIncidentLine(line) {
   return text(line.k) === 'incident' || Boolean(text(line.tri));
 }
 
+/**
+ * CCTV and camera reviews and administration/desk entries have their own
+ * sections near the top of the report rather than being scattered through the
+ * site log by location. Incidents keep their own section.
+ */
+export const REVIEW_SECTIONS = /** @type {const} */ ([
+  { code: 'camera_activation', title: 'CCTV and Camera Reviews', one: 'CCTV or camera entry was', many: 'CCTV and camera entries were' },
+  { code: 'administration', title: 'Administration and Review', one: 'administration entry was', many: 'administration entries were' },
+]);
+
+/**
+ * The review section an entry belongs in, or '' when it stays in the site log.
+ * @param {Record<string, unknown>} line
+ */
+export function reviewSectionCode(line) {
+  if (isIncidentLine(line)) return '';
+  const code = text(line.c);
+  return REVIEW_SECTIONS.some((review) => review.code === code) ? code : '';
+}
+
 /** @param {string} value @returns {ReportTextRun[]} */
 function markupRuns(value) {
   /** @type {ReportTextRun[]} */
@@ -614,6 +634,14 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     blocks.push(note('No incidents were recorded at your locations during the period.'));
   }
 
+  for (const review of REVIEW_SECTIONS) {
+    const reviewLines = lines.filter((line) => reviewSectionCode(line) === review.code);
+    if (!reviewLines.length) continue;
+    blocks.push(section(review.title));
+    blocks.push(note(`${counted(reviewLines.length, review.one, review.many)} recorded during the period, in date order (New Zealand time).`, 9, true));
+    for (const line of reviewLines) blocks.push(entryWithPlace(line, label));
+  }
+
   const places = rows(report.byPlace);
   if (places.length) {
     blocks.push(section('Activity by Location'));
@@ -754,11 +782,11 @@ export function siteLogBlocks(data, activityLines) {
       : 'Nothing was recorded at your locations during the period.'));
     return blocks;
   }
-  blocks.push(note('What happened at each location, in date order (New Zealand time).', 9, true));
+  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents, CCTV and camera reviews, and administration entries are listed in their own sections above.', 9, true));
   /** @type {Map<string, Record<string, unknown>[]>} */
   const byPlace = new Map();
   for (const line of lines) {
-    if (isIncidentLine(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line)) continue;
     const place = text(line.p) || NO_PLACE_LABEL;
     byPlace.set(place, [...(byPlace.get(place) ?? []), line]);
   }

@@ -253,6 +253,48 @@ test('the site log groups entries by location with comments, actions and photos,
   assert.match(allText(siteLogBlocks({ activityReport: empty }, { version: 2, lines: [], notItemised: 0 })), /Nothing was recorded at your locations during the period\./);
 });
 
+test('CCTV reviews and administration entries get their own sections and leave the site log', async () => {
+  const { monthlyActivityBlocks, siteLogBlocks, reviewSectionCode } = await load();
+  const labelled = { ...report, labels: { ...report.labels, category: { ...report.labels.category, camera_activation: 'CCTV and camera activity', administration: 'Administration and review' } } };
+  const desk = {
+    version: 2,
+    notItemised: 0,
+    lines: [
+      ...lines.lines,
+      { d: '2026-10-08', t: '00:00', p: 'General / All Forests (Admin, HQ, Travel)', k: 'event', c: 'administration', n: 'Monthly hunter permits reconciled with the client.' },
+      { d: '2026-10-09', t: '14:20', p: 'Serpentine', k: 'event', c: 'camera_activation', n: 'Camera card reviewed; a ute passes the gate at 02:14.', ph: 1, pr: [photo('e')] },
+      { d: '2026-10-10', t: '15:00', p: 'Serpentine', k: 'event', c: 'camera_activation', tri: 'theft', n: 'Card shows the fuel tank being drained.' },
+    ],
+  };
+  assert.equal(reviewSectionCode(desk.lines[8]), 'administration');
+  assert.equal(reviewSectionCode(desk.lines[9]), 'camera_activation');
+  assert.equal(reviewSectionCode(desk.lines[10]), '', 'a confirmed incident stays with the incidents');
+
+  const blocks = monthlyActivityBlocks({ activityReport: labelled }, desk);
+  const titles = blocks.filter((block) => block.kind === 'section').map((block) => block.title);
+  const at = (title) => titles.indexOf(title);
+  assert.ok(at('Incidents and Investigations') < at('CCTV and Camera Reviews'));
+  assert.ok(at('CCTV and Camera Reviews') < at('Administration and Review'));
+  assert.ok(at('Administration and Review') < at('Activity by Location'));
+  const sectionEntries = (title) => {
+    const start = blocks.findIndex((block) => block.kind === 'section' && block.title === title);
+    const end = blocks.findIndex((block, index) => index > start && block.kind === 'section');
+    return blocks.slice(start + 1, end).filter((block) => block.kind === 'entry');
+  };
+  const [cctv] = sectionEntries('CCTV and Camera Reviews');
+  assert.equal(sectionEntries('CCTV and Camera Reviews').length, 1);
+  assert.equal(cctv.tags[0], 'Serpentine');
+  assert.deepEqual(cctv.photos, [photo('e')]);
+  const [admin] = sectionEntries('Administration and Review');
+  assert.equal(admin.tags[0], 'General / All Forests (Admin, HQ, Travel)');
+  assert.match(allText([admin]), /Monthly hunter permits reconciled with the client\./);
+
+  const log = allText(siteLogBlocks({ activityReport: labelled }, desk));
+  assert.doesNotMatch(log, /hunter permits|Camera card reviewed|fuel tank/);
+  assert.match(log, /listed in their own sections above/);
+  assert.equal(monthlyActivityBlocks({ activityReport: report }, lines).some((block) => block.kind === 'section' && /CCTV and Camera|Administration and Review/.test(block.title)), false, 'sections appear only when there are entries');
+});
+
 test('the client email summary is a headline and entries by type of activity', async () => {
   const { activityEmailSummary } = await load();
   const email = activityEmailSummary({ activityReport: report });
@@ -285,7 +327,7 @@ test('PDF, send gate and every web surface agree on the current renderer version
   const pdf = version(read('supabase/functions/generate-report-pack-pdf/index.ts'), /const rendererVersion = '([^']+)'/);
   const send = version(read('supabase/functions/send-report-pack/index.ts'), /const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
   const web = version(read('apps/web/src/lib/reportPackRenderer.ts'), /export const CURRENT_REPORT_PDF_RENDERER = '([^']+)'/);
-  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v17');
+  assert.equal(pdf, 'fcm-report-pack-pdf-lib-a4-v18');
   assert.equal(send, pdf);
   assert.equal(web, pdf);
   for (const surface of ['apps/web/src/pages/ReportsHubPage.tsx', 'apps/web/src/pages/ClientPortalPage.tsx', 'apps/web/src/components/CrmAccountWorkspace.tsx']) {
