@@ -167,10 +167,11 @@ describe('parity with the client PDF renderer', () => {
     expect(logBlocks.filter((block): block is { kind: 'subsection'; title: string; detail?: string } => block.kind === 'subsection'))
       .toEqual(groups.map((group) => ({ kind: 'subsection', title: group.place, detail: countedText(group.lines.length, 'entry', 'entries') })));
     expect(logBlocks.some((block) => block.kind === 'text' && 'text' in block && /routine patrol/.test(block.text))).toBe(false);
-    const routineTable = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [])
-      .find((block): block is { kind: 'table'; rows: string[][] } => block.kind === 'table' && 'rows' in block && (block as { columns?: Array<{ label: string }> }).columns?.[0]?.label === 'Check');
-    expect(routineCheckRows(report, lines).length).toBeGreaterThan(0);
-    expect(routineTable?.rows).toEqual(routineCheckRows(report, lines).map((row) => [row.check, String(row.checks), String(row.places), row.results]));
+    // The client PDF is compact: routine checks are one counted line, while the staff preview keeps the table.
+    const routineChecks = routineCheckRows(report, lines).reduce((total, row) => total + row.checks, 0);
+    expect(routineChecks).toBeGreaterThan(0);
+    expect((sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [])
+      .some((block) => block.kind === 'text' && 'text' in block && block.text.startsWith(`${routineChecks} routine patrol`))).toBe(true);
 
     const incidentBlocks = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? []).filter(isEntry);
     const withPlace = (entry: ActivityLine) => {
@@ -180,6 +181,7 @@ describe('parity with the client PDF renderer', () => {
     expect(incidentBlocks.map(asWeb)).toEqual([
       ...lines.filter((entry) => entry.kind === 'incident'),
       ...REVIEW_SECTIONS.flatMap((review) => lines.filter((entry) => reviewSectionCode(entry) === review.code)),
+      ...['maintenance', 'manufacture'].flatMap((work) => lines.filter((entry) => !isIncidentLine(entry) && entry.category === work)),
     ].map(withPlace));
 
     const monthly = sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [];
@@ -203,6 +205,7 @@ describe('parity with the client PDF renderer', () => {
     expect(confirmedBlocks.map(asWeb)).toEqual([
       ...triagedWeb.filter(isIncidentLine),
       ...REVIEW_SECTIONS.flatMap((review) => triagedWeb.filter((entry) => reviewSectionCode(entry) === review.code)),
+      ...['maintenance', 'manufacture'].flatMap((work) => triagedWeb.filter((entry) => !isIncidentLine(entry) && entry.category === work)),
     ].map(withPlace));
     expect(monthly.some((block) => block.kind === 'gallery')).toBe(false);
   });
