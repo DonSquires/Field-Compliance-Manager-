@@ -43,6 +43,19 @@ test('PDF wrapping measures glyph widths and preserves long words and extended c
   assert.deepEqual(wrapPdfText('M\u0101ori evidence', fonts, 1, 9), ['M\u0101ori', 'evidence']);
 });
 
+test('PDF wrapping measures each character once so large reports stay within the CPU budget', async () => {
+  const { pdfTextWidth, wrapPdfText } = await import('../supabase/functions/_shared/pdf-text-fonts.mjs');
+  let calls = 0;
+  const font = { widthOfTextAtSize: (text, size) => { calls += 1; return Array.from(text).length * size * 0.5; } };
+  const fonts = { latin: font, latinExtended: font, latinCodePoints: new Set(Array.from({ length: 128 }, (_, codePoint) => codePoint)), latinExtendedCodePoints: new Set() };
+  const note = 'Complaint from possumer that lock would not open. Shown at 100% battery. Several attempts finally get it to activate.';
+  const lines = wrapPdfText(Array.from({ length: 500 }, () => note).join('\n'), fonts, 10, 120);
+
+  assert.ok(lines.length > 500);
+  assert.ok(lines.every((line) => pdfTextWidth(line, fonts, 10) <= 120));
+  assert.ok(calls <= new Set(Array.from(note)).size + 1, `expected one width lookup per distinct character, saw ${calls}`);
+});
+
 test('PDF font strategy uses prebuilt static TTFs without request-time WOFF processing', async () => {
   const { readFileSync } = require('node:fs');
   const { resolve } = require('node:path');
