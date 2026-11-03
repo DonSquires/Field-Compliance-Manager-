@@ -17,6 +17,11 @@ export interface ActivitySpecies { code: string; culls: number; sightings: numbe
 export interface ActivityAmmunition { calibre: string; entries: number; rounds: number | null }
 export interface ActivityWork { entries: number; bySubject: ActivityCode[]; completed: number; open: number }
 export interface ActivityModule { module: string; entries: number; withPhoto: number; photos: number }
+export interface HunterReturns {
+  returns: number; killReturns: number; nilReturns: number; animals: number;
+  bySpecies: Array<{ species: string; animals: number; returns: number }>;
+  byArea: Array<{ area: string; returns: number; kill: number; nil: number; animals: number }>;
+}
 
 export interface ActivityReport {
   basis: string;
@@ -31,6 +36,8 @@ export interface ActivityReport {
   manufacture: ActivityWork;
   observations: { total: number; withPhoto: number; photos: number; byModule: ActivityModule[] };
   incidents: { total: number; investigations: number; withMedia: number; bySeverity: ActivityCode[]; byStatus: ActivityCode[] };
+  /** Base44 RAMS hunter kill/nil returns; null when the client has no hunter-return programme. */
+  hunterReturns: HunterReturns | null;
   accountedFor: {
     eventsInScope: number; mirrorEventsExcluded: number; activityEvents: number; observationsInScope: number;
     workOrdersInScope: number; incidentsInScope: number; entries: number; reported: number; operationalWithheld: number;
@@ -94,6 +101,16 @@ function work(value: unknown): ActivityWork {
   return { entries: num(row.entries), bySubject: list(row.bySubject).map(code), completed: num(orders.completed), open: num(orders.open) };
 }
 
+function readHunterReturns(value: unknown): HunterReturns | null {
+  const row = object(value);
+  if (!row) return null;
+  return {
+    returns: num(row.returns), killReturns: num(row.killReturns), nilReturns: num(row.nilReturns), animals: num(row.animals),
+    bySpecies: list(row.bySpecies).map((item) => ({ species: str(item.species), animals: num(item.animals), returns: num(item.returns) })),
+    byArea: list(row.byArea).map((item) => ({ area: str(item.area), returns: num(item.returns), kill: num(item.kill), nil: num(item.nil), animals: num(item.animals) })),
+  };
+}
+
 export function humaniseCode(value: string): string {
   const text = value.replaceAll('_', ' ').trim();
   return text ? text[0].toUpperCase() + text.slice(1) : '';
@@ -149,6 +166,7 @@ export function readActivityReport(data: unknown): ActivityReport | null {
       total: num(incidents.total), investigations: num(incidents.investigations), withMedia: num(incidents.withMedia),
       bySeverity: list(incidents.bySeverity).map(code), byStatus: list(incidents.byStatus).map(code),
     },
+    hunterReturns: readHunterReturns(report.hunterReturns),
     accountedFor: {
       eventsInScope: num(accounted.eventsInScope), mirrorEventsExcluded: num(accounted.mirrorEventsExcluded), activityEvents: num(accounted.activityEvents),
       observationsInScope: num(accounted.observationsInScope), workOrdersInScope: num(accounted.workOrdersInScope), incidentsInScope: num(accounted.incidentsInScope),
