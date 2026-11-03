@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { FileCheck2, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { FileCheck2, ShieldCheck, Sparkles } from 'lucide-react';
 import { CustomReportSnapshot } from './CustomReportSnapshot';
 import { ReportActivityReview } from './ReportActivityReview';
 import { readActivityReport } from '../lib/reportActivity';
@@ -111,6 +111,14 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
   const facilities = facilitiesFrom(pack.data);
   const hasActivityReport = pack.report_kind === 'monthly' && readActivityReport(pack.data) !== null;
   const tiles = pack.report_kind === 'custom' ? [] : sourceTiles(pack.data, hasActivityReport, subjectSummary);
+  const canDraftSummary = hasActivityReport && pack.status !== 'sent';
+  const [drafting, setDrafting] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const currentPackId = useRef(pack.id);
+  const autoDrafted = useRef<string | null>(null);
+  const summaryText = useRef(executiveSummary);
+  summaryText.current = executiveSummary;
 
   useEffect(() => {
     setTitle(pack.editorial?.title ?? defaultTitle(pack));
@@ -119,6 +127,46 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
     setFollowUp(pack.editorial?.follow_up ?? '');
     setError(null);
   }, [pack]);
+
+  useEffect(() => {
+    currentPackId.current = pack.id;
+    setDraftStatus(null);
+    setDraftError(null);
+  }, [pack.id]);
+
+  /** Bob's draft fills the box only; nothing is saved until the reviewer saves or publishes. */
+  const draftSummary = useCallback(async (mode: 'auto' | 'manual') => {
+    const packId = pack.id;
+    setDrafting(true);
+    setDraftError(null);
+    setDraftStatus('Bob is drafting the executive summary from this report\'s recorded entries...');
+    const { data, error: draftFailure } = await supabase.functions.invoke('draft-report-executive-summary', { body: { pack_id: packId } });
+    if (currentPackId.current !== packId) return;
+    setDrafting(false);
+    const summary = typeof data?.summary === 'string' ? data.summary : '';
+    if (draftFailure || !summary) {
+      setDraftStatus(null);
+      setDraftError(`Bob could not draft the summary${draftFailure?.message ? ` (${draftFailure.message})` : ''}. Write it yourself or try again.`);
+      return;
+    }
+    if (mode === 'auto' && summaryText.current.trim()) {
+      setDraftStatus(null);
+      return;
+    }
+    setExecutiveSummary(summary);
+    setDraftStatus('Bob drafted this summary from the report\'s recorded entries. Check and edit it; it is not saved until you save the draft or publish.');
+  }, [pack.id]);
+
+  useEffect(() => {
+    if (!canDraftSummary || (pack.editorial?.executive_summary ?? '').trim() || autoDrafted.current === pack.id) return;
+    autoDrafted.current = pack.id;
+    void draftSummary('auto');
+  }, [canDraftSummary, draftSummary, pack.editorial?.executive_summary, pack.id]);
+
+  const redraftSummary = () => {
+    if (executiveSummary.trim() && !window.confirm('Replace the current executive summary with a new draft from Bob?')) return;
+    void draftSummary('manual');
+  };
 
   const submit = async (action: 'save' | 'publish') => {
     if (action === 'publish' && !title.trim()) {
@@ -201,10 +249,20 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
           <input name="report-title" value={title} onChange={(event) => { setTitle(event.target.value); setError(null); }} maxLength={160} required aria-describedby={`report-title-help-${pack.id}`} />
           <small id={`report-title-help-${pack.id}`}>{title.length}/160 characters</small>
         </label>
-        <label>
-          <span>Executive summary</span>
-          <textarea name="executive-summary" value={executiveSummary} onChange={(event) => setExecutiveSummary(event.target.value)} maxLength={4000} rows={5} />
-        </label>
+        <div className="report-review-summary-field">
+          <div className="report-review-summary-head">
+            <label htmlFor={`executive-summary-${pack.id}`}>Executive summary</label>
+            {canDraftSummary && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={redraftSummary} disabled={drafting || savingAction !== null}>
+                <Sparkles size={14} aria-hidden="true" /> {drafting ? 'Drafting...' : executiveSummary.trim() ? 'Redraft with Bob' : 'Draft with Bob'}
+              </button>
+            )}
+          </div>
+          <textarea id={`executive-summary-${pack.id}`} name="executive-summary" value={executiveSummary} onChange={(event) => setExecutiveSummary(event.target.value)} maxLength={4000} rows={8} aria-describedby={`executive-summary-help-${pack.id}`} aria-busy={drafting} />
+          <small id={`executive-summary-help-${pack.id}`}>Two short paragraphs for the client: the work delivered, then the significant issues. {executiveSummary.length}/4000 characters</small>
+          <p className="report-review-draft-status" aria-live="polite">{draftStatus}</p>
+          {draftError && <p className="report-review-draft-error" role="alert">{draftError}</p>}
+        </div>
         <label>
           <span>Client notes</span>
           <textarea name="client-notes" value={clientNotes} onChange={(event) => setClientNotes(event.target.value)} maxLength={8000} rows={5} />

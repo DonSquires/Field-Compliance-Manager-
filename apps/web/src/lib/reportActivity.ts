@@ -327,7 +327,6 @@ export function routineSummary(routine: ActivityLine[]): string {
 }
 
 export const SUMMARY_PHOTO_LIMIT = 6;
-export const OF_NOTE_LIMIT = 20;
 
 /** An observation, CCTV activation or anything photographed; incidents are listed separately and routine patrols only counted. */
 export function isNotableLine(line: ActivityLine): boolean {
@@ -341,18 +340,6 @@ const shortDate = (value: string) => {
   const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
   return match ? `${Number(match[2])} ${MONTHS[Number(match[1]) - 1]}` : value;
 };
-
-/** The notable entries listed under Of Note: most important first when capped, then back in date order. */
-export function ofNoteLines(lines: ActivityLine[]): { listed: ActivityLine[]; total: number } {
-  const notable = lines.filter(isNotableLine);
-  const listed = notable
-    .map((line, index) => ({ line, index }))
-    .sort((left, right) => noteRank(left.line) - noteRank(right.line) || left.index - right.index)
-    .slice(0, OF_NOTE_LIMIT)
-    .sort((left, right) => left.index - right.index)
-    .map(({ line }) => line);
-  return { listed, total: notable.length };
-}
 
 /** Summary photos: one per entry in order of importance before any entry gets a second. */
 export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: ActivityLine[]): Array<{ ref: ReportPhotoRef; caption: string }> {
@@ -377,8 +364,13 @@ export function summaryPhotos(report: Pick<ActivityReport, 'labels'>, lines: Act
   return picks;
 }
 
-/** The period in plain sentences, built only from the frozen figures. */
-export function summaryParagraphs(report: ActivityReport, lines: ActivityLine[]): string[] {
+/** Paragraphs of reviewer text, split on blank lines. */
+export function textParagraphs(value: string): string[] {
+  return value.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+}
+
+/** The period in plain sentences, built only from the frozen figures; used when the reviewer has not written an executive summary. */
+export function summaryParagraphs(report: ActivityReport): string[] {
   const { totals, incidents, observations } = report;
   const hunters = report.hunterReturns;
   const hunterText = hunters && hunters.returns > 0
@@ -404,8 +396,7 @@ export function summaryParagraphs(report: ActivityReport, lines: ActivityLine[])
   const observationText = observations.total > 0
     ? ` ${countedText(observations.total, 'observation was', 'observations were')} logged, ${formatActivityNumber(observations.withPhoto)} with photos.`
     : '';
-  const noteText = lines.filter(isNotableLine).length + incidents.total > 0 ? ' The entries that stand out are listed under Of Note.' : '';
-  paragraphs.push(`${incidentText}${observationText}${noteText}`);
+  paragraphs.push(`${incidentText}${observationText}`);
   return paragraphs;
 }
 
