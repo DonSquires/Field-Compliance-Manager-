@@ -10,6 +10,7 @@ import {
   formatActivityNumber,
   humaniseCode,
   isReportPhotoRef,
+  NO_PLACE_LABEL,
   readActivityAccounting,
   readActivityLines,
   readActivityReport,
@@ -98,6 +99,39 @@ function placeMix(categories: Record<string, number>, label: Label): string {
     .slice(0, 3)
     .map(([code, entries]) => `${label('category', code)} ${count(entries)}`)
     .join(', ');
+}
+
+interface SummaryChart {
+  title: string;
+  items: Array<{ label: string; value: number }>;
+}
+
+function topSummaryChart(title: string, items: Array<{ label: string; value: number }>): SummaryChart | null {
+  const top = items.filter((item) => item.label && item.value > 0)
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+    .slice(0, 5);
+  return top.length ? { title, items: top } : null;
+}
+
+function reportSummaryCharts(report: ActivityReport, label: Label): SummaryChart[] {
+  const activity = topSummaryChart('Activity type highlights', report.categories.map((row) => ({
+    label: label('category', row.code), value: row.entries,
+  })));
+  const camera = report.categories.find((row) => row.code === 'camera_activation');
+  if (activity && camera && camera.entries > 0
+    && !activity.items.some((item) => item.label === label('category', 'camera_activation'))) {
+    activity.items.push({ label: label('category', 'camera_activation'), value: camera.entries });
+  }
+  return [
+    activity,
+    topSummaryChart('Top locations', report.byPlace.map((row) => ({ label: row.place || NO_PLACE_LABEL, value: row.entries }))),
+    topSummaryChart('Pest culls by species', report.pest.bySpecies.map((row) => ({
+      label: label('species', row.code), value: row.culls,
+    }))),
+    topSummaryChart('Hunter animals by species', (report.hunterReturns?.bySpecies ?? []).map((row) => ({
+      label: row.species, value: row.animals,
+    }))),
+  ].filter((chart): chart is SummaryChart => chart !== null);
 }
 
 async function signPhotos(bucket: string, paths: string[]): Promise<PhotoUrls> {
@@ -576,6 +610,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
   ];
   const hunters = report.hunterReturns;
   if (hunters) metrics.push(['Hunter-reported kills', hunters.animals]);
+  const summaryCharts = reportSummaryCharts(report, label);
   const logEntries = Math.max(totals.entries - totals.incidents, 0);
   const accountedBadge = accountedFor.reconciled
     ? (accountedFor.entries === 1 ? '1 record accounted for' : `All ${count(accountedFor.entries)} records accounted for`)
@@ -598,6 +633,30 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId }: { 
         {metrics.map(([name, value, alert]) => <div key={name} className={alert ? 'is-alert' : undefined}><span>{name}</span><strong>{count(value)}</strong></div>)}
       </div>
       {report.basis && <p className="report-review-source-note">{report.basis}</p>}
+      {summaryCharts.length > 0 && (
+        <div className="report-activity-charts" role="group" aria-label="Activity statistics charts">
+          {summaryCharts.map((chart) => {
+            const maxValue = Math.max(1, ...chart.items.map((item) => item.value));
+            return (
+              <figure className="report-activity-chart" key={chart.title}>
+                <figcaption>{chart.title}</figcaption>
+                <ol>
+                  {chart.items.map((item) => (
+                    <li key={item.label}>
+                      <span className="report-activity-chart-label">{item.label}</span>
+                      <span className="report-activity-chart-track" aria-hidden="true">
+                        <span style={{ width: `${Math.min(100, (item.value / maxValue) * 100)}%` }} />
+                      </span>
+                      <strong>{count(item.value)}</strong>
+                    </li>
+                  ))}
+                </ol>
+              </figure>
+            );
+          })}
+          <p className="report-activity-chart-note">Charts highlight the highest recorded counts; complete figures remain in the tables below.</p>
+        </div>
+      )}
 
       <section className="report-activity-section" aria-labelledby={`${headingId}-overview`}>
         <h5 id={`${headingId}-overview`}>Activity overview</h5>

@@ -141,15 +141,66 @@ export function indexPhotoTargets(targets) {
 
 export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
   const candidates = targetsByMinute.get(parsed.minuteKey) ?? [];
-  // Library folders are named "<Location> - <Area> - <Client>", so the leading location
-  // segment is compared as well as the whole folder name.
-  const folderPlaces = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1)
-    .flatMap((folder) => [folder, folder.split(/\s+-\s+/)[0]])
-    .map(normalizePlace).filter(Boolean);
-  const matched = candidates.filter((target) => parsed.plate
+  // Library folders are named "<Location> - <Area> - <Client>"; only the whole folder name and
+  // its leading location identify a place. Area/client suffixes are never location aliases.
+  const folders = String(relativePath ?? '').replaceAll('\\', '/').split('/').slice(1, -1);
+  const leadingPlaces = folders.map((folder) => normalizePlace(folder.split(/\s+-\s+/)[0])).filter(Boolean);
+  const folderPlaces = [...folders.map(normalizePlace), ...leadingPlaces].filter(Boolean);
+  let matchType = parsed.plate ? 'rego' : 'place';
+  let matched = candidates.filter((target) => parsed.plate
     ? target.plateCandidates.has(parsed.plate)
     : folderPlaces.some((place) => target.placeAliases.has(place)));
+  if (!parsed.plate && matched.length === 0) {
+    // Hand-named folders can carry a one-character typo. The leading location and one alias of
+    // this exact-minute target must have the same distinctive words, paired in both directions.
+    const leadingTokenGroups = leadingPlaces.map((place) => distinctivePlaceTokens([place]))
+      .filter((tokens) => tokens.length);
+    matched = candidates.filter((target) => [...target.placeAliases]
+      .map((alias) => distinctivePlaceTokens([alias]))
+      .some((aliasTokens) => leadingTokenGroups.some((tokens) => sameDistinctiveTokens(tokens, aliasTokens))));
+    matchType = 'place_near';
+  }
   const unique = [...new Map(matched.map((target) => [target.id, target])).values()];
-  if (unique.length === 1) return { status: 'matched', target: unique[0], matchType: parsed.plate ? 'rego' : 'place' };
+  if (unique.length === 1) return { status: 'matched', target: unique[0], matchType };
   return { status: unique.length > 1 ? 'ambiguous' : 'unmatched', target: null };
+}
+
+const GENERIC_PLACE_WORDS = new Set([
+  'road', 'street', 'lane', 'drive', 'gate', 'gates', 'forest', 'forests', 'reserve', 'block', 'track',
+  'camera', 'cameras', 'cctv', 'photos', 'photo', 'images', 'image', 'footage', 'site', 'area',
+  'main', 'entrance', 'onefortyone', 'private', 'general',
+]);
+
+function sameDistinctiveTokens(left, right) {
+  if (!left.length || !right.length) return false;
+  return left.every((token) => right.some((word) => placeTokensMatch(token, word)))
+    && right.every((word) => left.some((token) => placeTokensMatch(token, word)));
+}
+
+function distinctivePlaceTokens(places) {
+  const tokens = new Set();
+  for (const place of places) {
+    for (const token of String(place ?? '').split(' ')) {
+      if (token.length >= 4 && !/^[0-9]+$/.test(token) && !GENERIC_PLACE_WORDS.has(token)) tokens.add(token);
+    }
+  }
+  return [...tokens];
+}
+
+function placeTokensMatch(a, b) {
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 6 || Math.abs(a.length - b.length) > 1) return false;
+  // At most one inserted, deleted or substituted letter.
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i += 1; j += 1; continue; }
+    edits += 1;
+    if (edits > 1) return false;
+    if (a.length > b.length) i += 1;
+    else if (b.length > a.length) j += 1;
+    else { i += 1; j += 1; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
 }

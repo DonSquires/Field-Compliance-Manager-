@@ -21,7 +21,8 @@ test('report-pack PDFs keep snapshot provenance in document metadata, not on cli
 });
 
 test('monthly PDFs render agreement-scoped client sections without provider-wide or operational totals', () => {
-  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v12'/);
+  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v13'/);
+  assert.match(source, /else if \(block\.kind === 'charts'\) drawCharts\(block\)/);
   assert.match(source, /embedPdfNotoFonts\(pdf\)/);
   assert.doesNotMatch(source, /noto-sans-[^'" ]+\.woff/);
   assert.doesNotMatch(source, /pdf\.embedFont\(/);
