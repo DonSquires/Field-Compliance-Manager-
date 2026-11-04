@@ -33595,6 +33595,7 @@ export type Database = {
         Row: {
           client_hash: string | null
           created_at: string
+          dispatch_job_id: string | null
           email: string | null
           handled_at: string | null
           handled_by: string | null
@@ -33619,6 +33620,7 @@ export type Database = {
         Insert: {
           client_hash?: string | null
           created_at?: string
+          dispatch_job_id?: string | null
           email?: string | null
           handled_at?: string | null
           handled_by?: string | null
@@ -33643,6 +33645,7 @@ export type Database = {
         Update: {
           client_hash?: string | null
           created_at?: string
+          dispatch_job_id?: string | null
           email?: string | null
           handled_at?: string | null
           handled_by?: string | null
@@ -33665,6 +33668,13 @@ export type Database = {
           version?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "website_enquiries_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "website_enquiries_handled_by_fkey"
             columns: ["handled_by"]
@@ -40844,6 +40854,22 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      create_and_assign_dispatch_job: {
+        Args: {
+          p_briefing_notes?: string
+          p_client_request_id?: string
+          p_client_site_id: string
+          p_job_type: string
+          p_officer_user_id?: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_sla_minutes: number
+          p_source?: string
+          p_website_enquiry_id?: string
+          p_zone_id: string
+        }
+        Returns: Json
       }
       create_bob_document_draft: {
         Args: {
@@ -52412,6 +52438,10 @@ export type Database = {
           p_branch_organization_id: string
           p_target_user_id: string
         }
+        Returns: boolean
+      }
+      staff_credential_has_verified_match: {
+        Args: { p_credential_id: string }
         Returns: boolean
       }
       staff_fatigue_conflict: {
