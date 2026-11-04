@@ -32,7 +32,7 @@ async function fixture() {
     decided_at: '2026-10-03T00:00:00Z', bob_assessed_at: '2026-10-02T00:00:00Z',
     excerpt: 'Alice Example bypassed the gate.',
   }];
-  const state = { pack: original, decisions, prompts: [], briefs: [], updates: [], audits: [], triageWrites: [] };
+  const state = { pack: original, decisions, prompts: [], briefs: [], updates: [], audits: [], triageWrites: [], auditFailures: 0, modelFindings: new Map() };
 
   const caller = {
     auth: { getUser: async () => ({ data: { user: { id: 'provider-user' } }, error: null }) },
@@ -53,13 +53,29 @@ async function fixture() {
           ...query(() => ({ data: state.pack, error: null })),
           update(values) {
             state.updates.push(values);
-            return { eq() { return this; }, select: async () => ({ data: [{ id: state.pack.id }], error: null }) };
+            return {
+              eq() { return this; },
+              in() { return this; },
+              select: async () => {
+                state.pack = { ...state.pack, ...values };
+                return { data: [{ id: state.pack.id, updated_at: state.pack.updated_at }], error: null };
+              },
+            };
           },
         };
       }
       if (table === 'bob_knowledge_cards') return query(() => ({ data: [{ title: 'Fixture card', content: 'Consider perimeter failures.' }], error: null }));
       if (table === 'report_incident_triage') return { upsert: async (rows) => { state.triageWrites.push(rows); return { error: null }; } };
-      if (table === 'audit_log') return { insert: async (row) => { state.audits.push(row); return { error: null }; } };
+      if (table === 'audit_log') return {
+        insert: async (row) => {
+          if (state.auditFailures > 0) {
+            state.auditFailures -= 1;
+            return { error: { message: 'fixture audit unavailable' } };
+          }
+          state.audits.push(row);
+          return { error: null };
+        },
+      };
       throw new Error(`Unexpected table ${table}`);
     },
     rpc: async (name) => {
@@ -83,7 +99,7 @@ async function fixture() {
     },
     completeWithProviders: async ({ messages }) => {
       state.prompts.push(messages);
-      return { value: new Map(), provider: 'fixture', model: 'fixture' };
+      return { value: state.modelFindings, provider: 'fixture', model: 'fixture' };
     },
   };
   const loadHandler = (name) => {
@@ -139,4 +155,29 @@ test('incident endpoint blocks unchecked lines and never uses an old raw excerpt
   assert.match(JSON.stringify(state.prompts[0]), /\[name withheld\] bypassed the gate/);
   assert.doesNotMatch(JSON.stringify(state.prompts[0]), /Alice Example/);
   assert.equal(state.triageWrites.length, 1);
+});
+
+test('privacy audit failure reports the saved state and a retry records a receipt before returning clearance', async () => {
+  const { state, loadHandler, request } = await fixture();
+  state.pack = { ...state.pack, editorial: { title: '', executive_summary: '', client_notes: '', follow_up: '' } };
+  state.auditFailures = 1;
+  state.modelFindings = new Map([[0, { names: ['Alice Example'], details: [] }]]);
+  const handle = loadHandler('check-report-privacy');
+
+  const failed = await handle(request());
+  assert.equal(failed.status, 502);
+  assert.match((await failed.json()).error, /saved changes, but its audit receipt failed.*Refresh the report.*retry the check/);
+  assert.match(JSON.stringify(state.pack.activity_lines), /\[name withheld\]/);
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.audits.length, 0);
+
+  const retried = await handle(request());
+  assert.equal(retried.status, 200);
+  const result = await retried.json();
+  assert.equal(result.cleared, true);
+  assert.equal(result.checked, 0);
+  assert.equal(state.updates.length, 1, 'already checked entries are not rewritten');
+  assert.equal(state.audits.length, 1);
+  assert.equal(state.audits[0].action, 'report_privacy_checked');
+  assert.equal(state.audits[0].metadata.remaining, 0);
 });

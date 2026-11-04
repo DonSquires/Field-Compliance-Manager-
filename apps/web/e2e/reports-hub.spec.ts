@@ -79,7 +79,7 @@ test('preview shows privacy failures beside the report and retries safely', asyn
       return;
     }
     if (name === 'flag-report-potential-incidents') {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ checked: 1, flagged: 0, remaining: 0 }) });
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, checked: 1, flagged: 0, remaining: 0, not_itemised: 0 }) });
       return;
     }
     if (name === 'draft-report-executive-summary') {
@@ -119,6 +119,48 @@ test('preview shows privacy failures beside the report and retries safely', asyn
   ]);
 });
 
+test('report preview errors and busy states remain attached to their own reports', async ({ page }) => {
+  const firstId = '79797979-7979-4979-8979-797979797971';
+  const secondId = '79797979-7979-4979-8979-797979797972';
+  const pack = (id: string, agreement: string) => ({
+    id, organization_id: OPERATING_ORG_ID, template_code: 'monthly-compliance', report_kind: 'monthly', report_scope: {},
+    period_start: '2026-08-01', period_end: '2026-08-30', status: 'draft', data: {}, editorial: {},
+    generated_at: '2026-08-30T09:30:00.000Z', updated_at: '2026-08-30T09:30:00.000Z',
+    reviewed_at: null, published_at: null, delivery_channel: null, sent_at: null, agreement: [{ name: agreement }],
+  });
+  let releaseFirst: () => void = () => {};
+  const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route('**/rest/v1/monthly_report_packs?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      pack(firstId, 'First agreement'), pack(secondId, 'Second agreement'),
+    ]) });
+  });
+  await page.route('**/functions/v1/check-report-privacy', async (route) => {
+    const id = (route.request().postDataJSON() as { pack_id: string }).pack_id;
+    if (id === firstId) await firstPending;
+    await route.fulfill({
+      status: 502, contentType: 'application/json',
+      body: JSON.stringify({ error: id === firstId ? 'First privacy error' : 'Second privacy error' }),
+    });
+  });
+  await signInAsAdmin(page, '/admin/reports');
+  const region = page.getByRole('region', { name: 'Report packs' });
+  const first = region.locator('tbody tr').filter({ hasText: 'First agreement' });
+  const second = region.locator('tbody tr').filter({ hasText: 'Second agreement' });
+
+  await first.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(first.getByRole('button', { name: 'Bob is checking for personal names...' })).toBeDisabled();
+  await second.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(second.getByRole('alert')).toContainText('Second privacy error');
+  await expect(first.getByRole('button', { name: 'Bob is checking for personal names...' })).toBeDisabled();
+  releaseFirst();
+  await expect(first.getByRole('alert')).toContainText('First privacy error');
+  await expect(second.getByRole('alert')).toContainText('Second privacy error');
+  await first.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(first.getByRole('alert')).toContainText('First privacy error');
+  await expect(second.getByRole('alert')).toContainText('Second privacy error');
+});
+
 test('preview stops when the second privacy check fails or the renderer gives no receipt', async ({ page }) => {
   const calls: string[] = [];
   let privacyCalls = 0;
@@ -141,7 +183,7 @@ test('preview stops when the second privacy check fails or the renderer gives no
       }
       return;
     }
-    const body = name === 'flag-report-potential-incidents' ? { checked: 1, flagged: 0, remaining: 0 }
+    const body = name === 'flag-report-potential-incidents' ? { ok: true, checked: 1, flagged: 0, remaining: 0, not_itemised: 0 }
       : name === 'draft-report-executive-summary' ? { saved: false } : { ok: true };
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });

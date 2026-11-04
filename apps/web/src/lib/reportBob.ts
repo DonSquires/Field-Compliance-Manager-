@@ -20,6 +20,24 @@ export interface IncidentScanResult {
   error: string | null;
 }
 
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+interface IncidentScanResponse {
+  ok: true;
+  checked: number;
+  flagged: number;
+  remaining: number;
+  not_itemised: number;
+}
+
+const isIncidentScanResponse = (value: unknown): value is IncidentScanResponse => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.ok === true && isCount(record.checked) && isCount(record.flagged)
+    && record.flagged <= record.checked && isCount(record.remaining) && isCount(record.not_itemised);
+};
+
 /**
  * Bob reads the pack's logged activity and officer notes and highlights
  * possible incidents for the reviewer (flag-report-potential-incidents), in
@@ -37,12 +55,15 @@ export async function runIncidentScan(packId: string, options: { rescanBefore?: 
       result.error = await functionErrorMessage(error, 'Bob could not check the entries.');
       return result;
     }
-    const checked = Number(data.checked) || 0;
-    result.checked += checked;
-    result.flagged += Number(data.flagged) || 0;
-    result.remaining = Number(data.remaining) || 0;
-    result.notItemised = Number(data.not_itemised) || 0;
-    if (result.remaining === 0 || checked <= 0) break;
+    if (!isIncidentScanResponse(data)) {
+      result.error = 'Bob returned an invalid incident-scan result. The check was not completed; try again.';
+      return result;
+    }
+    result.checked += data.checked;
+    result.flagged += data.flagged;
+    result.remaining = data.remaining;
+    result.notItemised = data.not_itemised;
+    if (result.remaining === 0 || data.checked === 0) break;
   }
   return result;
 }
@@ -82,9 +103,6 @@ interface PrivacyCheckResponse {
   updated_at: string;
   editorial?: unknown;
 }
-
-const isCount = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
 const isPrivacyCheckResponse = (value: unknown): value is PrivacyCheckResponse => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
