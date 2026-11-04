@@ -6,6 +6,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
+import { defaultFieldReportShift } from '../lib/fieldReportShift';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import { OfficerPhotoAttachments } from '../components/OfficerPhotoAttachments';
@@ -79,9 +80,10 @@ const OfficerFieldReportPage: React.FC = () => {
     }
     setLoading(true); setError(null);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
     const [reportResponse, shiftResponse, incidentResponse, documentTypeResponse, requestedShiftResponse] = await Promise.all([
       supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required, review_notes, reviewed_at').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
-      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
+      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress', 'completed']).or(`status.eq.in_progress,and(scheduled_end.gte.${since},scheduled_start.lte.${now})`).order('status', { ascending: false }).order('scheduled_start', { ascending: false }).limit(10),
       supabase.from('incidents').select('id,incident_type,status,occurred_at').eq('officer_user_id', profile.id).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }).limit(50),
       supabase.rpc('get_identity_document_types'),
       validReportShiftId(requestedShiftId)
@@ -95,8 +97,10 @@ const OfficerFieldReportPage: React.FC = () => {
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts(availableShifts);
     setIncidents((incidentResponse.data as IncidentOption[]) ?? []);
     setDocumentTypes(((documentTypeResponse.data as DocumentTypeOption[]) ?? []).filter((definition) => definition.document_kind !== 'person_photo'));
-    const selection = resolveReportShift(availableShifts.map((shift) => shift.id), requestedShiftId,
-      shiftSelectionRef.current?.scope === shiftScope ? shiftSelectionRef.current.shiftId : null);
+    const rememberedShiftId = shiftSelectionRef.current?.scope === shiftScope ? shiftSelectionRef.current.shiftId : null;
+    const selection = requestedShiftId === null && rememberedShiftId === null
+      ? { shiftId: defaultFieldReportShift(availableShifts), error: null }
+      : resolveReportShift(availableShifts.map((shift) => shift.id), requestedShiftId, rememberedShiftId);
     shiftSelectionRef.current = { scope: shiftScope, shiftId: selection.shiftId };
     setForm((current) => ({ ...current, shiftId: selection.shiftId }));
     setShiftContextError(selection.error);

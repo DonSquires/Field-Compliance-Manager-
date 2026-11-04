@@ -22,6 +22,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-breadcrumb-admin-o
 if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-recovery-readiness-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./payroll-export-receipt-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./invitation-access-states-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./static-arrival-start-gate-migration.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');

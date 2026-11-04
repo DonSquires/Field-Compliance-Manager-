@@ -104,6 +104,17 @@ async function request(method, route, body, headers = {}) {
   return { response, body: await response.json() };
 }
 
+test('officer privacy route requires server authority and never echoes invalid source content', async () => {
+  const source = { fields: { site_brief: { private: 'SYNTHETIC-PRIVATE-SENTINEL' } } };
+  const denied = await request('POST', '/api/bob/officer/privacy', source);
+  assert.equal(denied.response.status, 401);
+  const result = await request('POST', '/api/bob/officer/privacy', source, { authorization: `Bearer ${adminToken}` });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.response.headers.get('cache-control'), 'no-store');
+  assert.match(result.body.error, /remains withheld/);
+  assert.doesNotMatch(JSON.stringify(result.body), /SYNTHETIC-PRIVATE-SENTINEL/);
+});
+
 test.before(async () => {
   const bin = path.join(stateDir, 'bin');
   fs.mkdirSync(bin);

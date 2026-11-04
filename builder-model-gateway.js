@@ -9,7 +9,8 @@ const ALLOWED_BUILDER_MODES = new Set([
   'builder_chat',
   'qa_security_reviewer',
   'code_reviewer',
-  'release_engineer'
+  'release_engineer',
+  'officer_privacy'
 ]);
 const NATIVE_TOOL_MODES = new Set(['vibe_engineer', 'builder_chat']);
 // 'xhigh' is the highest value the Chat Completions API accepts for current reasoning models
@@ -297,7 +298,14 @@ function promptLength(input) {
 
 function validateModelRequest(input, config) {
   if (!input || typeof input !== 'object') return 'request body is required';
+  if (input.builder_mode === 'officer_privacy' && !['gpu_workstation', 'ollama'].includes(input.provider)) return 'officer privacy requires private inference';
   if (!PROVIDER_KINDS[input.provider]) return 'unsupported model provider';
+  if (input.builder_mode === 'officer_privacy') {
+    let endpoint;
+    try { endpoint = new URL(config[input.provider].baseUrl); } catch { return 'private inference endpoint is invalid'; }
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password
+      || !/^(?:localhost|ollama|fcm-ollama|host\.docker\.internal|\[::1\]|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+)$/.test(endpoint.hostname)) return 'officer privacy endpoint must be private';
+  }
   if (!ALLOWED_BUILDER_MODES.has(input.builder_mode)) return 'unsupported builder mode';
   if (!input.prompt_version || typeof input.prompt_version !== 'string') return 'prompt_version is required';
   if (!input.idempotency_key || typeof input.idempotency_key !== 'string') return 'idempotency_key is required';
@@ -426,6 +434,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
           ...authHeaders(providerConfig)
         },
         body: JSON.stringify(buildProviderBody({ input, config, model, nativeTools })),
+        ...(input.builder_mode === 'officer_privacy' ? { redirect: 'error' } : {}),
         signal: controller.signal
       }
     );
