@@ -125,6 +125,7 @@ interface ReportPackRowProps {
   pack: MonthlyReportPack;
   busy: boolean;
   busyStage: string | null;
+  previewError: string | null;
   onReview: () => void;
   onOpenPdf: () => void;
   onDownloadPdf: () => void;
@@ -161,7 +162,7 @@ function reportReviewAction(pack: MonthlyReportPack, onReview: () => void): Reac
   return <button type="button" className="btn btn-sm btn-secondary" onClick={onReview}>{pack.reviewed_at ? 'Edit review' : 'Review'}</button>;
 }
 
-function ReportPackRow({ pack, busy, busyStage, onReview, onOpenPdf, onDownloadPdf, onGeneratePdf, onSend }: ReportPackRowProps) {
+function ReportPackRow({ pack, busy, busyStage, previewError, onReview, onOpenPdf, onDownloadPdf, onGeneratePdf, onSend }: ReportPackRowProps) {
   return (
     <tr>
       <td>{reportAgreementName(pack)}</td>
@@ -169,7 +170,10 @@ function ReportPackRow({ pack, busy, busyStage, onReview, onOpenPdf, onDownloadP
       <td>{reportKindLabel(pack)}</td>
       <td><span className={`status-badge status-${pack.status}`}>{reportStatusLabel(pack)}</span></td>
       <td>{reportReviewAction(pack, onReview)}</td>
-      <td>{reportPdfAction(pack, busy, busyStage, onOpenPdf, onDownloadPdf, onGeneratePdf)}</td>
+      <td>
+        {reportPdfAction(pack, busy, busyStage, onOpenPdf, onDownloadPdf, onGeneratePdf)}
+        {previewError && <p className="report-preview-error" role="alert">{previewError}</p>}
+      </td>
       <td>{reportDeliveryAction(pack, busy, onSend)}</td>
     </tr>
   );
@@ -210,6 +214,7 @@ const ReportsHubPage: React.FC = () => {
   const [showCustomReportBuilder, setShowCustomReportBuilder] = useState(false);
   const [busyPackId, setBusyPackId] = useState<string | null>(null);
   const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<{ packId: string; message: string } | null>(null);
   const [reviewingPackId, setReviewingPackId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -394,44 +399,66 @@ const ReportsHubPage: React.FC = () => {
     setBusyPackId(pack.id);
     setError(null);
     setNotice(null);
-    const bobNotes: string[] = [];
-    let privacyCleared = false;
-    let withheld = 0;
-    if (pack.report_kind !== 'custom' && pack.status !== 'sent') {
-      // Names are withheld before Bob reads the entries, so his summary never sees them.
-      setBusyStage('Bob is checking for personal names...');
-      const privacy = await runPrivacyCheck(pack.id);
-      if (privacy.error) bobNotes.push(`Bob could not finish the privacy check (${privacy.error}); try again before Bob reviews the entries.`);
-      else if (!privacy.cleared) bobNotes.push(`Bob still has ${privacy.remaining === 1 ? '1 entry' : `${privacy.remaining} entries`} to check for personal names; generate the preview again to continue.`);
-      privacyCleared = privacy.cleared;
-      withheld = privacy.reworded;
-    }
-    if (privacyCleared) {
-      // Bob reads the entries only once every name in them has been withheld.
-      setBusyStage('Bob is reviewing...');
-      const scan = await runIncidentScan(pack.id);
-      if (scan.error) bobNotes.push(`Bob could not finish checking for potential incidents (${scan.error}); use Ask Bob in the review to continue.`);
-      else if (scan.flagged > 0) bobNotes.push(`Bob highlighted ${scan.flagged === 1 ? '1 possible incident' : `${scan.flagged} possible incidents`} for your review.`);
-      else if (scan.remaining > 0) bobNotes.push('Bob has more entries to check; use Ask Bob in the review to continue.');
-      if (pack.status === 'draft') {
-        setBusyStage('Bob is drafting the summary...');
-        const draft = await draftSummaryIfEmpty(pack.id);
-        if (draft.error) bobNotes.push(`Bob could not draft the executive summary (${draft.error}).`);
-        else if (draft.saved) bobNotes.push('Bob drafted the executive summary; check and edit it in the review before publishing.');
+    setPreviewError(null);
+    try {
+      const bobNotes: string[] = [];
+      let privacyCleared = false;
+      let withheld = 0;
+      if (pack.report_kind !== 'custom' && pack.status !== 'sent') {
+        // Names are withheld before Bob reads the entries, so his summary never sees them.
+        setBusyStage('Bob is checking for personal names...');
+        const privacy = await runPrivacyCheck(pack.id);
+        if (privacy.error) bobNotes.push(`Bob could not finish the privacy check (${privacy.error}); try again before Bob reviews the entries.`);
+        else if (!privacy.cleared) bobNotes.push(`Bob still has ${privacy.remaining === 1 ? '1 entry' : `${privacy.remaining} entries`} to check for personal names; generate the preview again to continue.`);
+        privacyCleared = privacy.cleared;
+        withheld = privacy.reworded;
+        if (!privacy.cleared) {
+          setPreviewError({ packId: pack.id, message: `No preview was generated. ${bobNotes.join(' ')}` });
+          return;
+        }
       }
-      setBusyStage('Bob is checking for personal names...');
-      const recheck = await runPrivacyCheck(pack.id);
-      if (recheck.error) bobNotes.push(`Bob could not finish the privacy check (${recheck.error}).`);
-      else if (!recheck.cleared) bobNotes.push(`Bob still has ${recheck.remaining === 1 ? '1 entry' : `${recheck.remaining} entries`} to check for personal names; generate the preview again to continue.`);
-      withheld += recheck.reworded;
+      if (privacyCleared) {
+        // Bob reads the entries only once every name in them has been withheld.
+        setBusyStage('Bob is reviewing...');
+        const scan = await runIncidentScan(pack.id);
+        if (scan.error) bobNotes.push(`Bob could not finish checking for potential incidents (${scan.error}); use Ask Bob in the review to continue.`);
+        else if (scan.flagged > 0) bobNotes.push(`Bob highlighted ${scan.flagged === 1 ? '1 possible incident' : `${scan.flagged} possible incidents`} for your review.`);
+        else if (scan.remaining > 0) bobNotes.push('Bob has more entries to check; use Ask Bob in the review to continue.');
+        if (pack.status === 'draft') {
+          setBusyStage('Bob is drafting the summary...');
+          const draft = await draftSummaryIfEmpty(pack.id);
+          if (draft.error) bobNotes.push(`Bob could not draft the executive summary (${draft.error}).`);
+          else if (draft.saved) bobNotes.push('Bob drafted the executive summary; check and edit it in the review before publishing.');
+        }
+        setBusyStage('Bob is checking for personal names...');
+        const recheck = await runPrivacyCheck(pack.id);
+        if (recheck.error) bobNotes.push(`Bob could not finish the privacy check (${recheck.error}).`);
+        else if (!recheck.cleared) bobNotes.push(`Bob still has ${recheck.remaining === 1 ? '1 entry' : `${recheck.remaining} entries`} to check for personal names; generate the preview again to continue.`);
+        withheld += recheck.reworded;
+        if (!recheck.cleared) {
+          setPreviewError({ packId: pack.id, message: `No preview was generated. ${bobNotes.join(' ')}` });
+          return;
+        }
+      }
+      if (withheld > 0) bobNotes.push(`Bob withheld personal names or contact details in ${withheld === 1 ? '1 place' : `${withheld} places`}.`);
+      setBusyStage('Rendering...');
+      const { data: receipt, error: renderError } = await supabase.functions.invoke<{ ok: boolean; pack?: { id?: string; pdf_path?: string } }>('generate-report-pack-pdf', { body: { pack_id: pack.id } });
+      if (renderError || receipt?.ok !== true || receipt.pack?.id !== pack.id || !receipt.pack.pdf_path) {
+        const detail = renderError
+          ? await functionErrorMessage(renderError, 'The PDF preview could not be generated.')
+          : 'The PDF service did not confirm a preview. Please try again.';
+        setPreviewError({ packId: pack.id, message: [detail, ...bobNotes].join(' ') });
+      } else {
+        setNotice([`PDF preview for ${pack.period_start} to ${pack.period_end} is ready to review.`, ...bobNotes].join(' '));
+        await loadReports();
+      }
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? error.message : 'Unexpected error';
+      setPreviewError({ packId: pack.id, message: `The PDF preview could not be generated: ${detail}` });
+    } finally {
+      setBusyStage(null);
+      setBusyPackId(null);
     }
-    if (withheld > 0) bobNotes.push(`Bob withheld personal names or contact details in ${withheld === 1 ? '1 place' : `${withheld} places`}.`);
-    setBusyStage('Rendering...');
-    const { error: renderError } = await supabase.functions.invoke('generate-report-pack-pdf', { body: { pack_id: pack.id } });
-    if (renderError) setError([await functionErrorMessage(renderError, 'The PDF preview could not be generated.'), ...bobNotes].join(' '));
-    else { setNotice([`PDF preview for ${pack.period_start} to ${pack.period_end} is ready to review.`, ...bobNotes].join(' ')); await loadReports(); }
-    setBusyStage(null);
-    setBusyPackId(null);
   };
 
   const openReportPackPdf = async (pack: MonthlyReportPack) => {
@@ -636,6 +663,7 @@ const ReportsHubPage: React.FC = () => {
                   pack={pack}
                   busy={busyPackId === pack.id}
                   busyStage={busyPackId === pack.id ? busyStage : null}
+                  previewError={previewError?.packId === pack.id ? previewError.message : null}
                   onReview={() => setReviewingPackId(pack.id)}
                   onOpenPdf={() => void openReportPackPdf(pack)}
                   onDownloadPdf={() => void downloadReportPackPdf(pack)}

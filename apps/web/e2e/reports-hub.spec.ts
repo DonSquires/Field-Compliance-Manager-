@@ -37,6 +37,200 @@ test('reports remain focused without Freedom Camping', async ({ page }) => {
   expect(reportingRoots).toContain(OPERATING_ORG_ID);
 });
 
+test('preview shows privacy failures beside the report and retries safely', async ({ page }) => {
+  const calls: string[] = [];
+  let privacy: 'denied' | 'malformed' | 'remaining' | 'cleared' = 'denied';
+  let rendered = false;
+  const packId = '79797979-7979-4979-8979-797979797979';
+  await page.route('**/rest/v1/monthly_report_packs?*', async (route) => {
+    if (!rendered) {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+      id: packId, organization_id: OPERATING_ORG_ID, template_code: 'monthly-compliance', report_kind: 'monthly', report_scope: {},
+      period_start: '2026-08-01', period_end: '2026-08-30', status: 'draft', data: {}, editorial: {},
+      generated_at: '2026-08-30T09:30:00.000Z', updated_at: '2026-08-30T09:30:00.000Z',
+      reviewed_at: null, published_at: null, delivery_channel: null, sent_at: null,
+      pdf_path: 'org/fixture/report.pdf', pdf_sha256: 'fixture', pdf_renderer_version: 'fcm-report-pack-pdf-lib-a4-v20',
+      pdf_source_updated_at: '2026-08-30T09:30:00.000Z', agreement: [{ name: 'Civic Events Compliance Services' }],
+    }]) });
+  });
+  await page.route('**/functions/v1/**', async (route) => {
+    const name = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    if (!['check-report-privacy', 'flag-report-potential-incidents', 'draft-report-executive-summary', 'generate-report-pack-pdf'].includes(name)) {
+      await route.fallback();
+      return;
+    }
+    calls.push(name);
+    if (name === 'check-report-privacy' && privacy === 'denied') {
+      await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'Privacy check could not be saved: permission denied for function is_report_provider_custodian_for_org' }) });
+      return;
+    }
+    if (name === 'check-report-privacy' && privacy === 'malformed') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (name === 'check-report-privacy') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        ok: true, checked: privacy === 'remaining' ? 0 : 1, remaining: privacy === 'remaining' ? 506 : 0,
+        cleared: privacy === 'cleared', reworded: 0, editorial_reworded: 0, updated_at: '2026-08-30T09:30:00.000Z',
+      }) });
+      return;
+    }
+    if (name === 'flag-report-potential-incidents') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ checked: 1, flagged: 0, remaining: 0 }) });
+      return;
+    }
+    if (name === 'draft-report-executive-summary') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ saved: false }) });
+      return;
+    }
+    rendered = true;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, pack: { id: packId, pdf_path: 'org/fixture/report.pdf' } }) });
+  });
+
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  const row = page.getByRole('region', { name: 'Report packs' }).locator('tbody tr').filter({ hasText: 'Civic Events Compliance Services' });
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toContainText('No preview was generated.');
+  await expect(row.getByRole('alert')).toContainText('permission denied for function is_report_provider_custodian_for_org');
+  expect(calls).toEqual(['check-report-privacy']);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  privacy = 'malformed';
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toContainText('invalid privacy-check result');
+  expect(calls).toEqual(['check-report-privacy', 'check-report-privacy']);
+
+  privacy = 'remaining';
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toContainText('506 entries');
+  expect(calls).toEqual(['check-report-privacy', 'check-report-privacy', 'check-report-privacy']);
+
+  privacy = 'cleared';
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Preview PDF' })).toBeVisible();
+  expect(calls.slice(3)).toEqual([
+    'check-report-privacy', 'flag-report-potential-incidents', 'draft-report-executive-summary',
+    'check-report-privacy', 'generate-report-pack-pdf',
+  ]);
+});
+
+test('preview stops when the second privacy check fails or the renderer gives no receipt', async ({ page }) => {
+  const calls: string[] = [];
+  let privacyCalls = 0;
+  let failRecheck = true;
+  await page.route('**/functions/v1/**', async (route) => {
+    const name = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    if (!['check-report-privacy', 'flag-report-potential-incidents', 'draft-report-executive-summary', 'generate-report-pack-pdf'].includes(name)) {
+      await route.fallback();
+      return;
+    }
+    calls.push(name);
+    if (name === 'check-report-privacy') {
+      privacyCalls += 1;
+      if (failRecheck && privacyCalls === 2) {
+        await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'Privacy check unavailable' }) });
+      } else {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          ok: true, checked: 1, remaining: 0, cleared: true, reworded: 0, editorial_reworded: 0, updated_at: '2026-08-30T09:30:00.000Z',
+        }) });
+      }
+      return;
+    }
+    const body = name === 'flag-report-potential-incidents' ? { checked: 1, flagged: 0, remaining: 0 }
+      : name === 'draft-report-executive-summary' ? { saved: false } : { ok: true };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  const row = page.getByRole('region', { name: 'Report packs' }).locator('tbody tr').filter({ hasText: 'Civic Events Compliance Services' });
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toContainText('Privacy check unavailable');
+  expect(calls).not.toContain('generate-report-pack-pdf');
+
+  failRecheck = false;
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(row.getByRole('alert')).toContainText('The PDF service did not confirm a preview');
+  await expect(row.getByRole('button', { name: 'Generate preview' })).toBeEnabled();
+  await expect(page.getByText(/PDF preview .* is ready to review/)).toHaveCount(0);
+});
+
+test('review shows how to resolve a privacy hold before asking Bob to draft or scan', async ({ page }) => {
+  let cleared = false;
+  const requests: string[] = [];
+  await page.route('**/functions/v1/**', async (route) => {
+    const name = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    if (!['draft-report-executive-summary', 'flag-report-potential-incidents'].includes(name)) {
+      await route.fallback();
+      return;
+    }
+    requests.push(name);
+    if (!cleared) {
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+        error: "Run Bob's privacy check first: 1 entry has not been checked. Generate preview to run the privacy check.",
+      }) });
+      return;
+    }
+    const result = name === 'draft-report-executive-summary'
+      ? { ok: true, summary: 'A checked summary.' }
+      : { ok: true, checked: 1, flagged: 0, remaining: 0, not_itemised: 0 };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
+  });
+
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.getByText(/Bob could not draft the summary.*Generate preview to run the privacy check/)).toBeVisible();
+  await page.getByRole('button', { name: 'Ask Bob to check for potential incidents' }).click();
+  await expect(page.getByText(/1 entry has not been checked.*Generate preview to run the privacy check/)).toHaveCount(2);
+  expect(requests).toEqual(['draft-report-executive-summary', 'flag-report-potential-incidents']);
+
+  cleared = true;
+  await page.getByRole('button', { name: 'Draft with Bob' }).click();
+  await expect(page.getByRole('textbox', { name: 'Executive summary', exact: true })).toHaveValue('A checked summary.');
+  await page.getByRole('button', { name: 'Ask Bob to check for potential incidents' }).click();
+  await expect(page.getByText(/Bob read 1 entry and highlighted 0 possible incidents/)).toBeVisible();
+});
+
+test('publishing requires the exact wording returned by the privacy check', async ({ page }) => {
+  let validWording = false;
+  const publishedSummaries: string[] = [];
+  await page.route('**/functions/v1/check-report-privacy', async (route) => {
+    const body = route.request().postDataJSON() as { editorial?: Record<string, string> };
+    const editorial = body.editorial
+      ? validWording ? { ...body.editorial, executive_summary: '[name withheld]' } : { title: body.editorial.title }
+      : undefined;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      ok: true, checked: 1, remaining: 0, cleared: true, reworded: 0, editorial_reworded: 0,
+      updated_at: '2026-08-30T09:30:00.000Z', ...(editorial ? { editorial } : {}),
+    }) });
+  });
+  await page.route('**/rest/v1/rpc/review_monthly_report_pack', async (route) => {
+    const body = route.request().postDataJSON() as { p_action?: string; p_executive_summary?: string };
+    if (body.p_action === 'publish') publishedSummaries.push(body.p_executive_summary ?? '');
+    await route.fallback();
+  });
+
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.getByLabel('Client-facing title').fill('August report');
+  await page.getByRole('textbox', { name: 'Executive summary', exact: true }).fill('Private example');
+  await page.getByRole('button', { name: 'Publish reviewed report' }).click();
+  await expect(page.getByText(/invalid checked wording/)).toBeVisible();
+  expect(publishedSummaries).toEqual([]);
+
+  validWording = true;
+  await page.getByRole('button', { name: 'Publish reviewed report' }).click();
+  await expect(page.getByText(/published to Civic Events Compliance Services/)).toBeVisible();
+  expect(publishedSummaries).toEqual(['[name withheld]']);
+});
+
 test('administrator reviews and publishes a tenant report pack to the live client portal', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/reports');
@@ -60,7 +254,7 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await page.getByRole('button', { name: 'Review', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services' })).toBeVisible();
   await page.getByLabel('Client-facing title').fill('August service accountability report');
-  await page.getByLabel('Executive summary').fill('All scheduled visits were completed and one incident was recorded.');
+  await page.getByRole('textbox', { name: 'Executive summary', exact: true }).fill('All scheduled visits were completed and one incident was recorded.');
   await testInfo.attach('report-review-editor', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
   await page.getByRole('button', { name: 'Publish reviewed report' }).click();
     await expect(page.getByText('Reviewed report published to Civic Events Compliance Services\'s live client portal.', { exact: true })).toBeVisible();

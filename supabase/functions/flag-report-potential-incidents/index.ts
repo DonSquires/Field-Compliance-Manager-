@@ -14,9 +14,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { completeWithProviders } from '../_shared/report-executive-summary.mjs';
 import { readActivityLines } from '../_shared/report-activity-sections.ts';
 import { readPackTriage } from '../_shared/report-incident-triage-store.ts';
+import { privacyHoldReason } from '../_shared/report-privacy-oracle.mjs';
 import {
   TRIAGE_BATCH_SIZE,
-  TRIAGE_EXAMPLE_LIMIT,
+  checkedTriageExamples,
   parseTriageFlags,
   triageBatchMessage,
   triageCandidates,
@@ -45,7 +46,13 @@ class RequestError extends Error {
 }
 
 type Candidate = ReturnType<typeof triageCandidates>[number];
-type ExistingRow = { line_key: string; decision: string; bob_assessed_at: string | null };
+type ExistingRow = {
+  line_key: string;
+  decision: string;
+  incident_type: string | null;
+  decided_at: string | null;
+  bob_assessed_at: string | null;
+};
 
 async function handleFlag(req: Request) {
   const started = Date.now();
@@ -65,18 +72,20 @@ async function handleFlag(req: Request) {
   if (!profile || profile.deactivated_at || !canTriage.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
 
   const { data: pack, error: packError } = await admin.from('monthly_report_packs')
-    .select('id,organization_id,service_agreement_id,period_start,period_end,status,report_kind,data,activity_lines')
+    .select('id,organization_id,service_agreement_id,period_start,period_end,status,report_kind,data,activity_lines,editorial')
     .eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayTriage } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayTriage !== true) throw new RequestError('Forbidden', 403);
   if (!['draft', 'generated'].includes(pack.status)) throw new RequestError('Sent report packs cannot be changed', 409);
   if (pack.report_kind === 'custom') throw new RequestError('This report has no site activity to check', 409);
+  const privacyHold = privacyHoldReason(pack);
+  if (privacyHold) throw new RequestError(`${privacyHold}. Generate preview to run the privacy check.`, 409);
 
   const candidates = triageCandidates(pack.data, pack.activity_lines);
   // Entries beyond the pack's itemised lines cannot be read; say so rather than imply a full check.
   const notItemised = readActivityLines(pack.activity_lines).notItemised;
-  const existingResult = await readPackTriage<ExistingRow>(admin, pack, 'line_key,decision,bob_assessed_at');
+  const existingResult = await readPackTriage<ExistingRow>(admin, pack, 'line_key,decision,incident_type,decided_at,bob_assessed_at');
   if (existingResult.error) throw new RequestError(`Incident review could not be read: ${existingResult.error}`, 500);
   const existingByKey = new Map(existingResult.data.map((row) => [row.line_key, row]));
   const pending = candidates.filter((candidate) => {
@@ -86,20 +95,13 @@ async function handleFlag(req: Request) {
     return !row.bob_assessed_at || (rescanBefore !== null && Date.parse(row.bob_assessed_at) < rescanBefore);
   });
 
-  const [cardsResult, examplesResult] = await Promise.all([
-    admin.from('bob_knowledge_cards').select('key,title,content')
-      .eq('category', 'report_incident_triage').eq('is_active', true)
-      .or(`organization_id.is.null,organization_id.eq.${pack.organization_id}`)
-      .order('key'),
-    // Worked examples come from this agreement only: one client's "routine
-    // here" decisions must not shape another client's highlights.
-    admin.from('report_incident_triage').select('excerpt,decision,incident_type')
-      .eq('service_agreement_id', pack.service_agreement_id).neq('decision', 'unreviewed')
-      .order('decided_at', { ascending: false }).limit(TRIAGE_EXAMPLE_LIMIT),
-  ]);
+  const cardsResult = await admin.from('bob_knowledge_cards').select('key,title,content')
+    .eq('category', 'report_incident_triage').eq('is_active', true)
+    .or(`organization_id.is.null,organization_id.eq.${pack.organization_id}`)
+    .order('key');
   if (cardsResult.error) throw new RequestError(`Bob's cards could not be read: ${cardsResult.error.message}`, 500);
-  if (examplesResult.error) throw new RequestError(`Reviewer decisions could not be read: ${examplesResult.error.message}`, 500);
-  const system = triageSystemPrompt(cardsResult.data ?? [], examplesResult.data ?? []);
+  const examples = checkedTriageExamples(pack.data, pack.activity_lines, existingResult.data);
+  const system = triageSystemPrompt(cardsResult.data ?? [], examples);
   const env = Object.fromEntries(MODEL_ENV.map((key) => [key, Deno.env.get(key)]));
 
   const batches: Candidate[][] = [];
