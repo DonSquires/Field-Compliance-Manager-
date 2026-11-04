@@ -204,3 +204,20 @@ test('converts patrol local times with Auckland DST and holds skipped or repeate
     assert.equal(aucklandInstantFromLocalParts(2026, 9, 20, 24, 0), null);
   });
 });
+test('a photo with the exact YYMMDD HHMM of a single entry attaches even when its folder names another place', () => {
+  return loadMatcher().then(({ parsePhotoName, matchPhotoByMinute }) => {
+  const parsed = parsePhotoName('261001 155912.jpg');
+  const observation = { id: 'obs-1' };
+  const event = { id: 'evt-1' };
+  const byMinute = (rows) => new Map([[parsed.minuteKey, rows]]);
+  assert.deepEqual(matchPhotoByMinute(parsed, byMinute([observation]), byMinute([event])),
+    { status: 'matched', target: observation, matchType: 'minute' });
+  assert.deepEqual(matchPhotoByMinute(parsed, new Map(), byMinute([event])),
+    { status: 'matched', target: event, matchType: 'minute' });
+  assert.equal(matchPhotoByMinute(parsed, byMinute([observation, { id: 'obs-2' }]), new Map()).status, 'ambiguous');
+  assert.equal(matchPhotoByMinute(parsed, new Map(), byMinute([event, { id: 'evt-2' }])).status, 'ambiguous');
+  assert.equal(matchPhotoByMinute(parsePhotoName('261001 160012.jpg'), byMinute([observation]), byMinute([event])).status, 'unmatched');
+  // A rego-named photo must still match its plate, never just its minute.
+  assert.equal(matchPhotoByMinute(parsePhotoName('261001 155912 GKJ550.jpg'), byMinute([observation]), null).status, 'unmatched');
+  });
+});

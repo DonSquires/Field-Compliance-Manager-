@@ -165,6 +165,19 @@ export function matchPhotoTarget(parsed, relativePath, targetsByMinute) {
   return { status: unique.length > 1 ? 'ambiguous' : 'unmatched', target: null };
 }
 
+// Owner ruling 2026-11-04: a photo named with the exact YYMMDD HHMM of a log entry belongs to
+// that entry even when its folder does not name the entry's place. This applies only when the
+// minute holds a single record: one observation (whose patrol-log mirror is the same sighting)
+// or, with no observation, one patrol entry. Rego-named photos must still match their plate.
+export function matchPhotoByMinute(parsed, targetsByMinute, eventsByMinute = null) {
+  if (!parsed?.minuteKey || parsed.plate) return { status: 'unmatched', target: null };
+  const observations = targetsByMinute?.get(parsed.minuteKey) ?? [];
+  const events = eventsByMinute?.get(parsed.minuteKey) ?? [];
+  if (observations.length === 1 && events.length <= 1) return { status: 'matched', target: observations[0], matchType: 'minute' };
+  if (observations.length === 0 && events.length === 1) return { status: 'matched', target: events[0], matchType: 'minute' };
+  return { status: observations.length + events.length > 1 ? 'ambiguous' : 'unmatched', target: null };
+}
+
 const GENERIC_PLACE_WORDS = new Set([
   'road', 'street', 'lane', 'drive', 'gate', 'gates', 'forest', 'forests', 'reserve', 'block', 'track',
   'camera', 'cameras', 'cctv', 'photos', 'photo', 'images', 'image', 'footage', 'site', 'area',

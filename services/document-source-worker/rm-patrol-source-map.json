@@ -17,19 +17,19 @@
       "reason": "The DOC place map used for the original import is not in the repository; add a reviewed map before automatic sync."
     },
     "ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx": {
-      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "MR", "client_organization_id": "b991ebca-c9ce-4488-a0fd-58f1be3b4810", "zone_map": "mr-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }]
+      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "MR", "place_name_suffix": "M&R", "client_organization_id": "b991ebca-c9ce-4488-a0fd-58f1be3b4810", "zone_map": "mr-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }]
     },
     "ACTIVE MPC log.xlsx": {
       "hold": "agreement_and_place_map_review",
       "reason": "Mainland Pest Control work needs an exact agreement and a reviewed place map before automatic sync."
     },
     "ACTIVE NelsonCityCouncil patrol NCC.xlsx": {
-      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "NCC", "client_organization_id": "405fc1f7-45e8-4736-a517-885bb3e5ef95", "zone_map": "ncc-zone-map.json", "column_aliases": { "21": { "source_header": "Issue", "alias": "Secondary Issue (U)", "preserve_source": true } } }]
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "NCC", "place_name_suffix": "NCC", "client_organization_id": "405fc1f7-45e8-4736-a517-885bb3e5ef95", "zone_map": "ncc-zone-map.json", "column_aliases": { "21": { "source_header": "Issue", "alias": "Secondary Issue (U)", "preserve_source": true } } }]
     },
     "ACTIVE OneFortyOne camera and patrol OFO.xlsx": {
       "sheets": [
-        { "sheet": "2025", "header_row": 1, "client_code": "OFO2025", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json", "column_aliases": { "25": { "source_header": "Issue", "alias": "Secondary Issue (Y)", "preserve_source": true } } },
-        { "sheet": "2026", "header_row": 1, "client_code": "OFO2026", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json" }
+        { "sheet": "2025", "header_row": 1, "client_code": "OFO2025", "place_name_suffix": "OneFortyOne", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json", "column_aliases": { "25": { "source_header": "Issue", "alias": "Secondary Issue (Y)", "preserve_source": true } } },
+        { "sheet": "2026", "header_row": 1, "client_code": "OFO2026", "place_name_suffix": "OneFortyOne", "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6", "zone_map": "ofo-zone-map.json" }
       ]
     },
     "ACTIVE OperationLizard camera and patrol log DART.xlsx": {
@@ -51,8 +51,8 @@
     },
     "ACTIVE TasmanPineForest camera and patrol TPFL.xlsx": {
       "sheets": [
-        { "sheet": "2025", "header_row": 1, "client_code": "TPFL2025", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } },
-        { "sheet": "2026", "header_row": 1, "client_code": "TPFL2026", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }
+        { "sheet": "2025", "header_row": 1, "client_code": "TPFL2025", "place_name_suffix": "TPFL", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } },
+        { "sheet": "2026", "header_row": 1, "client_code": "TPFL2026", "place_name_suffix": "TPFL", "client_organization_id": "74d7fcf1-106a-481f-a770-1589c8a0db6b", "zone_map": "tpfl-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }
       ]
     },
     "ACTIVE TaylorsContracting camera and patrol log.xlsx": {
