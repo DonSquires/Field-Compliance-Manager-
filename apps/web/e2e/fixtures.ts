@@ -697,6 +697,10 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       await route.fulfill(fulfillJson({ ok: true, checked: 1, reworded: 0, editorial_reworded: 0, remaining: 0, cleared: true, updated_at: updatedAt, ...(payload.editorial ? { editorial: payload.editorial } : {}) }));
       return;
     }
+    if (functionName === 'flag-report-potential-incidents') {
+      await route.fulfill(fulfillJson({ ok: true, checked: 0, flagged: 0, remaining: 0, not_itemised: 0 }));
+      return;
+    }
     if (functionName === 'linz-lookup') { if (payload.action === 'address_autocomplete' || payload.action === 'reverse_geocode') await route.fulfill(fulfillJson({ candidates: [{ label: '1 Civic Square, Nelson 7010', lat: -41.274, lng: 173.283, source: 'linz_address' }] })); else await route.fulfill(fulfillJson({ geometry: { type: 'Polygon', coordinates: [[[173.2815, -41.2752], [173.2845, -41.2752], [173.2845, -41.2728], [173.2815, -41.2728], [173.2815, -41.2752]]] }, properties: { appellation: 'LOT 1 DP 12345' }, kind: 'parcel', matched_via: { exact: true, layer: 'parcel', radius_m: 0 } })); return; }
     if (functionName === 'create-user') { identityUsers.push({ id: '56565656-5656-4656-8656-565656565656', display_name: payload.display_name, email: payload.email, phone: null, role: payload.role, organization_id: ORG_ID, module_access: [], deactivated_at: null, updated_at: '2026-08-30T09:55:00.000Z' }); await route.fulfill(fulfillJson({ success: true, invitation_sent: true, user_id: '56565656-5656-4656-8656-565656565656', access_preset: payload.access_preset_key ?? null })); return; }
     if (functionName === 'bob-document-register') { const payload = JSON.parse(request.postData() ?? '{}'); const index = pendingIntake.findIndex((item) => item.id === payload.attachment_id); if (index >= 0) pendingIntake.splice(index, 1); await route.fulfill(fulfillJson({ success: true, document_id: 'abababab-abab-4bab-8bab-ababababab10' })); return; }

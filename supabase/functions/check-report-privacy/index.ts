@@ -160,6 +160,7 @@ async function handleCheck(req: Request) {
   const changed = checked.length > 0 || writeEditorial
     || (isDocument(pack.activity_lines) && (stored?.editorial_digest !== digest || !clearedCurrent));
   let updatedAt = pack.updated_at as string;
+  let savedChanges = false;
   if (changed && isDocument(applied.activityLines)) {
     const nextLines = {
       ...applied.activityLines,
@@ -179,6 +180,7 @@ async function handleCheck(req: Request) {
     if (saveError) throw new RequestError(`Privacy check could not be saved: ${saveError.message}`, 500);
     if ((saved ?? []).length !== 1) throw new RequestError('Report pack changed during the privacy check; run it again', 409);
     updatedAt = String(saved![0].updated_at);
+    savedChanges = true;
   }
 
   const status = privacyStatus(isDocument(applied.activityLines) ? { ...applied.activityLines, privacy: { editorial_digest: digest } } : applied.activityLines, editorial);
@@ -199,7 +201,10 @@ async function handleCheck(req: Request) {
       models: [...models],
     },
   });
-  if (auditError) throw new RequestError(`Privacy check ran but audit receipt failed: ${auditError.message}`, 502);
+  if (auditError) {
+    const outcome = savedChanges ? 'saved changes' : 'ran';
+    throw new RequestError(`Privacy check ${outcome}, but its audit receipt failed. Refresh the report, preserving any unsaved review wording, then retry the check before previewing or publishing: ${auditError.message}`, 502);
+  }
   if (checked.length === 0 && candidates.length > 0 && failures.length > 0) throw new RequestError(failures[0] ?? 'Bob could not complete the privacy check', 502);
 
   return json({

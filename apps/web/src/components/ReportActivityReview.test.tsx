@@ -387,7 +387,7 @@ describe('ReportActivityReview', () => {
     await screen.findByText('Trespass');
   });
   it('asks Bob to check the logged activity and reports what he highlighted', async () => {
-    invoke.mockResolvedValueOnce({ data: { checked: 6, flagged: 1, remaining: 0, not_itemised: 3 }, error: null });
+    invoke.mockResolvedValueOnce({ data: { ok: true, checked: 6, flagged: 1, remaining: 0, not_itemised: 3 }, error: null });
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
     const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
     expect(await within(section).findByText('Bob has not checked this report yet.')).toBeTruthy();
@@ -397,6 +397,17 @@ describe('ReportActivityReview', () => {
     expect(await within(section).findByText('Bob read 6 entries and highlighted 1 possible incident for your review. 3 further entries were not itemised in this report, so Bob could not read them.')).toBeTruthy();
     expect(invoke).toHaveBeenCalledWith('flag-report-potential-incidents', { body: { pack_id: 'p1' } });
     expect(triageRpc.mock.calls.filter(([name]) => name === 'list_report_incident_triage')).toHaveLength(2);
+  });
+
+  it('shows an incomplete incident scan instead of reporting that there was nothing to check', async () => {
+    invoke.mockResolvedValueOnce({ data: { ok: true }, error: null });
+    render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" />);
+    const section = screen.getByRole('region', { name: 'Potential incidents (Bob)' });
+    const ask = within(section).getByRole('button', { name: 'Ask Bob to check for potential incidents' }) as HTMLButtonElement;
+    await waitFor(() => expect(ask.disabled).toBe(false));
+    fireEvent.click(ask);
+    expect(await within(section).findByText(/invalid incident-scan result/)).toBeTruthy();
+    expect(within(section).queryByText('Bob had no new entries to check.')).toBeNull();
   });
 
   it('lets a reviewer confirm an entry Bob highlighted, recolouring it and listing it under Incidents', async () => {

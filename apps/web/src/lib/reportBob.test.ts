@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('./supabase', () => ({ supabase: { functions: { invoke } } }));
 
-import { runPrivacyCheck } from './reportBob';
+import { runIncidentScan, runPrivacyCheck } from './reportBob';
 
 const response = (overrides: Record<string, unknown> = {}) => ({
   ok: true,
@@ -17,6 +17,39 @@ const response = (overrides: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => invoke.mockReset());
+
+describe('report incident scans', () => {
+  const scan = (overrides: Record<string, unknown> = {}) => ({
+    ok: true, checked: 3, flagged: 1, remaining: 0, not_itemised: 0, ...overrides,
+  });
+
+  it.each([
+    {},
+    { ok: true },
+    scan({ checked: '3' }),
+    scan({ checked: -1 }),
+    scan({ flagged: 4 }),
+    scan({ remaining: null }),
+    scan({ not_itemised: undefined }),
+  ])('does not present a malformed response as a completed scan', async (data) => {
+    invoke.mockResolvedValueOnce({ data, error: null });
+    const result = await runIncidentScan('pack');
+    expect(result.error).toMatch(/invalid incident-scan result/);
+    expect(result.checked).toBe(0);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the last verified progress if a later scan pass is malformed', async () => {
+    invoke
+      .mockResolvedValueOnce({ data: scan({ remaining: 4, not_itemised: 2 }), error: null })
+      .mockResolvedValueOnce({ data: { ok: true }, error: null });
+    const result = await runIncidentScan('pack');
+    expect(result).toEqual({
+      checked: 3, flagged: 1, remaining: 4, notItemised: 2,
+      error: expect.stringMatching(/invalid incident-scan result/),
+    });
+  });
+});
 
 describe('report privacy checks', () => {
   it('carries the saved version through every pass and uses only checked wording', async () => {
