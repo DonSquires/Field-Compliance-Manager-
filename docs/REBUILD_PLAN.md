@@ -8,6 +8,24 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Roster credential matching, 2026-11-04 (local acceptance):
+
+- **Before:** recording a verified COA alongside an identical unverified
+  imported row still made the roster directory report all credentials as
+  unverified. Assignment preview also described any unverified credential with
+  an expiry date as expired, even when the date was not before the shift.
+- **During:** the migration reconciles only an unverified row that matches an
+  active verified credential for the same staff member by credential number,
+  issue/expiry dates and credential type (including the COA/security-licence
+  labels). Superseded rows no longer affect roster eligibility, while a current
+  renewal remains eligible. Other unverified credentials remain blocking. The
+  preview now distinguishes verification status from expiry and includes the
+  expiry year.
+- **After:** the roster directory and assignment preview use the same matching
+  rule. Fatigue, work-readiness, authorization and other credential gates are
+  unchanged. The migration is not applied to production; no shifts have been
+  created or published while the live gate remains blocked.
+
 Client report scope and period repair (local acceptance):
 
 - **Before:** routine camera maintenance/install/removal and photographed gate

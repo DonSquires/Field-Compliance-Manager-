@@ -38,7 +38,7 @@ export const coverageWords = (preview: CoveragePreview, startLocal: string): { t
 
 interface AssignmentPreview { staff_id: string; work_ready: boolean; rules: { min_rest_hours_between_shifts: number; max_hours_per_week: number; max_consecutive_days: number; enforced: boolean } | null; rest_hours: number | null; week_start: string; week_hours: number; consecutive_days: number; availability_conflict: boolean; conflict: string | null; credential_warnings: { credential_type: string; expiry_date: string | null; verified: boolean }[]; }
 const hoursWords = (value: number) => `${Number.isInteger(value) ? value : value.toFixed(1)} h`;
-const dayWords = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+const dayWords = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
 /** Rest, hours and days in a row for this officer if this shift is added — and whether the roster will refuse it. */
 export const assignmentWords = (preview: AssignmentPreview): { tone: 'ok' | 'warn' | 'stop'; text: string }[] => {
   const notes: { tone: 'ok' | 'warn' | 'stop'; text: string }[] = [];
@@ -48,7 +48,10 @@ export const assignmentWords = (preview: AssignmentPreview): { tone: 'ok' | 'war
   if (!preview.rules) notes.push({ tone: 'warn', text: 'No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in Rosters › Shift setup & open shifts › Rest & hours rules.' });
   else if (!preview.rules.enforced) notes.push({ tone: 'warn', text: 'The employer\'s rest and hours rules are recorded but not enforced — the roster will accept this even if it breaks them.' });
   if (preview.availability_conflict && !preview.conflict) notes.push({ tone: 'warn', text: 'The officer has marked themselves unavailable for part of this time.' });
-  for (const warning of preview.credential_warnings ?? []) notes.push({ tone: 'warn', text: warning.expiry_date ? `${credentialTypeLabel(warning.credential_type)} expires ${dayWords(warning.expiry_date)}, before this shift ends.` : `${credentialTypeLabel(warning.credential_type)} is not verified.` });
+  for (const warning of preview.credential_warnings ?? []) {
+    if (!warning.verified) notes.push({ tone: 'warn', text: `${credentialTypeLabel(warning.credential_type)} is not verified.` });
+    else if (warning.expiry_date) notes.push({ tone: 'warn', text: `${credentialTypeLabel(warning.credential_type)} expires ${dayWords(warning.expiry_date)}, before this shift ends.` });
+  }
   return notes;
 };
 
