@@ -154,8 +154,8 @@ Officer selected-shift journey and private briefing (local acceptance, 2026-11-0
 - **Live blockers:** the hospital boundary remains mapped but unverified;
   no H&S notes/hazards have been recorded from the restricted assessment.
   The source assessment has not been uploaded or promoted. An empty hazard
-  list is not safety clearance. Governed release,   deployed-route verification and a human-operated field session remain
-  acceptance gates.
+  list is not safety clearance. Governed release, deployed-route verification
+  and a human-operated field session remain acceptance gates.
 
 Existing staff login invitations, 2026-11-05:
 
