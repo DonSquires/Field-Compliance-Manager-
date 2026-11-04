@@ -27,7 +27,7 @@ const lines = {
     { d: '2026-10-05', p: 'Kings Ridge', k: 'observation', c: 'unclassified', n: 'Roadblock log winched aside.' },
   ],
 };
-const context = { clientName: 'Forest Co', agreementName: 'Security', period: '2026-10-01 to 2026-10-31', periodStart: '2026-10-01' };
+const context = { clientName: 'Forest Co', agreementName: 'Security', period: '2026-10-01 to 2026-10-31', periodStart: '2026-10-01', periodEnd: '2026-10-31' };
 
 test('the brief carries this month, the reviewer decisions and the non-routine entries only', async () => {
   const { executiveSummaryBrief } = await load();
@@ -40,13 +40,14 @@ test('the brief carries this month, the reviewer decisions and the non-routine e
   const brief = executiveSummaryBrief({ activityReport: report }, lines, { ...context, triage });
   assert.equal(brief.client, 'Forest Co');
   assert.equal(brief.period, '2026-10-01 to 2026-10-31');
-  assert.equal(brief.month, 'October 2026');
+  assert.equal(brief.periodLabel, 'October 2026');
   assert.equal(brief.figures, undefined);
-  assert.deepEqual(brief.thisMonth.cullsAndSightingsBySpecies.map((row) => row.culls), [2, 1]);
-  assert.deepEqual(brief.thisMonth.hunterReportedAnimalsBySpecies, [{ species: 'Possum', animals: 7 }]);
-  assert.equal(brief.thisMonth.confirmedIncidentsByType.length, 1);
-  assert.equal(brief.thisMonth.byWeek[0].incidents, 2);
-  assert.equal(brief.thisMonth.byWeek[0].potentialIncidents, 1);
+  assert.deepEqual(brief.thisPeriod.cullsAndSightingsBySpecies.map((row) => row.culls), [2, 1]);
+  assert.deepEqual(brief.thisPeriod.hunterReportedAnimalsBySpecies, [{ species: 'Possum', animals: 7 }]);
+  assert.equal(brief.thisPeriod.confirmedIncidentsByType.length, 1);
+  assert.equal(brief.thisPeriod.incidentsIncludingConfirmed, 2);
+  assert.equal(brief.thisPeriod.byWeek[0].incidents, 2);
+  assert.equal(brief.thisPeriod.byWeek[0].potentialIncidents, 1);
   assert.deepEqual(brief.previousMonths, []);
   assert.deepEqual(brief.entries.map((entry) => entry.date), ['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05']);
   assert.equal(brief.entries[0].location, 'Smiths');
@@ -72,6 +73,73 @@ test('prior months without recorded activity are marked as not comparable', asyn
   assert.deepEqual(priorMonthFigures(null), []);
 });
 
+test('January to October uses ten separate monthly buckets, the full incident total and no unequal prior-month baseline', async () => {
+  const { executiveSummaryBrief, finaliseExecutiveSummary } = await load();
+  const { activityLineKey } = await import('../supabase/functions/_shared/report-activity-sections.mjs');
+  const late = { d: '2026-10-01', p: 'A', k: 'event', c: 'inspection', s: 'gate', n: 'Open' };
+  const brief = executiveSummaryBrief({ activityReport: {
+    ...report, totals: { ...report.totals, incidents: 9 }, incidents: { total: 9 },
+  } }, { version: 2, notItemised: 8, lines: [
+    { d: '2026-01-01', p: 'A', k: 'incident', it: 'theft', n: 'Fuel taken.' },
+    late,
+  ] }, {
+    ...context, period: '2026-01-01 to 2026-10-31', periodStart: '2026-01-01', periodEnd: '2026-10-31',
+    triage: [{ line_key: activityLineKey(late), bob_flagged: true, decision: 'unreviewed', bob_incident_type: 'trespass' }],
+    trend: { months: [{ month: '2025-12-01', report }] },
+  });
+  assert.equal(brief.periodLabel, '2026-01-01 to 2026-10-31');
+  assert.equal(brief.thisMonth, undefined);
+  assert.equal(brief.thisPeriod.byWeek, undefined, 'days from ten months must not be collapsed into four weeks');
+  assert.equal(brief.thisPeriod.byMonth.length, 10);
+  assert.deepEqual(brief.thisPeriod.byMonth.map((month) => [month.month, month.incidents, month.potentialIncidents]), [
+    ['January 2026', 1, 0], ['February 2026', 0, 0], ['March 2026', 0, 0], ['April 2026', 0, 0],
+    ['May 2026', 0, 0], ['June 2026', 0, 0], ['July 2026', 0, 0], ['August 2026', 0, 0],
+    ['September 2026', 0, 0], ['October 2026', 0, 1],
+  ]);
+  assert.equal(brief.thisPeriod.incidentsIncludingConfirmed, 9, 'the narrative must not replace nine recorded incidents with its one itemised incident');
+  assert.equal(brief.entriesNotItemised, 8);
+  assert.deepEqual(brief.previousMonths, []);
+  assert.match(brief.comparisonBasis, /No equivalent prior-period/);
+  assert.match(finaliseExecutiveSummary('**Executive Summary: January 2026**\n\nFirst.\n\nSecond.', brief), /^\*\*Executive Summary: 2026-01-01 to 2026-10-31\*\*/);
+});
+
+test('single-month and cross-year ranges keep their own month boundaries', async () => {
+  const { executiveSummaryBrief } = await load();
+  const monthly = executiveSummaryBrief({ activityReport: report }, lines, {
+    ...context, periodEnd: '2026-10-31', trend: { months: [{ month: '2026-09-01', report }] },
+  });
+  assert.equal(monthly.thisPeriod.byWeek.length, 4);
+  assert.equal(monthly.thisPeriod.byMonth.length, 1);
+  assert.equal(monthly.previousMonths[0].month, 'September 2026');
+  const partial = executiveSummaryBrief({ activityReport: report }, lines, {
+    periodStart: '2026-10-15', periodEnd: '2026-10-31',
+  });
+  assert.equal(partial.periodLabel, '2026-10-15 to 2026-10-31');
+  assert.match(partial.comparisonBasis, /partial month/);
+  const acrossYear = executiveSummaryBrief({ activityReport: report }, { version: 2, lines: [] }, {
+    periodStart: '2025-12-15', periodEnd: '2026-02-02',
+  });
+  assert.deepEqual(acrossYear.thisPeriod.byMonth.map((month) => month.month), ['December 2025', 'January 2026', 'February 2026']);
+});
+
+test('internal camera work and gate statuses do not enter the narrative unless Bob flags or a reviewer confirms a concern', async () => {
+  const { executiveSummaryBrief } = await load();
+  const { activityLineKey } = await import('../supabase/functions/_shared/report-activity-sections.mjs');
+  const internal = { d: '2026-10-02', k: 'event', c: 'maintenance', s: 'camera', n: 'Battery and card replaced.', ph: 1 };
+  const gate = { d: '2026-10-03', k: 'event', c: 'inspection', s: 'gate', n: 'Open', ph: 1 };
+  const input = { version: 2, lines: [internal, gate] };
+  assert.deepEqual(executiveSummaryBrief({ activityReport: report }, input, context).entries, []);
+  const flagged = executiveSummaryBrief({ activityReport: report }, input, {
+    ...context, triage: [{ line_key: activityLineKey(internal), bob_flagged: true, decision: 'unreviewed', bob_incident_type: 'surveillance_tampering' }],
+  });
+  assert.match(flagged.entries[0].review, /Potential .*not yet reviewed/);
+  assert.equal(flagged.thisPeriod.incidentsIncludingConfirmed, 1, 'a potential flag does not increase the report incident total');
+  const cleared = executiveSummaryBrief({ activityReport: report }, input, {
+    ...context, triage: [{ line_key: activityLineKey(internal), bob_flagged: true, decision: 'not_incident' }],
+  });
+  assert.deepEqual(cleared.entries, []);
+});
+
 test('when entries exceed the limit, incidents are kept ahead of routine notes', async () => {
   const { executiveSummaryBrief, BRIEF_ENTRY_LIMIT } = await load();
   const many = { version: 2, lines: [
@@ -87,9 +155,9 @@ test('when entries exceed the limit, incidents are kept ahead of routine notes',
 test('the instructions ask for a two-paragraph executive summary of occurrences and trends, without volumes, copying or names', async () => {
   const { EXECUTIVE_SUMMARY_INSTRUCTIONS } = await load();
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /expert corporate security analyst/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Executive Summary: <month and year from the brief>\*\*\n\n<paragraph 1>\n\n<paragraph 2>/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /\*\*Executive Summary: <periodLabel from the brief>\*\*\n\n<paragraph 1>\n\n<paragraph 2>/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Paragraph 1, significant occurrences[\s\S]*commercial theft[\s\S]*perimeter compromise[\s\S]*lock and hardware failures[\s\S]*surveillance tampering/);
-  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Paragraph 2, trends[\s\S]*previous two months[\s\S]*pest control[\s\S]*previous two months/);
+  assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Paragraph 2, trends[\s\S]*thisPeriod.byMonth[\s\S]*previous two months[\s\S]*pest control/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Write a summary, not a copy/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /no bullets/);
   assert.match(EXECUTIVE_SUMMARY_INSTRUCTIONS, /Do not restate volume statistics/);
@@ -106,7 +174,7 @@ test('model output keeps headers, bullets and bold, without reasoning or other m
     '**Significant Issues**\n\n* **Smiths:** diesel taken.\n* A lock failed.\n\nRepairs are booked.',
   );
   assert.equal(finaliseExecutiveSummary('* A point.', { month: 'October 2026' }), '**Executive Summary: October 2026**\n\n* A point.');
-  assert.equal(finaliseExecutiveSummary('**Executive Summary: May**\n\n* A point.', { month: 'October 2026' }), '**Executive Summary: May**\n\n* A point.');
+  assert.equal(finaliseExecutiveSummary('**Executive Summary: May**\n\n* A point.', { periodLabel: 'October 2026' }), '**Executive Summary: October 2026**\n\n* A point.');
   const long = cleanExecutiveSummary(`${'* One bullet point here.\n'.repeat(400)}`);
   assert.ok(long.length <= EXECUTIVE_SUMMARY_MAX_CHARS);
   assert.match(long, /here\.$/);
@@ -183,6 +251,7 @@ test('Ollama Cloud drafts first; OpenAI is used only when it fails', async () =>
 test('the edge function and review panel keep drafting governed; only an empty draft summary is filled', () => {
   const edge = read('supabase/functions/draft-report-executive-summary/index.ts');
   assert.match(edge, /is_report_provider_custodian_for_org/);
+  assert.match(edge, /periodEnd: pack\.period_end/);
   assert.match(edge, /'grand_master', 'master', 'admin', 'admin_officer'/);
   assert.match(edge, /Sent report packs cannot be changed/);
   assert.match(edge, /monthly_report_pack_summary_drafted/);

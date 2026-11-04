@@ -7,6 +7,8 @@ import {
   activityAccountingProblem,
   activityLabel,
   applyIncidentTriage,
+  clientActivityReport,
+  isInternalWorkLine,
   isReportedLine,
   countedText,
   describeActivityLine,
@@ -24,8 +26,6 @@ import {
   REVIEW_SECTIONS,
   observationCount,
   reviewSectionCode,
-  isRoutineCheck,
-  routineCheckRows,
   siteLogGroups,
   executiveSummaryMarkup,
   textParagraphs,
@@ -693,14 +693,12 @@ function AccountingResult({ result, status, label }: { result: ActivityAccountin
 }
 
 
-function ActivityReportBody({ packId, updatedAt, report, status, headingId, reviewerSummary, highlights }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string; reviewerSummary: string; highlights: string }) {
+function ActivityReportBody({ packId, updatedAt, report: sourceReport, status, headingId, reviewerSummary, highlights }: { packId: string; updatedAt: string; report: ActivityReport; status: string; headingId: string; reviewerSummary: string; highlights: string }) {
   const [lines, setLines] = useState<LinesState>({ state: 'idle' });
   const [accounting, setAccounting] = useState<AccountingState>({ state: 'idle' });
   const [logOpen, setLogOpen] = useState(false);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
   const { urls, request: requestPhotos, retry: retryPhoto, failed: photoFailed } = usePhotoUrls();
-  const label: Label = useCallback((dim: string, code: string) => activityLabel(report, dim, code), [report]);
-  const { totals, accountedFor, pest, observations, incidents } = report;
 
   // A ref, not state: two toggle events in one render would both see the old state and fetch twice.
   const linesRequest = useRef<'idle' | 'loading' | 'done'>('idle');
@@ -787,7 +785,11 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   };
 
   // Triage first: an administration entry confirmed as an incident stays in the report.
-  const triagedLines = useMemo(() => applyIncidentTriage(readyLines, triage).filter(isReportedLine), [readyLines, triage]);
+  const reportedLines = useMemo(() => applyIncidentTriage(readyLines, triage).filter(isReportedLine), [readyLines, triage]);
+  const report = useMemo(() => clientActivityReport(sourceReport, reportedLines), [sourceReport, reportedLines]);
+  const triagedLines = useMemo(() => reportedLines.filter((line) => !isInternalWorkLine(line)), [reportedLines]);
+  const label: Label = useCallback((dim: string, code: string) => activityLabel(report, dim, code), [report]);
+  const { totals, accountedFor, pest, observations, incidents } = report;
   const incidentEntries = useMemo(() => triagedLines
     .filter(isIncidentLine)
     .map((line) => ({ line, entry: describeActivityLine(report, line) })), [triagedLines, report]);
@@ -823,8 +825,6 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   };
 
   const summaryItems = useMemo(() => executiveSummaryMarkup(reviewerSummary), [reviewerSummary]);
-  const routineRows = useMemo(() => routineCheckRows(report, triagedLines), [triagedLines, report]);
-  const routineCount = useMemo(() => triagedLines.filter(isRoutineCheck).length, [triagedLines]);
   useEffect(() => {
     requestPhotos([
       ...incidentEntries.flatMap(({ entry }) => entry.photos.slice(0, PHOTOS_PER_ENTRY)),
@@ -854,7 +854,7 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
   const hunters = report.hunterReturns;
   if (hunters) metrics.push(['Hunter-reported kills', hunters.animals]);
   const summaryCharts = reportSummaryCharts(report, label);
-  const logEntries = Math.max(totals.entries - totals.incidents - confirmedCount - reviewSectionCount - routineCount, 0);
+  const logEntries = Math.max(totals.entries - totals.incidents - confirmedCount - reviewSectionCount, 0);
   const accountedBadge = accountedFor.reconciled
     ? (accountedFor.entries === 1 ? '1 record accounted for' : `All ${count(accountedFor.entries)} records accounted for`)
     : 'Totals need review';
@@ -913,20 +913,6 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
           })}
           <p className="report-activity-chart-note">Charts highlight the highest recorded counts; complete figures remain in the tables below.</p>
         </div>
-      )}
-
-      {routineRows.length > 0 && (
-        <section className="report-activity-section" aria-labelledby={`${headingId}-routine`}>
-          <h5 id={`${headingId}-routine`}>Routine checks</h5>
-          <p className="report-review-source-note">
-            {counted(routineCount, 'routine patrol or check', 'routine patrols and checks')} recorded a status only. They are summarised here rather than listed in the site log; anything an officer described further is listed in full.
-          </p>
-          <ActivityTable
-            label="Routine checks by type"
-            columns={[{ label: 'Check' }, { label: 'Checks', numeric: true }, { label: 'Locations', numeric: true }, { label: 'Recorded results' }]}
-            rows={routineRows.map((row) => [row.check, count(row.checks), count(row.places), row.results])}
-          />
-        </section>
       )}
 
       <section className="report-activity-section" aria-labelledby={`${headingId}-overview`}>
@@ -1103,13 +1089,11 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
 
       {([['maintenance', 'Maintenance and repairs', 'No maintenance or repair work was recorded during the period.'], ['manufacture', 'Manufacture and fabrication', 'No manufacture or fabrication work was recorded during the period.']] as const).map(([key, title, empty]) => {
         const work = report[key];
+        if (!triagedLines.some((line) => line.category === key && !isIncidentLine(line) && !reviewSectionCode(line))) return null;
         return (
           <Group key={key} title={title} meta={counted(work.entries, 'entry', 'entries')}>
             {work.entries > 0 ? (
               <>
-                {work.completed + work.open > 0 && (
-                  <p className="report-review-source-note">Workshop jobs: {count(work.completed)} completed, {count(work.open)} scheduled or in progress.</p>
-                )}
                 {work.bySubject.length > 0 && (
                   <ActivityTable label={`${title} by item`} columns={[{ label: 'Item worked on' }, { label: 'Entries', numeric: true }]} rows={work.bySubject.map((row) => [label('subject', row.code) || 'Not specified', count(row.entries)])} />
                 )}
@@ -1149,7 +1133,8 @@ function ActivityReportBody({ packId, updatedAt, report, status, headingId, revi
       <Group className="report-activity-check" title="Completeness check" meta={`Provider only · ${accountedBadge}`}>
         <p className="report-review-source-note">Not part of the client report. Confirms every record in scope is either reported or deliberately kept out, and compares this pack with live records.</p>
         <ul className="report-activity-facts">
-          <li>{counted(accountedFor.reported, 'entry is', 'entries are')} in the client report{accountedFor.reconciled ? '; every record in scope is accounted for.' : '.'}</li>
+          <li>{counted(totals.entries, 'entry is', 'entries are')} in the client report{accountedFor.reconciled ? '; every record in scope is accounted for.' : '.'}</li>
+          {reportedLines.length > triagedLines.length && <li>{counted(reportedLines.length - triagedLines.length, 'internal servicing or routine-check record is', 'internal servicing and routine-check records are')} kept out of the client report. Original records remain available to Bob for incident review.</li>}
           {accountedFor.withheldTravelAdmin > 0 && <li>{counted(accountedFor.withheldTravelAdmin, 'travel or materials record is', 'travel and materials records are')} kept out of the client report.</li>}
           {accountedFor.withheldShiftMarkers > 0 && <li>{counted(accountedFor.withheldShiftMarkers, 'shift start or finish marker is', 'shift start and finish markers are')} kept out of the client report.</li>}
           {accountedFor.withheldRoutineCards > 0 && <li>{counted(accountedFor.withheldRoutineCards, 'routine camera card swap is', 'routine camera card swaps are')} kept out of the client report.</li>}

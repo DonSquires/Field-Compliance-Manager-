@@ -8,6 +8,41 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Client report scope and period repair (local acceptance):
+
+- **Before:** routine camera maintenance/install/removal and photographed gate
+  statuses could reach client detail. Bob labelled every range with its first
+  month and combined days from all months into four weekly buckets; a ten-month
+  report was compared against two individual prior months.
+- **During:** one client projection removes internal camera work and short
+  status-only checks from provider preview, PDF detail, email figures and displayed aggregates.
+  Original records remain available to Bob's heuristic incident review; card
+  reviews remain observations with their photos, and reviewer-confirmed incidents
+  override routine exclusions. Client-relevant repairs remain itemised.
+  Summary briefs carry both date boundaries, separate monthly buckets across
+  the entire range, weekly buckets only for single-month reports, and a shared
+  recorded-plus-confirmed incident total. Multi-month briefs do not supply
+  unequal prior-month comparisons. Incomplete itemisation must be acknowledged,
+  and status alone is not evidence of forced access or a breach.
+- **After:** summary headings use the actual period, multi-month report/email
+  titles no longer claim to be monthly, and renderer v21 invalidates obsolete
+  previews before sending. Existing reviewer writing is never overwritten;
+  an existing incorrect summary needs an explicit Redraft with Bob and review.
+  Privacy Oracle and publish/send gates remain unchanged.
+- **Evidence boundary:** scoped live Atlas reads confirm the draft, PDF, email,
+  privacy and review flow through `monthly_report_packs`; FK links are not flow
+  evidence. The schema confirms that `report_pack_trend_context` supplies only
+  two prior calendar months, so it is not used as a multi-month baseline.
+  No schema or tenant records are changed by this repair. Synthetic regression
+  and type checks precede publication; desktop/phone fixture flows retain
+  observation photos and provider-only completeness accounting. Windows has no
+  matching screenshot baselines, so functional browser checks ignore snapshots
+  rather than manufacturing visual acceptance. Report contracts: 94 pass, two
+  database-dependent checks skipped; frontend parity: 17 pass; desktop/phone
+  report-hub flows: 24 pass. Edge type checks and the web production build pass.
+  Production regeneration, release-lane
+  deployment and Atlas refresh remain separate acceptance gates.
+
 Report privacy preview recovery, 2026-11-04 (local acceptance):
 
 - **Before:** the privacy oracle could read a report but its service-role save

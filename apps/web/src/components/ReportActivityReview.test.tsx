@@ -91,8 +91,8 @@ describe('ReportActivityReview', () => {
     expect(within(pest).getByText('DOC 200 trap')).toBeTruthy();
     expect(within(pest).getByText('Calibre not recorded')).toBeTruthy();
     expect(within(pest).getByText('Not recorded')).toBeTruthy();
-    expect(within(group(/^Maintenance and repairs/)).getByText('Gate')).toBeTruthy();
-    expect(screen.getByText('No manufacture or fabrication work was recorded during the period.')).toBeTruthy();
+    expect(within(await waitFor(() => group(/^Maintenance and repairs/))).getByText('Gate')).toBeTruthy();
+    expect(screen.queryByText('No manufacture or fabrication work was recorded during the period.')).toBeNull();
 
     const clientSections = [...document.querySelectorAll('.report-activity-section, .report-activity-group:not(.report-activity-check)')];
     for (const section of clientSections) expect(section.textContent).not.toMatch(/import|ledger|batch|reconcil|start or finish|travel/i);
@@ -145,7 +145,7 @@ describe('ReportActivityReview', () => {
     expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 
-  it('opens with the reviewer text, keeps photos with their entries and summarises routine checks', async () => {
+  it('opens with the reviewer text, keeps photos with their entries and keeps routine checks out of the client report', async () => {
     render(<ReportActivityReview packId="p1" updatedAt={updatedAt} data={data} status="draft" summary="A quiet month overall." highlights="  " />);
     const summary = screen.getByRole('region', { name: 'Executive summary' });
     const paragraphs = [...summary.querySelectorAll('.report-activity-summary-text')].map((node) => node.textContent);
@@ -153,9 +153,8 @@ describe('ReportActivityReview', () => {
     expect(paragraphs.some((paragraph) => /were recorded across/.test(paragraph ?? ''))).toBe(false);
     expect(within(summary).queryByRole('list', { name: 'Selected photos' })).toBeNull();
     expect(summary.querySelector('img, .report-photo-thumb')).toBeNull();
-    const routine = (await screen.findByRole('heading', { name: 'Routine checks' })).closest('section') as HTMLElement;
-    expect(within(routine).getByText(/recorded a status only/)).toBeTruthy();
-    expect(within(within(routine).getByRole('region', { name: 'Routine checks by type' })).getAllByRole('row').length).toBeGreaterThan(1);
+    expect(await screen.findByText(/routine-check records? (is|are) kept out of the client report/)).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Routine checks' })).toBeNull();
   });
 
   it('opens photos in an accessible viewer, steps through them and returns focus', async () => {

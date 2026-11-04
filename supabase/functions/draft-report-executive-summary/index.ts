@@ -80,6 +80,7 @@ async function handleDraft(req: Request) {
     agreementName: relationName(agreement),
     period: `${pack.period_start} to ${pack.period_end}`,
     periodStart: pack.period_start,
+    periodEnd: pack.period_end,
     triage: triageResult.data,
     trend: trendResult.data,
   });

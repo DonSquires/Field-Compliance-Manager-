@@ -44,6 +44,8 @@ test('Bob reads written, non-routine entries once each, never recorded incidents
 test('the prompt is judgement guided by cards and reviewer decisions, not a keyword list', async () => {
   const { TRIAGE_INSTRUCTIONS, INCIDENT_TYPES, triageSystemPrompt, triageBatchMessage } = await load();
   assert.match(TRIAGE_INSTRUCTIONS, /Do not match keywords/);
+  assert.match(TRIAGE_INSTRUCTIONS, /open or closed gate status alone does not establish forced access/);
+  assert.match(TRIAGE_INSTRUCTIONS, /card\/battery replacement alone does not establish tampering/);
   assert.match(TRIAGE_INSTRUCTIONS, /Never name or describe a person/);
   assert.ok(INCIDENT_TYPES.includes('trespass') && INCIDENT_TYPES.includes('other'));
   const prompt = triageSystemPrompt(

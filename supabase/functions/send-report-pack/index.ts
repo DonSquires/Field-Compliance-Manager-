@@ -17,7 +17,7 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
-import { activityEmailSummary, applyIncidentTriage, confirmedIncidentCount, executiveSummaryMarkup, summaryMarkup } from '../_shared/report-activity-sections.ts';
+import { activityEmailSummary, applyIncidentTriage, clientReportTitle, confirmedIncidentCount, executiveSummaryMarkup, summaryMarkup } from '../_shared/report-activity-sections.ts';
 import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
 import { privacyHoldReason } from '../_shared/report-privacy-oracle.mjs';
 import { fetchCappedBytes, reportEmailMimeContent, reportEmailSubject, reportLogoUrl, reportPdfFilename } from '../_shared/report-delivery.mjs';
@@ -29,7 +29,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v20';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v21';
 // Larger PDFs are sent as the signed download link only, keeping the message
 // under common mailbox size limits once base64-encoded.
 const MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -154,7 +154,7 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     const pct = expected > 0 ? Math.round(completed / expected * 100) : 0;
     return `<tr><td>${escapeHtml(facility.siteName)}</td><td align="right">${expected}</td><td align="right">${completed}</td><td align="right">${pct}%</td></tr>`;
   }).join('');
-  const activity = activityEmailSummary(d, { confirmedIncidents: pack.confirmed_incidents ?? 0 });
+  const activity = activityEmailSummary(d, { confirmedIncidents: pack.confirmed_incidents ?? 0, activityLines: pack.activity_lines });
   // The client activity report replaces the legacy patrol line; travel,
   // hours and operational detail are never part of the client email.
   const activityHtml = activity ? `<h3>Activity at your locations</h3>
@@ -172,7 +172,7 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     <p>${escapeHtml(slaCounts[0])} met · ${escapeHtml(slaCounts[1])} breached · ${escapeHtml(slaCounts[2])} in progress</p>`
     : '';
   return `
-    <h2>${escapeHtml(editorial.title || 'Monthly Report Pack')}</h2>
+    <h2>${escapeHtml(clientReportTitle(editorial.title || 'Monthly Report Pack', pack.period_start, pack.period_end))}</h2>
     <p>Period: ${escapeHtml(pack.period_start)} to ${escapeHtml(pack.period_end)}</p>
     ${editorialHtml(editorial)}
     ${activityHtml}
@@ -230,7 +230,8 @@ async function loadDeliveryContext(req: Request, packId: string) {
   if (emailPack.report_kind !== 'custom' && emailPack.service_agreement_id) {
     const { data: confirmed, error: triageError } = await readConfirmedIncidents(admin, emailPack);
     if (triageError) throw new RequestError(`Incident review could not be read: ${triageError}`, 500);
-    emailPack.confirmed_incidents = confirmedIncidentCount(applyIncidentTriage(emailPack.activity_lines, confirmed));
+    emailPack.activity_lines = objectValue(applyIncidentTriage(emailPack.activity_lines, confirmed));
+    emailPack.confirmed_incidents = confirmedIncidentCount(emailPack.activity_lines);
   }
   return { admin, callerId: caller.id, pack: emailPack };
 }
