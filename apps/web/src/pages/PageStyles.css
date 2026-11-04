@@ -200,6 +200,14 @@
 
 .report-packs-section { margin-top: 18px; }
 
+.report-preview-error {
+  max-width: 24rem;
+  margin: 8px 0 0;
+  color: var(--color-status-critical-text);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
 .reports-section h2 {
   margin: 0 0 8px 0;
   font-size: 18px;

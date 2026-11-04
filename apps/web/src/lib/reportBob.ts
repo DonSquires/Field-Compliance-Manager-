@@ -72,10 +72,33 @@ export interface PrivacyCheckResult {
   error: string | null;
 }
 
-const wordingOf = (value: unknown, fallback: ReviewWording): ReviewWording => {
-  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const pick = (field: keyof ReviewWording) => (typeof record[field] === 'string' ? record[field] as string : fallback[field]);
-  return { title: pick('title'), executive_summary: pick('executive_summary'), client_notes: pick('client_notes'), follow_up: pick('follow_up') };
+interface PrivacyCheckResponse {
+  ok: true;
+  checked: number;
+  reworded: number;
+  editorial_reworded: number;
+  remaining: number;
+  cleared: boolean;
+  updated_at: string;
+  editorial?: unknown;
+}
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+const isPrivacyCheckResponse = (value: unknown): value is PrivacyCheckResponse => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.ok === true && isCount(record.checked) && isCount(record.reworded)
+    && isCount(record.editorial_reworded) && isCount(record.remaining)
+    && record.cleared === (record.remaining === 0)
+    && typeof record.updated_at === 'string' && !Number.isNaN(Date.parse(record.updated_at));
+};
+
+const isReviewWording = (value: unknown): value is ReviewWording => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return ['title', 'executive_summary', 'client_notes', 'follow_up'].every((field) => typeof record[field] === 'string');
 };
 
 /**
@@ -92,26 +115,34 @@ export async function runPrivacyCheck(
   const check = async (editorial?: ReviewWording) => {
     // With a starting version, each pass expects the version left by the previous pass, so another administrator's save stops the check.
     const expected = result.updatedAt ? { expected_updated_at: result.updatedAt } : {};
-    const { data, error } = await supabase.functions.invoke('check-report-privacy', { body: { pack_id: packId, ...expected, ...(editorial ? { editorial } : {}) } });
+    const { data, error } = await supabase.functions.invoke<unknown>('check-report-privacy', { body: { pack_id: packId, ...expected, ...(editorial ? { editorial } : {}) } });
     if (error || !data) {
       result.error = await functionErrorMessage(error, 'Bob could not complete the privacy check.');
       return null;
     }
-    result.reworded += (Number(data.reworded) || 0) + (Number(data.editorial_reworded) || 0);
-    result.remaining = Number(data.remaining) || 0;
-    if (typeof data.updated_at === 'string') result.updatedAt = data.updated_at;
-    return data as { checked?: unknown; editorial?: unknown };
+    if (!isPrivacyCheckResponse(data)) {
+      result.error = 'Bob returned an invalid privacy-check result; the report was not cleared. Please try again.';
+      return null;
+    }
+    result.reworded += data.reworded + data.editorial_reworded;
+    result.remaining = data.remaining;
+    result.updatedAt = data.updated_at;
+    return data;
   };
   for (let pass = 0; pass < MAX_SCAN_PASSES; pass += 1) {
     const data = await check();
     if (!data) return result;
-    if (result.remaining === 0 || (Number(data.checked) || 0) <= 0) break;
+    if (result.remaining === 0 || data.checked <= 0) break;
   }
   if (result.remaining > 0) return result;
   if (options.editorial) {
     const data = await check(options.editorial);
     if (!data) return result;
-    result.editorial = wordingOf(data.editorial, options.editorial);
+    if (!isReviewWording(data.editorial)) {
+      result.error = 'Bob returned invalid checked wording; the report was not cleared. Please try again.';
+      return result;
+    }
+    result.editorial = data.editorial;
   }
   result.cleared = result.remaining === 0;
   return result;

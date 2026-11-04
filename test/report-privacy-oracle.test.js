@@ -102,7 +102,7 @@ test('the PDF and the email refuse wording the oracle has not cleared, and the w
 
   const hub = read('apps/web/src/pages/ReportsHubPage.tsx');
   assert.match(hub, /privacyCleared = privacy\.cleared;[\s\S]*if \(privacyCleared\) \{[\s\S]*runIncidentScan/, 'Bob reads the entries only after names are withheld');
-  const order = ['runPrivacyCheck(pack.id)', 'runIncidentScan(pack.id)', 'draftSummaryIfEmpty(pack.id)', 'const recheck = await runPrivacyCheck(pack.id)', "invoke('generate-report-pack-pdf'"].map((needle) => hub.indexOf(needle));
+  const order = ['runPrivacyCheck(pack.id)', 'runIncidentScan(pack.id)', 'draftSummaryIfEmpty(pack.id)', 'const recheck = await runPrivacyCheck(pack.id)', "'generate-report-pack-pdf'"].map((needle) => hub.indexOf(needle));
   assert.ok(order.every((index) => index > 0), 'every step is present');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'privacy check, incident scan, summary draft, privacy check, render');
 
@@ -110,6 +110,21 @@ test('the PDF and the email refuse wording the oracle has not cleared, and the w
   assert.match(panel, /if \(action === 'publish' && pack\.report_kind === 'monthly'\) \{\s*const privacy = await runPrivacyCheck\(pack\.id, \{ editorial: wording, expectedUpdatedAt: pack\.updated_at \}\);/);
   assert.match(panel, /p_executive_summary: wording\.executive_summary/);
   assert.match(panel, /p_expected_updated_at: expectedUpdatedAt/);
+});
+
+test('summary drafting and incident scanning enforce the privacy hold before constructing a model prompt', () => {
+  for (const [file, nextStep] of [
+    ['supabase/functions/draft-report-executive-summary/index.ts', 'executiveSummaryBrief(pack.data'],
+    ['supabase/functions/flag-report-potential-incidents/index.ts', 'triageCandidates(pack.data'],
+  ]) {
+    const source = read(file);
+    assert.match(source, /import \{ privacyHoldReason \} from '..\/_shared\/report-privacy-oracle.mjs';/, file);
+    assert.match(source, /const privacyHold = privacyHoldReason\(pack\);\s*if \(privacyHold\) throw new RequestError\(`\$\{privacyHold\}.*`, 409\);/, file);
+    assert.ok(source.indexOf('const privacyHold = privacyHoldReason(pack)') < source.indexOf(nextStep), `${file} checks before reading report wording`);
+    assert.match(source, /Generate preview to run the privacy check/, 'the reviewer is given an actionable next step');
+  }
+  const triage = read('supabase/functions/flag-report-potential-incidents/index.ts');
+  assert.match(triage, /status,report_kind,data,activity_lines,editorial'\)/, 'the hold checks the saved editorial as well as the activity');
 });
 
 test("the reviewer's privacy check keeps stale-edit protection and records the exact wording it cleared", () => {

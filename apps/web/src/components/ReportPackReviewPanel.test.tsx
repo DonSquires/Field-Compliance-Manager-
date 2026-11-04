@@ -67,6 +67,18 @@ describe('ReportPackReviewPanel executive summary drafting', () => {
     expect(summaryBox().value).toBe('Saved words.');
     confirm.mockRestore();
   });
+
+  it('shows the privacy hold and how to continue when Bob cannot draft yet', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: { context: new Response(JSON.stringify({ error: "Run Bob's privacy check first: 1 entry has not been checked. Generate preview to run the privacy check." }), { status: 409 }) },
+    });
+    render(<ReportPackReviewPanel pack={pack()} onClose={vi.fn()} onSaved={vi.fn()} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/1 entry has not been checked/);
+    expect(alert.textContent).toMatch(/Generate preview to run the privacy check/);
+    expect(summaryBox().value).toBe('');
+  });
 });
 
 describe('ReportPackReviewPanel background refresh', () => {

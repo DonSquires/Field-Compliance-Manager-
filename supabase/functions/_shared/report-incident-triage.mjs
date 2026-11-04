@@ -6,7 +6,8 @@
 // set_report_incident_triage. Only the frozen, client-facing line text (already
 // redacted of identified persons) is sent to the model.
 
-import { INCIDENT_TYPE_LABELS, NO_PLACE_LABEL, activityLineKey, isRoutineLine, labeller, readActivityLines, readActivityReport } from './report-activity-sections.mjs';
+import { ACTIVITY_REPORT_VERSION, INCIDENT_TYPE_LABELS, NO_PLACE_LABEL, activityLineKey, isRoutineLine, labeller, readActivityLines, readActivityReport } from './report-activity-sections.mjs';
+import { PRIVACY_VERSION } from './report-privacy-oracle.mjs';
 
 export const TRIAGE_BATCH_SIZE = 60;
 export const TRIAGE_EXAMPLE_LIMIT = 30;
@@ -64,6 +65,25 @@ export function triageCandidates(data, activityLines) {
     });
   }
   return candidates;
+}
+
+/**
+ * Use the checked wording in this report, never a stored historical excerpt
+ * whose privacy-check provenance cannot be established.
+ * @param {unknown} data
+ * @param {unknown} activityLines
+ * @param {Array<{ line_key?: unknown, decision?: unknown, incident_type?: unknown, decided_at?: unknown }>} decisions
+ */
+export function checkedTriageExamples(data, activityLines, decisions) {
+  const checkedLines = readActivityLines(activityLines).lines.filter((line) => line.pv === PRIVACY_VERSION);
+  const candidates = triageCandidates(data, { version: ACTIVITY_REPORT_VERSION, lines: checkedLines });
+  const byKey = new Map(candidates.map((candidate) => [candidate.key, candidate.excerpt]));
+  return (Array.isArray(decisions) ? decisions : [])
+    .filter((row) => typeof row?.line_key === 'string' && byKey.has(row.line_key)
+      && (row.decision === 'incident' || row.decision === 'not_incident'))
+    .sort((left, right) => (Date.parse(text(right.decided_at)) || 0) - (Date.parse(text(left.decided_at)) || 0))
+    .slice(0, TRIAGE_EXAMPLE_LIMIT)
+    .map((row) => ({ excerpt: byKey.get(row.line_key), decision: row.decision, incident_type: row.incident_type }));
 }
 
 export const TRIAGE_INSTRUCTIONS = [

@@ -3,7 +3,7 @@ import { FileCheck2, ShieldCheck, Sparkles } from 'lucide-react';
 import { CustomReportSnapshot } from './CustomReportSnapshot';
 import { ReportActivityReview } from './ReportActivityReview';
 import { readActivityReport } from '../lib/reportActivity';
-import { runPrivacyCheck } from '../lib/reportBob';
+import { functionErrorMessage, runPrivacyCheck } from '../lib/reportBob';
 import { supabase } from '../lib/supabase';
 import './ReportPackReviewPanel.css';
 
@@ -178,8 +178,10 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
     setDrafting(false);
     const summary = typeof data?.summary === 'string' ? data.summary : '';
     if (draftFailure || !summary) {
+      const detail = draftFailure ? await functionErrorMessage(draftFailure, 'The drafting service did not complete the request.') : '';
+      if (currentPackId.current !== packId) return;
       setDraftStatus(null);
-      setDraftError(`Bob could not draft the summary${draftFailure?.message ? ` (${draftFailure.message})` : ''}. Write it yourself or try again.`);
+      setDraftError(`Bob could not draft the summary${detail ? ` (${detail})` : ''}. Write it yourself or try again.`);
       return;
     }
     if (mode === 'auto' && summaryText.current.trim()) {

@@ -8,6 +8,26 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Report privacy preview recovery, 2026-11-04 (local acceptance):
+
+- **Before:** the privacy oracle could read a report but its service-role save
+  failed because the report-pack update trigger could not execute the
+  custodian helper. The preview error was displayed away from the action.
+- **During:** the migration adds only service-role execution of the helper;
+  authenticated access is unchanged. Anonymous access, custodian checks,
+  sent-report immutability, delivery guards and version checks remain in
+  force. Incomplete or malformed privacy responses cannot clear a report,
+  and preview errors appear beside the affected action. Rendering waits for
+  the required privacy checks; successful preview requires a PDF receipt.
+  Summary drafting and incident scanning also require server-side clearance.
+  Bob's worked incident examples use checked wording from the current report;
+  historical excerpts without verifiable clearance are not sent to a model.
+- **After and verification:** disposable PostgreSQL reproduced the original
+  permission failure and verified the save and existing guards after the
+  grant. Focused web unit, type, build and desktop/mobile fixture tests passed.
+  A deployed migration and a human-operated live preview remain separate
+  evidence gates; fixture tests do not establish production success.
+
 Website hub, news publishing and Expo preparation, 2026-11-02 (local acceptance):
 
 - **Before:** statistics already had a route, summary RPC and hub card, but the

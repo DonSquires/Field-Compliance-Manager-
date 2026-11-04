@@ -63,6 +63,25 @@ test('the prompt is judgement guided by cards and reviewer decisions, not a keyw
   assert.match(triageBatchMessage([{ prompt: { date: '2026-10-02' } }]), /\[\{"i":0,"date":"2026-10-02"\}\]/);
 });
 
+test('review examples use only oracle-checked wording from this report, not stored excerpts', async () => {
+  const { checkedTriageExamples, triageSystemPrompt } = await load();
+  const { activityLineKey } = await import('../supabase/functions/_shared/report-activity-sections.mjs');
+  const { PRIVACY_VERSION } = await import('../supabase/functions/_shared/report-privacy-oracle.mjs');
+  const original = { d: '2026-10-02', p: 'Smiths', k: 'event', c: 'maintenance', n: 'Alice Example bypassed the gate.' };
+  const unchecked = { d: '2026-10-03', p: 'Smiths', k: 'event', c: 'maintenance', n: 'Another Person forced a lock.' };
+  const checked = { ...original, n: '[name withheld] bypassed the gate.', pv: PRIVACY_VERSION, lk: activityLineKey(original) };
+  const decisions = [
+    { line_key: activityLineKey(original), decision: 'incident', incident_type: 'trespass', decided_at: '2026-10-05T00:00:00Z', excerpt: original.n },
+    { line_key: activityLineKey(unchecked), decision: 'incident', incident_type: 'trespass', decided_at: '2026-10-06T00:00:00Z', excerpt: unchecked.n },
+    { line_key: 'v1:00000000000000', decision: 'not_incident', excerpt: 'A historical unchecked example.' },
+  ];
+  const examples = checkedTriageExamples({ activityReport: report }, { version: 2, lines: [checked, unchecked] }, decisions);
+  assert.deepEqual(examples, [{ excerpt: '[name withheld] bypassed the gate.', decision: 'incident', incident_type: 'trespass' }]);
+  const prompt = triageSystemPrompt([], examples);
+  assert.match(prompt, /\[name withheld\] bypassed the gate/);
+  assert.doesNotMatch(prompt, /Alice Example|Another Person|historical unchecked/);
+});
+
 test('flags are validated: entry numbers in range, allowed types, clamped confidence', async () => {
   const { parseTriageFlags } = await load();
   const flags = parseTriageFlags('<think>hmm {"flags":[]}</think>Here: {"flags":[{"i":0,"type":"Trespass","reason":"Barrier bypassed.","confidence":1.7},{"i":"1","type":"made_up","reason":"Odd.","confidence":"high"},{"i":5,"type":"theft"},{"i":-1}]}', 2);
@@ -99,7 +118,8 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.match(edge, /triageSystemPrompt/);
   assert.doesNotMatch(edge, /decision:\s*'incident'/, 'Bob never records a decision');
   assert.doesNotMatch(edge, /decision_note/, 'reviewer notes are not read for prompts');
-  assert.match(edge, /select\('excerpt,decision,incident_type'\)\s*\.eq\('service_agreement_id', pack\.service_agreement_id\)/, 'worked examples are scoped to this agreement');
+  assert.match(edge, /checkedTriageExamples\(pack\.data, pack\.activity_lines, existingResult\.data\)/, 'worked examples use the checked report snapshot');
+  assert.doesNotMatch(edge, /select\('excerpt,decision,incident_type'\)/, 'unverified historical excerpts are not read for prompts');
   assert.match(edge, /readPackTriage/, 'triage reads page past the 1,000-row cap');
   assert.match(sql, /set pdf_source_updated_at = null/, 'a changed decision makes generated PDFs stale');
   const reclassify = read('supabase/migrations/20261105120000_report_triage_reclassify_after_send.sql');
@@ -118,5 +138,7 @@ test('triage storage is server-only and decisions are custodian-gated, audited a
   assert.match(view, /rpc\('set_report_incident_triage'/);
   assert.match(view, /rpc\('list_report_incident_triage'/);
   const hub = read('apps/web/src/pages/ReportsHubPage.tsx');
-  assert.match(hub, /await runIncidentScan\(pack\.id\)[\s\S]*functions\.invoke\('generate-report-pack-pdf'/, 'Generate preview has Bob check for potential incidents before rendering');
+  const scan = hub.indexOf('await runIncidentScan(pack.id)');
+  const render = hub.indexOf("'generate-report-pack-pdf'");
+  assert.ok(scan >= 0 && render > scan, 'Generate preview has Bob check for potential incidents before rendering');
 });
