@@ -52,7 +52,7 @@ test('preview shows privacy failures beside the report and retries safely', asyn
       period_start: '2026-08-01', period_end: '2026-08-30', status: 'draft', data: {}, editorial: {},
       generated_at: '2026-08-30T09:30:00.000Z', updated_at: '2026-08-30T09:30:00.000Z',
       reviewed_at: null, published_at: null, delivery_channel: null, sent_at: null,
-      pdf_path: 'org/fixture/report.pdf', pdf_sha256: 'fixture', pdf_renderer_version: 'fcm-report-pack-pdf-lib-a4-v20',
+      pdf_path: 'org/fixture/report.pdf', pdf_sha256: 'fixture', pdf_renderer_version: 'fcm-report-pack-pdf-lib-a4-v21',
       pdf_source_updated_at: '2026-08-30T09:30:00.000Z', agreement: [{ name: 'Civic Events Compliance Services' }],
     }]) });
   });
@@ -364,7 +364,7 @@ test('administrator previews the client site activity report with incidents, pho
   await expect(incident.locator('img')).toHaveCount(2);
   await expect.poll(() => incident.locator('img').evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
   expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
-  expect(signedBatches).toEqual([['e2e/incidents/graffiti-1.jpg', 'e2e/incidents/graffiti-2.jpg']]);
+  expect(signedBatches).toEqual([['e2e/incidents/graffiti-1.jpg', 'e2e/incidents/graffiti-2.jpg', 'e2e/observations/verge.jpg']]);
   await page.mouse.move(0, 0);
   await expect(glance).toHaveScreenshot('report-site-activity-glance.png');
   await expect(incidents).toHaveScreenshot('report-site-activity-incidents.png');
@@ -385,10 +385,10 @@ test('administrator previews the client site activity report with incidents, pho
 
   await report.locator('summary', { hasText: /^Site log/ }).click();
   const log = report.locator('details', { has: page.locator('summary', { hasText: /^Site log/ }) });
-  await expect(log.getByRole('status')).toHaveText('5 entries with comments, work or photos');
+  await expect(log.getByRole('status')).toHaveText('4 entries with comments, work or photos');
   await expect(log.getByRole('heading', { name: 'Civic Events Centre' })).toBeVisible();
   await expect(log.getByText(/routine patrol/)).toHaveCount(0);
-  await expect(report.getByRole('region', { name: 'Routine checks by type' })).toBeVisible();
+  await expect(report.getByRole('region', { name: 'Routine checks by type' })).toHaveCount(0);
   await expect(log.getByText('Ref WO-0042')).toBeVisible();
   await expect(log.getByText('Ammunition .223 × 12')).toBeVisible();
   await expect(log.getByText('Vandalism')).toHaveCount(0);
@@ -397,8 +397,8 @@ test('administrator previews the client site activity report with incidents, pho
   await expect(log.getByText('Hinge replaced and the gate tested.')).toBeVisible();
   await log.getByRole('button', { name: 'Clear filters' }).click();
   await log.getByRole('checkbox', { name: 'With photos only' }).check();
-  await expect(log.getByRole('status')).toHaveText('2 entries match these filters');
-  await expect(log.locator('img')).toHaveCount(2);
+  await expect(log.getByRole('status')).toHaveText('1 entry matches these filters');
+  await expect(log.locator('img')).toHaveCount(1);
   await log.getByRole('button', { name: 'Clear filters' }).click();
   expect(lineReads.filter((select) => select === 'activity_lines,updated_at')).toHaveLength(1);
   await testInfo.attach('report-site-activity-preview', { body: await page.screenshot(), contentType: 'image/png' });

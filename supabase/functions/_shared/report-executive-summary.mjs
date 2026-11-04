@@ -1,5 +1,5 @@
-// Bob's draft of the exception-based executive summary that opens a monthly
-// client report. The brief is built only from the frozen, client-facing pack
+// Bob's draft of the exception-based executive summary that opens a client
+// report. The brief is built only from the frozen, client-facing pack
 // (monthly_report_packs.data.activityReport and .activity_lines), which has
 // already had identified persons redacted and withholds travel, administration,
 // staff and system detail, plus the reviewer's incident triage and the figures
@@ -8,7 +8,7 @@
 // fills the reviewer's Executive summary box and reaches the client only once
 // a provider administrator saves or publishes the review.
 
-import { NO_PLACE_LABEL, activityLineKey, incidentTypeLabel, isRoutineLine, labeller, readActivityLines, readActivityReport } from './report-activity-sections.mjs';
+import { NO_PLACE_LABEL, activityLineKey, applyIncidentTriage, clientActivitySnapshot, incidentTypeLabel, isInternalWorkLine, isRoutineCheck, labeller, readActivityLines } from './report-activity-sections.mjs';
 
 export const EXECUTIVE_SUMMARY_MAX_CHARS = 4000;
 export const BRIEF_ENTRY_LIMIT = 150;
@@ -67,7 +67,7 @@ function activityFigures(report) {
   const totals = obj(report.totals) ?? {};
   return {
     entriesRecorded: num(totals.entries),
-    incidentsRecorded: num(obj(report.incidents)?.total),
+    incidentsRecorded: num(obj(report.totals)?.incidents ?? obj(report.incidents)?.total),
     observations: num(obj(report.observations)?.total),
     cctvActivations: num(totals.cameraActivations),
   };
@@ -104,14 +104,15 @@ function weekOf(date) {
 /**
  * The facts Bob may use: the written entries most likely to matter to the
  * client (with the reviewer's incident decisions and Bob's open flags), pest
- * figures, the month by week and the two months before. Returns null for packs
+ * figures and the selected period by month (by week for a single month).
+ * Previous months are context only for single-month reports. Returns null for packs
  * with no client activity report.
  * @param {unknown} data
  * @param {unknown} activityLines
- * @param {{ clientName?: string, agreementName?: string, period?: string, periodStart?: string, triage?: TriageRow[], trend?: unknown }} [context]
+ * @param {{ clientName?: string, agreementName?: string, period?: string, periodStart?: string, periodEnd?: string, triage?: TriageRow[], trend?: unknown }} [context]
  */
 export function executiveSummaryBrief(data, activityLines, context = {}) {
-  const report = readActivityReport(data);
+  const report = clientActivitySnapshot(data, applyIncidentTriage(activityLines, context.triage ?? [])).report;
   if (!report) return null;
   const label = labeller(report);
   const { lines, notItemised } = readActivityLines(activityLines);
@@ -122,7 +123,9 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
 
   const assessed = lines.map((line, index) => ({ line, index, triage: triageByKey.get(activityLineKey(line)) }));
   const written = assessed
-    .filter(({ line }) => text(line.k) === 'incident' || (!isRoutineLine(line) && (text(line.n) || text(line.ac) || text(line.ti))));
+    .filter(({ line, triage }) => text(line.k) === 'incident' || triage?.decision === 'incident'
+      || (triage?.bob_flagged === true && triage.decision !== 'not_incident')
+      || (!isInternalWorkLine(line) && !isRoutineCheck(line) && (text(line.n) || text(line.ac) || text(line.ti))));
   const chosen = [...written]
     .sort((left, right) => briefRank(left.line, left.triage) - briefRank(right.line, right.triage) || left.index - right.index)
     .slice(0, BRIEF_ENTRY_LIMIT)
@@ -146,19 +149,37 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
       }).filter(([, value]) => value));
     });
 
+  const periodStart = text(context.periodStart);
+  const periodEnd = text(context.periodEnd) || text(context.period).split(' to ')[1] || periodStart;
+  const firstMonth = periodStart.slice(0, 7);
+  const lastMonth = periodEnd.slice(0, 7);
+  const multipleMonths = firstMonth !== lastMonth;
+  const endDate = new Date(`${periodEnd}T00:00:00Z`);
+  const lastDay = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, 0)).getUTCDate();
+  const fullMonth = !multipleMonths && periodStart.endsWith('-01') && Number(periodEnd.slice(8, 10)) === lastDay;
+  const monthly = new Map();
+  for (let month = firstMonth; /^\d{4}-\d{2}$/.test(month) && month <= lastMonth;) {
+    monthly.set(month, { month: reportMonthLabel(month), entries: 0, incidents: 0, potentialIncidents: 0, observations: 0 });
+    const [year, number] = month.split('-').map(Number);
+    month = number === 12 ? `${year + 1}-01` : `${year}-${String(number + 1).padStart(2, '0')}`;
+  }
   const weeks = ['Days 1-7', 'Days 8-14', 'Days 15-21', 'Day 22 to month end'].map((week) => ({ week, entries: 0, incidents: 0, potentialIncidents: 0, observations: 0 }));
   for (const { line, triage } of assessed) {
-    const bucket = weeks[weekOf(text(line.d))];
-    if (!bucket) continue;
-    bucket.entries += 1;
-    if (text(line.k) === 'incident' || triage?.decision === 'incident') bucket.incidents += 1;
-    else if (triage?.bob_flagged === true && triage.decision !== 'not_incident') bucket.potentialIncidents += 1;
-    if (text(line.k) === 'observation') bucket.observations += 1;
+    const date = text(line.d);
+    if (date < periodStart || date > periodEnd) continue;
+    const buckets = [monthly.get(date.slice(0, 7)), ...(!multipleMonths ? [weeks[weekOf(date)]] : [])];
+    for (const bucket of buckets) {
+      if (!bucket) continue;
+      bucket.entries += 1;
+      if (text(line.k) === 'incident' || triage?.decision === 'incident') bucket.incidents += 1;
+      else if (triage?.bob_flagged === true && triage.decision !== 'not_incident') bucket.potentialIncidents += 1;
+      if (text(line.k) === 'observation') bucket.observations += 1;
+    }
   }
 
   const confirmed = new Map();
-  for (const { triage } of assessed) {
-    if (triage?.decision !== 'incident') continue;
+  for (const { line, triage } of assessed) {
+    if (text(line.k) === 'incident' || triage?.decision !== 'incident') continue;
     const type = incidentTypeLabel(triage.incident_type);
     confirmed.set(type, (confirmed.get(type) ?? 0) + 1);
   }
@@ -167,14 +188,21 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
     client: text(context.clientName),
     agreement: text(context.agreementName),
     period: text(context.period),
-    month: reportMonthLabel(context.periodStart),
-    thisMonth: {
+    periodStart,
+    periodEnd,
+    periodLabel: fullMonth ? reportMonthLabel(periodStart) : `${periodStart} to ${periodEnd}`,
+    thisPeriod: {
       ...activityFigures(report),
+      incidentsIncludingConfirmed: activityFigures(report).incidentsRecorded + [...confirmed.values()].reduce((sum, count) => sum + count, 0),
       confirmedIncidentsByType: [...confirmed.entries()].map(([type, count]) => ({ type, count })),
       ...pestFigures(report, label),
-      byWeek: weeks,
+      byMonth: [...monthly.values()],
+      ...(!multipleMonths ? { byWeek: weeks } : {}),
     },
-    previousMonths: priorMonthFigures(context.trend),
+    previousMonths: multipleMonths ? [] : priorMonthFigures(context.trend),
+    comparisonBasis: multipleMonths
+      ? 'No equivalent prior-period figures are supplied. Describe trends within the selected period, not against individual prior months.'
+      : 'Previous two calendar months are context only. For a partial month, counts are not equivalent exposure periods; do not claim a rate change.',
     entries: chosen,
     entriesNotIncluded: Math.max(written.length - chosen.length, 0),
     entriesNotItemised: notItemised,
@@ -182,17 +210,17 @@ export function executiveSummaryBrief(data, activityLines, context = {}) {
 }
 
 export const EXECUTIVE_SUMMARY_INSTRUCTIONS = [
-  'You are an expert corporate security analyst writing the executive summary of a monthly security accountability report for a corporate client. Read the brief and write what the client\'s leadership needs to know: what significant happened, and which way things are trending.',
+  'You are an expert corporate security analyst writing the executive summary of a security accountability report for a corporate client. Read the brief and write what the client\'s leadership needs to know across the ENTIRE selected reporting period: what significant happened, and which way things are trending.',
   '',
   'Output exactly this, and nothing else:',
-  '**Executive Summary: <month and year from the brief>**',
+  '**Executive Summary: <periodLabel from the brief>**',
   '',
   '<paragraph 1>',
   '',
   '<paragraph 2>',
   '',
   'Paragraph 1, significant occurrences (3 to 5 sentences): synthesise the most serious matters of the period into a judgement about risk, grouping related entries rather than retelling them one by one. Cover, where the brief supports it: targeted commercial theft (fuel, machinery, tools, with locations and vehicle descriptions or registrations); perimeter compromise and trespass (gates bypassed, locks forced, roadblocks moved, unauthorised access); lock and hardware failures (electronic locks, batteries, hardware cut or replaced); and surveillance tampering or blind spots (cameras or SD cards interfered with, coverage gaps). Say what each matter means for the client\'s assets or exposure. If nothing serious was recorded, say so in one sentence.',
-  'Paragraph 2, trends (3 to 5 sentences): how incidents and potential incidents were spread across the month (thisMonth.byWeek) and whether they concentrated by location or type; how this period compares with the previous two months (previousMonths) for incidents and incident types; and pest control: the most common species culled or reported, any marked rise or fall by species against the previous two months, keeping contractor culls separate from hunter-reported animals. Where a previous month has no comparable data, say that once rather than guessing.',
+  'Paragraph 2, trends (3 to 5 sentences): describe the spread of incidents and potential incidents across thisPeriod.byMonth and concentrations by location or type. For multi-month reports compare months WITHIN the selected period, never describe the whole period as its first month or merge days from different months into weeks. Use thisPeriod.byWeek only for single-month reports. Follow comparisonBasis: previous two months (previousMonths) are context for single-month reports only, not a baseline for a multi-month total. Where supported, discuss pest control and any species trends, keeping contractor culls separate from hunter-reported animals. If monthly species figures or equivalent comparisons are absent, do not invent a rise or fall.',
   '',
   'Style rules:',
   '- Write a summary, not a copy. Never quote, paste or closely paraphrase log entries, and never list entries one after another. Each sentence must combine or interpret facts.',
@@ -203,7 +231,9 @@ export const EXECUTIVE_SUMMARY_INSTRUCTIONS = [
   '',
   'Rules for the facts:',
   '- Use only facts in the brief. Never invent, round or total figures that are not given.',
-  '- If entriesNotItemised is above zero, the weekly spread covers the itemised entries only; say so briefly and do not describe it as complete.',
+  '- If entriesNotItemised is above zero, monthly or weekly distributions cover itemised entries only; say so briefly. A zero bucket means no itemised records, not proof of no activity. entriesNotIncluded means some itemised detail was omitted from the narrative brief, not from its distribution.',
+  '- thisPeriod.incidentsIncludingConfirmed is the incident total used by the report. Never substitute a count of the selected narrative entries or potential flags for that total. Confirmed and potential incidents are separate.',
+  '- Routine gate statuses (including open or closed), camera servicing, battery/card swaps and camera installation/removal are in-house work, not client events. Never infer forced locks, bypass, trespass or compromise from a status alone. Only describe a security failure when the actual evidence or reviewer confirmation supports it.',
   '- Entries with review "Confirmed incident on review" are incidents. Entries with review "Cleared on review: not an incident" must not be reported as incidents or breaches. Entries marked "not yet reviewed" are potential incidents: mention them only if the entry clearly describes a serious matter, and never call them confirmed.',
   '- Privacy: never name, initial or otherwise identify a private individual (suspect, offender, member of the public, landowner, hunter, contractor or staff member), and never give phone numbers, emails or home addresses. Write "a person", "an identified person" or "a suspect" instead. Text shown as "[name withheld]" or "[details withheld]" must not be reconstructed. Vehicle descriptions and registrations may be given. Place and block names (many are family names, such as Smiths) are places, not people.',
 ].join('\n');
@@ -278,9 +308,12 @@ export function summaryParagraphs(summary) {
  */
 export function finaliseExecutiveSummary(summary, brief) {
   let result = summary;
-  if (!/^\*\*Executive Summary\b/i.test(result)) {
-    const month = text(obj(brief)?.month);
-    result = `**Executive Summary${month ? `: ${month}` : ''}**\n\n${result}`;
+  const period = text(obj(brief)?.periodLabel) || text(obj(brief)?.month);
+  if (period) {
+    result = result.replace(/^\*\*Executive Summary[^\n]*\*\*\s*/i, '');
+    result = `**Executive Summary: ${period}**\n\n${result}`;
+  } else if (!/^\*\*Executive Summary\b/i.test(result)) {
+    result = `**Executive Summary**\n\n${result}`;
   }
   if (result.length > EXECUTIVE_SUMMARY_MAX_CHARS) result = cleanExecutiveSummary(result);
   return result;

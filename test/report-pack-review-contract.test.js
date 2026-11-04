@@ -38,7 +38,9 @@ test('email delivery requires reviewed publication and refuses portal-delivered 
 });
 
 test('PDF previews include editorial content and cannot overwrite an issued artifact', () => {
-  assert.match(pdf, /pack\.editorial \?\? \{\}/);
+  assert.match(pdf, /\.\.\.pack\.editorial/);
+  assert.match(pdf, /clientReportTitle\(pack\.editorial\.title, pack\.period_start, pack\.period_end\)/);
+  assert.match(pdf, /templateTitle: pack\.report_kind === 'custom' \? templateTitle : clientReportTitle\(templateTitle, pack\.period_start, pack\.period_end\)/);
   assert.match(pdf, /Executive summary/);
   assert.match(pdf, /Source-derived metrics/);
   assert.match(pdf, /report-packs\/\$\{pack\.id\}\/\$\{checksum\}\.pdf/);
@@ -58,7 +60,7 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdfTextFonts, /widthOfTextAtSize\(character, 1\)/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /return expected !== 0 \|\| completed !== 0/);
-  assert.match(send, /fcm-report-pack-pdf-lib-a4-v20/);
+  assert.match(send, /fcm-report-pack-pdf-lib-a4-v21/);
 });
 
 test('monthly client email summaries exclude provider-wide incident and alert totals', () => {

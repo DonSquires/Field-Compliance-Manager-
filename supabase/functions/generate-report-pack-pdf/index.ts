@@ -7,7 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage } from 'https://esm.sh/pdf-lib@1.17.1';
 import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
 import { pdfFontTextWidth, pdfTextFontRuns, pdfTextWidth, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
-import { applyIncidentTriage, monthlyActivityBlocks, notableEventBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
+import { applyIncidentTriage, clientReportTitle, monthlyActivityBlocks, notableEventBlocks, type ReportBlock, type ReportPhotoRef } from '../_shared/report-activity-sections.ts';
 import { loadReportPhotos, reportPhotoKey } from '../_shared/report-photos.ts';
 import { loadReportLogo } from '../_shared/report-delivery.mjs';
 import { readConfirmedIncidents } from '../_shared/report-incident-triage-store.ts';
@@ -16,7 +16,7 @@ import { privacyHoldReason } from '../_shared/report-privacy-oracle.mjs';
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v20';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v21';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -710,14 +710,19 @@ async function handlePdfGeneration(req: Request) {
     ? pack.activity_lines
     : applyIncidentTriage(pack.activity_lines, await loadConfirmedIncidents(admin, pack));
   const bytes = await renderPdf({
-    templateTitle,
+    templateTitle: pack.report_kind === 'custom' ? templateTitle : clientReportTitle(templateTitle, pack.period_start, pack.period_end),
     agreementName: reportAgreementName(pack),
     providerName: relationName(pack.provider),
     clientName: reportClientName(pack),
     period: reportPeriodLabel(pack.period_start, pack.period_end),
     packId: pack.id,
     snapshotGeneratedAt: pack.generated_at,
-    editorial: pack.editorial ?? {},
+    editorial: {
+      ...pack.editorial,
+      title: pack.report_kind !== 'custom' && typeof pack.editorial?.title === 'string' && pack.editorial.title.trim()
+        ? clientReportTitle(pack.editorial.title, pack.period_start, pack.period_end)
+        : pack.editorial?.title,
+    },
     data: pack.data ?? {},
     activityLines: (activityLines ?? null) as Record<string, unknown> | null,
     reportKind: pack.report_kind ?? 'monthly',

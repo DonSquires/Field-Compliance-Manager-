@@ -20,6 +20,8 @@ import {
   textParagraphs,
   activityLineKey,
   applyIncidentTriage,
+  clientActivityReport,
+  isInternalWorkLine,
   isIncidentLine,
   isReportedLine,
   type ActivityLine,
@@ -182,6 +184,39 @@ describe('siteLogGroups', () => {
 });
 
 describe('parity with the client PDF renderer', () => {
+  it('projects identical client figures and exclusions without removing original incident-review records', async () => {
+    const sections = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(readFileSync(SECTIONS_PATH)).toString('base64')}`) as {
+      clientActivitySnapshot: (data: unknown, lines: unknown) => { report: unknown; lines: unknown[] };
+      isInternalWorkLine: (line: unknown) => boolean;
+    };
+    const raw = [
+      { d: '2026-10-01', p: 'A', k: 'event', c: 'maintenance', s: 'camera', n: 'Replace battery.', ph: 1 },
+      { d: '2026-10-02', p: 'A', k: 'event', c: 'installation_removal', s: 'camera', n: 'Remove Tapo.' },
+      { d: '2026-10-03', p: 'A', k: 'event', c: 'inspection', s: 'gate', n: 'Open', ph: 1 },
+      { d: '2026-10-04', p: 'A', k: 'event', c: 'maintenance', s: 'camera', ti: 'Card review', n: 'Vehicle seen.', ph: 1 },
+      { d: '2026-10-05', p: 'A', k: 'event', c: 'maintenance', s: 'camera', n: 'Lens damaged.', tri: 'surveillance_tampering' },
+      { d: '2026-10-06', p: 'A', k: 'event', c: 'maintenance', s: 'gate', n: 'Gate hinge repaired.' },
+    ];
+    const input = { version: 2, lines: raw };
+    const source = readActivityLines(input)!.lines;
+    const parsed = applyIncidentTriage(source, new Map([[source[4].key, {
+      lineKey: source[4].key, decision: 'incident', incidentType: 'surveillance_tampering',
+      bobFlagged: false, bobType: '', bobReason: '', bobConfidence: null,
+      note: '', decidedAt: '', inSentReport: false,
+    }]]));
+    expect(parsed).toHaveLength(6);
+    expect(parsed.map(isInternalWorkLine)).toEqual([true, true, true, false, false, false]);
+    expect(parsed.map(isInternalWorkLine)).toEqual(raw.map(sections.isInternalWorkLine));
+    const client = clientActivityReport(report, parsed);
+    const pdf = sections.clientActivitySnapshot({ activityReport: activityReportFixture }, input);
+    expect(client).toEqual(readActivityReport({ activityReport: pdf.report }));
+    expect(pdf.lines).toHaveLength(3);
+    expect(client.totals.entries).toBe(report.totals.entries - 3);
+    expect(client.totals.photos).toBe(report.totals.photos - 2);
+    expect(report.totals.entries).toBe(9);
+    expect(siteLogGroups(parsed).flatMap((group) => group.lines)).toHaveLength(1);
+  });
+
   it('produces the same entries, locations and routine checks as report-activity-sections.mjs', async () => {
     const sections = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(readFileSync(SECTIONS_PATH)).toString('base64')}`) as {
       siteLogBlocks: (data: unknown, lines: unknown) => PdfBlock[];
@@ -203,11 +238,11 @@ describe('parity with the client PDF renderer', () => {
     expect(logBlocks.filter((block): block is { kind: 'subsection'; title: string; detail?: string } => block.kind === 'subsection'))
       .toEqual(groups.map((group) => ({ kind: 'subsection', title: group.place, detail: countedText(group.lines.length, 'entry', 'entries') })));
     expect(logBlocks.some((block) => block.kind === 'text' && 'text' in block && /routine patrol/.test(block.text))).toBe(false);
-    // The client PDF is compact: routine checks are one counted line, while the staff preview keeps the table.
+    // Both client views omit routine statuses; the source remains available to incident review.
     const routineChecks = routineCheckRows(report, lines).reduce((total, row) => total + row.checks, 0);
     expect(routineChecks).toBeGreaterThan(0);
     expect((sections.monthlyActivityBlocks(data, activityLinesFixture) ?? [])
-      .some((block) => block.kind === 'text' && 'text' in block && block.text.startsWith(`${routineChecks} routine patrol`))).toBe(true);
+      .some((block) => block.kind === 'text' && 'text' in block && block.text.startsWith(`${routineChecks} routine patrol`))).toBe(false);
 
     const incidentBlocks = (sections.monthlyActivityBlocks(data, activityLinesFixture) ?? []).filter(isEntry);
     const withPlace = (entry: ActivityLine) => {

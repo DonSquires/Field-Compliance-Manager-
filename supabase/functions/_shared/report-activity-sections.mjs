@@ -556,6 +556,84 @@ export function isRoutineCheck(line) {
   return !status || (status.length <= 40 && statusWords(status) <= ROUTINE_STATUS_WORDS);
 }
 
+const INTERNAL_CAMERA_WORK = new Set(['maintenance', 'installation_removal']);
+
+/**
+ * Disclosure is separate from incident detection: Bob and the provider still
+ * review the original lines, and a confirmed incident always survives.
+ * @param {Record<string, unknown>} line
+ */
+export function isInternalWorkLine(line) {
+  if (isIncidentLine(line) || reviewSectionCode(line)) return false;
+  return isRoutineCheck(line)
+    || (text(line.c) === 'inspection'
+      && isRoutineCheck({ ...line, ph: 0, pr: [] }))
+    || (INTERNAL_CAMERA_WORK.has(text(line.c)) && text(line.s) === 'camera');
+}
+
+/** @param {unknown} title @param {string} start @param {string} end */
+export function clientReportTitle(title, start, end) {
+  const multipleMonths = start.slice(0, 7) !== end.slice(0, 7);
+  const value = text(title) || 'Monthly Report';
+  return multipleMonths ? value.replace(/\bmonthly\b/gi, 'Period') : value;
+}
+
+/**
+ * Remove known internal lines from the client figures as well as the detail.
+ * Never use this projection as Bob's incident-review input.
+ * @param {unknown} data
+ * @param {unknown} activityLines
+ */
+export function clientActivitySnapshot(data, activityLines) {
+  const report = readActivityReport(data);
+  const { lines, notItemised } = readActivityLines(activityLines);
+  const withheld = lines.filter(isInternalWorkLine);
+  const visible = lines.filter((line) => !isInternalWorkLine(line));
+  if (!report || !withheld.length) return { report, lines: visible, notItemised };
+  const removedFor = (category) => withheld.filter((line) => text(line.c) === category).length;
+  const removedPhotos = (source) => source.reduce((sum, line) => sum + num(line.ph), 0);
+  const totals = obj(report.totals) ?? {};
+  const byPlace = rows(report.byPlace).map((place) => {
+    const removed = withheld.filter((line) => (text(line.p) || NO_PLACE_LABEL) === (text(place.place) || NO_PLACE_LABEL));
+    return {
+      ...place,
+      entries: Math.max(0, num(place.entries) - removed.length),
+      photos: Math.max(0, num(place.photos) - removedPhotos(removed)),
+      categories: Object.fromEntries(Object.entries(obj(place.categories) ?? {}).map(([code, value]) => [
+        code, Math.max(0, num(value) - removed.filter((line) => text(line.c) === code).length),
+      ])),
+    };
+  }).filter((place) => num(place.entries) > 0);
+  return {
+    lines: visible,
+    notItemised,
+    report: {
+      ...report,
+      totals: {
+        ...totals,
+        entries: Math.max(0, num(totals.entries) - withheld.length),
+        photos: Math.max(0, num(totals.photos) - removedPhotos(withheld)),
+        patrolVisits: Math.max(0, num(totals.patrolVisits) - removedFor('patrol_visit')),
+        places: Array.isArray(report.byPlace) ? byPlace.length : totals.places,
+      },
+      categories: rows(report.categories).map((row) => ({
+        ...row,
+        entries: Math.max(0, num(row.entries) - removedFor(text(row.code))),
+        photos: Math.max(0, num(row.photos) - removedPhotos(withheld.filter((line) => text(line.c) === text(row.code)))),
+      })).filter((row) => num(row.entries) > 0),
+      byPlace,
+      maintenance: {
+        ...obj(report.maintenance),
+        entries: Math.max(0, num(obj(report.maintenance)?.entries) - removedFor('maintenance')),
+        bySubject: rows(obj(report.maintenance)?.bySubject).map((row) => ({
+          ...row,
+          entries: Math.max(0, num(row.entries) - withheld.filter((line) => text(line.c) === 'maintenance' && text(line.s) === text(row.code)).length),
+        })).filter((row) => row.entries > 0),
+      },
+    },
+  };
+}
+
 /** "secure." -> "Secure"; a blank note reads "Nothing to report". @param {Record<string, unknown>} line */
 function routineResult(line) {
   const status = text(line.n).replace(/[.\s]+$/, '');
@@ -615,7 +693,7 @@ function isWorkLine(line, key) {
  * @param {Record<string, unknown>} line
  */
 export function isNotableEvent(line) {
-  if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) return false;
+  if (isIncidentLine(line) || reviewSectionCode(line) || isInternalWorkLine(line)) return false;
   const category = text(line.c);
   if (category === 'pest_control' || WORK_SECTIONS.some(([key]) => key === category)) return false;
   return Boolean(text(line.n) || text(line.ac) || num(line.ph) > 0 || (Array.isArray(line.pr) && line.pr.length > 0));
@@ -654,12 +732,11 @@ export function executiveSummaryBlocks(summary, highlights) {
  * @returns {ReportBlock[] | null}
  */
 export function monthlyActivityBlocks(data, activityLines, options = {}) {
-  const report = readActivityReport(data);
+  const { report, lines } = clientActivitySnapshot(data, activityLines);
   if (!report) return null;
   const label = labeller(report);
   const totals = obj(report.totals) ?? {};
   const pest = obj(report.pestControl) ?? {};
-  const { lines } = readActivityLines(activityLines);
   /** @type {ReportBlock[]} */
   const blocks = [];
 
@@ -702,11 +779,6 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     blocks.push(note('Charts highlight the highest recorded counts; complete figures remain in the tables below.', 8, true));
   }
 
-  const routineChecks = lines.filter(isRoutineCheck).length;
-  if (routineChecks > 0) {
-    blocks.push(note(`${counted(routineChecks, 'routine patrol or check', 'routine patrols and checks')} recorded a status only (for example secure or working) and ${routineChecks === 1 ? 'is' : 'are'} not itemised in this report.`, 9, true));
-  }
-
   const incidents = obj(report.incidents) ?? {};
   blocks.push(section('Incidents and Investigations'));
   if (num(incidents.total) > 0 || confirmedLines.length) {
@@ -737,15 +809,10 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
   }
 
   for (const [key, title] of WORK_SECTIONS) {
-    const work = obj(report[key]) ?? {};
     const workLines = lines.filter((line) => isWorkLine(line, key));
-    if (num(work.entries) <= 0 && !workLines.length) continue;
-    const orders = obj(work.workOrders) ?? {};
-    const jobs = num(orders.completed) + num(orders.open) > 0
-      ? ` Workshop jobs: ${fmt(num(orders.completed))} completed, ${fmt(num(orders.open))} scheduled or in progress.`
-      : '';
+    if (!workLines.length) continue;
     blocks.push(section(title));
-    blocks.push(note(`${counted(Math.max(num(work.entries), workLines.length), 'entry was', 'entries were')} recorded, listed below in date order (New Zealand time).${jobs}`, 9, true));
+    blocks.push(note(`${counted(workLines.length, 'entry was', 'entries were')} recorded, listed below in date order (New Zealand time).`, 9, true));
     for (const line of workLines) blocks.push(entryWithPlace(line, label));
   }
 
@@ -844,11 +911,11 @@ export function siteLogBlocks(data, activityLines) {
       : 'Nothing was recorded at your locations during the period.'));
     return blocks;
   }
-  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents and observations, including camera card reviews, are listed in their own sections above; routine checks are summarised under Routine Checks.', 9, true));
+  blocks.push(note('What happened at each location, in date order (New Zealand time). Incidents and observations, including camera card reviews, are listed in their own sections above; routine checks and internal camera servicing are not itemised.', 9, true));
   /** @type {Map<string, Record<string, unknown>[]>} */
   const byPlace = new Map();
   for (const line of lines) {
-    if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line) || isInternalWorkLine(line)) continue;
     const place = text(line.p) || NO_PLACE_LABEL;
     byPlace.set(place, [...(byPlace.get(place) ?? []), line]);
   }
@@ -867,11 +934,11 @@ export function siteLogBlocks(data, activityLines) {
 /**
  * Short email summary: one headline sentence plus entries by type of activity.
  * @param {unknown} data
- * @param {{ confirmedIncidents?: number }} [options] logged entries a reviewer confirmed as incidents, counted with recorded incidents
+ * @param {{ confirmedIncidents?: number, activityLines?: unknown }} [options] logged entries a reviewer confirmed as incidents, counted with recorded incidents
  * @returns {{ headline: string, categories: string[][] } | null}
  */
 export function activityEmailSummary(data, options = {}) {
-  const report = readActivityReport(data);
+  const { report } = clientActivitySnapshot(data, options.activityLines);
   if (!report) return null;
   const label = labeller(report);
   const reported = obj(report.totals) ?? {};

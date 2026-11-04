@@ -530,6 +530,59 @@ export function isRoutineCheck(line: ActivityLine): boolean {
   return !status || (status.length <= 40 && (status.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= ROUTINE_STATUS_WORDS);
 }
 
+const INTERNAL_CAMERA_WORK = new Set(['maintenance', 'installation_removal']);
+
+/** Client disclosure only; the original lines remain available to Bob and the reviewer. Mirrors the PDF. */
+export function isInternalWorkLine(line: ActivityLine): boolean {
+  if (isIncidentLine(line) || reviewSectionCode(line)) return false;
+  return isRoutineCheck(line)
+    || (line.category === 'inspection' && isRoutineCheck({ ...line, photos: 0, photoRefs: [] }))
+    || (INTERNAL_CAMERA_WORK.has(line.category) && line.subject === 'camera');
+}
+
+/** The same client-only aggregate projection used by the PDF and email. Apply incident triage first. */
+export function clientActivityReport(report: ActivityReport, lines: ActivityLine[]): ActivityReport {
+  const withheld = lines.filter(isInternalWorkLine);
+  if (!withheld.length) return report;
+  const removedFor = (category: string) => withheld.filter((line) => line.category === category).length;
+  const removedPhotos = (source: ActivityLine[]) => source.reduce((sum, line) => sum + line.photos, 0);
+  const byPlace = report.byPlace.map((place) => {
+    const removed = withheld.filter((line) => (line.place || NO_PLACE_LABEL) === (place.place || NO_PLACE_LABEL));
+    return {
+      ...place,
+      entries: Math.max(0, place.entries - removed.length),
+      photos: Math.max(0, place.photos - removedPhotos(removed)),
+      categories: Object.fromEntries(Object.entries(place.categories).map(([code, value]) => [
+        code, Math.max(0, value - removed.filter((line) => line.category === code).length),
+      ])),
+    };
+  }).filter((place) => place.entries > 0);
+  return {
+    ...report,
+    totals: {
+      ...report.totals,
+      entries: Math.max(0, report.totals.entries - withheld.length),
+      photos: Math.max(0, report.totals.photos - removedPhotos(withheld)),
+      patrolVisits: Math.max(0, report.totals.patrolVisits - removedFor('patrol_visit')),
+      places: byPlace.length,
+    },
+    categories: report.categories.map((row) => ({
+      ...row,
+      entries: Math.max(0, row.entries - removedFor(row.code)),
+      photos: Math.max(0, row.photos - removedPhotos(withheld.filter((line) => line.category === row.code))),
+    })).filter((row) => row.entries > 0),
+    byPlace,
+    maintenance: {
+      ...report.maintenance,
+      entries: Math.max(0, report.maintenance.entries - removedFor('maintenance')),
+      bySubject: report.maintenance.bySubject.map((row) => ({
+        ...row,
+        entries: Math.max(0, row.entries - withheld.filter((line) => line.category === 'maintenance' && line.subject === row.code).length),
+      })).filter((row) => row.entries > 0),
+    },
+  };
+}
+
 export interface RoutineCheckRow { check: string; checks: number; places: number; results: string }
 
 /** Routine checks by type with their recorded results, most common first (routineCheckRows in the PDF). */
@@ -565,7 +618,7 @@ export function routineCheckRows(report: Pick<ActivityReport, 'labels'>, lines: 
 export function siteLogGroups(lines: ActivityLine[]): SiteLogGroup[] {
   const byPlace = new Map<string, ActivityLine[]>();
   for (const line of lines) {
-    if (isIncidentLine(line) || reviewSectionCode(line) || isRoutineCheck(line)) continue;
+    if (isIncidentLine(line) || reviewSectionCode(line) || isInternalWorkLine(line)) continue;
     byPlace.set(line.place, [...(byPlace.get(line.place) ?? []), line]);
   }
   return [...byPlace.keys()]
