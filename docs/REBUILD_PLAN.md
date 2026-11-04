@@ -8,6 +8,24 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Existing staff login invitations, 2026-11-05:
+
+- **Before:** imported officer profiles and their HR records can exist without
+  an Auth identity or email. Changing their email failed at Auth lookup, while
+  a new-user invitation could create a second identity detached from the
+  existing credentials, skills and history.
+- **During:** the existing identity workspace offers explicit, audited
+  provisioning of an unclaimed officer login. Existing administrator, tenant
+  and role-ceiling checks run first. The server verifies the staff linkage,
+  creates an unconfirmed Auth identity at that exact existing UUID, and sends
+  the invitation only after confirming the ID and email. Claimed accounts,
+  mismatched identities and lookup outages are refused.
+- **After:** retries reuse the same unconfirmed login; no password is supplied,
+  no HR/credential/branch records are replaced, and invitation is not work
+  readiness. Synthetic regression tests cover preservation, retries, lookup
+  failures and claimed/mismatched identities. Live invitations and roster
+  assignments remain pending release and confirmation.
+
 Roster credential matching, 2026-11-04 (local acceptance):
 
 - **Before:** recording a verified COA alongside an identical unverified

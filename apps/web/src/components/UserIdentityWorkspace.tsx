@@ -27,6 +27,7 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
   const [accessReason, setAccessReason] = useState('');
   const [email, setEmail] = useState(user.email ?? '');
   const [emailReason, setEmailReason] = useState('');
+  const [provisionExistingStaff, setProvisionExistingStaff] = useState(false);
   const [saving, setSaving] = useState<'identity' | 'access' | 'email' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,9 +46,10 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
   /** The sign-in identity lives in auth.users, so this goes through the governed edge function, not the table. */
   const saveEmail = async (event: FormEvent) => {
     event.preventDefault(); setSaving('email'); setError(null); setNotice(null);
-    const { data, error: saveError } = await supabase.functions.invoke('update-user-email', { body: { user_id: user.id, email: email.trim(), reason: emailReason.trim() } });
-    const receipt = data as { error?: string; email?: string; pending_email?: string; requires_confirmation?: boolean; invitation_resent?: boolean } | null;
+    const { data, error: saveError } = await supabase.functions.invoke('update-user-email', { body: { user_id: user.id, email: email.trim(), reason: emailReason.trim(), provision_existing_staff: provisionExistingStaff } });
+    const receipt = data as { error?: string; email?: string; pending_email?: string; requires_confirmation?: boolean; invitation_resent?: boolean; existing_staff_preserved?: boolean } | null;
     if (saveError || receipt?.error) setError(receipt?.error ?? (saveError instanceof Error ? saveError.message : 'The email address could not be changed.'));
+    else if (receipt?.existing_staff_preserved) { setNotice(`Invitation sent to ${receipt.email}. The existing staff record, credentials, skills and history were preserved. Work readiness still needs confirmation in HR.`); setEmailReason(''); setProvisionExistingStaff(false); await onChanged(); }
     else if (receipt?.requires_confirmation) { setNotice(`${user.display_name ?? 'This person'} has signed in before, so ${receipt.pending_email} has to be confirmed before it becomes their sign-in address. Until then they keep signing in with ${receipt.email}. Their profile, role and history are unchanged.`); setEmailReason(''); await onChanged(); }
     else { setNotice(receipt?.invitation_resent ? `Email corrected to ${receipt.email}. Their unclaimed invitation was re-sent to the new address.` : `Email corrected to ${receipt?.email ?? email.trim()}. They sign in with it from now on.`); setEmailReason(''); await onChanged(); }
     setSaving(null);
@@ -71,7 +73,13 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
       <form onSubmit={saveAccess}><div className="user-spine-section-title"><KeyRound size={18} /><div><strong>Access preset</strong><span>One named administration access bundle at this organization.</span></div></div>{adminTier ? <><label><span>Preset</span><select value={presetId} onChange={(event) => setPresetId(event.target.value)}><option value="">No active preset</option>{presets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}</select></label><label><span>Reason for access change</span><textarea required rows={3} value={accessReason} onChange={(event) => setAccessReason(event.target.value)} placeholder="Role responsibilities or approval reference" /></label><button type="submit" disabled={saving !== null || !accessReason.trim() || (!presetId && !assignment)}>{saving === 'access' ? 'Saving' : presetId ? 'Assign preset' : 'End preset'}</button></> : <div className="user-spine-not-applicable"><ShieldCheck size={22} /><strong>Role-scoped access</strong><span>Field and client roles use their role, branch authorization, and module scope rather than an administration preset.</span></div>}
       </form>
     </div>
-    <form className="user-spine-email" onSubmit={saveEmail}><div className="user-spine-section-title"><Mail size={18} /><div><strong>Email and sign-in</strong><span>The address this person signs in with, and where their invitation is sent.</span></div></div><div className="user-spine-email-grid"><label><span>Email address</span><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Reason for change</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} placeholder="Corrected typo, name change, new work address" /></label></div><button type="submit" disabled={saving !== null || !email.trim() || !emailReason.trim() || email.trim().toLowerCase() === (user.email ?? '').toLowerCase()}>{saving === 'email' ? 'Saving' : 'Change email'}</button><small>If they have never signed in, the address is corrected and their invitation re-sent to it. If they have signed in before, the new address must be confirmed before it replaces the old one — their profile, role and history stay as they are.</small></form>
+    <form className="user-spine-email" onSubmit={saveEmail}>
+      <div className="user-spine-section-title"><Mail size={18} /><div><strong>Email and sign-in</strong><span>The address this person signs in with, and where their invitation is sent.</span></div></div>
+      <div className="user-spine-email-grid"><label><span>Email address</span><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Reason for change</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} placeholder="Corrected typo, name change, new work address" /></label></div>
+      {user.role === 'officer' && <label className="user-spine-checkbox"><input type="checkbox" checked={provisionExistingStaff} onChange={(event) => setProvisionExistingStaff(event.target.checked)} /><span>Provision or retry an unclaimed login invitation using this existing staff record. Preserve its credentials, skills and history; do not create a new staff record. Already claimed logins are refused.</span></label>}
+      <button type="submit" disabled={saving !== null || !email.trim() || !emailReason.trim() || (!provisionExistingStaff && email.trim().toLowerCase() === (user.email ?? '').toLowerCase())}>{saving === 'email' ? 'Saving' : provisionExistingStaff ? 'Send staff invitation' : 'Change email'}</button>
+      <small>If they have never signed in, the address is corrected and their invitation re-sent to it. If they have signed in before, the new address must be confirmed before it replaces the old one — their profile, role and history stay as they are.</small>
+    </form>
     <RestrictedAccessSection key={`person-${user.id}`} userId={user.id} kind="person" />
     <RestrictedAccessSection key={`vehicle-${user.id}`} userId={user.id} kind="vehicle" />
     <StaffBranchAccessPanel userId={user.id} branches={branches} onChanged={onChanged} />

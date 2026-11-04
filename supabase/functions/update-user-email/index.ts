@@ -25,6 +25,7 @@
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { ensureExistingStaffAuth } from '../_shared/existing-staff-invitation.mjs';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -69,7 +70,7 @@ serve(async (req) => {
     if (!reason) return json({ error: 'A change reason is required for the audit trail.' }, 400);
 
     const { data: target } = await adminClient
-      .from('user_profiles').select('id, organization_id, role, display_name, email').eq('id', userId).single();
+      .from('user_profiles').select('id, organization_id, role, display_name, email, deactivated_at').eq('id', userId).single();
     if (!target) return json({ error: 'Target user not found' }, 404);
 
     if (callerProfile.role !== 'grand_master' && target.organization_id !== callerProfile.organization_id) {
@@ -85,6 +86,59 @@ serve(async (req) => {
     ]);
     if (typeof callerLevel === 'number' && typeof targetLevel === 'number' && targetLevel > callerLevel) {
       return json({ error: 'Cannot manage a user above your authority' }, 403);
+    }
+
+    if (body.provision_existing_staff === true) {
+      if (target.deactivated_at || target.role !== 'officer') {
+        return json({ error: 'Only an active existing field-officer record can use staff-login provisioning.' }, 409);
+      }
+      if (target.email && target.email.toLowerCase() !== requested) {
+        return json({ error: 'This profile already has a different email. Review the existing identity first.' }, 409);
+      }
+      const { data: staff, error: staffError } = await adminClient.from('staff_profiles')
+        .select('id,user_id').eq('id', userId).single();
+      if (staffError || !staff || (staff.user_id && staff.user_id !== userId)) {
+        return json({ error: 'The existing staff linkage could not be confirmed. No invitation was sent.' }, 409);
+      }
+      const { data: org, error: orgError } = await adminClient.from('organizations')
+        .select('name,logo_url').eq('id', target.organization_id).single();
+      if (orgError || !org) return json({ error: 'The inviting organisation could not be confirmed.' }, 500);
+      const metadata = {
+        display_name: target.display_name || requested.split('@')[0],
+        role: target.role, role_label: ROLE_LABELS[target.role],
+        organization_id: target.organization_id,
+        organization_name: org.name, organization_logo: org.logo_url ?? '',
+      };
+      try {
+        await ensureExistingStaffAuth(adminClient.auth.admin, userId, requested, metadata);
+      } catch (error) {
+        console.error('[update-user-email] existing staff login provisioning failed:', error);
+        return json({ error: error instanceof Error ? error.message : 'Staff login provisioning failed.' }, 409);
+      }
+      const { data: synced, error: syncError } = await adminClient.from('user_profiles')
+        .update({ email: requested }).eq('id', userId).eq('organization_id', target.organization_id)
+        .is('deactivated_at', null).select('id').single();
+      if (syncError || !synced) {
+        return json({ error: 'The unconfirmed login exists, but its profile email could not be saved. No invitation was sent; retry this same staff record.' }, 500);
+      }
+      const siteUrl = Deno.env.get('SITE_URL') ?? 'https://fcmanager.co.nz';
+      const { data: invited, error: invitationError } = await adminClient.auth.admin.inviteUserByEmail(requested, {
+        data: metadata, redirectTo: `${siteUrl}/auth/callback`,
+      });
+      if (invitationError || invited?.user?.id !== userId) {
+        return json({ error: `The unconfirmed staff login was preserved, but its invitation was not confirmed. Retry this same record. ${invitationError?.message ?? 'Unexpected invitation identity.'}` }, 502);
+      }
+      const { error: auditError } = await adminClient.rpc('log_user_management_action', {
+        p_organization_id: target.organization_id, p_target_user_id: userId,
+        p_action_type: 'user_invited', p_performed_by: caller.id,
+        p_old_value: null, p_new_value: { email: requested },
+        p_metadata: { reason, existing_staff_preserved: true },
+      });
+      if (auditError) {
+        console.error('[update-user-email] staff invitation audit failed:', auditError.message);
+        return json({ error: 'The invitation was sent, but its application audit receipt failed. Do not send another invitation; contact operations.' }, 500);
+      }
+      return json({ success: true, email: requested, invitation_resent: true, existing_staff_preserved: true });
     }
 
     const { data: authUser, error: getUserError } = await adminClient.auth.admin.getUserById(userId);
