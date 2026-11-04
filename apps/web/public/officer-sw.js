@@ -7,3 +7,18 @@ self.addEventListener('fetch', (event) => {
     { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
   )));
 });
+
+// New dispatch job notifications (officerJobAlerts.showJobNotification): focus or open the job.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const requested = event.notification.data && event.notification.data.url;
+  const target = typeof requested === 'string' && requested.startsWith('/officer') ? requested : '/officer';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    for (const client of clientList) {
+      if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
+        return Promise.resolve(client.navigate ? client.navigate(target) : undefined).catch(() => undefined).then(() => client.focus());
+      }
+    }
+    return self.clients.openWindow(target);
+  }));
+});
