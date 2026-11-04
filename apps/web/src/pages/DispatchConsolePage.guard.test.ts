@@ -194,4 +194,19 @@ describe('noise complaint intake — two places, protected identity', () => {
     expect(source).toContain('Job created, but the complainant details were not saved');
     expect(source).toContain('setWarning(');
   });
+
+  it('assigns a job straight to an agreement officer through the governed, audited RPC', () => {
+    expect(source).toContain("supabase.rpc('list_dispatch_target_officers', { p_service_agreement_id: detailAgreementId })");
+    expect(source).toContain("supabase.rpc('assign_dispatch_job_to_officer', { p_job_id: selectedJob.id, p_officer_user_id: jobOfficerId })");
+    expect(source).toContain('selectedJob.resourceName ?? assignedOfficerName(selectedJob) ??');
+    expect(source).toContain('This job is closed, so it cannot be reassigned.');
+  });
+
+  it('filters the job list by the selected place and makes the filter visible and clearable', () => {
+    expect(source).toContain('<DispatchJobList jobs={listedJobs}');
+    expect(source).not.toContain('<DispatchJobList jobs={jobs}');
+    expect(source).toContain('Showing jobs at <strong>{placeFilter.name}</strong>');
+    expect(source).toContain('const [filterToPlace, setFilterToPlace] = useState(false);');
+    expect(source).toContain('Only show jobs at {selectedPlace.name}');
+  });
 });
