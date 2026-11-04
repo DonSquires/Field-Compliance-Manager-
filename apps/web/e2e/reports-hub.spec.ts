@@ -161,6 +161,34 @@ test('report preview errors and busy states remain attached to their own reports
   await expect(second.getByRole('alert')).toContainText('Second privacy error');
 });
 
+test('preview reports an inconclusive incident scan instead of calling it complete', async ({ page }) => {
+  const packId = '79797979-7979-4979-8979-797979797979';
+  const calls: string[] = [];
+  await page.route('**/functions/v1/**', async (route) => {
+    const name = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    if (!['check-report-privacy', 'flag-report-potential-incidents', 'draft-report-executive-summary', 'generate-report-pack-pdf'].includes(name)) {
+      await route.fallback();
+      return;
+    }
+    calls.push(name);
+    const body = name === 'check-report-privacy'
+      ? { ok: true, checked: 1, remaining: 0, cleared: true, reworded: 0, editorial_reworded: 0, updated_at: '2026-08-30T09:30:00.000Z' }
+      : name === 'flag-report-potential-incidents' ? { ok: true }
+        : name === 'draft-report-executive-summary' ? { saved: false }
+          : { ok: true, pack: { id: packId, pdf_path: 'org/fixture/report.pdf' } };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await signInAsAdmin(page, '/admin/reports');
+  await page.getByRole('button', { name: 'Generate report drafts' }).click();
+  const row = page.getByRole('region', { name: 'Report packs' }).locator('tbody tr').filter({ hasText: 'Civic Events Compliance Services' });
+  await row.getByRole('button', { name: 'Generate preview' }).click();
+  await expect(page.getByText(/Bob could not finish checking for potential incidents.*invalid incident-scan result/)).toBeVisible();
+  expect(calls).toEqual([
+    'check-report-privacy', 'flag-report-potential-incidents', 'draft-report-executive-summary',
+    'check-report-privacy', 'generate-report-pack-pdf',
+  ]);
+});
+
 test('preview stops when the second privacy check fails or the renderer gives no receipt', async ({ page }) => {
   const calls: string[] = [];
   let privacyCalls = 0;
