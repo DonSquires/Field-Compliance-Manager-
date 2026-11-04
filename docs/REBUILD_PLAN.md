@@ -116,6 +116,47 @@ Officer overdue-shift recovery (local acceptance, 2026-11-06):
   live shift remain separate release gates. Existing raw officer paths still
   need private Oracle protection; this change does not close them.
 
+Officer selected-shift journey and private briefing (local acceptance, 2026-11-05):
+
+- **Before:** accepted static assignments had no detail action; static-post
+  navigation chose a shift implicitly. An overdue active shift disappeared
+  from the schedule, and reports could default to future work. Static arrival
+  also auto-started accepted work outside the canonical start/safety flow.
+- **During:** each own assigned static shift opens its exact post, time,
+  address/navigation, configured skills, authorised primary/emergency client
+  contacts and H&S state. Scheduled/published assignments can load a pre-start
+  briefing as well, preserving unscheduled static starts; reading never starts
+  work. Start and changed-briefing reload use the private Oracle projection.
+  Oracle describes exact findings; Conductor removes spans or withholds whole
+  fields. Missing, malformed or source-mismatched review withholds narrative
+  and safety, rather than calling a cloud provider or raw briefing fallback.
+  Structured authorised operational contact names remain visible.
+- **After:** canonical start is required before arrival; existing verified
+  boundary, GPS, contract, audit and idempotent-receipt checks remain in force.
+  Reports carry the selected shift, otherwise prefer active/recent work, and
+  retain selection/writing on refresh. In-shift reporting and the existing
+  break/end/debrief journey are linked explicitly. Maps open separately.
+  Handover drafts survive briefing refreshes.
+- **Evidence:** synthetic Oracle/gateway tests, caller-scoped edge tests,
+  selected-shift component/submission tests and disposable PostGIS lifecycle
+  tests pass. Desktop/phone fixture journeys cover arrival receipts, selected
+  reports, pre-start detail, unavailable review and changed-safety reload.
+  These are not evidence of real officer attendance or receipt by staff.
+  The prospective helper was also run in an isolated temporary directory on
+  the private runtime, before release: its strengthened v2 instructions/schema
+  removed unseen synthetic names and a narrative phone number, withheld a
+  whole clinical/legal field, preserved safe operational/place wording and
+  resisted an embedded instruction to clear everything. The first prompt
+  failed this check and was not released. No real assessment was sent.
+  The private GPU passed all four cases. VPS qualification timed out, so the
+  officer route deliberately has no automatic VPS fallback; GPU unavailability
+  leaves narrative withheld rather than selecting an unqualified engine.
+- **Live blockers:** the hospital boundary remains mapped but unverified;
+  no H&S notes/hazards have been recorded from the restricted assessment.
+  The source assessment has not been uploaded or promoted. An empty hazard
+  list is not safety clearance. Governed release,   deployed-route verification and a human-operated field session remain
+  acceptance gates.
+
 Existing staff login invitations, 2026-11-05:
 
 - **Before:** imported officer profiles and their HR records can exist without
@@ -131,8 +172,12 @@ Existing staff login invitations, 2026-11-05:
 - **After:** retries reuse the same unconfirmed login; no password is supplied,
   no HR/credential/branch records are replaced, and invitation is not work
   readiness. Synthetic regression tests cover preservation, retries, lookup
-  failures and claimed/mismatched identities. Live invitations and roster
-  assignments remain pending release and confirmation.
+  failures and claimed/mismatched identities. PR #381 is merged/deployed.
+  Two existing officers were invited at their preserved identities and
+  progressed through audited employment/readiness reviews. Their twelve
+  original draft slots now have matching published field shifts and persisted
+  roster notifications. Other held/unassigned drafts were not published.
+  Invitation acceptance and device notification delivery are separate checks.
 
 Roster credential matching, 2026-11-04 (local acceptance):
 

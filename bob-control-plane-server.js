@@ -1746,6 +1746,22 @@ async function route(req, res, body) {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
     return json(res, 200, await modelHealth(modelGatewayConfig));
   }
+  if (req.method === 'POST' && url.pathname === '/api/bob/officer/privacy') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    res.setHeader('Cache-Control', 'no-store');
+    const controller = new AbortController();
+    const cancelOnDisconnect = () => { if (!res.writableEnded) controller.abort(); };
+    res.once('close', cancelOnDisconnect);
+    try {
+      const { reviewOfficerPrivacy } = require('./officer-privacy-oracle');
+      const result = await reviewOfficerPrivacy({ fields: body?.fields, invoke: invokeBuilderModel, config: modelGatewayConfig, signal: controller.signal });
+      if (!res.destroyed) return json(res, 200, result);
+    } catch {
+      record('officer-privacy', 'officer.privacy.unavailable', null, { outcome: 'withheld' });
+      if (!res.destroyed) return json(res, 503, { error: 'Private Oracle review unavailable; briefing text remains withheld' });
+    } finally { res.removeListener('close', cancelOnDisconnect); }
+    return;
+  }
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
     if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
     const controller = new AbortController();

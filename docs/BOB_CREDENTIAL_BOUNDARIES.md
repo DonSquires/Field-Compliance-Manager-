@@ -63,6 +63,32 @@ rebuild; an image rebuild alone does not update the running launcher.
 
 ## Private repository code and Vibe Builder
 
+### Officer operational briefings (2026-11-05)
+
+`officer-shift-briefing` verifies the active user and uses the caller JWT for
+the exact own static assignment and safety RPCs before service-role site,
+work-unit and primary/emergency contact reads. The browser never receives a
+service-role or control-plane credential. Operational contacts are authorised
+structured records, not names inferred from narrative.
+
+The edge calls `/api/bob/officer/privacy` with the existing server-only
+control-plane credential class. That route constructs a fixed
+`officer_privacy` request on the qualified private `gpu_workstation`, with
+private-host validation and no redirects for sensitive POSTs. There is no
+automatic VPS or cloud fallback: the VPS's synthetic qualification timed out
+at the request budget and is not approved to disclose briefings. An unavailable
+GPU leaves narrative withheld. Oracle findings contain exact spans;
+Conductor performs disclosure and binds its receipt to the source SHA256.
+Unknown source fields and source-document links are excluded. Unavailable,
+incomplete or source-mismatched findings withhold narrative/H&S and prevent
+the officer UI from proceeding through start.
+
+Requests/responses are not cached; failures log only the credential class
+boundary/outcome, never source text, model output or tokens. This path does
+not upload or approve restricted assessments, grant clinical-history access,
+verify a site boundary, or authorise live attendance. Validate a release with
+synthetic material before sending any approved private source.
+
 ### Builder Chat cloud PM/QA (owner decision, 2026-10-25)
 
 New PM turns use purpose-assigned Ollama Cloud models directly, without private

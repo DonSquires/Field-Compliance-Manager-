@@ -416,6 +416,9 @@ enabled = true
 # Public intake for the R&M website. No user JWT: the function checks the origin,
 # validates the body, rate-limits by salted IP hash and writes only through the
 # service-role RPC submit_website_enquiry.
+[functions.officer-shift-briefing]
+verify_jwt = false
+
 [functions.website-enquiry]
 verify_jwt = false
 

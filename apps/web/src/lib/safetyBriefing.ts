@@ -90,18 +90,24 @@ export const describeHazardSource = (hazard: Pick<BriefingHazard, 'source_name' 
   return hazard.origin === 'officer_reported' ? 'Reported by an officer on shift' : 'Recorded by your organisation';
 };
 
-export async function fetchShiftSafetyBriefing(shiftId: string, stopId: string | null = null): Promise<SafetyBriefing> {
-  // ATLAS READS: get_shift_safety_briefing
-  const { data, error } = await supabase.rpc('get_shift_safety_briefing', { p_shift_id: shiftId, p_stop_id: stopId });
-  if (error || !data || data.shift_id !== shiftId || data.stop_id !== stopId
+export function parseSafetyBriefing(value: unknown, shiftId: string, stopId: string | null = null): SafetyBriefing {
+  const data = value && typeof value === 'object' && !Array.isArray(value) ? value as Partial<SafetyBriefing> : null;
+  if (!data || data.shift_id !== shiftId || data.stop_id !== stopId
     || !Array.isArray(data.hazards) || !Array.isArray(data.places) || !Array.isArray(data.warnings)
     || typeof data.briefing_hash !== 'string' || !data.briefing_hash
     || !Number.isInteger(data.item_count) || data.item_count !== data.hazards.length + data.warnings.length
     || typeof data.is_assigned_officer !== 'boolean' || typeof data.acknowledged !== 'boolean'
     || typeof data.acknowledgement_required !== 'boolean') {
-    throw new Error(error?.message ?? 'The server did not return a safety briefing. Retry before starting work.');
+    throw new Error('The server did not return a safety briefing. Retry before starting work.');
   }
   return data as SafetyBriefing;
+}
+
+export async function fetchShiftSafetyBriefing(shiftId: string, stopId: string | null = null): Promise<SafetyBriefing> {
+  // ATLAS READS: get_shift_safety_briefing
+  const { data, error } = await supabase.rpc('get_shift_safety_briefing', { p_shift_id: shiftId, p_stop_id: stopId });
+  if (error) throw new Error(error.message);
+  return parseSafetyBriefing(data, shiftId, stopId);
 }
 
 export type AcknowledgeResult = { ok: true; acknowledgedAt: string } | { ok: false; changed: boolean; message: string };
