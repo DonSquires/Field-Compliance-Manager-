@@ -14,6 +14,9 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { OfficerRouteGuidance } from '../components/OfficerRouteGuidance';
 import { PersonInteractionForm } from '../components/PersonInteractionForm';
+import { DispatchJobDestination } from '../components/DispatchJobDestination';
+import { DispatchJobEvidence } from '../components/DispatchJobEvidence';
+import { resolveDispatchDestination, type DispatchDestination, type GeoPointLike } from '../lib/dispatchJobLocation';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './OfficerDispatchPage.css';
@@ -30,12 +33,19 @@ interface DispatchJob {
   timing_source: string;
   created_at: string;
   investigation_id: string | null;
+  harmed_party_address: string | null;
   site: { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null } | null;
+  destination: DispatchDestination;
 }
 
-interface DispatchJobRow extends Omit<DispatchJob, 'site'> {
+type SiteGeo = { gps_lat: number | null; gps_lng: number | null; center_point: GeoPointLike | null };
+type ZoneGeo = { center_point: GeoPointLike | null; boundary: GeoPointLike | null };
+
+interface DispatchJobRow extends Omit<DispatchJob, 'site' | 'destination'> {
   site: DispatchJob['site'] | DispatchJob['site'][];
   zone: { name: string; zone_type: string | null } | Array<{ name: string; zone_type: string | null }> | null;
+  site_geo: SiteGeo | SiteGeo[] | null;
+  zone_geo: ZoneGeo | ZoneGeo[] | null;
 }
 
 interface CompletionReceipt {
@@ -150,7 +160,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
       const jobQuery = supabase
         .from('dispatch_jobs')
-        .select('id, organization_id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type)')
+        .select('id, organization_id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, harmed_party_address, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type), site_geo:client_site_id(gps_lat, gps_lng, center_point), zone_geo:zone_id(center_point, boundary)')
         .or(`${shiftIds.length ? `shift_id.in.(${shiftIds.join(',')}),` : ''}assigned_officer_id.eq.${profile.id}`)
         .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]);
       const scopedJobQuery = activeZoneIds && activeZoneIds.length > 0
@@ -164,8 +174,16 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
       setJobs(((data as unknown as DispatchJobRow[]) || []).map((row) => {
         const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
         const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
+        const siteGeo = Array.isArray(row.site_geo) ? row.site_geo[0] ?? null : row.site_geo;
+        const zoneGeo = Array.isArray(row.zone_geo) ? row.zone_geo[0] ?? null : row.zone_geo;
         return {
           ...row,
+          destination: resolveDispatchDestination({
+            site: site ? { ...site, ...siteGeo } : null,
+            zone: zone ? { name: zone.name, ...zoneGeo } : null,
+            harmed_party_address: row.harmed_party_address,
+            briefing_notes: row.briefing_notes,
+          }),
           site: site ?? (zone ? { name: zone.name, address: null, hs_notes: null, access_instructions: null } : null),
         };
       }));
@@ -323,6 +341,8 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
                   {!job.site?.access_instructions && !job.site?.hs_notes && !job.briefing_notes && <p>No access, safety, or briefing notes were recorded for this job.</p>}
                 </section>
 
+                <DispatchJobDestination destination={job.destination} />
+
                 {job.status === 'on_scene' && (
                   <div className="form-group officer-dispatch-outcome">
                     <label htmlFor={`dispatch-outcome-${job.id}`}>Outcome notes</label>
@@ -352,6 +372,8 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
                     {busyId === job.id ? 'Updating…' : STATUS_LABEL[job.status]}
                   </button>
                 )}
+
+                <DispatchJobEvidence jobId={job.id} />
               </article>
             );
           })

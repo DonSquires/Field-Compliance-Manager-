@@ -10,6 +10,7 @@ import {
   Clock3,
   Map,
   MapPin,
+  MoreHorizontal,
   Navigation,
   Radio,
   RefreshCw,
@@ -55,7 +56,11 @@ interface AssignedDispatchJobRow extends Omit<AssignedDispatchJob, 'site'> {
   zone: { name: string } | Array<{ name: string }> | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'places' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'person_search' | 'credentials' | 'leave' | 'timesheet';
+type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'places' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'person_search' | 'credentials' | 'leave' | 'timesheet' | 'debrief';
+
+/** Statuses where the officer has already taken the job on: the home offers "Resume job". */
+const IN_PROGRESS_JOB_STATUSES = ['acknowledged', 'en_route', 'on_scene'];
+const JOB_PROGRESS_RANK: Record<string, number> = { on_scene: 0, en_route: 1, acknowledged: 2, dispatched: 3, pending: 4 };
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -64,6 +69,8 @@ interface OfficerHomePageProps {
   safety: UseOfficerSafetyApi;
   onNavigate: (destination: HomeDestination | null) => void;
   onRefreshShift: () => Promise<void>;
+  /** Opens the dispatch page focused on one job (`/officer/dispatch?job=`). */
+  onOpenJob?: (jobId: string) => void;
 }
 
 function localDateIso(): string {
@@ -184,19 +191,30 @@ function useNextDispatchJob(officerId: string | null | undefined) {
       .in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene'])
       .order('sla_respond_by', { ascending: true, nullsFirst: false })
       .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .limit(10);
     if (queryError) setError(queryError.message);
-    else if (!data) setJob(null);
     else {
-      const row = data as unknown as AssignedDispatchJobRow;
-      const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
-      const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
-      setJob({ ...row, site: site ?? (zone ? { name: zone.name, address: null } : null) });
+      // A job the officer has already started (e.g. before leaving for the maps app) outranks a newer one.
+      const row = ((data ?? []) as unknown as AssignedDispatchJobRow[])
+        .map((candidate, index) => ({ candidate, index }))
+        .sort((left, right) => (JOB_PROGRESS_RANK[left.candidate.status] ?? 9) - (JOB_PROGRESS_RANK[right.candidate.status] ?? 9) || left.index - right.index)[0]?.candidate ?? null;
+      if (!row) setJob(null);
+      else {
+        const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
+        const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
+        setJob({ ...row, site: site ?? (zone ? { name: zone.name, address: null } : null) });
+      }
     }
     setLoading(false);
   }, [officerId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => void load(), 30_000);
+    // Coming back from the maps app (or unlocking the phone) re-checks the job immediately.
+    const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, [load]);
   return { job, loading, error, reload: load };
 }
 
@@ -228,7 +246,7 @@ const describeUpcoming = (shift: UpcomingShift) => {
   return { day, time, isToday: start.toDateString() === new Date().toDateString() };
 };
 
-export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate, onRefreshShift }: OfficerHomePageProps) {
+export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate, onRefreshShift, onOpenJob }: OfficerHomePageProps) {
   const { profile } = useAuth();
   const online = useConnectionState();
   const { openShifts, loading: openShiftsLoading, error: openShiftsError, notice, claimingId, claim, reload } = useOpenShifts(profile?.organizationId);
@@ -242,7 +260,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
   const endShiftDestination = (destination: EndShiftDestination) => {
     setEndingShift(false);
     if (destination === 'stops') onNavigate(activeShiftLaunch?.destination ?? 'patrol');
-    else if (destination === 'debrief') onNavigate('schedule');
+    else if (destination === 'debrief') onNavigate('debrief');
     else if (destination === 'home') onNavigate(null);
     else onNavigate(destination);
   };
@@ -258,6 +276,9 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
   const safetyLabel = safety.activeAlert
     ? safety.activeAlert.kind === 'sos' ? 'SOS active' : sentence(`${safety.activeAlert.kind.replaceAll('_', ' ')} alert`)
     : safety.status === 'ok' ? `Check-in in ${safety.minutesRemaining} min` : sentence(safety.status.replaceAll('_', ' '));
+
+  const jobInProgress = Boolean(nextDispatchJob && IN_PROGRESS_JOB_STATUSES.includes(nextDispatchJob.status));
+  const openJob = () => (nextDispatchJob && onOpenJob ? onOpenJob(nextDispatchJob.id) : onNavigate('dispatch'));
 
   return (
     <div className="officer-home">
@@ -281,7 +302,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
         </div>
       )}
 
-      {nextDispatchError ? <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Your assigned jobs could not be checked: {nextDispatchError}</span><button type="button" onClick={() => void reloadNextDispatch()} disabled={nextDispatchLoading}>Try again</button></div> : nextDispatchJob ? <section className={`officer-next-job priority-${nextDispatchJob.priority}`} aria-labelledby="next-job-heading"><div><span className="officer-kicker">Your next job</span><h2 id="next-job-heading">{nextDispatchJob.job_type.replaceAll('_', ' ')}</h2><p>{nextDispatchJob.site?.name ?? 'Site details to be confirmed'}{nextDispatchJob.site?.address ? ` · ${nextDispatchJob.site.address}` : ''}</p><small>{nextDispatchJob.status.replaceAll('_', ' ')}{nextDispatchJob.sla_respond_by ? ` · respond by ${new Date(nextDispatchJob.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</small></div><button type="button" className="officer-primary-action" onClick={() => onNavigate('dispatch')}><Radio size={18} aria-hidden="true" /> Open and acknowledge job <ArrowRight size={17} aria-hidden="true" /></button></section> : null}
+      {nextDispatchError ? <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Your assigned jobs could not be checked: {nextDispatchError}</span><button type="button" onClick={() => void reloadNextDispatch()} disabled={nextDispatchLoading}>Try again</button></div> : nextDispatchJob ? <section className={`officer-next-job priority-${nextDispatchJob.priority}${jobInProgress ? ' is-in-progress' : ''}`} aria-labelledby="next-job-heading"><div><span className="officer-kicker">{jobInProgress ? 'Job in progress' : 'Your next job'}</span><h2 id="next-job-heading">{nextDispatchJob.job_type.replaceAll('_', ' ')}</h2><p>{nextDispatchJob.site?.name ?? 'Site details to be confirmed'}{nextDispatchJob.site?.address ? ` · ${nextDispatchJob.site.address}` : ''}</p><small>{nextDispatchJob.status.replaceAll('_', ' ')}{nextDispatchJob.sla_respond_by ? ` · respond by ${new Date(nextDispatchJob.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</small></div><button type="button" className="officer-primary-action" onClick={openJob}><Radio size={18} aria-hidden="true" /> {jobInProgress ? 'Resume job' : 'Open and acknowledge job'} <ArrowRight size={17} aria-hidden="true" /></button></section> : null}
       {endedNotice && <div className="officer-notice is-success" role="status"><CheckCircle2 size={18} aria-hidden="true" /><span>{endedNotice}</span><button type="button" onClick={() => onNavigate('timesheet')}>Open timesheet</button></div>}
       {endingShift && shift && <EndShiftDialog shiftId={shift.id} shiftStatus={shift.status} serviceType={shift.shift_type} onClose={() => setEndingShift(false)} onNavigate={endShiftDestination} onEnded={async ({ completed_at }) => { setEndingShift(false); setEndedNotice(`Shift ended at ${new Date(completed_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. You are off duty. Record your worked time when you are ready.`); await onRefreshShift(); }} />}
 
@@ -365,7 +386,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
       {!profile?.organizationId ? <div className="officer-notice is-error" role="status"><AlertTriangle size={18} aria-hidden="true" /> Coverage is unavailable until organisation access is confirmed.</div> : openShiftsError && <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Open shifts could not be checked: {openShiftsError}</span><button type="button" className="btn-secondary" onClick={() => void reload()} disabled={openShiftsLoading}>Try again</button></div>}
 
       <details className="officer-home-more">
-      <summary>More tools, open shifts and status</summary>
+      <summary><MoreHorizontal size={20} aria-hidden="true" /> More tools, open shifts and status</summary>
       <section className="officer-quick-actions" aria-labelledby="quick-actions-heading">
         <div className="officer-section-heading">
           <div><span className="officer-kicker">Work tools</span><h2 id="quick-actions-heading">Quick actions</h2></div>
@@ -386,6 +407,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <QuickAction icon={<Map />} label="Places" detail="Add or verify with GPS" onClick={() => onNavigate('places')} />
           <QuickAction icon={<Users />} label="Person search" detail="Authorized notice and permit checks" onClick={() => onNavigate('person_search')} />
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
+            <QuickAction icon={<ShieldCheck />} label="Debrief" detail="Record or review shift debriefs" onClick={() => onNavigate('debrief')} />
         </div>
         <button type="button" className="officer-all-modules" onClick={() => onNavigate('modules')}>All enabled modules <ArrowRight size={16} aria-hidden="true" /></button>
       </section>

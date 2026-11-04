@@ -371,9 +371,11 @@ test('an assigned urgent dispatch job is the officer’s first next action from 
   const nextJob = page.locator('.officer-next-job');
   await expect(nextJob).toContainText('Alarm response');
   await expect(nextJob).toContainText('Civic Operations Centre');
-  await expect(nextJob.getByRole('button', { name: 'Open and acknowledge job' })).toBeVisible();
-  await nextJob.getByRole('button', { name: 'Open and acknowledge job' }).click();
-  await expect(page).toHaveURL(/\/officer\/dispatch$/);
+  // The fixture job is already on scene, so home offers to resume it rather than acknowledge it again.
+  await expect(nextJob).toContainText('Job in progress');
+  await expect(nextJob.getByRole('button', { name: 'Resume job' })).toBeVisible();
+  await nextJob.getByRole('button', { name: 'Resume job' }).click();
+  await expect(page).toHaveURL(/\/officer\/dispatch\?job=cccccccc-cccc-4ccc-8ccc-cccccccccccc$/);
   await expect(page.getByRole('heading', { name: 'Dispatch' })).toBeVisible();
   await expect(page.locator('#officer-dispatch-cccccccc-cccc-4ccc-8ccc-cccccccccccc')).toContainText('Civic Operations Centre');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);

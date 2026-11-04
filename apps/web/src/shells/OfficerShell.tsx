@@ -66,6 +66,9 @@ import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { OfficerLocationAdvisory } from '../components/OfficerLocationAdvisory';
 import { OfficerLocationPill } from '../components/OfficerLocationPill';
 import { OfficerSafetyBriefingBanner } from '../components/ShiftSafetyBriefing';
+import { OfficerJobAlertBanner } from '../components/OfficerJobAlertBanner';
+import { useNewDispatchJobAlerts } from '../hooks/useNewDispatchJobAlerts';
+import { unlockAudioOnFirstGesture } from '../lib/officerJobAlerts';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
@@ -77,6 +80,7 @@ import {
 } from '../lib/officerBreadcrumb';
 import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import './OfficerShell.css';
+import './OfficerUsability.css';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
@@ -365,6 +369,17 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
     return !destination || destination.kind === 'bob' || confirmNavigation();
   }, [confirmNavigation, profile?.role]);
 
+  const jobAlerts = useNewDispatchJobAlerts(profile?.id);
+  const dismissJobAlert = jobAlerts.dismiss;
+  useEffect(() => unlockAudioOnFirstGesture(), []);
+  const openDispatchJob = useCallback((jobId: string) => {
+    dismissJobAlert(jobId);
+    if (!canAccessOfficerModule('dispatch')) return;
+    if (location.pathname !== '/officer/dispatch' && !confirmNavigation()) return;
+    navigate(`/officer/dispatch?job=${encodeURIComponent(jobId)}`);
+    setActiveModule('dispatch');
+  }, [canAccessOfficerModule, confirmNavigation, dismissJobAlert, location.pathname, navigate]);
+
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
     if (!destination) return false;
@@ -587,6 +602,8 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
       <main ref={contentRef} data-app-content className="officer-shell-content">
         <OfficerLocationAdvisory shift={activeShift} />
         <OfficerSafetyBriefingBanner shift={activeShift} />
+        {/* Home and Dispatch already lead with the assigned job, so the banner only interrupts other pages. */}
+        <OfficerJobAlertBanner jobs={activeModule === null || activeModule === 'dispatch' ? [] : jobAlerts.jobs} onOpen={openDispatchJob} onDismiss={dismissJobAlert} />
         <OfficerLocationPill />
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">
@@ -603,7 +620,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
         {(officerState === 'standby' || officerState === 'home') && (
           <React.Suspense fallback={<LazyPageFallback />}>
             <OfficerAppInstall />
-            <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} onRefreshShift={refreshShift} />
+            <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} onRefreshShift={refreshShift} onOpenJob={openDispatchJob} />
           </React.Suspense>
         )}
         {(officerState === 'selector' || officerState === 'portal') && (

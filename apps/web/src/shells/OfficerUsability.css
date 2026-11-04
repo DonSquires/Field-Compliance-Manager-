@@ -1,0 +1,116 @@
+/*
+ * Officer portal field-test additions (phone use): new-job alert, job resume
+ * on home, dispatch destination and evidence capture. Base officer type sizes,
+ * tap targets, the action bar, the location pill and the home "More" drawer live in OfficerShell.css.
+ * Scoped to officer-only class names so admin/console surfaces are unaffected.
+ */
+
+/* ---------- New job alert ---------- */
+.officer-job-alert-region { margin: 10px 16px 0; display: grid; gap: 8px; }
+.officer-job-alert {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  border: 2px solid #f59e0b;
+  border-radius: 12px;
+  color: #1c1917;
+  background: #fbbf24;
+  animation: officer-job-alert-pulse 1.4s ease-in-out 3;
+}
+.officer-job-alert.priority-urgent,
+.officer-job-alert.priority-high { border-color: #fecaca; color: #ffffff; background: #b91c1c; }
+.officer-job-alert div { display: grid; min-width: 0; }
+.officer-job-alert strong { font-size: 19px; line-height: 1.2; }
+.officer-job-alert span { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.officer-job-alert .officer-job-alert-open { min-height: 48px; padding: 0 16px; border: 0; border-radius: 8px; color: #ffffff; background: #0f172a; font-size: 16px; font-weight: 850; cursor: pointer; }
+.officer-job-alert .officer-job-alert-dismiss { display: grid; place-items: center; width: 44px; min-height: 44px; border: 0; border-radius: 8px; color: inherit; background: transparent; cursor: pointer; }
+@keyframes officer-job-alert-pulse { 50% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.35); } }
+@media (prefers-reduced-motion: reduce) { .officer-job-alert { animation: none; } }
+.officer-enable-alerts {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid #2dd4bf;
+  border-radius: 10px;
+  color: #ccfbf1;
+  background: #0f2e2d;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.officer-alerts-note { margin: 0; color: #fde68a; font-size: 15px; }
+
+/* ---------- Home: a job the officer already started reads as in progress ---------- */
+.officer-shell .officer-next-job.is-in-progress { border-left-color: #22c55e; }
+
+/* ---------- Dispatch job: destination + evidence ---------- */
+.officer-job-destination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1524;
+}
+.officer-job-destination p { display: flex; align-items: flex-start; gap: 8px; margin: 0; min-width: 0; color: #e2e8f0; }
+.officer-job-destination p span { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.officer-job-destination small { color: #cbd5e1; }
+.officer-job-destination.is-none { border-color: #b45309; color: #fde68a; background: #2c210d; }
+.officer-job-maps-link,
+.officer-route-external {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.officer-route-external { margin-top: 10px; border: 1px solid #2dd4bf; color: #ccfbf1; background: #0f2e2d; }
+.officer-route-status.is-no-location { display: flex; align-items: center; gap: 8px; color: #fde68a; }
+
+.officer-job-evidence { margin-top: 16px; padding-top: 14px; border-top: 1px solid #334155; }
+.officer-job-evidence h4 { margin: 0 0 10px; }
+.officer-job-evidence-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.officer-job-evidence-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.officer-job-evidence-button input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.officer-job-evidence-button:focus-within { outline: 3px solid #2dd4bf; outline-offset: 2px; }
+.officer-job-evidence-button.is-disabled { opacity: 0.6; pointer-events: none; }
+.officer-job-evidence-status p,
+.officer-job-evidence .is-error { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; }
+.officer-job-evidence .is-progress { color: #bae6fd; background: #0c2a3d; }
+.officer-job-evidence .is-success { color: #bbf7d0; background: #0d2a1c; }
+.officer-job-evidence .is-error { color: #fecaca; background: #3a1414; }
+.officer-job-evidence-empty { margin: 10px 0 0; color: #cbd5e1; }
+.officer-job-evidence-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.officer-job-evidence-list li { display: grid; gap: 6px; padding: 6px; border: 1px solid #334155; border-radius: 8px; background: #0b1524; font-size: 14px; overflow-wrap: anywhere; }
+.officer-job-evidence-list img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+.officer-job-evidence-list span { display: grid; }
+
+@media (max-width: 620px) {
+  .officer-job-alert-region { margin-inline: 10px; }
+  .officer-job-alert { grid-template-columns: auto 1fr auto; }
+  .officer-job-alert .officer-job-alert-open { grid-column: 1 / -1; grid-row: 2; }
+  .officer-job-alert .officer-job-alert-dismiss { grid-column: 3; grid-row: 1; }
+}
