@@ -6,6 +6,7 @@ import {
   acknowledgeSourceVersion, holdSourceVersion, isHeldVersion, loadSyncState, pendingSourceVersions,
   photoSourcePaths, runSourceScan, saveSyncState,
 } from './source-sync.mjs';
+import { MAX_NEW_PLACES_PER_SHEET, placeOverlay, placeRegistrationSql, placesToRegister } from './source-places.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CODE = /^[A-Z0-9_-]{1,40}$/;
@@ -31,6 +32,10 @@ export function validateSourceMap(map) {
         || !CODE.test(sheet.client_code ?? '') || !UUID.test(sheet.client_organization_id ?? '')
         || !/^[a-z0-9-]+-zone-map\.json$/.test(sheet.zone_map ?? '')) {
         throw new Error(`${workbook}: sheet mapping is incomplete`);
+      }
+      if (sheet.place_name_suffix !== undefined
+        && (typeof sheet.place_name_suffix !== 'string' || !/^[\p{L}\p{N}&' .-]{1,40}$/u.test(sheet.place_name_suffix))) {
+        throw new Error(`${workbook}: place_name_suffix must be a short client label`);
       }
       for (const [position, alias] of Object.entries(sheet.column_aliases ?? {})) {
         if (!/^[1-9][0-9]{0,2}$/.test(position) || typeof alias?.source_header !== 'string'
@@ -58,15 +63,16 @@ const changedRows = requested => (requested?.inserts ?? 0) + (requested?.updates
 
 // Promotes one workbook version. Every mapped sheet is previewed first; a sheet is committed only
 // when its namespace is proven live and its change volume is within the reviewed limit.
-export async function promoteWorkbookVersion({ version, map, exportPlan, syncPlan, namespaceEventCount, commit }) {
+export async function promoteWorkbookVersion({ version, map, exportPlan, syncPlan, namespaceEventCount, registerPlaces, commit }) {
   const base = { source_relative_path: version.relative_path, source_sha256: version.sha256 };
   const entry = workbookEntry(version.relative_path, map);
   if (entry.hold) return { ...base, status: 'held', reason: entry.hold, sheets: [] };
   const sheets = [];
+  const freshPlan = plan => plan?.mode === 'plan' && plan.source_sha256 === version.sha256;
   for (const sheet of entry.sheets) {
     const label = { sheet: sheet.sheet, client_code: sheet.client_code };
-    const plan = await exportPlan({ version, sheet, map });
-    if (plan?.mode !== 'plan' || plan.source_sha256 !== version.sha256) {
+    let plan = await exportPlan({ version, sheet, map });
+    if (!freshPlan(plan)) {
       return { ...base, status: 'stale', reason: 'source_changed_during_promotion', sheets };
     }
     if (plan.manifest?.client_code !== sheet.client_code
@@ -77,9 +83,26 @@ export async function promoteWorkbookVersion({ version, map, exportPlan, syncPla
       sheets.push({ ...label, status: 'held', reason: 'namespace_unproven' });
       continue;
     }
+    const newPlaces = placesToRegister(plan, sheet);
+    let places;
+    if (newPlaces.length > MAX_NEW_PLACES_PER_SHEET) {
+      sheets.push({ ...label, status: 'held', reason: 'new_place_volume_review', new_places: newPlaces.map(place => place.name) });
+      continue;
+    }
+    if (newPlaces.length && registerPlaces) {
+      // Preview rolls the registration back, so it reports what would be created without creating it.
+      places = await registerPlaces({ version, sheet, map, places: newPlaces, commit });
+      const overlay = commit ? placeOverlay(newPlaces, places) : {};
+      if (Object.keys(overlay).length) {
+        plan = await exportPlan({ version, sheet, map, placeOverlay: overlay });
+        if (!freshPlan(plan)) return { ...base, status: 'stale', reason: 'source_changed_during_promotion', sheets };
+      }
+    } else if (newPlaces.length) {
+      places = newPlaces.map(place => ({ name: place.name, status: 'not_registered' }));
+    }
     const preview = await syncPlan({ sourcePlan: plan, commit: false });
     const summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
-      preview_result: preview.summary };
+      preview_result: preview.summary, ...(places ? { places } : {}) };
     if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
       sheets.push({ ...label, status: 'held', reason: 'change_volume_review', ...summary });
       continue;
@@ -317,7 +340,7 @@ COMMIT;`);
 export async function linkedDeps({ root, map }) {
   const { cliQuery, linkedQuery, runSourceSync } = await import('./reconcile-plan.mjs');
   return {
-    exportPlan: async ({ version, sheet }) => JSON.parse(runNode([
+    exportPlan: async ({ version, sheet, placeOverlay: overlay }) => JSON.parse(runNode([
       path.join(REPO_ROOT, 'scripts', 'import-patrol-log.mjs'), '--export-plan', '--use-supabase-cli',
       '--xlsx', path.join(root, ...version.relative_path.split('/')),
       '--sheet', sheet.sheet, '--header-row', String(sheet.header_row),
@@ -329,7 +352,17 @@ export async function linkedDeps({ root, map }) {
       // their workshop proposals are never created automatically (evidenceOnly below).
       '--include-narratives',
       ...(sheet.column_aliases ? ['--source-column-aliases', JSON.stringify(sheet.column_aliases)] : []),
+      ...(overlay ? ['--place-overlay', JSON.stringify(overlay)] : []),
     ])),
+    registerPlaces: async ({ version, sheet, places, commit }) => {
+      const actors = linkedQuery(`SELECT import_actor_id FROM public.import_source_profiles
+        WHERE organization_id='${map.provider_organization_id}'::uuid AND profile_code='rm_patrol_log' AND active;`);
+      const actorId = actors?.length === 1 ? actors[0].import_actor_id : null;
+      if (!/^[0-9a-f-]{36}$/i.test(actorId ?? '')) throw new Error('The R&M source profile has no configured import identity');
+      return cliQuery(placeRegistrationSql({ actorId, providerId: map.provider_organization_id,
+        clientId: sheet.client_organization_id, places, commit,
+        source: { file: path.posix.basename(version.relative_path), sheet: sheet.sheet, sha256: version.sha256 } })) ?? [];
+    },
     namespaceEventCount: async sheet => {
       const rows = linkedQuery(`SELECT count(*)::integer AS n FROM public.location_events
         WHERE organization_id='${sheet.client_organization_id}'::uuid

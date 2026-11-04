@@ -11,6 +11,7 @@ import {
   indexPhotoTargets,
   isPrivilegedPhotoName,
   matchPhotoTarget,
+  matchPhotoByMinute,
   normalizePlate,
   parsePhotoName,
 } from './rm-photo-matcher.mjs';
@@ -152,6 +153,7 @@ export async function classifyPhoto(relativePath, sourceRoot, byMinute, fileName
   if (!parsed) return { status: 'unnamed' };
   let match = matchPhotoTarget(parsed, relativePath, byMinute);
   if (match.status === 'unmatched' && eventsByMinute) match = matchPhotoTarget(parsed, relativePath, eventsByMinute);
+  if (match.status === 'unmatched') match = matchPhotoByMinute(parsed, byMinute, eventsByMinute);
   if (match.status === 'unmatched' || match.status === 'ambiguous') return { status: match.status, parsed };
   const localPath = sourcePath(sourceRoot, relativePath);
   try {

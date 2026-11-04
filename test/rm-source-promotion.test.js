@@ -228,3 +228,45 @@ test('a photo the attach step holds gets a visible hold, not an applied receipt'
     reason: 'photo_already_attached_to_other_record' }]);
   assert.deepEqual(receipts, {});
 });
+
+const unresolved = (count) => Array.from({ length: count }, (_, index) => ({ name: `New Place ${index}`, reserve_codes: [],
+  locations: [`New Place ${index}`], source_rows: [index] }));
+
+test('unknown places are previewed without being created, then registered and re-exported on commit', async () => {
+  const exports = [];
+  const registrations = [];
+  const base = deps();
+  const run = (commit) => promoteWorkbookVersion({ version, map: sourceMap(), commit, ...base,
+    exportPlan: async ({ placeOverlay }) => { exports.push(placeOverlay ?? null); return { ...plan(), unresolved_places: unresolved(1) }; },
+    registerPlaces: async ({ places, commit: registering }) => { registrations.push(registering);
+      return places.map((place) => ({ name: place.name, status: 'created', zone_id: 'zone-new', agreement_linked: true })); } });
+  const preview = await run(false);
+  assert.equal(preview.status, 'previewed');
+  assert.deepEqual(preview.sheets[0].places, [{ name: 'New Place 0', status: 'created', zone_id: 'zone-new', agreement_linked: true }]);
+  assert.deepEqual(exports, [null]);
+  const applied = await run(true);
+  assert.equal(applied.status, 'applied');
+  assert.deepEqual(registrations, [false, true]);
+  assert.deepEqual(exports.slice(1), [null, { 'New Place 0': 'zone-new' }]);
+});
+
+test('too many unknown places in one sheet are held for a person before anything is created', async () => {
+  const calls = [];
+  let registered = false;
+  const held = await promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps({ calls }),
+    exportPlan: async () => ({ ...plan(), unresolved_places: unresolved(11) }),
+    registerPlaces: async () => { registered = true; return []; } });
+  assert.deepEqual([held.status, held.reason], ['held', 'sheet_new_place_volume_review']);
+  assert.equal(registered, false);
+  assert.deepEqual(calls, []);
+});
+
+test('the source map names new places with each client suffix', async () => {
+  const map = JSON.parse(await readFile(new URL('../services/document-source-worker/rm-patrol-source-map.json', import.meta.url), 'utf8'));
+  const suffixes = Object.values(map.workbooks).flatMap((entry) => entry.sheets ?? []).map((sheet) => sheet.place_name_suffix);
+  assert.ok(suffixes.includes('OneFortyOne'));
+  assert.ok(suffixes.includes('TPFL'));
+  const bad = sourceMap();
+  bad.workbooks[WORKBOOK].sheets[0].place_name_suffix = '';
+  assert.throws(() => validateSourceMap(bad));
+});

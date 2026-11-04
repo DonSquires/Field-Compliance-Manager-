@@ -30,6 +30,7 @@ import { buildChargeCatalog, composeChargeCode } from './patrol-charge-code.mjs'
 import { materialsUsed } from './patrol-materials.mjs';
 import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 import { aucklandInstantFromLocalParts } from './rm-photo-matcher.mjs';
+import { buildPlaceResolver } from './rm-place-resolver.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
@@ -57,7 +58,10 @@ const sourceFirstRow = Number(flag('--source-first-row') ?? (workbookInput && he
 const classificationProfile = flag('--classification-profile');
 const sourceColumnAliases = JSON.parse(flag('--source-column-aliases') ?? '{}');
 const importContextFile = flag('--import-context');
-const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
+const baseZoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
+// Places registered for previously unknown locations (source-promote.mjs) extend the reviewed map.
+const zoneMap = { ...JSON.parse(flag('--place-overlay') ?? '{}'), ...baseZoneMap };
+const resolvePlace = buildPlaceResolver(zoneMap);
 const token = process.env.SUPABASE_ACCESS_TOKEN || process.env.FIELD_COMPLIANCE_CODESPACE;
 if (importContextFile && !exportPlan) { console.error('--import-context is only allowed with --export-plan'); process.exit(1); }
 if (!exportPlan || !importContextFile) {
@@ -361,6 +365,9 @@ const eventsBatch = [];
 const proposalsBatch = [];
 const seenExternalRefs = new Set();
 const unresolvedAliasValues = new Set();
+const unresolvedPlaces = new Map();
+const pendingPlaceNames = {};
+let resolvePendingPlace = buildPlaceResolver(pendingPlaceNames);
 const classificationCounts = { work_subject: {}, work_activity: {}, biosecurity_species: {}, equipment_type: {}, material_type: {} };
 const chargeCodeCounts = {};
 const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
@@ -399,7 +406,8 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   // A zone-map entry is normally a bare zone UUID string; some clients (e.g. Taylors) also have
   // commercial client_sites, not just residential/patrol zones - those entries are written as
   // { "site_id": "<uuid>" } instead, so a single map can resolve to either place type.
-  const resolved = (reserveCode ? zoneMap[reserveCode] : null) ?? zoneMap[locationText] ?? null;
+  const place = resolvePlace(reserveCode, locationText);
+  const resolved = place.target;
   const zoneId = typeof resolved === 'string' ? resolved : null;
   const siteId = resolved && typeof resolved === 'object' ? resolved.site_id ?? null : null;
   const comments = (r[col.comments] ?? '').trim();
@@ -435,6 +443,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     source_file: effectiveSourceLabel, source_sha256: effectiveSourceHash, derivative_sha256: derivativeHash,
     source_sheet: sourceSheet || null, source_row: sourceFirstRow + rowIndex,
     location_raw: locationText, reserve_raw: reserveCode || null,
+    ...(place.match && !['reserve', 'location'].includes(place.match) ? { place_match: place.match } : {}),
     reg_raw: (r[col.registration] ?? '').trim() || null, plates_found: plates,
     job_time_hours: leg ? String(leg.hours) : r[col.jobTime] || null,
     job_kms: leg ? String(leg.kms) : dayResetKms !== null ? String(dayResetKms) : r[col.jobKms] || null,
@@ -500,10 +509,24 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     });
     evidenceRecordType = 'location_events';
   } else {
-    // location_events requires client_site_id XOR zone_id (no placeless events) -
-    // a row whose Location text doesn't resolve to a seeded zone or site has nowhere
-    // valid to attach; skip rather than force/guess a place.
+    // location_events requires client_site_id XOR zone_id (no placeless events). The row is
+    // held and its location is reported so the promoter can register it as a new place.
     skippedNoZone += 1;
+  }
+  if (!zoneId && !siteId && (reserveCode || locationText)) {
+    // Shift markers with no place text at all are not unresolved places.
+    // Spelling variants of the same new place are grouped so they register as one place.
+    const grouped = place.placeName ? resolvePendingPlace(null, locationText || place.placeName).target : null;
+    const key = grouped ?? place.placeName ?? '';
+    if (place.placeName && !grouped) {
+      pendingPlaceNames[key] = key;
+      resolvePendingPlace = buildPlaceResolver(pendingPlaceNames);
+    }
+    const pending = unresolvedPlaces.get(key) ?? { name: place.placeName, reserve_codes: [], locations: [], source_rows: [] };
+    if (reserveCode && !pending.reserve_codes.includes(reserveCode)) pending.reserve_codes.push(reserveCode);
+    if (locationText && !pending.locations.includes(locationText)) pending.locations.push(locationText);
+    pending.source_rows.push(sourceFirstRow + rowIndex);
+    unresolvedPlaces.set(key, pending);
   }
   if (includeNarratives) {
     proposalsBatch.push(...buildPatrolImportProposals({
@@ -604,6 +627,7 @@ if (exportPlan) {
     source_sheet: sourceSheet || null,
     manifest: importManifest,
     schema: importSchema,
+    unresolved_places: [...unresolvedPlaces.values()],
     counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate,
       ...(startLegCorrections ? { start_row_leg_corrections: startLegCorrections } : {}),
       ...(dayResetKmCorrections ? { day_reset_km_corrections: dayResetKmCorrections } : {}) },

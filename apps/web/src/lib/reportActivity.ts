@@ -41,7 +41,7 @@ export interface ActivityReport {
   accountedFor: {
     eventsInScope: number; mirrorEventsExcluded: number; activityEvents: number; observationsInScope: number;
     workOrdersInScope: number; incidentsInScope: number; entries: number; reported: number; operationalWithheld: number;
-    withheldTravelAdmin: number; withheldShiftMarkers: number; itemised: number; notItemised: number; unclassified: number; reconciled: boolean;
+    withheldTravelAdmin: number; withheldShiftMarkers: number; withheldRoutineCards: number; withheldDuplicates: number; itemised: number; notItemised: number; unclassified: number; reconciled: boolean;
   };
   labels: Record<string, Record<string, string>>;
 }
@@ -347,6 +347,7 @@ export function readActivityReport(data: unknown): ActivityReport | null {
       observationsInScope: num(accounted.observationsInScope), workOrdersInScope: num(accounted.workOrdersInScope), incidentsInScope: num(accounted.incidentsInScope),
       entries: num(accounted.entries), reported: num(accounted.reported), operationalWithheld: num(accounted.operationalWithheld),
       withheldTravelAdmin: num(accounted.withheldTravelAdmin), withheldShiftMarkers: num(accounted.withheldShiftMarkers),
+      withheldRoutineCards: num(accounted.withheldRoutineCards), withheldDuplicates: num(accounted.withheldDuplicates),
       itemised: num(accounted.itemised), notItemised: num(accounted.notItemised), unclassified: num(accounted.unclassified), reconciled: accounted.reconciled === true,
     },
     labels,
