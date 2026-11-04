@@ -306,6 +306,11 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     governance: 'WRITE-direct after the caller confirms an in-chat preview; caller JWT; existing audited RPCs only; the database enforces rank and tenant scope',
     effect_class: 'direct_world_change'
   },
+  dispatch_job: {
+    purpose: "CREATE A DISPATCH JOB AND SEND IT TO AN OFFICER when an admin asks you to attend, dispatch, send someone, or turn a website enquiry into a job (e.g. \"create the job for ENQ-024654 and dispatch Don Squires Field\"). Use this instead of saying you cannot dispatch. Args: { place: \"site or zone name, or UUID\", agreement?: \"agreement or client name, or UUID (needed only when the place name is under more than one agreement)\", officer?: \"officer name or UUID (omit to leave the job pending for the console)\", job_type?: \"patrol_support|alarm_response|incident|event|noise_control|welfare_check or plain words\" (default patrol_support), priority?: \"low|normal|high|urgent\" (default normal), sla_minutes?: 1-1440 (default urgent 15, high 30, normal 60, low 240), briefing: \"what the officer must do, when, and why — include the requested attendance time\", enquiry_reference?: \"ENQ-…\" when the job comes from a website enquiry }. Bob resolves the agreement, place and officer with the caller's own access; if any is missing or matches more than one, he lists the choices and asks — he never guesses. The job is created and assigned in one audited database call; a website enquiry is linked and marked converted. Reply with what was created and the console link.",
+    governance: 'WRITE-direct; admiral/captain/commander (canPromote); caller JWT; create_and_assign_dispatch_job enforces provider admin, agreement place and officer membership; audit_log dispatch_job_created_and_assigned',
+    effect_class: 'direct_world_change'
+  },
   laptop_shell: {
     purpose: "Run ONE PowerShell command on the owner's own Windows laptop (fcm-gpu-laptop) over the private Tailscale link — the owner's terminal for Bob. Use it when the owner asks you to look at, list, read, or check something on their computer (folders, documents, the GPU link: `ollama list`, `nvidia-smi`, `tailscale status`, `docker compose ... ps`), or to do setup they asked for. Two-turn: FIRST call with args { command, purpose } to SHOW the exact command; it runs only after the owner's affirmative on the next turn. Prefer read-only commands; never propose deletion, formatting, account/firewall/registry changes, credential access, or download-and-execute — the control plane refuses them. Output comes back capped; summarise it for the owner rather than dumping it. If the laptop is off or the owner's Bob switch is off, say so and tell them how to turn it on (laptop-tailscale.ps1 -Allow).",
     governance: 'WRITE-direct on the owner\'s laptop; admiral only; human-confirms-every-command; owner-toggled SSH; deny list + audit on the control plane',
@@ -413,6 +418,8 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     // update_records applies only the caller's own confirmed preview, as the caller, through audited RPCs
     // that check the caller's real database authority; the conductor tier is not the permission.
     if (tool === 'update_records') return caps.canCompareData;
+    // dispatch_job writes only through create_and_assign_dispatch_job as the caller, which checks provider admin rights.
+    if (tool === 'dispatch_job') return caps.canPromote;
     return caps.tier === 'admiral';
   }
   // admin_diagnostic_substrate_action: tiered by tool
@@ -735,6 +742,9 @@ const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effec
     // update_records: conductor-inline; index.ts previews and, on the caller's next-turn yes, applies
     //   through the caller-scoped record RPCs in _shared/record-updates.mjs. No separate edge function.
     update_records: 'onspace-ai-chat',
+    // dispatch_job: conductor-inline; index.ts resolves names with the caller's access and calls
+    //   create_and_assign_dispatch_job as the caller. No separate edge function.
+    dispatch_job: 'onspace-ai-chat',
     // read_bob_chat: conductor calls callFn('bob-repo-search', { action:
     //   'read_bob_chat' }) — routed through bob-repo-search, not a separate
     //   'bob-read-bob-chat' edge function (which does not exist).

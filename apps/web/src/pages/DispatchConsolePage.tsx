@@ -87,6 +87,7 @@ interface DispatchJob {
   shiftId?: string;
   shiftStopId?: string;
   resourceName: string | null;
+  assignedOfficerId: string | null;
   expectedDwellMinutes: number | null;
   timingSource: string | null;
   createdAt: string;
@@ -266,6 +267,8 @@ const DispatchConsolePage: React.FC = () => {
     selectedAgreement,
     selectedAgreementSites,
     selectedAgreementZones,
+    selectedSite,
+    selectedZone,
     loading: relationshipLoading,
     error: relationshipError,
   } = useServiceRelationships();
@@ -279,6 +282,15 @@ const DispatchConsolePage: React.FC = () => {
   // State: Phase A (Load initial data)
   const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
+  // Opt-in: the shell auto-selects a place on load, so narrowing by it must be the user's explicit choice.
+  const [filterToPlace, setFilterToPlace] = useState(false);
+  const selectedPlace = selectedZone ? { kind: 'zone' as const, id: selectedZone.id, name: selectedZone.name } : selectedSite ? { kind: 'site' as const, id: selectedSite.id, name: selectedSite.name } : null;
+  const placeFilter = filterToPlace ? selectedPlace : null;
+  const listedJobs = useMemo(() => (placeFilter
+    ? jobs.filter((job) => (placeFilter.kind === 'zone' ? job.zoneId : job.siteId) === placeFilter.id)
+    : jobs), [jobs, placeFilter?.kind, placeFilter?.id]);
+  const [jobOfficerOptions, setJobOfficerOptions] = useState<DirectOfficer[]>([]);
+  const [jobOfficerId, setJobOfficerId] = useState('');
   const [alarmsByJob, setAlarmsByJob] = useState<Record<string, AlarmSignal>>({});
   const [sites, setSites] = useState<ClientSite[]>([]);
   const [zones, setZones] = useState<DispatchZone[]>([]);
@@ -463,6 +475,7 @@ const DispatchConsolePage: React.FC = () => {
           shiftId: j.shift_id ?? undefined,
           shiftStopId: j.shift_stop_id ?? undefined,
           resourceName: j.resource?.name ?? null,
+          assignedOfficerId: j.assigned_officer_id ?? null,
           expectedDwellMinutes: j.expected_dwell_minutes ?? null,
           timingSource: j.timing_source ?? null,
           createdAt: j.created_at,
@@ -548,6 +561,21 @@ const DispatchConsolePage: React.FC = () => {
     setJobDetailId(requestedJobId);
     setMobileTab('jobs');
   }, [requestedJobId]);
+
+  // Officers who may take the open job: the agreement's provider officers, independent of shifts or resources.
+  const detailAgreementId = jobs.find((job) => job.id === jobDetailId)?.serviceAgreementId ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    setJobOfficerId('');
+    if (!detailAgreementId) { setJobOfficerOptions([]); return; }
+    void supabase.rpc('list_dispatch_target_officers', { p_service_agreement_id: detailAgreementId }).then(({ data, error: officerError }) => {
+      if (cancelled) return;
+      if (officerError) { setJobOfficerOptions([]); return; }
+      setJobOfficerOptions(((data as Array<{ id: string; display_name: string | null; email: string | null }> | null) ?? [])
+        .map((officer) => ({ id: officer.id, displayName: officer.display_name || officer.email || 'Officer' })));
+    });
+    return () => { cancelled = true; };
+  }, [detailAgreementId, jobDetailId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1138,6 +1166,16 @@ const DispatchConsolePage: React.FC = () => {
   );
 
   const selectedJob = jobs.find((job) => job.id === jobDetailId) ?? null;
+  const placeFilterNotice = placeFilter ? (
+    <div className="dispatch-console-inline-success" role="status">
+      Showing jobs at <strong>{placeFilter.name}</strong> only ({listedJobs.length} of {jobs.length}).{' '}
+      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setFilterToPlace(false)}>Show all agreement jobs</button>
+    </div>
+  ) : selectedPlace && jobs.length > 0 ? (
+    <div className="dispatch-console-form-note">
+      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setFilterToPlace(true)}>Only show jobs at {selectedPlace.name}</button>
+    </div>
+  ) : null;
   const jobTimingLocked = selectedJob ? ['completed', 'cancelled'].includes(selectedJob.status) : true;
   const runsheetInsertUnavailable = !selectedJob
     ? 'Open a dispatch job first.'
@@ -1172,6 +1210,23 @@ const DispatchConsolePage: React.FC = () => {
   const closeJobDetail = () => {
     setJobDetailId(null);
     setShowRunsheetInsertConfirm(false);
+  };
+  const assignedOfficerName = (job: DispatchJob) => job.assignedOfficerId
+    ? (jobOfficerOptions.find((officer) => officer.id === job.assignedOfficerId) ?? directOfficers.find((officer) => officer.id === job.assignedOfficerId))?.displayName ?? 'Queued officer'
+    : null;
+  const assignJobToOfficer = async () => {
+    if (!selectedJob || !jobOfficerId) { setError('Choose the officer who will take this job.'); return; }
+    setOperatorBusy(true); setError(null);
+    // ATLAS WRITES: assign_dispatch_job_to_officer (provider admin + officer membership checked on the server, audited)
+    const { error: assignError } = await supabase.rpc('assign_dispatch_job_to_officer', { p_job_id: selectedJob.id, p_officer_user_id: jobOfficerId });
+    if (assignError) setError(assignError.message);
+    else {
+      const name = jobOfficerOptions.find((officer) => officer.id === jobOfficerId)?.displayName ?? 'the officer';
+      setNotice(`Job queued to ${name} with an audit receipt. It appears in their Field portal dispatch list.`);
+      setJobOfficerId('');
+      await loadPhaseA();
+    }
+    setOperatorBusy(false);
   };
   const manageJobFromDetail = async (action: 'amend' | 'reassign' | 'escalate' | 'cancel') => {
     if (!selectedJob || !jobActionReason.trim()) { setError('Write a short reason before changing this job.'); return; }
@@ -1303,7 +1358,7 @@ const DispatchConsolePage: React.FC = () => {
         <div className="dispatch-job-dialog-grid">
           <div><strong>Status</strong><span>{JOB_STATUS_LABELS[selectedJob.status]}{selectedJob.slaBreached ? ' · response time breached' : ''}</span></div>
           <div><strong>Respond by</strong><span>{selectedJob.slaRespondBy ? new Date(selectedJob.slaRespondBy).toLocaleString('en-NZ') : `Not set (${selectedJob.slaMinutes} min target)`}</span></div>
-          <div><strong>Assigned to</strong><span>{selectedJob.resourceName ?? 'Unassigned'}</span></div>
+          <div><strong>Assigned to</strong><span>{selectedJob.resourceName ?? assignedOfficerName(selectedJob) ?? 'Unassigned'}</span></div>
           <div><strong>Expected attendance</strong><span>{selectedJob.expectedDwellMinutes ?? 5} minutes · {selectedJob.timingSource?.replaceAll('_', ' ') ?? 'dispatch default'}</span></div>
         </div>
 
@@ -1331,6 +1386,31 @@ const DispatchConsolePage: React.FC = () => {
           {selectedJob.briefingNotes && <p><strong>Briefing</strong>{selectedJob.briefingNotes}</p>}
           {selectedJob.accessInstructions && <p><strong>Access</strong>{selectedJob.accessInstructions}</p>}
           {selectedJob.safetyNotes && <p className="is-safety"><strong>Safety</strong>{selectedJob.safetyNotes}</p>}
+        </section>
+
+        <section className="dispatch-job-dialog-actions">
+          <h3>Assign to officer</h3>
+          {jobTimingLocked ? (
+            <p className="dispatch-console-form-note" role="status">This job is closed, so it cannot be reassigned.</p>
+          ) : (
+            <>
+              <p className="dispatch-console-form-note">Queue this job straight to an officer, with or without a shift. It shows in their Field portal dispatch list when this agreement is selected.</p>
+              <label>
+                <span>Officer</span>
+                <select value={jobOfficerId} onChange={(event) => setJobOfficerId(event.target.value)} disabled={operatorBusy}>
+                  <option value="">{jobOfficerOptions.length ? 'Choose an officer…' : 'No officers can take this agreement'}</option>
+                  {jobOfficerOptions.map((officer) => (
+                    <option key={officer.id} value={officer.id}>{officer.displayName}{officer.id === selectedJob.assignedOfficerId ? ' (current)' : ''}</option>
+                  ))}
+                </select>
+              </label>
+              <div>
+                <button type="button" className="btn btn-secondary" disabled={operatorBusy || !jobOfficerId || jobOfficerId === selectedJob.assignedOfficerId} onClick={() => void assignJobToOfficer()}>
+                  Assign to officer
+                </button>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="dispatch-job-dialog-actions">
@@ -1664,7 +1744,7 @@ const DispatchConsolePage: React.FC = () => {
               <span className="dispatch-console-eyebrow">Operations</span>
               <h1>Dispatch console</h1>
             </div>
-            <span className="dispatch-console-page-meta">{jobs.length} active jobs</span>
+            <span className="dispatch-console-page-meta">{listedJobs.length} active jobs</span>
           </header>
         }
         statusStrip={
@@ -1734,10 +1814,11 @@ const DispatchConsolePage: React.FC = () => {
                   </button>
                 )}
                 {newJobPanel}
-                {jobs.length === 0 ? (
+                {placeFilterNotice}
+                {listedJobs.length === 0 ? (
                   <div className="dispatch-console-empty-state">No active jobs</div>
                 ) : (
-                  <DispatchJobList jobs={jobs} onOpen={openJobDetail} />
+                  <DispatchJobList jobs={listedJobs} onOpen={openJobDetail} />
                 )}
               </div>
             )}
@@ -1761,7 +1842,7 @@ const DispatchConsolePage: React.FC = () => {
           </div>
           <div className="dispatch-console-page-meta">
             <span>{activeShifts.length} live shifts</span>
-            <span>{jobs.length} open jobs</span>
+            <span>{listedJobs.length} open jobs</span>
           </div>
         </header>
       }
@@ -1823,12 +1904,13 @@ const DispatchConsolePage: React.FC = () => {
         <div className="dispatch-console-column">
           <div className="dispatch-console-column-header">
             <span>Active Jobs</span>
-            <strong>({jobs.length})</strong>
+            <strong>({listedJobs.length})</strong>
           </div>
 
           {newJobPanel}
+          {placeFilterNotice}
 
-          <DispatchJobList jobs={jobs} onOpen={openJobDetail} />
+          <DispatchJobList jobs={listedJobs} onOpen={openJobDetail} />
         </div>
       </div>
       {jobDetailDialog}

@@ -39,6 +39,16 @@ describe('Website enquiries page', () => {
     expect(page).toContain('Only R&amp;M administrators can see website enquiries');
   });
 
+  it('creates a dispatch job from an enquiry through one governed RPC and links back to it', () => {
+    expect(page).toContain("supabase.rpc('create_and_assign_dispatch_job', {");
+    expect(page).toContain('p_website_enquiry_id: enquiry.id');
+    expect(page).toContain("p_source: 'website_enquiry'");
+    expect(page).toContain("supabase.rpc('list_dispatch_target_officers'");
+    expect(page).toContain('dispatch_job_id');
+    expect(page).toContain('onNavigate(`dispatch?job=${enquiry.dispatch_job_id}`)');
+    expect(page).not.toMatch(/from\('dispatch_jobs'\)/);
+  });
+
   it('lives inside the CRM area instead of a new top-level destination', () => {
     expect(shell).toContain("{ id: 'website-enquiries', label: 'Website enquiries', icon: Inbox }");
     expect(shell).toContain("'website-enquiries': 'crm'");

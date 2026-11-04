@@ -60,6 +60,29 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
       const scopedOrgId = unrestricted ? orgId : profile.organization_id;
       if (!unrestricted && !scopedOrgId) return json({ error: 'No organization scope is available', permanent: true, retryable: false }, 403);
 
+      // A provider serves client organisations whose places (sites/zones) the
+      // client owns. Reach = own branch tree + clients under the tree's agreements.
+      let reachableCache: string[] | null = null;
+      const reachableOrgIds = async (): Promise<string[]> => {
+        if (reachableCache) return reachableCache;
+        const { data: tree, error: treeError } = await admin.rpc('get_descendant_organizations', { org_id: profile.organization_id });
+        if (treeError) throw treeError;
+        const providers = Array.isArray(tree) && tree.length ? (tree as string[]) : [profile.organization_id as string];
+        const { data: agreements, error: agreementError } = await admin
+          .from('service_agreements')
+          .select('client_organization_id')
+          .in('provider_organization_id', providers);
+        if (agreementError) throw agreementError;
+        const clients = (agreements ?? []).map((row: { client_organization_id: string | null }) => row.client_organization_id).filter(Boolean) as string[];
+        reachableCache = [...new Set([...providers, ...clients])];
+        return reachableCache;
+      };
+      const placeOrgId = async (): Promise<string | null> => {
+        if (unrestricted) return orgId;
+        if (orgId && orgId !== scopedOrgId && (await reachableOrgIds()).includes(orgId)) return orgId;
+        return scopedOrgId;
+      };
+
       if (query === 'safety_workspace') {
         const targetOrg = orgId ?? scopedOrgId;
         if (!targetOrg) return json({ error: 'An explicit keeping organisation is required' }, 422);
@@ -90,7 +113,7 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
         const name = String(args.name ?? args.search ?? '').trim();
         if (!name) return json({ error: 'An organization name is required' }, 422);
         let request = admin.from('organizations').select('id, name, organization_type, parent_organization_id, active, status').ilike('name', `%${name}%`).order('name').limit(limit);
-        if (!unrestricted) request = request.eq('id', scopedOrgId);
+        if (!unrestricted) request = request.in('id', await reachableOrgIds());
         const { data, error } = await request;
         if (error) throw error;
         return json({ results: data ?? [] });
@@ -99,7 +122,7 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
       if (query === 'get_org') {
         const targetId = orgId;
         if (!targetId) return json({ error: 'An organization ID is required' }, 422);
-        if (!unrestricted && targetId !== scopedOrgId) return json({ error: 'That organization is outside your operational scope', permanent: true, retryable: false }, 403);
+        if (!unrestricted && !(await reachableOrgIds()).includes(targetId)) return json({ error: 'That organization is outside your operational scope', permanent: true, retryable: false }, 403);
         const { data, error } = await admin.from('organizations').select('id, name, organization_type, parent_organization_id, active, status').eq('id', targetId).maybeSingle();
         if (error) throw error;
         return json({ results: data ? [data] : [] });
@@ -109,15 +132,16 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
         const parentId = asUuid(args.parent_id);
         let request = admin.from('organizations').select('id, name, organization_type, parent_organization_id, active, status').order('name').limit(limit);
         if (parentId) request = request.eq('parent_organization_id', parentId);
-        if (!unrestricted) request = request.eq('id', scopedOrgId);
+        if (!unrestricted) request = request.in('id', await reachableOrgIds());
         const { data, error } = await request;
         if (error) throw error;
         return json({ results: data ?? [] });
       }
 
       if (query === 'list_sites') {
-        if (!scopedOrgId) return json({ error: 'An organization ID is required' }, 422);
-        const { data, error } = await admin.from('client_sites').select('id, client_organization_id, location_id, name, address, active, boundary_status, boundary_verification').eq('client_organization_id', scopedOrgId).order('name').limit(limit);
+        const siteOrgId = await placeOrgId();
+        if (!siteOrgId) return json({ error: 'An organization ID is required' }, 422);
+        const { data, error } = await admin.from('client_sites').select('id, client_organization_id, location_id, name, address, active, boundary_status, boundary_verification').eq('client_organization_id', siteOrgId).order('name').limit(limit);
         if (error) throw error;
         return json({ results: data ?? [] });
       }
@@ -130,8 +154,9 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
       }
 
       if (query === 'list_zones') {
-        if (!scopedOrgId) return json({ error: 'An organization ID is required' }, 422);
-        const { data, error } = await admin.from('location_zones').select('id, organization_id, name, rule_type, is_active, boundary_status, boundary_verification').eq('organization_id', scopedOrgId).order('name').limit(limit);
+        const zoneOrgId = await placeOrgId();
+        if (!zoneOrgId) return json({ error: 'An organization ID is required' }, 422);
+        const { data, error } = await admin.from('location_zones').select('id, organization_id, name, rule_type, is_active, boundary_status, boundary_verification').eq('organization_id', zoneOrgId).order('name').limit(limit);
         if (error) throw error;
         return json({ results: (data ?? []).map((zone) => ({ ...zone, has_boundary: zone.boundary_status === 'authoritative' || zone.boundary_verification === 'verified' })) });
       }

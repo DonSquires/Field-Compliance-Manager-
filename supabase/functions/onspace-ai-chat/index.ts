@@ -41,6 +41,7 @@ import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
+import { matchByName, normalizeJobType, normalizePriority, resolveSlaMinutes, resolveDispatchPlace, describeOptions } from '../_shared/dispatch-job-resolve.mjs';
 import { validateRecordUpdatePlan, amendRecordUpdatePlan, recordUpdateSources, resolveRecordUpdatePlan, renderRecordUpdatePreview, recordUpdateDecision, isTrustedPendingRecordUpdates, signPendingRecordUpdates, verifyPendingRecordUpdates, claimRecordUpdatePreview, applyRecordUpdatePlan, renderRecordUpdateReceipts } from '../_shared/record-updates.mjs';
 const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
 type DbClient = ReturnType<typeof createClient>;
@@ -386,6 +387,7 @@ function safeAgentWorkspaceContext(value: any) {
         'create_builder_job',
         'cancel_builder_job',
         'update_records',
+        'dispatch_job',
         'laptop_shell',
         'create_document_draft',
         'review_merge_request',
@@ -808,6 +810,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'cancel_builder_job',
   // update_records previews person/vehicle/report changes and applies them only on the caller's next-turn yes.
   'update_records',
+  // dispatch_job creates and assigns a live dispatch job through create_and_assign_dispatch_job.
+  'dispatch_job',
   // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
   'laptop_shell',
   'create_document_draft',
@@ -1045,6 +1049,8 @@ async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: 
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   // update_records: every non-guest caller; the audited RPCs it calls as the caller decide what is accepted.
   if (canCompareData) allowedTools.push('update_records');
+  // dispatch_job: write-capable ranks; create_and_assign_dispatch_job still requires provider admin rights.
+  if (canPromote) allowedTools.push('dispatch_job');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
   // Owner ruling 2026-11-01: Bob's Atlas is available at every rank. It maps the
@@ -10052,6 +10058,125 @@ serve(async (req)=>{
                 '```'
               ].join('\n'),
               meta: { tool: 'laptop_shell', outcome: exitCode === 0 ? 'ran' : 'ran_with_error', command: lsCommand, exit_code: exitCode, truncated: run.truncated === true, output_chars: shown.length }
+            };
+          }
+        // dispatch_job: in-app Bob creates a live dispatch job and, when named, queues it to an officer (owner
+        // ruling 2026-11-06: Bob creates and assigns directly for admin callers). Names are resolved with the
+        // caller's own access; anything missing or ambiguous is asked, never guessed. The single write is
+        // create_and_assign_dispatch_job as the caller, which re-checks provider admin, place and officer.
+        case 'dispatch_job':
+          {
+            const toolMeta = (outcome: string, extra: JsonRecord = {}) => ({ tool: 'dispatch_job', outcome, ...extra });
+            if (!caps.canPromote) return { reply: 'Creating dispatch jobs needs an administrator account.', meta: toolMeta('forbidden') };
+            const placeQuery = String(toolArgs.place ?? toolArgs.site ?? toolArgs.zone ?? toolArgs.location ?? '').trim();
+            const agreementQuery = String(toolArgs.agreement ?? toolArgs.client ?? '').trim();
+            const officerQuery = String(toolArgs.officer ?? toolArgs.assign_to ?? '').trim();
+            const briefing = String(toolArgs.briefing ?? toolArgs.briefing_notes ?? toolArgs.instructions ?? '').trim().slice(0, 4000);
+            const enquiryReference = String(toolArgs.enquiry_reference ?? toolArgs.enquiry ?? '').trim().toUpperCase();
+            const jobType = normalizeJobType(toolArgs.job_type);
+            const priority = normalizePriority(toolArgs.priority);
+            if (!jobType) return { reply: 'Which kind of job is this: patrol support, alarm response, incident, event, noise control or welfare check? Nothing has been created.', meta: toolMeta('need_params') };
+            if (!priority) return { reply: 'Should the job be low, normal, high or urgent priority? Nothing has been created.', meta: toolMeta('need_params') };
+            const slaMinutes = resolveSlaMinutes(toolArgs.sla_minutes, priority);
+            if (!slaMinutes) return { reply: 'The response target must be a whole number of minutes from 1 to 1,440. Nothing has been created.', meta: toolMeta('need_params') };
+            if (!briefing) return { reply: 'What should the officer do there, and when? I need a short briefing before I create the job.', meta: toolMeta('need_params') };
+
+            // Enquiry first: its location often names the place when the user did not.
+            let enquiry: JsonRecord | null = null;
+            if (enquiryReference) {
+              const { data: enquiryRows, error: enquiryError } = await callerClient
+                .from('website_enquiries')
+                .select('id, reference, status, location, organisation, dispatch_job_id')
+                .eq('reference', enquiryReference)
+                .limit(1);
+              if (enquiryError || !enquiryRows?.length) return { reply: `I could not find website enquiry ${enquiryReference} in your organisation, so nothing has been created.`, meta: toolMeta('enquiry_not_found') };
+              enquiry = enquiryRows[0] as JsonRecord;
+              if (['closed', 'spam'].includes(String(enquiry.status))) return { reply: `${enquiryReference} is marked ${enquiry.status}. Reopen it in CRM → Website enquiries before creating a job from it.`, meta: toolMeta('enquiry_closed') };
+            }
+
+            const { data: tree } = await callerClient.rpc('get_descendant_organizations', { org_id: orgId });
+            const providerIds = Array.isArray(tree) && tree.length ? tree as string[] : orgId ? [orgId] : [];
+            if (!providerIds.length) return { reply: 'Your account is not attached to an organisation, so I cannot create dispatch jobs for you.', meta: toolMeta('no_org') };
+            const { data: agreementRows, error: agreementError } = await callerClient
+              .from('service_agreements')
+              .select('id, name, agreement_type, client:client_organization_id(name)')
+              .in('provider_organization_id', providerIds)
+              .eq('agreement_type', 'operational');
+            if (agreementError) return { reply: `I could not read your service agreements (${agreementError.message}). Nothing has been created.`, meta: toolMeta('lookup_failed') };
+            const agreements = (agreementRows ?? []).map((row: JsonRecord) => ({ id: String(row.id), name: String(row.name ?? ''), client_name: String((row.client as JsonRecord | null)?.name ?? '') }));
+            const { data: linkRows, error: linkError } = agreements.length
+              ? await callerClient.from('service_agreement_locations').select('service_agreement_id, site_id, zone_id').in('service_agreement_id', agreements.map((a) => a.id)).eq('status', 'active')
+              : { data: [], error: null };
+            if (linkError) return { reply: `I could not read the agreement places (${linkError.message}). Nothing has been created.`, meta: toolMeta('lookup_failed') };
+            const siteIds = [...new Set((linkRows ?? []).map((l: JsonRecord) => l.site_id).filter(Boolean))] as string[];
+            const zoneIds = [...new Set((linkRows ?? []).map((l: JsonRecord) => l.zone_id).filter(Boolean))] as string[];
+            const [{ data: siteRows }, { data: zoneRows }] = await Promise.all([
+              siteIds.length ? callerClient.from('client_sites').select('id, name, active').in('id', siteIds) : Promise.resolve({ data: [] }),
+              zoneIds.length ? callerClient.from('location_zones').select('id, name, is_active').in('id', zoneIds) : Promise.resolve({ data: [] }),
+            ]);
+            const siteById = new Map((siteRows ?? []).filter((s: JsonRecord) => s.active).map((s: JsonRecord) => [String(s.id), String(s.name)]));
+            const zoneById = new Map((zoneRows ?? []).filter((z: JsonRecord) => z.is_active).map((z: JsonRecord) => [String(z.id), String(z.name)]));
+            const places = (linkRows ?? []).flatMap((l: JsonRecord) => {
+              if (l.site_id && siteById.has(String(l.site_id))) return [{ id: String(l.site_id), kind: 'site', name: siteById.get(String(l.site_id)), agreement_id: String(l.service_agreement_id) }];
+              if (l.zone_id && zoneById.has(String(l.zone_id))) return [{ id: String(l.zone_id), kind: 'zone', name: zoneById.get(String(l.zone_id)), agreement_id: String(l.service_agreement_id) }];
+              return [];
+            });
+            const agreementLabel = (id: string) => agreements.find((a) => a.id === id)?.name ?? 'agreement';
+            const resolved = resolveDispatchPlace({ agreements, places, agreementQuery, placeQuery: placeQuery || String(enquiry?.location ?? '').split(/[-,]/)[0] });
+            if (resolved.status === 'agreement_not_found') return { reply: `I could not find a service agreement matching "${agreementQuery}". Nothing has been created.`, meta: toolMeta('agreement_not_found') };
+            if (resolved.status === 'agreement_ambiguous') return { reply: `"${agreementQuery}" matches more than one agreement. Which one?\n${describeOptions(resolved.options)}\n\nNothing has been created.`, meta: toolMeta('ambiguous') };
+            if (resolved.status !== 'ok') {
+              const options = (resolved.options ?? []) as Array<JsonRecord>;
+              const lead = resolved.status === 'place_ambiguous' ? `"${placeQuery}" matches more than one place.` : placeQuery ? `I could not find a site or zone called "${placeQuery}" under ${agreementQuery ? `"${agreementQuery}"` : 'your agreements'}.` : 'Which site or zone should the officer attend?';
+              return {
+                reply: `${lead}${options.length ? ` Choose one:\n${describeOptions(options, (p) => `${p.name} (${agreementLabel(String(p.agreement_id))})`)}` : ' The agreement has no active places; add one under CRM first.'}\n\nNothing has been created.`,
+                meta: toolMeta(resolved.status === 'place_ambiguous' ? 'ambiguous' : 'need_params')
+              };
+            }
+            const agreement = resolved.agreement as { id: string; name: string };
+            const place = resolved.place as { id: string; kind: string; name: string };
+
+            let officer: { id: string; name: string } | null = null;
+            if (officerQuery) {
+              const { data: officerRows, error: officerError } = await callerClient.rpc('list_dispatch_target_officers', { p_service_agreement_id: agreement.id });
+              if (officerError) return { reply: `I could not list officers for ${agreement.name} (${officerError.message}). Nothing has been created.`, meta: toolMeta('lookup_failed') };
+              const officers = (officerRows ?? []).map((o: JsonRecord) => ({ id: String(o.id), name: String(o.display_name || o.email || 'Officer') }));
+              const pickedOfficer = matchByName(officers, officerQuery);
+              if (pickedOfficer.status === 'none') return { reply: `No active officer called "${officerQuery}" can take ${agreement.name} jobs. Nothing has been created.${officers.length ? `\nOfficers who can:\n${describeOptions(officers)}` : ''}`, meta: toolMeta('officer_not_found') };
+              if (pickedOfficer.status === 'many') return { reply: `"${officerQuery}" matches more than one officer. Which one?\n${describeOptions(pickedOfficer.options)}\n\nNothing has been created.`, meta: toolMeta('ambiguous') };
+              officer = pickedOfficer.match;
+            }
+
+            const { data: created, error: createError } = await callerClient.rpc('create_and_assign_dispatch_job', {
+              p_service_agreement_id: agreement.id,
+              p_client_site_id: place.kind === 'site' ? place.id : null,
+              p_zone_id: place.kind === 'zone' ? place.id : null,
+              p_job_type: jobType,
+              p_priority: priority,
+              p_sla_minutes: slaMinutes,
+              p_briefing_notes: briefing,
+              p_officer_user_id: officer?.id ?? null,
+              p_client_request_id: null,
+              p_website_enquiry_id: enquiry?.id ?? null,
+              p_source: 'bob',
+            });
+            if (createError || !created?.job_id) return { reply: `The dispatch job was not created: ${createError?.message ?? 'the database returned no job'}. Nothing was assigned.`, meta: toolMeta('failed') };
+            const jobPath = `/admin/field-ops?area=dispatch&job=${created.job_id}`;
+            const respondBy = created.sla_respond_by ? new Date(String(created.sla_respond_by)).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', dateStyle: 'medium', timeStyle: 'short' }) : null;
+            const lines = [
+              created.created ? `Created a **${priority}** ${jobType.replaceAll('_', ' ')} job at **${place.name}** (${agreement.name}).` : `That job already exists at **${place.name}** (${agreement.name}); I did not create a second one.`,
+              officer ? `Queued to **${officer.name}**. It appears in their Field portal under Dispatch when ${agreement.name} is selected.` : 'It is pending in the dispatch console; nobody has been assigned yet.',
+              respondBy ? `Respond by ${respondBy} (${slaMinutes}-minute target).` : null,
+              enquiry ? `${enquiry.reference} is linked to the job and marked converted.` : null,
+            ].filter(Boolean);
+            return {
+              reply: lines.join('\n'),
+              meta: toolMeta(created.created ? 'created' : 'existing', {
+                dispatch_job_id: created.job_id,
+                assigned_officer_id: created.assigned_officer_id ?? null,
+                website_enquiry_id: enquiry?.id ?? undefined,
+                navigation_actions: [{ label: 'Open the job in the dispatch console', path: jobPath }],
+              })
             };
           }
         case 'check_proposals':
