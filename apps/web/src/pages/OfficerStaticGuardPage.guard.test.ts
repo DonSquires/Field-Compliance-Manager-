@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
 const home = readFileSync(resolve(process.cwd(), 'src/pages/OfficerHomePage.tsx'), 'utf8');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerStaticGuardPage.tsx'), 'utf8');
+const privateBriefing = readFileSync(resolve(process.cwd(), 'src/lib/officerStaticBriefing.ts'), 'utf8');
+const startGateMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261104214253_static_arrival_requires_started_shift.sql'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901014000_static_guard_post_attendance.sql'), 'utf8');
 const shiftUpdateFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901015000_fix_static_guard_shift_updates.sql'), 'utf8');
 const rehydrationMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901016000_rehydrate_static_guard_evidence.sql'), 'utf8');
@@ -19,9 +21,11 @@ describe('officer static guarding post', () => {
     expect(shell).not.toMatch(/case 'site_guard':[\s\S]{0,120}<OfficerDispatchPage/);
   });
 
-  it('uses governed read and attendance RPCs without direct stop mutation', () => {
-    expect(page).toContain("supabase.rpc('get_officer_static_post'");
-    expect(page).toContain('const next = parseStaticPost(data)');
+  it('uses private governed reads and attendance RPCs without direct stop mutation', () => {
+    expect(page).toContain('await fetchOfficerStaticBriefing(requestedShiftId)');
+    expect(privateBriefing).toContain("supabase.functions.invoke('officer-shift-briefing'");
+    expect(page).not.toContain("supabase.rpc('get_officer_static_post'");
+    expect(page).toContain('const next = parseStaticPost(data.post)');
     expect(page).toContain('Static post data was incomplete');
     expect(page).not.toContain('p_zone_ids:');
     expect(page).not.toContain("p_module_key: 'site_guard'");
@@ -59,6 +63,8 @@ describe('officer static guarding post', () => {
     expect(shiftUpdateFix).toContain("update public.shifts set status='in_progress',actual_start=coalesce(actual_start,v_at)");
     expect(shiftUpdateFix).toContain('update public.shifts set completed_stops=');
     expect(shiftUpdateFix).not.toMatch(/update public\.shifts set[^;]*updated_at/);
+    expect(startGateMigration).toContain("v_shift.status<>'in_progress' or v_shift.actual_start is null");
+    expect(startGateMigration).not.toContain("update public.shifts set status='in_progress'");
   });
 
   it('rehydrates durable attendance evidence and suppresses invalid actions from persisted state', () => {
