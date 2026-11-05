@@ -66,6 +66,11 @@
 	background: #301719;
 }
 
+.end-shift-note > svg,
+.end-shift-error > svg {
+	flex-shrink: 0;
+}
+
 .end-shift-checklist {
 	display: grid;
 	gap: 6px;
@@ -117,6 +122,13 @@
 	color: #aebdca;
 	font-size: 12px;
 	line-height: 1.4;
+}
+
+.end-shift-checklist .end-shift-help {
+	color: #f7e3a8;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.45;
 }
 
 .end-shift-checklist li > button {

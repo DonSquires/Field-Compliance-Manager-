@@ -265,6 +265,13 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   entries; closing an unfinished end-shift dialog also
   asks for confirmation. These warnings do not save drafts. Submit work before
   leaving, especially when using the browser's Back or Forward controls.
+- An unfinished shift remains in **Schedule** after its scheduled end. Choose
+  **End shift** to record the debrief and finish once all work is complete.
+  Briefing notes for these earlier shifts are not shown here; if stops or
+  dispatch jobs remain open, contact operations to finish them.
+- Debrief and shift end are separate confirmations. If a debrief response is
+  unconfirmed, retry the same details or contact operations; if the debrief is
+  recorded but the end is unconfirmed, check the shift status before retrying.
 - **3.1 Freedom Camping:** Vehicle scans, SCV validation, overnight stays, breach notices, and evidence capture.
 - **3.2 Parking Enforcement:** Plate lookup, chalking, time-limit rechecks, infringement notice drafting.
 - **3.3 Noise Control:** Incident response, sound level assessment, EXC/END notice issuance.
