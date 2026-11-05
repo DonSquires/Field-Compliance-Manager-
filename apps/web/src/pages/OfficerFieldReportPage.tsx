@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, IdCard
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
@@ -48,6 +49,14 @@ const OfficerFieldReportPage: React.FC = () => {
   const [identityMessage, setIdentityMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
   const capturedAtRef = useRef(new Date().toISOString());
+  useOfficerUnsavedWork(Boolean(
+    submitting || identitySubmitting || form.reportType !== initialForm.reportType || form.severity !== initialForm.severity
+    || form.title || form.description || form.locationName || form.address || form.immediateAction || form.followUp || form.followUpNotes
+    || gps.status === 'captured' || gps.status === 'locating'
+    || identityForm.incidentId || identityForm.displayName || identityForm.notes
+    || identityForm.involvementRole !== initialIdentityForm.involvementRole
+    || identityForm.documentKind !== initialIdentityForm.documentKind || identityFiles.length,
+  ));
 
   const loadData = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {

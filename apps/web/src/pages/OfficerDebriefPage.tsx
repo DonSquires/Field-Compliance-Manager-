@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, Home, RefreshCw, Send, ShieldAlert, Wrench, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { useLocation } from 'react-router-dom';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
@@ -30,6 +31,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
+  useOfficerUnsavedWork(Boolean(submitting || summary || safetyIncident || equipmentIssue || followUp || followUpNotes));
 
   const loadDebriefData = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {

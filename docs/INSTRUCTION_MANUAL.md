@@ -94,7 +94,7 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   Where several sites share a location, choose the intended active site before
   opening scheduling. Area-only locations open agreement/service configuration
   rather than defaulting to another site's schedule.
-- On the officer home page, use **Places**. Select the client and existing
+- In the officer portal, open **Tools** and use **Places**. Select the client and existing
   location, or add a new one. If several site/area boundaries share the
   location, choose the intended boundary. Capture GPS, inspect the map and
   correct the point if needed, then confirm and save.
@@ -250,6 +250,21 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 - Client portfolio management (CRM), service agreements, site/zone geofence management, workforce rostering, HR leave & credentials, and operational finance.
 
 ### Section 3: Specialist Field Officer Portals (`officer`)
+- The bottom field navigation provides **Home**, **Schedule**, **Tools**,
+  **Report**, and **SOS**. The home page keeps the current assignment and
+  personal safety visible; expand **More tools, open shifts and status** for
+  additional actions. On the schedule, expand **Start an unscheduled shift**
+  only when a supervisor has requested unscheduled work.
+- The compact location control shows whether a current service place was
+  resolved. Expand it for the detailed GPS/geofence state; a manually
+  selected place is not proof of the officer's current position. Officers
+  with both admin and field access can switch portals from account tools. On
+  narrow screens, **More** contains instructions, Bob and change requests;
+  notifications and account settings remain in the header.
+- Navigation warns before discarding unfinished reports, debriefs or schedule
+  entries; closing an unfinished end-shift dialog also
+  asks for confirmation. These warnings do not save drafts. Submit work before
+  leaving, especially when using the browser's Back or Forward controls.
 - **3.1 Freedom Camping:** Vehicle scans, SCV validation, overnight stays, breach notices, and evidence capture.
 - **3.2 Parking Enforcement:** Plate lookup, chalking, time-limit rechecks, infringement notice drafting.
 - **3.3 Noise Control:** Incident response, sound level assessment, EXC/END notice issuance.

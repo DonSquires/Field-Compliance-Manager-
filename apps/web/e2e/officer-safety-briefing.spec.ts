@@ -90,6 +90,7 @@ test('unscheduled work is prepared, briefed and only then started', async ({ pag
     await route.fulfill({ json: [{ shift_id: shiftId, started_at: '2026-08-31T05:30:00Z' }] });
   });
   await signInAsOfficer(page);
+  await page.getByText('Start an unscheduled shift', { exact: true }).click();
   await page.getByLabel('Work unit', { exact: true }).selectOption('44444444-4444-4444-8444-444444444445');
   await page.getByRole('button', { name: 'Start unscheduled shift' }).click();
   const dialog = page.getByRole('dialog', { name: 'Before you start: risks on this shift' });

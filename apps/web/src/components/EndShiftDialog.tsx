@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Circle, RefreshCw, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import './EndShiftDialog.css';
 
 export interface EndShiftReadiness {
@@ -54,6 +55,13 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, onClose, onE
   const [followUp, setFollowUp] = useState(false);
   const [followUpNotes, setFollowUpNotes] = useState('');
   const [debriefEventId] = useState(() => crypto.randomUUID());
+  const dirty = Boolean(ending || summary || safetyIncident || equipmentIssue || followUp || followUpNotes);
+  const clearUnsavedWork = useOfficerUnsavedWork(dirty);
+  const leaveDialog = (action: () => void) => {
+    if (dirty && !window.confirm('Your debrief is not confirmed. Leave and lose the unsubmitted writing?')) return;
+    clearUnsavedWork();
+    action();
+  };
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -90,7 +98,7 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, onClose, onE
     <li className={done ? 'is-done' : 'is-open'} key={label}>
       {done ? <CheckCircle2 size={18} aria-hidden="true" /> : <Circle size={18} aria-hidden="true" />}
       <div><strong>{label}</strong>{detail && <span>{detail}</span>}</div>
-      {!done && action && <button type="button" onClick={() => onNavigate(action.destination)}>{action.label}</button>}
+      {!done && action && <button type="button" onClick={() => leaveDialog(() => onNavigate(action.destination))}>{action.label}</button>}
     </li>
   );
 
@@ -100,7 +108,7 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, onClose, onE
       <div className="end-shift-dialog" role="dialog" aria-modal="true" aria-labelledby="end-shift-title">
         <header>
           <div><span>Finish up</span><h2 id="end-shift-title">End {serviceType.replaceAll('_', ' ')} shift</h2></div>
-          <button type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
+          <button type="button" onClick={() => leaveDialog(onClose)} aria-label="Close"><X size={18} /></button>
         </header>
         {error && <p className="end-shift-error" role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}</p>}
         {loading || !readiness ? <p className="end-shift-note"><RefreshCw size={16} className="is-spinning" aria-hidden="true" /> Checking what is still open…</p> : <>
@@ -122,7 +130,7 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, onClose, onE
           </div>}
           {readiness.status !== 'in_progress' && <p className="end-shift-error" role="status">This shift is {readiness.status.replaceAll('_', ' ')}, so there is nothing to end.</p>}
           <footer>
-            <button type="button" onClick={onClose}>Not yet</button>
+            <button type="button" onClick={() => leaveDialog(onClose)}>Not yet</button>
             <button type="button" className="is-primary" disabled={!canEnd || ending} onClick={() => void endShift()}>{ending ? 'Ending…' : needsDebrief ? 'Record debrief and end shift' : 'End shift'}</button>
           </footer>
         </>}

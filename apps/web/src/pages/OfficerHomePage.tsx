@@ -60,7 +60,7 @@ interface OfficerHomePageProps {
   shiftLoading: boolean;
   shiftError: Error | null;
   safety: UseOfficerSafetyApi;
-  onNavigate: (destination: HomeDestination) => void;
+  onNavigate: (destination: HomeDestination | null) => void;
   onRefreshShift: () => Promise<void>;
 }
 
@@ -255,7 +255,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
     setEndingShift(false);
     if (destination === 'stops') onNavigate(activeShiftLaunch?.destination ?? 'patrol');
     else if (destination === 'debrief') onNavigate('schedule');
-    else if (destination === 'home') onNavigate('modules');
+    else if (destination === 'home') onNavigate(null);
     else onNavigate(destination);
   };
 
@@ -282,19 +282,6 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           {online ? 'Online' : 'Offline'}
         </div>
       </header>
-
-      <section className="officer-brief" aria-labelledby="officer-brief-heading">
-        <div className="officer-brief-heading">
-          <div><span className="officer-kicker">At a glance</span><h2 id="officer-brief-heading">Operational brief</h2></div>
-          <span className="officer-brief-time">Live field state</span>
-        </div>
-        <div className="officer-brief-grid">
-          <BriefSignal label="Assignment" value={shift ? serviceTypeLabel(shift.shift_type).label : nextRostered ? `Next: ${describeUpcoming(nextRostered).day}` : 'Standby'} detail={shift ? shift.status.replace('_', ' ') : nextRostered ? (nextRostered.status === 'published' ? 'Waiting for you to accept' : `${describeUpcoming(nextRostered).time} · ${serviceTypeLabel(nextRostered.service_type).label}`) : 'Nothing rostered yet'} tone={shift ? 'active' : 'quiet'} />
-          <BriefSignal label="Route" value={shift ? `${shiftProgress.completed}/${shiftProgress.total} stops` : 'No route'} detail={shift ? `${shiftProgress.percent}% complete` : 'Open your schedule'} tone={shift ? 'active' : 'quiet'} />
-          <BriefSignal label="Safety" value={safetyLabel} detail={safety.activeAlert ? 'Action required' : 'Check-in state confirmed'} tone={safety.activeAlert ? 'alert' : 'active'} />
-          <BriefSignal label="Evidence" value={online ? 'Connected' : 'Queued locally'} detail={online ? 'Ready to submit evidence' : 'Will sync when online'} tone={online ? 'active' : 'warning'} />
-        </div>
-      </section>
 
       {shiftError && (
         <div className="officer-notice is-error" role="alert">
@@ -373,6 +360,10 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
         </section>
       </div>
 
+      {!profile?.organizationId ? <div className="officer-notice is-error" role="status"><AlertTriangle size={18} aria-hidden="true" /> Coverage is unavailable until organisation access is confirmed.</div> : openShiftsError && <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Open shifts could not be checked: {openShiftsError}</span><button type="button" className="btn-secondary" onClick={() => void reload()} disabled={openShiftsLoading}>Try again</button></div>}
+
+      <details className="officer-home-more">
+      <summary>More tools, open shifts and status</summary>
       <section className="officer-quick-actions" aria-labelledby="quick-actions-heading">
         <div className="officer-section-heading">
           <div><span className="officer-kicker">Work tools</span><h2 id="quick-actions-heading">Quick actions</h2></div>
@@ -406,7 +397,6 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           </button>
         </div>
 
-        {!profile?.organizationId ? <div className="officer-notice is-error" role="status"><AlertTriangle size={18} aria-hidden="true" /> Coverage is unavailable until organisation access is confirmed.</div> : openShiftsError && <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>{openShiftsError}</span><button type="button" className="btn-secondary" onClick={() => void reload()} disabled={openShiftsLoading}>Try again</button></div>}
         {notice && <div className="officer-notice is-success" role="status"><CheckCircle2 size={18} aria-hidden="true" /> {notice}</div>}
         {openShiftsLoading ? (
           <div className="officer-shift-empty"><RefreshCw size={20} className="is-spinning" aria-hidden="true" /> Checking coverage</div>
@@ -425,6 +415,19 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           </div>
         )}
       </section>
+      <section className="officer-brief" aria-labelledby="officer-brief-heading">
+        <div className="officer-brief-heading">
+          <div><span className="officer-kicker">At a glance</span><h2 id="officer-brief-heading">Operational brief</h2></div>
+          <span className="officer-brief-time">Live field state</span>
+        </div>
+        <div className="officer-brief-grid">
+          <BriefSignal label="Assignment" value={shift ? serviceTypeLabel(shift.shift_type).label : nextRostered ? `Next: ${describeUpcoming(nextRostered).day}` : 'Standby'} detail={shift ? shift.status.replace('_', ' ') : nextRostered ? (nextRostered.status === 'published' ? 'Waiting for you to accept' : `${describeUpcoming(nextRostered).time} · ${serviceTypeLabel(nextRostered.service_type).label}`) : 'Nothing rostered yet'} tone={shift ? 'active' : 'quiet'} />
+          <BriefSignal label="Route" value={shift ? `${shiftProgress.completed}/${shiftProgress.total} stops` : 'No route'} detail={shift ? `${shiftProgress.percent}% complete` : 'Open your schedule'} tone={shift ? 'active' : 'quiet'} />
+          <BriefSignal label="Safety" value={safetyLabel} detail={safety.activeAlert ? 'Action required' : 'Check-in state confirmed'} tone={safety.activeAlert ? 'alert' : 'active'} />
+          <BriefSignal label="Evidence" value={online ? 'Connected' : 'Queued locally'} detail={online ? 'Ready to submit evidence' : 'Will sync when online'} tone={online ? 'active' : 'warning'} />
+        </div>
+      </section>
+      </details>
     </div>
   );
 }

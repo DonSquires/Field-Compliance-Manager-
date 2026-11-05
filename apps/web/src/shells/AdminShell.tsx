@@ -448,7 +448,7 @@ class LazyPageRecovery extends React.Component<{ pageKey: string; children: Reac
   }
 }
 
-const AdminShell: React.FC = () => {
+const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, signOut, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
@@ -961,6 +961,7 @@ const AdminShell: React.FC = () => {
     <div className="admin-utilities-content">
       <strong>{profile?.displayName ?? profile?.role ?? 'Administrator'}</strong>
       {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
+      {onSwitchPortal && <button type="button" className="admin-portal-switch" onClick={onSwitchPortal}><Radio size={17} aria-hidden="true" />Switch to field portal</button>}
       <ChangeRequestButton compact workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
       <HelpInstructions context={activePage} role={profile?.role} />
       {!isMobile && <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>}
