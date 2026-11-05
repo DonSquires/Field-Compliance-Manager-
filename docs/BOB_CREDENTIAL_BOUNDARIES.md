@@ -67,9 +67,14 @@ rebuild; an image rebuild alone does not update the running launcher.
 
 `officer-shift-briefing` verifies the active user and uses the caller JWT for
 the exact own static assignment and safety RPCs before service-role site,
-work-unit and primary/emergency contact reads. The browser never receives a
-service-role or control-plane credential. Operational contacts are authorised
-structured records, not names inferred from narrative.
+work-unit and shift-contact reads. The browser never receives a service-role or
+control-plane credential. Shift requirements are reviewed as narrative before
+display; warning contact numbers are not inferred as shift contacts. A roster
+administrator explicitly designates the optional contact person and/or phone
+for a particular static roster slot;
+they are not inferred from narrative, account contacts or the place owner.
+The contact is shown only after the linked slot and its assigned officer are
+confirmed. Repeated drafts do not inherit contacts.
 
 The edge calls `/api/bob/officer/privacy` with the existing server-only
 control-plane credential class. That route constructs a fixed
@@ -88,6 +93,10 @@ boundary/outcome, never source text, model output or tokens. This path does
 not upload or approve restricted assessments, grant clinical-history access,
 verify a site boundary, or authorise live attendance. Validate a release with
 synthetic material before sending any approved private source.
+
+The private projection does not itself revoke older raw RPC or table paths.
+Those paths must be traced and protected before treating the projection as a
+complete privacy boundary or releasing the selected-shift changes.
 
 ### Builder Chat cloud PM/QA (owner decision, 2026-10-25)
 

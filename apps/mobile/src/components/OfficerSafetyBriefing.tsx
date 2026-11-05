@@ -1,22 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { fetchMobileShiftSafety, type Briefing, type Place } from '../lib/officerSafetyBriefing';
 import { OfficerTaskRiskAssessments } from './OfficerTaskRiskAssessments';
 
-type Place = { kind: 'site' | 'zone'; id: string; name: string };
-type Hazard = {
-  id: string; title: string; risk_level: string; controls: string[]; details: string | null;
-  status: string; place_name: string; source_name: string | null; source_locator: string | null; has_source_document: boolean;
-};
-type Briefing = {
-  briefing_hash: string; item_count: number; acknowledged: boolean; is_assigned_officer: boolean;
-  hazards: Hazard[]; places: Place[];
-  warnings: Array<{ id: string; hazard_class: string; alert_level: string; reason: string | null }>;
-};
-type Props = { shiftId: string; shiftStatus: string; busy: boolean; onReadyToStart: () => Promise<void> };
+type Props = { shiftId: string; shiftStatus: string; shiftServiceType: string | null; busy: boolean; onReadyToStart: () => Promise<void> };
 
-export function OfficerSafetyBriefing({ shiftId, shiftStatus, busy, onReadyToStart }: Props) {
-  const [briefing, setBriefing] = useState<Briefing | null>(null);
+export function OfficerSafetyBriefing({ shiftId, shiftStatus, shiftServiceType, busy, onReadyToStart }: Props) {
+  const [loaded, setLoaded] = useState<{ context: string; briefing: Briefing } | null>(null);
   const [reading, setReading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -29,32 +20,26 @@ export function OfficerSafetyBriefing({ shiftId, shiftStatus, busy, onReadyToSta
   const [risk, setRisk] = useState('medium');
   const ackRequest = useRef(crypto.randomUUID());
   const reportRequest = useRef(crypto.randomUUID());
-  const context = `${shiftId}:${shiftStatus}`;
+  const context = `${shiftId}:${shiftStatus}:${shiftServiceType ?? 'unknown'}`;
+  const briefing = loaded?.context === context ? loaded.briefing : null;
   const activeContext = useRef(context);
   activeContext.current = context;
   const notStarted = ['scheduled', 'published', 'accepted'].includes(shiftStatus);
 
   const load = useCallback(async () => {
-    if (!supabase) throw new Error('The app is not connected. Safety briefing cannot be checked.');
-    // ATLAS READS: get_shift_safety_briefing
-    const { data, error: failure } = await supabase.rpc('get_shift_safety_briefing', { p_shift_id: shiftId, p_stop_id: null });
-    if (failure) throw new Error(failure.message);
-    if (!data || data.shift_id !== shiftId || data.stop_id !== null
-      || !Array.isArray(data.hazards) || !Array.isArray(data.places) || !Array.isArray(data.warnings)
-      || typeof data.briefing_hash !== 'string' || !data.briefing_hash
-      || !Number.isInteger(data.item_count) || data.item_count !== data.hazards.length + data.warnings.length
-      || typeof data.is_assigned_officer !== 'boolean' || typeof data.acknowledged !== 'boolean') {
-      throw new Error('The server did not return a safety briefing. Retry before starting work.');
-    }
-    const next = data as Briefing;
-    if (activeContext.current === context) {
-      setBriefing(next); setError(null);
-    }
+    const client = supabase;
+    if (!client) throw new Error('The app is not connected. Safety briefing cannot be checked.');
+    const next = await fetchMobileShiftSafety({
+      privateBriefing: (id) => client.functions.invoke('officer-shift-briefing', { body: { shift_id: id } }),
+      generalBriefing: (id) => client.rpc('get_shift_safety_briefing', { p_shift_id: id, p_stop_id: null }),
+    }, shiftId, shiftServiceType);
+    if (activeContext.current !== context) throw new Error('The shift changed. Check safety again before starting work.');
+    setLoaded({ context, briefing: next }); setError(null);
     return next;
-  }, [shiftId, context]);
+  }, [shiftId, shiftServiceType, context]);
 
   useEffect(() => {
-    setBriefing(null); setReading(false); setStarting(false); setReporting(false); setError(null); setNotice(null);
+    setLoaded(null); setReading(false); setStarting(false); setReporting(false); setError(null); setNotice(null);
     let cancelled = false;
     const refresh = async () => {
       try { await load(); }
@@ -152,7 +137,7 @@ export function OfficerSafetyBriefing({ shiftId, shiftStatus, busy, onReadyToSta
       <Text style={styles.buttonText}>{briefing ? 'Read site risks' : 'Retry safety briefing'}</Text>
     </Pressable>
     {reading && briefing && <View style={styles.panel}>
-      {briefing.item_count === 0 && <Text style={styles.text}>No hazards recorded. Stay alert and report anything new.</Text>}
+      {briefing.item_count === 0 && <Text style={styles.text}>No hazards are recorded. This is not safety clearance; check site risks with your supervisor and stay alert.</Text>}
       {briefing.warnings.map((warning) => <Text key={warning.id} style={styles.error}>{warning.alert_level}: {warning.hazard_class.replaceAll('_', ' ')}{warning.reason ? ` - ${warning.reason}` : ''}</Text>)}
       {briefing.hazards.map((hazard) => <View key={hazard.id} style={styles.hazard}>
         <Text style={styles.heading}>{hazard.risk_level.toUpperCase()}: {hazard.title}</Text>

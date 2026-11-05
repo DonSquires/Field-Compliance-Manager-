@@ -123,8 +123,8 @@ Officer selected-shift journey and private briefing (local acceptance, 2026-11-0
   from the schedule, and reports could default to future work. Static arrival
   also auto-started accepted work outside the canonical start/safety flow.
 - **During:** each own assigned static shift opens its exact post, time,
-  address/navigation, configured skills, authorised primary/emergency client
-  contacts and H&S state. Scheduled/published assignments can load a pre-start
+  address/navigation, configured skills, an explicitly roster-designated
+  shift contact (if present) and H&S state. Scheduled/published assignments can load a pre-start
   briefing as well, preserving unscheduled static starts; reading never starts
   work. Start and changed-briefing reload use the private Oracle projection.
   Oracle describes exact findings; Conductor removes spans or withholds whole
@@ -151,7 +151,9 @@ Officer selected-shift journey and private briefing (local acceptance, 2026-11-0
   The private GPU passed all four cases. VPS qualification timed out, so the
   officer route deliberately has no automatic VPS fallback; GPU unavailability
   leaves narrative withheld rather than selecting an unqualified engine.
-- **Live blockers:** the hospital boundary remains mapped but unverified;
+- **Live blockers:** older raw static-post, safety and table paths remain
+  reachable and the private projection alone is not a complete access boundary.
+  The hospital boundary remains mapped but unverified;
   no H&S notes/hazards have been recorded from the restricted assessment.
   The source assessment has not been uploaded or promoted. An empty hazard
   list is not safety clearance. Governed release, deployed-route verification

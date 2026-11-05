@@ -23,7 +23,7 @@ vi.mock('../lib/supabase', () => ({
       const builder = {
         select: () => builder,
         eq: (column: string, value: unknown) => { query.filters.push([column, value]); return builder; },
-        in: () => builder, gte: () => builder, order: () => builder,
+        in: () => builder, or: () => builder, gte: () => builder, order: () => builder,
         limit: async () => ({ data: table === 'shifts' ? state.recent : [], error: null }),
         maybeSingle: async () => { query.exact = true; return { data: state.exact, error: null }; },
       };

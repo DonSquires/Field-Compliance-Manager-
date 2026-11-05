@@ -567,9 +567,13 @@ test('one shift at a time: starting the next shift while still on one is confirm
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
   const stillOn = { id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', notes: 'Night patrol', shift_health: 'on_track', total_stops: 2, ended_reason: null };
-  const next = { id: '77777777-7777-4777-8777-777777777777', service_type: 'site_guard', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: null, shift_health: null, total_stops: 1, ended_reason: null };
+  const next = { id: '77777777-7777-4777-8777-777777777777', service_type: 'static_guarding', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: null, shift_health: null, total_stops: 1, ended_reason: null };
   let started = false;
   await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(started ? [{ ...stillOn, status: 'completed', ended_reason: 'superseded_by_next_shift' }, { ...next, status: 'in_progress' }] : [stillOn, next]) }));
+  await page.route('**/functions/v1/officer-shift-briefing', async (route) => await route.fulfill({ json: {
+    post: { shift: { id: next.id } }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [], privacy: { status: 'checked' },
+    safety: { shift_id: next.id, stop_id: null, places: [], hazards: [], warnings: [], item_count: 0, briefing_hash: 'private-v1', acknowledgement_required: false, acknowledged: false, is_assigned_officer: true },
+  } }));
   await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
   let startPayload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
@@ -607,7 +611,7 @@ test('End shift says what is still open and will not end the shift until it is c
   await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
   await expect(dialog).toHaveScreenshot('officer-end-shift-dialog.png', { maxDiffPixelRatio: 0.03 });
   await dialog.getByRole('button', { name: 'Open stops' }).click();
-  await expect(page).toHaveURL(/\/officer\/patrol$/);
+  await expect(page).toHaveURL(new RegExp(`/officer/patrol\\?shift=${ACTIVE_SHIFT.id}$`));
   expect(completeCalled).toBe(false);
 });
 

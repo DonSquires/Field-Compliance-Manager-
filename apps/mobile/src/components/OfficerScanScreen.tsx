@@ -35,9 +35,9 @@ import { OfficerAccessControlPanel } from './OfficerAccessControlPanel';
 import { registerOfficerDeviceToken, unregisterOfficerDeviceToken } from '../lib/officerNotifications';
 import { userFacingError } from '../lib/userFacingError';
 
-type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null };
+type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null; shiftServiceType: string | null };
 
-export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftId, shiftStatus }: Props) {
+export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftId, shiftStatus, shiftServiceType }: Props) {
   const [moduleKey, setModuleKey] = useState<ScanModuleKey>('freedom_camping');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [plateNumber, setPlateNumber] = useState('');
@@ -129,7 +129,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerSafetyBar officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <NotificationInbox organizationId={organizationId} userId={officerId} />
     <CollapsibleSection title="Shift &amp; dispatch" defaultOpen>
-      <OfficerShiftClockPanel shiftId={shiftId} shiftStatus={shiftStatus} />
+      <OfficerShiftClockPanel shiftId={shiftId} shiftStatus={shiftStatus} shiftServiceType={shiftServiceType} />
       <OfficerDispatchPanel shiftId={shiftId} />
       <OfficerStopPanel shiftId={shiftId} />
     </CollapsibleSection>
