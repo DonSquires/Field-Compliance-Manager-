@@ -267,8 +267,9 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   leaving, especially when using the browser's Back or Forward controls.
 - An unfinished shift remains in **Schedule** after its scheduled end. Choose
   **End shift** to record the debrief and finish once all work is complete.
-  Briefing notes for these earlier shifts are not shown here; if stops or
-  dispatch jobs remain open, contact operations to finish them.
+  Briefing notes and individual stop names for these earlier shifts are
+  withheld here; if stops or dispatch jobs remain open, contact operations
+  to finish them.
 - Debrief and shift end are separate confirmations. If a debrief response is
   unconfirmed, retry the same details or contact operations; if the debrief is
   recorded but the end is unconfirmed, check the shift status before retrying.

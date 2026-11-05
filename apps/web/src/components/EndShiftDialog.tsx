@@ -7,7 +7,6 @@ import './EndShiftDialog.css';
 export interface EndShiftReadiness {
   shift_id: string;
   status: string;
-  service_type: string;
   scheduled_end: string;
   actual_start: string | null;
   open_stops: Array<{ stop_id: string; place: string; status: string; module_key: string | null }>;
@@ -27,6 +26,7 @@ interface EndShiftDialogProps {
   shiftId: string;
   shiftStatus: string;
   serviceType: string;
+  recoveryReadiness?: boolean;
   stopsUnavailableReason?: string;
   dispatchUnavailableReason?: string;
   onClose: () => void;
@@ -52,7 +52,7 @@ const isEndShiftReadiness = (value: unknown, shiftId: string): value is EndShift
   if (!isRecord(value)) return false;
   const counts = ['open_stop_count', 'open_required_task_count', 'open_dispatch_job_count', 'active_welfare_alert_count'];
   return value.shift_id === shiftId
-    && typeof value.status === 'string' && typeof value.service_type === 'string'
+    && typeof value.status === 'string'
     && typeof value.scheduled_end === 'string' && Number.isFinite(Date.parse(value.scheduled_end))
     && (value.actual_start === null || (typeof value.actual_start === 'string' && Number.isFinite(Date.parse(value.actual_start))))
     && counts.every((key) => { const count = value[key]; return typeof count === 'number' && Number.isInteger(count) && count >= 0; })
@@ -76,7 +76,7 @@ const isDebriefReceipt = (value: unknown): boolean =>
   && 'submitted_at' in value && typeof value.submitted_at === 'string' && Number.isFinite(Date.parse(value.submitted_at));
 
 /** One place to end a shift: shows what is still open, takes the debrief if it is missing, then ends. */
-export function EndShiftDialog({ shiftId, shiftStatus, serviceType, stopsUnavailableReason, dispatchUnavailableReason, onClose, onEnded, onNavigate }: EndShiftDialogProps) {
+export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryReadiness = false, stopsUnavailableReason, dispatchUnavailableReason, onClose, onEnded, onNavigate }: EndShiftDialogProps) {
   const [readiness, setReadiness] = useState<EndShiftReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,16 +100,19 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, stopsUnavail
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     // ATLAS READS: get_shift_end_readiness
-    const { data, error: readError } = await supabase.rpc('get_shift_end_readiness', { p_shift_id: shiftId });
+    // ATLAS READS: get_officer_recovery_readiness
+    const { data, error: readError } = recoveryReadiness
+      ? await supabase.rpc('get_officer_recovery_readiness', { p_shift_id: shiftId })
+      : await supabase.rpc('get_shift_end_readiness', { p_shift_id: shiftId });
     if (readError || !isEndShiftReadiness(data, shiftId)) {
-      const message = readError?.message || 'Shift status could not be confirmed. Check again or contact operations.';
+      const message = readError?.message ? `Shift status could not be checked: ${readError.message}. Check again or contact operations.` : 'Shift status could not be confirmed. Check again or contact operations.';
       setReadiness(null); setError(message); setLoading(false);
       return message;
     }
     setReadiness(data);
     setLoading(false);
     return null;
-  }, [shiftId]);
+  }, [shiftId, recoveryReadiness]);
   useEffect(() => { void load(); }, [load]);
 
   const needsDebrief = readiness ? !readiness.debrief_submitted : false;
@@ -169,7 +172,7 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, stopsUnavail
         {loading ? <p className="end-shift-note"><RefreshCw size={16} className="is-spinning" aria-hidden="true" /> Checking what is still open…</p> : !readiness ? <footer><button type="button" onClick={() => void load()}>Check again</button></footer> : <>
           <p className="end-shift-note">{readiness.actual_start ? `On shift for ${workedFor(readiness.actual_start)}.` : ''} Everything below needs a tick before the shift can end.</p>
           <ul className="end-shift-checklist" aria-label="Before the shift can end">
-            {item(readiness.open_stop_count === 0 && readiness.open_required_task_count === 0, readiness.open_stop_count === 0 && readiness.open_required_task_count === 0 ? 'Every stop is done' : `${readiness.open_stop_count} ${readiness.open_stop_count === 1 ? 'stop' : 'stops'} still open`, readiness.open_stops.length ? readiness.open_stops.map((stop) => stop.place).join(', ') : readiness.open_required_task_count ? `${readiness.open_required_task_count} required ${readiness.open_required_task_count === 1 ? 'task' : 'tasks'} not done` : null, stopsUnavailableReason ? undefined : { label: 'Open stops', destination: stopsDestination }, readiness.open_stop_count > 0 || readiness.open_required_task_count > 0 ? stopsUnavailableReason : undefined)}
+            {item(readiness.open_stop_count === 0 && readiness.open_required_task_count === 0, readiness.open_stop_count === 0 && readiness.open_required_task_count === 0 ? 'Every stop is done' : readiness.open_stop_count ? `${readiness.open_stop_count} ${readiness.open_stop_count === 1 ? 'stop' : 'stops'} still open` : `${readiness.open_required_task_count} required ${readiness.open_required_task_count === 1 ? 'task' : 'tasks'} not done`, readiness.open_stops.length ? readiness.open_stops.map((stop) => stop.place).join(', ') : readiness.open_stop_count && readiness.open_required_task_count ? `${readiness.open_required_task_count} required ${readiness.open_required_task_count === 1 ? 'task' : 'tasks'} not done` : null, stopsUnavailableReason ? undefined : { label: 'Open stops', destination: stopsDestination }, readiness.open_stop_count > 0 || readiness.open_required_task_count > 0 ? stopsUnavailableReason : undefined)}
             {item(readiness.open_dispatch_job_count === 0, readiness.open_dispatch_job_count === 0 ? 'No dispatch jobs open' : `${readiness.open_dispatch_job_count} dispatch ${readiness.open_dispatch_job_count === 1 ? 'job' : 'jobs'} still open`, null, dispatchUnavailableReason ? undefined : { label: 'Open dispatch', destination: 'dispatch' }, readiness.open_dispatch_job_count > 0 ? dispatchUnavailableReason : undefined)}
             {item(readiness.active_welfare_alert_count === 0, readiness.active_welfare_alert_count === 0 ? 'No welfare alerts active' : `${readiness.active_welfare_alert_count} welfare ${readiness.active_welfare_alert_count === 1 ? 'alert' : 'alerts'} to resolve`, readiness.active_welfare_alert_count ? 'Resolve it from the safety panel, or call your supervisor.' : null)}
             {item(readiness.debrief_submitted, readiness.debrief_submitted ? 'Debrief recorded' : 'Debrief', readiness.debrief_submitted ? null : 'A few words about the shift, below.')}
