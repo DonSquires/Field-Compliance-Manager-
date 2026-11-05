@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const context = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/context/ServiceRelationshipContext.tsx'), 'utf8');
 const banner = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/PlaceContextBanner.tsx'), 'utf8');
+const officerPill = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/OfficerLocationPill.tsx'), 'utf8');
 const shells = ['OfficerShell.tsx', 'AdminShell.tsx', 'ModuleShell.tsx', 'ScanShell.tsx']
   .map((file) => fs.readFileSync(path.resolve(__dirname, `../apps/web/src/shells/${file}`), 'utf8'));
 const clientShell = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/shells/ClientShell.tsx'), 'utf8');
@@ -33,7 +34,10 @@ test('every authenticated shell shows place context; the officer shell advises o
   // Owner ruling 2026-09-19: officers are told about the geofence only when starting a shift outside it
   // or when leaving a place-bound post mid-shift — never while idle, and never as an automatic "on site".
   assert.match(officerShell, /<OfficerLocationAdvisory shift=\{activeShift\} \/>/);
-  assert.match(officerShell, /<PlaceContextBanner \/>/);
+  assert.match(officerShell, /<OfficerLocationPill \/>/);
+  assert.match(officerPill, /useServiceRelationships\(\)/);
+  assert.match(officerPill, /aria-expanded=\{open\}/);
+  assert.match(officerPill, /hidden=\{!open\}><PlaceContextBanner \/>/);
   // A client reads delivered records: the portal never asks for their position.
   assert.doesNotMatch(clientShell, /PlaceContextBanner/);
   assert.match(context, /if \(locationMode !== 'gps' \|\| !organizationId \|\| profile\?\.role\.startsWith\('client_'\)\) \{/);

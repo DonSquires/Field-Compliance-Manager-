@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
+
+test.afterAll(() => {
+  cpSync(join(process.cwd(), 'e2e', 'officer-schedule.spec.ts-snapshots'), join(process.cwd(), 'test-results', 'officer-schedule-linux-snapshots'), { recursive: true });
+});
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
