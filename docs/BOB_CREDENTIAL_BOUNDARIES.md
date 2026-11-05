@@ -2,6 +2,24 @@
 
 Bob must use the narrowest credential for each operation. Credential values must never appear in prompts, browser code, logs, screenshots, issue bodies, test artifacts, or human-test reports.
 
+## Officer shift recovery (2026-11-06)
+
+The overdue-shift path uses the signed-in officer's existing authorization.
+`get_officer_recovery_readiness` delegates to the existing shift-readiness
+authorization and returns an explicit count-only projection: stop names,
+unrestricted service labels, free-text blockers and future unrecognised fields
+do not reach the browser. The overdue schedule query also omits those labels
+and briefing notes.
+There is no service-role credential or fallback to the raw readiness RPC. The
+migration must be applied through the governed production lane before this
+path can work; a missing projection fails closed and directs the officer to
+operations.
+
+This projection does not close the existing raw RPC, table, patrol, dispatch
+or safety-briefing paths, and it is not an Oracle review of their contents.
+Those separately authorised surfaces must be protected before claiming a
+complete officer-briefing privacy boundary.
+
 ## GitHub support automation (owner decision, 2026-10-24)
 
 GitHub repository secrets now include `SUPABASE_ACCESS_TOKEN`,

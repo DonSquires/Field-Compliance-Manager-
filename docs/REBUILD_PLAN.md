@@ -8,6 +8,24 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Officer overdue-shift recovery (local acceptance, 2026-11-06):
+
+- **Before:** an in-progress shift disappeared from the schedule when its
+  planned end passed, leaving the officer unable to find its debrief/end action.
+- **During:** the schedule finds the officer's own unfinished shift without
+  selecting its notes or unrestricted service label. A caller-authorised
+  server projection provides only readiness counts and no stop names,
+  unrestricted service label or free-text blockers. Open stops or
+  dispatch jobs are not redirected to another shift; the officer is told to
+  contact operations. Debrief and completion receipts are checked separately,
+  and an uncertain debrief retry keeps the original event and details.
+- **After:** a shift can be ended only after its existing server-side checks
+  pass. Fixture browser tests cover phone and desktop recovery, partial
+  failures and unavailable projections; disposable PostgreSQL verifies the
+  projection and existing authorization. The migration and a human-operated
+  live shift remain separate release gates. Existing raw officer paths still
+  need private Oracle protection; this change does not close them.
+
 Existing staff login invitations, 2026-11-05:
 
 - **Before:** imported officer profiles and their HR records can exist without
