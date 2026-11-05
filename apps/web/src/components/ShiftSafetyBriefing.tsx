@@ -10,6 +10,7 @@ import {
   HAZARD_CLASSES, hazardClassLabel, openHazardSource, reportPlaceHazard, RISK_LABELS,
   type BriefingPlace, type RiskLevel, type SafetyBriefing,
 } from '../lib/safetyBriefing';
+import { fetchStaticShiftSafety, isStaticGuardingService } from '../lib/officerStaticBriefing';
 import './ShiftSafetyBriefing.css';
 import { DynamicRiskAssessment } from './DynamicRiskAssessment';
 
@@ -37,7 +38,7 @@ export function SafetyBriefingList({ briefing }: { briefing: SafetyBriefing }) {
   };
 
   if (briefing.item_count === 0) {
-    return <p className="safety-briefing-empty"><CheckCircle2 size={15} aria-hidden="true" /> No recorded hazards or warnings for {briefing.places.length ? briefing.places.map((place) => place.name).join(', ') : 'this shift'}. Stay alert and report anything new.</p>;
+    return <p className="safety-briefing-empty"><AlertTriangle size={15} aria-hidden="true" /> No recorded hazards or warnings for {briefing.places.length ? briefing.places.map((place) => place.name).join(', ') : 'this shift'}. This is not safety clearance; check site risks with your supervisor and stay alert.</p>;
   }
 
   return (
@@ -218,36 +219,41 @@ export function ReportHazardForm({ shiftId, places, onReported, onCancel }: { sh
 const BANNER_REFRESH_MS = 120_000;
 
 /** Mid-shift banner: re-asks for acknowledgement when the briefing changes and lets the officer report a hazard. */
-export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; status: string } | null }) {
-  const [briefing, setBriefing] = useState<SafetyBriefing | null>(null);
+export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; status: string; shift_type: string } | null }) {
+  const [loaded, setLoaded] = useState<{ key: string; briefing: SafetyBriefing } | null>(null);
   const [dialog, setDialog] = useState<'briefing' | 'report' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const shiftId = shift?.status === 'in_progress' ? shift.id : null;
-  const activeShiftId = useRef(shiftId);
-  activeShiftId.current = shiftId;
+  const isStatic = isStaticGuardingService(shift?.shift_type);
+  const contextKey = shiftId ? `${shiftId}:${isStatic ? 'static' : 'general'}` : null;
+  const briefing = loaded?.key === contextKey ? loaded.briefing : null;
+  const activeContext = useRef(contextKey);
+  const requestVersion = useRef(0);
+  activeContext.current = contextKey;
 
   const load = useCallback(async () => {
-    if (!shiftId) { setBriefing(null); return null; }
+    const version = ++requestVersion.current;
+    if (!shiftId || !contextKey) { setLoaded(null); return null; }
     try {
-      const next = await fetchShiftSafetyBriefing(shiftId);
-      if (activeShiftId.current !== shiftId) return null;
-      setBriefing(next);
+      const next = isStatic ? await fetchStaticShiftSafety(shiftId) : await fetchShiftSafetyBriefing(shiftId);
+      if (activeContext.current !== contextKey || requestVersion.current !== version) return null;
+      setLoaded({ key: contextKey, briefing: next });
       setError(null);
       return next;
     } catch (cause) {
-      if (activeShiftId.current !== shiftId) return null;
+      if (activeContext.current !== contextKey || requestVersion.current !== version) return null;
       setError(cause instanceof Error ? cause.message : 'The safety briefing could not be loaded.');
       return null;
     }
-  }, [shiftId]);
+  }, [contextKey, isStatic, shiftId]);
 
   useEffect(() => {
-    setBriefing(null); setDialog(null); setNotice(null); setError(null);
+    setLoaded(null); setDialog(null); setNotice(null); setError(null);
     void load();
     if (!shiftId) return undefined;
     const timer = window.setInterval(() => { void load(); }, BANNER_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    return () => { requestVersion.current += 1; window.clearInterval(timer); };
   }, [load, shiftId]);
 
   if (!shiftId) return null;

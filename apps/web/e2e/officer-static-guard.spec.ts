@@ -9,17 +9,46 @@ const staticPost = {
   attendance_evidence: { arrival: null, departure: null },
 };
 
-function briefing(post = staticPost, status = 'checked') {
+function briefing(post = staticPost, status = 'checked', stopId: string | null = null) {
   return {
     post: status === 'checked' ? post : { ...post, shift: { ...post.shift, notes: null }, stop: { ...post.stop, officer_notes: null }, place: { ...post.place, site_brief: null, access_instructions: null, hs_notes: null } },
-    privacy: { status }, requirements: ['Site induction'],
+    privacy: { status }, requirements: ['Site induction'], roster_notes: status === 'checked' ? 'Check reception.' : null, work_unit_name: status === 'checked' ? 'Civic Centre Static Post' : null,
     contacts: [{ id: 'contact', name: 'Authorised Contact', role: 'Duty manager', phone: '+64000000000', kind: 'Client primary contact' }],
     safety: status === 'checked' ? {
-      shift_id: post.shift.id, stop_id: null, shift_status: post.shift.status, places: [], hazards: [], warnings: [], item_count: 0,
+      shift_id: post.shift.id, stop_id: stopId, shift_status: post.shift.status, places: [], hazards: [], warnings: [], item_count: 0,
       briefing_hash: 'synthetic-private', acknowledgement_required: false, acknowledged: false, acknowledged_at: null, changed_since_acknowledgement: false, is_assigned_officer: true,
     } : null,
   };
 }
+
+test('schedule withholds unreviewed static roster notes but keeps internal work notes', async ({ page }) => {
+  await installOfficerScheduleFixtures(page);
+  const staticSlot = '10101010-1010-4010-8010-101010101010';
+  const internalSlot = '20202020-2020-4020-8020-202020202021';
+  const slotQueries: URL[] = [];
+  await page.route('**/rest/v1/roster_slots*', async (route) => {
+    const url = new URL(route.request().url());
+    slotQueries.push(url);
+    if (url.searchParams.get('select')?.includes('notes')) {
+      await route.fulfill({ json: [{ id: internalSlot, notes: 'Monthly roster reconciliation' }] });
+      return;
+    }
+    await route.fulfill({ json: [
+      { id: staticSlot, work_unit_id: '20202020-2020-4020-8020-202020202020', scheduled_start: '2026-09-03T21:00:00.000Z', scheduled_end: '2026-09-04T01:00:00.000Z', status: 'published', linked_shift_id: null },
+      { id: internalSlot, work_unit_id: '77777777-7777-4777-8777-777777777778', scheduled_start: '2026-09-03T21:00:00.000Z', scheduled_end: '2026-09-04T01:00:00.000Z', status: 'published', linked_shift_id: null },
+    ] });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await expect(page.getByText('Monthly roster reconciliation', { exact: false })).toBeVisible();
+  await expect(page.locator(`#officer-roster-slot-${staticSlot}`)).toContainText('Civic Centre Static Post');
+  const notesRequest = slotQueries.find((url) => url.searchParams.get('select')?.includes('notes'));
+  expect(notesRequest).toBeDefined();
+  expect(notesRequest?.searchParams.get('id')).toContain(internalSlot);
+  expect(notesRequest?.searchParams.get('id')).not.toContain(staticSlot);
+  expect(notesRequest?.searchParams.get('linked_shift_id')).toBe('is.null');
+  expect(notesRequest?.searchParams.get('work_unit.work_unit_type')).toBe('not.eq.static');
+  expect(notesRequest?.searchParams.getAll('work_unit.service_type')).toEqual(['not.ilike.%static%', 'not.ilike.%site_guard%']);
+});
 
 test('selected static post opens its exact shift without a separate arrival action', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);

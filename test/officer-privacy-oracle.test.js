@@ -31,6 +31,7 @@ test('incomplete, duplicate, contradictory and invented privacy findings fail cl
     [finding('site_brief', 'redact', ['Not in source']), finding('hs_notes')],
   ]) assert.throws(() => describe(fields, findings));
   assert.throws(() => describeOfficerPrivacy(fields, '{}', 'openai', 'cloud'));
+  assert.throws(() => describeOfficerPrivacy(fields, '{}', 'ollama', 'unqualified'));
 });
 
 test('changed sources and spans that the shared replacement cannot remove fail closed', async () => {
@@ -63,6 +64,63 @@ test('only the qualified GPU receipt can produce an officer disclosure', async (
   assert.equal(result.fields.site_brief, fields.site_brief);
   await assert.rejects(reviewOfficerPrivacy({ fields, config: {}, invoke: async () => ({ status: 200, body: { ...body, provider: 'ollama' } }) }), /remains withheld/);
 });
+
+test('all fields across bounded batches are reviewed and bound to the complete source', async () => {
+  const fields = Object.fromEntries(Array.from({ length: 45 }, (_, index) => [`hazard_${index}`, index === 44 ? 'Ask Alex Example to check the exit.' : `Control ${index}`]));
+  const batches = [];
+  const result = await reviewOfficerPrivacy({
+    fields, config: {},
+    invoke: async ({ input }) => {
+      const batch = JSON.parse(input.user_prompt);
+      batches.push(batch);
+      assert.ok(Object.keys(batch).length <= 40);
+      assert.ok(JSON.stringify(batch).length <= 30_000);
+      return { status: 200, body: { provider: 'gpu_workstation', model: 'synthetic-private', content: JSON.stringify({
+        fields: Object.keys(batch).map((key) => key === 'hazard_44' ? finding(key, 'redact', ['Alex Example']) : finding(key)),
+      }) } };
+    },
+  });
+  assert.equal(batches.length, 2);
+  assert.deepEqual(Object.keys(result.fields), Object.keys(fields));
+  assert.equal(result.fields.hazard_44, 'Ask [name withheld] to check the exit.');
+  assert.equal(result.privacy.source_hash, require('node:crypto').createHash('sha256').update(JSON.stringify(Object.entries(fields))).digest('hex'));
+});
+
+test('an incomplete later batch or model change withholds the entire briefing', async () => {
+  const fields = Object.fromEntries(Array.from({ length: 41 }, (_, index) => [`field_${index}`, `Value ${index}`]));
+  for (const problem of ['incomplete', 'model-change', 'outage']) {
+    let calls = 0;
+    await assert.rejects(reviewOfficerPrivacy({
+      fields, config: {},
+      invoke: async ({ input }) => {
+        calls += 1;
+        if (calls === 2 && problem === 'outage') return { status: 503 };
+        const keys = Object.keys(JSON.parse(input.user_prompt));
+        return { status: 200, body: {
+          provider: 'gpu_workstation', model: calls === 2 && problem === 'model-change' ? 'different-model' : 'synthetic-private',
+          content: JSON.stringify({ fields: calls === 2 && problem === 'incomplete' ? [] : keys.map((key) => finding(key)) }),
+        } };
+      },
+    }));
+    assert.equal(calls, 2);
+  }
+});
+
+test('batching respects serialized size and rejects an indivisible oversized field', async () => {
+  const batches = [];
+  await reviewOfficerPrivacy({
+    fields: { first: 'a'.repeat(20_000), second: 'b'.repeat(20_000) }, config: {},
+    invoke: async ({ input }) => {
+      const batch = JSON.parse(input.user_prompt);
+      batches.push(batch);
+      return { status: 200, body: { provider: 'gpu_workstation', model: 'synthetic-private', content: JSON.stringify({ fields: Object.keys(batch).map((key) => finding(key)) }) } };
+    },
+  });
+  assert.equal(batches.length, 2);
+  await assert.rejects(reviewOfficerPrivacy({ fields: { oversized: 'a'.repeat(30_000) }, config: {}, invoke: viNeverCalled }), /exceeds the private model envelope/);
+});
+
+function viNeverCalled() { throw new Error('The model must not be invoked for an oversized field'); }
 
 test('private review rejects cloud providers and non-private inference endpoints', () => {
   const config = createModelGatewayConfig({ OLLAMA_BASE_URL: 'http://127.0.0.1:11434', BOB_OLLAMA_MODELS: 'synthetic' });
