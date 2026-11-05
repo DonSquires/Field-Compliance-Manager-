@@ -1,9 +1,296 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
   await installOfficerScheduleFixtures(page);
+});
+
+async function installOverdueShift(page: Page, openStops: boolean, openDispatch = false) {
+  const shift = {
+    id: '45454545-4545-4454-8454-454545454545', service_type: 'patrol', status: 'in_progress',
+    scheduled_start: '2026-08-27T20:00:00.000Z', scheduled_end: '2026-08-28T04:00:00.000Z',
+    shift_health: 'on_track', total_stops: openStops ? 1 : 0, ended_reason: null,
+  };
+  const queries: URLSearchParams[] = [];
+  const actions: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let active = true;
+  await page.route('**/rest/v1/shifts**', async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (!query.get('select')?.includes('shift_health') || !query.has('scheduled_end')) return route.fallback();
+    queries.push(query);
+    await route.fulfill({ json: query.get('scheduled_end')?.startsWith('lt.') && active ? [shift] : [] });
+  });
+  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => {
+    expect(route.request().postDataJSON().p_shift_id).toBe(shift.id);
+    await route.fulfill({ json: {
+      shift_id: shift.id, status: shift.status, service_type: shift.service_type,
+      scheduled_end: shift.scheduled_end, actual_start: shift.scheduled_start,
+      open_stops: openStops ? [{ stop_id: 'stop-1', place: 'Test place', status: 'pending', module_key: 'general_patrol' }] : [],
+      open_stop_count: openStops ? 1 : 0, open_required_task_count: 0,
+      open_dispatch_job_count: openDispatch ? 1 : 0, active_welfare_alert_count: 0, debrief_submitted: false,
+      blockers: openStops ? ['One stop remains open'] : openDispatch ? ['One dispatch job remains open'] : ['The debrief has not been recorded'],
+      can_end: false, can_end_after_debrief: !openStops && !openDispatch,
+    } });
+  });
+  await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => {
+    actions.push({ name: 'debrief', args: route.request().postDataJSON() });
+    await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    actions.push({ name: 'end', args: route.request().postDataJSON() });
+    active = false;
+    await route.fulfill({ json: [{ shift_id: shift.id, shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/get_officer_patrol_stops', async (route) => {
+    actions.push({ name: 'raw-stops', args: route.request().postDataJSON() });
+    await route.fulfill({ json: null });
+  });
+  return { shift, queries, actions };
+}
+
+test('an overdue active shift can be found, debriefed and ended without loading its briefing notes', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  await signInAsOfficer(page, '/officer/schedule');
+  await expect(page.getByText('Briefing notes are not shown here; ask operations.')).toBeVisible();
+  const overdueQuery = fixture.queries.find((query) => query.get('scheduled_end')?.startsWith('lt.'));
+  expect(overdueQuery?.get('officer_user_id')).toBe('eq.22222222-2222-4222-8222-222222222222');
+  expect(overdueQuery?.get('status')).toBe('eq.in_progress');
+  expect(overdueQuery?.get('select')?.split(',')).not.toContain('notes');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await dialog.getByLabel('How did the shift go?').fill('Patrol completed and equipment returned.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toBeVisible();
+  expect(fixture.actions.map((action) => action.name)).toEqual(['debrief', 'end']);
+  expect(fixture.actions[0].args.p_shift_id).toBe(fixture.shift.id);
+  expect(fixture.actions[1].args).toMatchObject({ p_shift_id: fixture.shift.id, p_expected_status: 'in_progress' });
+});
+
+test('a saved overdue debrief stays recorded when ending the shift fails and is retried', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  let debriefs = 0;
+  let endAttempts = 0;
+  await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => {
+    debriefs += 1;
+    await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => {
+    await route.fulfill({ json: {
+      shift_id: fixture.shift.id, status: 'in_progress', service_type: 'patrol',
+      scheduled_end: fixture.shift.scheduled_end, actual_start: fixture.shift.scheduled_start,
+      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      active_welfare_alert_count: 0, debrief_submitted: debriefs > 0, blockers: [],
+      can_end: debriefs > 0, can_end_after_debrief: true,
+    } });
+  });
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    endAttempts += 1;
+    if (endAttempts === 1) return route.fulfill({ status: 409, json: { message: 'Temporary end failure' } });
+    await route.fulfill({ json: [{ shift_id: fixture.shift.id, shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await dialog.getByLabel('How did the shift go?').fill('Patrol completed and equipment returned.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Your debrief was recorded');
+  await expect(dialog.getByRole('alert')).toContainText('The shift end could not be confirmed');
+  await expect(dialog.getByRole('alert')).toContainText('Temporary end failure');
+  await expect(dialog.getByText('Debrief recorded', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'End shift' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toBeVisible();
+  expect(debriefs).toBe(1);
+  expect(endAttempts).toBe(2);
+});
+
+test('an overdue shift status refresh failure offers a retry without hiding the end failure', async ({ page }, testInfo) => {
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 600 });
+  const fixture = await installOverdueShift(page, false);
+  let debriefSubmitted = false;
+  let statusAvailable = true;
+  await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => {
+    debriefSubmitted = true;
+    await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => {
+    if (!statusAvailable) return route.fulfill({ status: 503, json: { message: 'Status temporarily unavailable' } });
+    await route.fulfill({ json: {
+      shift_id: fixture.shift.id, status: 'in_progress', service_type: 'patrol',
+      scheduled_end: fixture.shift.scheduled_end, actual_start: fixture.shift.scheduled_start,
+      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      active_welfare_alert_count: 0, debrief_submitted: debriefSubmitted, blockers: [],
+      can_end: debriefSubmitted, can_end_after_debrief: true,
+    } });
+  });
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    statusAvailable = false;
+    await route.fulfill({ status: 503, json: { message: 'End temporarily unavailable' } });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await dialog.getByLabel('How did the shift go?').fill('Patrol completed and equipment returned.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Your debrief was recorded');
+  await expect(dialog.getByRole('alert')).toContainText('End temporarily unavailable');
+  await expect(dialog.getByRole('alert')).toContainText('Status temporarily unavailable');
+  await expect(dialog.getByText('Checking what is still open…')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'End shift' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Check again' })).toBeVisible();
+  const alertIcon = await dialog.getByRole('alert').locator('svg').boundingBox();
+  expect(alertIcon && alertIcon.width >= 14).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('overdue-end-unconfirmed.png') });
+  statusAvailable = true;
+  await dialog.getByRole('button', { name: 'Check again' }).click();
+  await expect(dialog.getByText('Debrief recorded', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'End shift' })).toBeEnabled();
+});
+
+test('an unconfirmed debrief is retried with the same event before ending an overdue shift', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  const eventIds: string[] = [];
+  const summaries: string[] = [];
+  let endAttempts = 0;
+  await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => {
+    eventIds.push(route.request().postDataJSON().p_client_event_id);
+    summaries.push(route.request().postDataJSON().p_summary);
+    await route.fulfill({ json: eventIds.length === 1 ? [] : [{ id: 'debrief-receipt', created: false, submitted_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    endAttempts += 1;
+    await route.fulfill({ json: [{ shift_id: fixture.shift.id, shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await dialog.getByLabel('How did the shift go?').fill('Patrol completed and equipment returned.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('The debrief could not be confirmed');
+  await expect(dialog.getByLabel('How did the shift go?')).toBeDisabled();
+  expect(endAttempts).toBe(0);
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toBeVisible();
+  expect(eventIds).toHaveLength(2);
+  expect(eventIds[1]).toBe(eventIds[0]);
+  expect(summaries[1]).toBe(summaries[0]);
+  expect(endAttempts).toBe(1);
+});
+
+test('a rejected overdue debrief can be corrected before retrying', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  let attempts = 0;
+  await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => {
+    attempts += 1;
+    if (attempts === 1) return route.fulfill({ status: 400, json: { code: 'P0001', message: 'Please correct the debrief' } });
+    expect(route.request().postDataJSON().p_summary).toBe('Corrected debrief after the rejection.');
+    await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    await route.fulfill({ json: [{ shift_id: fixture.shift.id, shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  const summary = dialog.getByLabel('How did the shift go?');
+  await summary.fill('An initial debrief with enough detail.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Correct the issue before trying again');
+  await expect(summary).toBeEnabled();
+  await summary.fill('Corrected debrief after the rejection.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test('a completion receipt for another shift is not shown as a successful end', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => {
+    expect(route.request().postDataJSON().p_shift_id).toBe(fixture.shift.id);
+    await route.fulfill({ json: [{ shift_id: 'a-different-shift', shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await dialog.getByLabel('How did the shift go?').fill('Patrol completed and equipment returned.');
+  await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('The shift end could not be confirmed');
+  await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toHaveCount(0);
+});
+
+test('wrong-shift and malformed readiness responses cannot enable ending an overdue shift', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false);
+  let responseKind: 'wrong-shift' | 'malformed' | 'valid' = 'wrong-shift';
+  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => {
+    await route.fulfill({ json: {
+      shift_id: responseKind === 'wrong-shift' ? 'a-different-shift' : fixture.shift.id,
+      status: 'in_progress', service_type: 'patrol', scheduled_end: fixture.shift.scheduled_end,
+      actual_start: fixture.shift.scheduled_start, open_stops: responseKind === 'malformed' ? null : [],
+      open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      active_welfare_alert_count: 0, debrief_submitted: false, blockers: [],
+      can_end: false, can_end_after_debrief: true,
+    } });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await expect(dialog.getByRole('alert')).toContainText('Shift status could not be confirmed');
+  await expect(dialog.getByLabel('How did the shift go?')).toHaveCount(0);
+  responseKind = 'malformed';
+  await dialog.getByRole('button', { name: 'Check again' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Shift status could not be confirmed');
+  await expect(dialog.getByLabel('How did the shift go?')).toHaveCount(0);
+  responseKind = 'valid';
+  await dialog.getByRole('button', { name: 'Check again' }).click();
+  await expect(dialog.getByLabel('How did the shift go?')).toBeVisible();
+  expect(fixture.actions).toEqual([]);
+});
+
+test('an overdue shift with open stops directs the officer to operations instead of another shift', async ({ page }, testInfo) => {
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 600 });
+  const fixture = await installOverdueShift(page, true);
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await expect(dialog.getByRole('status')).toContainText('Contact operations to finish them');
+  await dialog.getByRole('status').scrollIntoViewIfNeeded();
+  const reason = await dialog.getByRole('status').boundingBox();
+  const viewport = page.viewportSize();
+  expect(reason && viewport && reason.x >= 0 && reason.x + reason.width <= viewport.width && reason.y >= 0 && reason.y + reason.height <= viewport.height).toBe(true);
+  expect(await dialog.getByRole('status').evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const topmost = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return topmost === element || (topmost !== null && element.contains(topmost));
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('overdue-open-stops.png') });
+  await expect(dialog.getByRole('button', { name: 'Open stops' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
+  expect(fixture.actions).toEqual([]);
+});
+
+test('an overdue shift with open dispatch work directs the officer to operations', async ({ page }) => {
+  const fixture = await installOverdueShift(page, false, true);
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'End shift' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  await expect(dialog.getByRole('status')).toContainText('Dispatch jobs for this earlier shift cannot be opened here yet');
+  await expect(dialog.getByRole('button', { name: 'Open dispatch' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
+  expect(fixture.actions).toEqual([]);
+});
+
+test('an overdue-shift lookup failure is visible on the schedule', async ({ page }) => {
+  await page.route('**/rest/v1/shifts**', async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (query.get('scheduled_end')?.startsWith('lt.')) {
+      return route.fulfill({ status: 403, json: { message: 'Unfinished-shift lookup denied' } });
+    }
+    return route.fallback();
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await expect(page.getByRole('alert')).toContainText("We couldn't load unfinished shifts");
 });
 
 test('officer standby keeps safety available and exposes only self-service work', async ({ page }) => {
@@ -301,6 +588,7 @@ test('when everything is closed, End shift takes the debrief and ends the shift 
   await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
   await dialog.getByLabel('How did the shift go?').fill('Quiet night, all stops visited, gate at Tahunanui left secured.');
   await dialog.getByLabel('Needs follow-up').check();
+  await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
   await dialog.getByLabel('What needs following up?').fill('Gate padlock is stiff.');
   await dialog.getByRole('button', { name: 'Record debrief and end shift' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Shift ended at' })).toBeVisible();
