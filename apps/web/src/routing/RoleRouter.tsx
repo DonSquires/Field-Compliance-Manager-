@@ -123,8 +123,8 @@ export function RoleRouter() {
   if (expectedPrefix === '/admin') {
     return (
       <Routes>
-        <Route path="/admin" element={<AdminShell />} />
-        <Route path="/admin/:page" element={<AdminShell />} />
+        <Route path="/admin" element={<AdminShell onSwitchPortal={role === 'admin_officer' ? () => choosePortal('field') : undefined} />} />
+        <Route path="/admin/:page" element={<AdminShell onSwitchPortal={role === 'admin_officer' ? () => choosePortal('field') : undefined} />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
     );
@@ -133,8 +133,8 @@ export function RoleRouter() {
   if (expectedPrefix === '/officer') {
     return (
       <Routes>
-        <Route path="/officer" element={<OfficerShell />} />
-        <Route path="/officer/:module" element={<OfficerShell />} />
+        <Route path="/officer" element={<OfficerShell onSwitchPortal={role === 'admin_officer' ? () => choosePortal('admin') : undefined} />} />
+        <Route path="/officer/:module" element={<OfficerShell onSwitchPortal={role === 'admin_officer' ? () => choosePortal('admin') : undefined} />} />
         <Route path="*" element={<Navigate to="/officer" replace />} />
       </Routes>
     );

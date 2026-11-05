@@ -16,6 +16,7 @@ test('officer standby keeps safety available and exposes only self-service work'
   await expect(page.getByRole('button', { name: 'Answer now' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Check in now' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'SOS' })).toBeVisible();
+  await page.getByText('More tools, open shifts and status').click();
   await expect(page.getByRole('button', { name: /^My schedule/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Vehicle lookup/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^My credentials/ })).toBeVisible();
@@ -35,6 +36,7 @@ test('officer standby keeps self-service and safety available when shift status 
   await expect(page.getByRole('alert')).toContainText('Roster service is unavailable.');
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Check in now' })).toBeVisible();
+  await page.getByText('More tools, open shifts and status').click();
   await expect(page.getByRole('button', { name: /^My schedule/ })).toBeVisible();
   expect(browserErrors.filter((error) => !error.includes('Roster service is unavailable.') && !error.includes('status of 500'))).toEqual([]);
 });
@@ -78,7 +80,7 @@ test('officer schedule and coverage claim are visually correct and operational',
   await expect(page.locator('.officer-schedule')).toHaveScreenshot('officer-schedule-assigned.png');
 
   await page.getByRole('tab', { name: /Open coverage/ }).click();
-  await expect(page.getByText('Civic Events Centre')).toBeVisible();
+  await expect(page.getByText('Civic Events Centre', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Review claim' }).click();
   const dialog = page.getByRole('dialog', { name: 'Claim this shift?' });
   await expect(dialog).toBeVisible();

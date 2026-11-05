@@ -24,6 +24,7 @@ import {
   Activity,
   BadgeCheck,
   Bot,
+  Building2,
   CalendarDays,
   Car,
   ClipboardList,
@@ -31,8 +32,10 @@ import {
   FilePlus2,
   FileText,
   Grid3X3,
+  Home,
   KeyRound,
   LogOut,
+  MoreHorizontal,
   Map,
   MapPin,
   MessageSquare,
@@ -53,13 +56,14 @@ import { canUseModule, officerRouteModuleKey } from '../lib/moduleAccess';
 import { isAdminTierRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { OfficerUnsavedWorkContext } from '../context/OfficerUnsavedWorkContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { OfficerLocationAdvisory } from '../components/OfficerLocationAdvisory';
+import { OfficerLocationPill } from '../components/OfficerLocationPill';
 import { OfficerSafetyBriefingBanner } from '../components/ShiftSafetyBriefing';
-import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
@@ -148,7 +152,7 @@ const LazyPageFallback: React.FC = () => (
   </div>
 );
 
-const OfficerShell: React.FC = () => {
+const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, signOut, updatePassword } = useAuth();
@@ -179,14 +183,41 @@ const OfficerShell: React.FC = () => {
   const [offeredCount, setOfferedCount] = useState(0);
   const [bobOpen, setBobOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
+  const contentRef = useRef<HTMLElement | null>(null);
+  const moreToolsRef = useRef<HTMLDivElement | null>(null);
+  const moreToolsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const unsavedWork = useRef(new Set<symbol>());
+  const registerUnsavedWork = useCallback((id: symbol, dirty: boolean) => {
+    if (dirty) unsavedWork.current.add(id);
+    else unsavedWork.current.delete(id);
+  }, []);
+  const confirmNavigation = useCallback(() => unsavedWork.current.size === 0
+    || window.confirm('You have unsubmitted field work. Leave and lose the unsaved entries?'), []);
 
   useEffect(() => { setLocationMode('gps'); }, [setLocationMode]);
+  useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; setMoreToolsOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    if (!moreToolsOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!moreToolsRef.current?.contains(event.target as Node)) setMoreToolsOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [moreToolsOpen]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (unsavedWork.current.size) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -304,20 +335,28 @@ const OfficerShell: React.FC = () => {
   }, [profile?.id]);
 
   // Navigate to module
-  const navigateToModule = useCallback((module: ActiveModule) => {
+  const navigateToModule = useCallback((module: ActiveModule, navigationConfirmed = false) => {
+    const target = module === null ? '/officer' : `/officer/${module}`;
+    if (target !== location.pathname && !navigationConfirmed && !confirmNavigation()) return false;
     if (module === null) {
       navigate('/officer');
       setActiveModule(null);
-      return;
+      return true;
     }
     if (!canAccessOfficerModule(module)) {
       navigate('/officer', { replace: true });
       setActiveModule(null);
-      return;
+      return true;
     }
-    navigate(`/officer/${module}`);
+    navigate(target);
     setActiveModule(module);
-  }, [canAccessOfficerModule, navigate]);
+    return true;
+  }, [canAccessOfficerModule, confirmNavigation, location.pathname, navigate]);
+
+  const confirmNotificationNavigation = useCallback((notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
+    return !destination || destination.kind === 'bob' || confirmNavigation();
+  }, [confirmNavigation, profile?.role]);
 
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
@@ -327,8 +366,7 @@ const OfficerShell: React.FC = () => {
       return true;
     }
     if (destination.kind === 'officer_module') {
-      navigateToModule(destination.module as ActiveModule);
-      return true;
+      return navigateToModule(destination.module as ActiveModule, true);
     }
     if (destination.kind === 'officer_report') {
       const report = destination.reportId ? `?report=${encodeURIComponent(destination.reportId)}` : '';
@@ -499,9 +537,10 @@ const OfficerShell: React.FC = () => {
   }, [activeModule, grantedModules, navigate, navigateToModule]);
 
   return (
+    <OfficerUnsavedWorkContext.Provider value={registerUnsavedWork}>
     <div className="officer-shell" data-theme="dark">
       <header className="officer-shell-header">
-        <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home">
+        <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home" aria-label="Field portal home">
           <img
             src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
             alt="Iron Eagle Security"
@@ -512,27 +551,36 @@ const OfficerShell: React.FC = () => {
 
         <div className="officer-shell-tools">
           {offeredCount > 0 && <span className="officer-offer-count" title={`${offeredCount} offered shifts`}>{offeredCount}</span>}
-          <button type="button" className={`officer-safety-chip welfare-${currentWelfareStatus}`} onClick={() => void safety.checkIn()} disabled={safety.writeStatus === 'pending'} title="Check in now">
+          <button type="button" className={`officer-safety-chip welfare-${currentWelfareStatus}`} onClick={() => void safety.checkIn()} disabled={safety.writeStatus === 'pending'} title="Check in now" aria-label={`${welfareLabel}. Check in`}>
             <span>{welfareDisplay.dot}</span><small>{welfareLabel}</small>
           </button>
-          <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
-          <ChangeRequestButton compact workspaceLabel="Officer operations" />
-          <NotificationCenter onNavigate={navigateFromNotification} />
-          <HelpInstructions context={activeModule ?? officerState} role={profile?.role} />
-          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
-            <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
-          </button>
+          <NotificationCenter onBeforeNavigate={confirmNotificationNavigation} onNavigate={navigateFromNotification} />
           <button type="button" className="officer-profile-chip" onClick={() => { setAccountOpen(true); setAccountMessage(null); }} title="Account settings" aria-label="Account settings">
             <UserRound size={17} aria-hidden="true" /><span>{profile?.displayName?.split(' ')[0] ?? 'Officer'}</span>
           </button>
+          <div className="officer-secondary-container" ref={moreToolsRef} onKeyDown={(event) => {
+            if (event.key === 'Escape' && moreToolsOpen) { setMoreToolsOpen(false); moreToolsButtonRef.current?.focus(); }
+          }}>
+            <button type="button" ref={moreToolsButtonRef} className="officer-more-tools" aria-label="More field tools" aria-expanded={moreToolsOpen} aria-controls="officer-secondary-tools" onClick={() => setMoreToolsOpen((value) => !value)}>
+              <MoreHorizontal size={21} aria-hidden="true" /><span>More</span>
+            </button>
+            <div id="officer-secondary-tools" className={`officer-secondary-tools ${moreToolsOpen ? 'is-open' : ''}`}>
+              <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
+              <div className="officer-secondary-item"><ChangeRequestButton compact workspaceLabel="Officer operations" /><span className="officer-secondary-label">Request a change</span></div>
+              <div className="officer-secondary-item"><HelpInstructions context={activeModule ?? officerState} role={profile?.role} /><span className="officer-secondary-label">Instructions</span></div>
+              <div className="officer-secondary-item"><button type="button" className="officer-shell-icon" onClick={() => { setBobOpen(true); setMoreToolsOpen(false); }} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
+                <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
+              </button><span className="officer-secondary-label">Open Bob</span></div>
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="bob-page-layout">
-      <main data-app-content className="officer-shell-content">
+      <main ref={contentRef} data-app-content className="officer-shell-content">
         <OfficerLocationAdvisory shift={activeShift} />
         <OfficerSafetyBriefingBanner shift={activeShift} />
-        <PlaceContextBanner />
+        <OfficerLocationPill />
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">
             Safety action not confirmed: {safety.lastError}
@@ -565,6 +613,12 @@ const OfficerShell: React.FC = () => {
       </div>
 
       <nav className="officer-action-bar" aria-label="Field actions">
+        <button type="button" onClick={() => navigateToModule(null)} className={activeModule === null ? 'is-active' : ''} aria-current={activeModule === null ? 'page' : undefined}>
+          <Home size={19} aria-hidden="true" /><span>Home</span>
+        </button>
+        <button type="button" onClick={() => navigateToModule('schedule')} className={activeModule === 'schedule' ? 'is-active' : ''} aria-current={activeModule === 'schedule' ? 'page' : undefined}>
+          <CalendarDays size={19} aria-hidden="true" /><span>Schedule</span>
+        </button>
         <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''} aria-current={activeModule === 'modules' ? 'page' : undefined}>
           <Grid3X3 size={19} aria-hidden="true" /><span>Tools</span>
         </button>
@@ -581,13 +635,15 @@ const OfficerShell: React.FC = () => {
           <section className="officer-account-dialog" role="dialog" aria-modal="true" aria-labelledby="officer-account-title" onClick={(event) => event.stopPropagation()}>
             <header><div><span>Account</span><h2 id="officer-account-title">{profile?.displayName ?? 'Officer'}</h2><p>{profile?.email ?? profile?.role ?? 'Officer account'}</p></div><button type="button" onClick={() => setAccountOpen(false)} aria-label="Close account settings"><X size={18} /></button></header>
             <div className="officer-account-role">{profile?.role?.replaceAll('_', ' ') ?? 'Officer'}</div>
+            {onSwitchPortal && <button type="button" className="officer-account-switch" onClick={() => { if (confirmNavigation()) onSwitchPortal(); }}><Building2 size={17} aria-hidden="true" />Switch to admin portal</button>}
             <form onSubmit={(event) => void savePassword(event)}><label><span>New password</span><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 8 characters" /></label><button type="submit" disabled={savingPassword || newPassword.length < 8}><KeyRound size={16} />{savingPassword ? 'Updating password' : 'Update password'}</button></form>
             {accountMessage && <p className="officer-account-message" role="status">{accountMessage}</p>}
-            <button type="button" className="officer-account-signout" onClick={() => void signOut()}><LogOut size={16} />Sign out</button>
+            <button type="button" className="officer-account-signout" onClick={() => { if (confirmNavigation()) void signOut(); }}><LogOut size={16} />Sign out</button>
           </section>
         </div>
       )}
     </div>
+    </OfficerUnsavedWorkContext.Provider>
   );
 };
 

@@ -6,7 +6,7 @@ const source = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'
 
 describe('OfficerShell state routing', () => {
   it('integrates role-aware notifications', () => {
-    expect(source).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
+    expect(source).toContain('<NotificationCenter onBeforeNavigate={confirmNotificationNavigation} onNavigate={navigateFromNotification} />');
     expect(source).toContain('resolveNotificationDestination');
   });
 
@@ -35,7 +35,8 @@ describe('OfficerShell state routing', () => {
 
   it('routes the module selector to its own URL', () => {
     expect(source).not.toContain("module === 'modules' || module === null");
-    expect(source).toContain('navigate(`/officer/${module}`');
+    expect(source).toContain("module === null ? '/officer' : `/officer/${module}`");
+    expect(source).toContain('navigate(target)');
   });
 
   it('routes post-debrief actions through the owning officer shell', () => {
@@ -58,7 +59,7 @@ describe('OfficerShell state routing', () => {
   it('exposes stateful accessible semantics on persistent controls', () => {
     expect(source).toContain('aria-label="Open Bob command center"');
     // Bob docks beside the working page rather than replacing it.
-    expect(source).toContain('onClick={() => setBobOpen(true)}');
+    expect(source).toContain('setBobOpen(true); setMoreToolsOpen(false)');
     expect(source).toContain('aria-expanded={bobOpen}');
     expect(source).toContain("aria-current={activeModule === 'modules' ? 'page' : undefined}");
     expect(source).toContain("aria-current={activeModule === 'report' ? 'page' : undefined}");

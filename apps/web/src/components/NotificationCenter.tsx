@@ -23,12 +23,13 @@ export interface NotificationRecord {
 }
 
 interface NotificationCenterProps {
+  onBeforeNavigate?: (notification: NotificationRecord) => boolean;
   onNavigate?: (notification: NotificationRecord) => boolean | void;
 }
 
 type ViewFilter = 'all' | 'unread' | 'critical';
 
-export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
+export function NotificationCenter({ onBeforeNavigate, onNavigate }: NotificationCenterProps) {
   const { profile } = useAuth();
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -116,6 +117,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
   }, []);
 
   const openNotification = async (notification: NotificationRecord) => {
+    if (onBeforeNavigate?.(notification) === false) return;
     if (!notification.read_at && !(await markRead([notification.id]))) return;
     const handled = onNavigate?.(notification);
     if (handled !== false) setOpen(false);
