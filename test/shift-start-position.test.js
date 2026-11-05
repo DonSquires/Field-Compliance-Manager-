@@ -41,7 +41,7 @@ test('the schedule advises before an off-site or blind start and passes the reas
 
 test('the officer shell only warns about the geofence on a place-bound shift in progress, judged by the server', () => {
   assert.match(officerShell, /<OfficerLocationAdvisory shift=\{activeShift\} \/>/);
-  assert.match(officerShell, /<PlaceContextBanner \/>/);
+  assert.match(officerShell, /<OfficerLocationPill \/>/);
   assert.match(advisory, /const active = Boolean\(shift && shift\.status === 'in_progress'\);/);
   assert.match(advisory, /if \(!shift \|\| !active\) return null;/);
   assert.match(advisory, /supabase\.rpc\('evaluate_shift_start_position', \{ p_shift_id: shiftId, p_gps_lat: lat, p_gps_lng: lng \}\)/);

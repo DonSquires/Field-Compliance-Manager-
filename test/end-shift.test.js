@@ -51,7 +51,8 @@ test('the End shift dialog reads readiness, takes the missing debrief, then ends
   assert.match(dialog, /summary\.trim\(\)\.length >= 10/);
   assert.match(dialog, /Everything below needs a tick before the shift can end\./);
   assert.match(dialog, /needsDebrief \? 'Record debrief and end shift' : 'End shift'/);
-  assert.match(dialog, /<button type="button" onClick=\{onClose\}>Not yet<\/button>/);
+  assert.match(dialog, /if \(dirty && !window\.confirm\('Your debrief is not confirmed\./);
+  assert.match(dialog, /<button type="button" onClick=\{\(\) => leaveDialog\(onClose\)\}>Not yet<\/button>/);
 });
 
 test('End shift is offered on the in-progress card of the schedule and on the home page, and the debrief page says End, not Complete', () => {
