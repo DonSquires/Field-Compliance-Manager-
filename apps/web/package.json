@@ -9,7 +9,7 @@
     "holidays:generate": "node scripts/generate-nz-holidays.cjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:ci-smoke": "playwright test officer-schedule.spec.ts --workers=2 --update-snapshots",
+    "test:e2e:ci-smoke": "playwright test e2e/admin-hub-dispatch.spec.ts e2e/dr-bob-automation-geofence-module.spec.ts e2e/geofence-spine-map.spec.ts e2e/officer-module-entitlements.spec.ts --project=desktop-chromium --workers=1 && playwright test officer-navigation.spec.ts officer-schedule.spec.ts officer-safety-briefing.spec.ts --workers=2",
     "test:e2e:human": "playwright test e2e/dr-bob-human-test.spec.ts",
     "test:e2e:human:live": "HUMAN_TEST_LIVE=true playwright test e2e/dr-bob-human-test.spec.ts",
     "test:e2e:update": "playwright test --update-snapshots",
