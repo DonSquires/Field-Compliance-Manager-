@@ -31,8 +31,8 @@ test('the Create shift dialog tells the rosterer, in plain words, and never bloc
   assert.match(rosterPage, /className=\{`roster-coverage-note is-\$\{words\.tone\}`\} role=\{words\.tone === 'warn' \? 'alert' : 'status'\}/);
   // the submit button's disabled condition does not depend on the preview; a new shift may be an
   // open (unassigned) slot, so only editing an existing draft slot requires an officer
-  assert.match(rosterPage, /disabled=\{saving \|\| Boolean\(editingSlot && !form\.officerId\) \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}>\{saving \? 'Creating' : 'Create shift'\}/);
-  assert.doesNotMatch(rosterPage, /disabled=\{[^}]*preview[^}]*\}>\{saving \? 'Creating' : 'Create shift'\}/);
+  assert.match(rosterPage, /disabled=\{saving \|\| Boolean\(editingSlot && !form\.officerId\) \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}>\{saving \? 'Saving' : editingSlot \? 'Save draft' : 'Create shift'\}/);
+  assert.doesNotMatch(rosterPage, /disabled=\{[^}]*preview[^}]*\}>\{saving \? 'Saving' : editingSlot \? 'Save draft' : 'Create shift'\}/);
   assert.match(rosterPage, /p_staff_id: person\?\.staffId \?\? null/);
 });
 
