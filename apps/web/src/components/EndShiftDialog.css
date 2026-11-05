@@ -233,7 +233,14 @@
 	}
 
 	.end-shift-dialog footer {
+		position: sticky;
+		z-index: 1;
+		bottom: -17px;
 		flex-direction: column-reverse;
+		margin: 15px -17px -17px;
+		padding: 10px 17px 17px;
+		border-top: 1px solid #2d4153;
+		background: #0b1725;
 	}
 
 	.end-shift-dialog footer button {

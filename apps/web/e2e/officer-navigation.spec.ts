@@ -148,7 +148,8 @@ test('cancelling navigation from an unread notification does not mark it read', 
   expect(marks).toBe(1);
 });
 
-test('ending a shift protects unfinished debrief text when closing or opening stops', async ({ page }) => {
+test('ending a shift protects unfinished debrief text when closing or opening stops', async ({ page }, testInfo) => {
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 600 });
   await installOfficerScheduleFixtures(page);
   const active = {
     id: '12121212-1212-4212-8212-121212121212', organization_id: '11111111-1111-4111-8111-111111111111',
@@ -168,6 +169,11 @@ test('ending a shift protects unfinished debrief text when closing or opening st
   await signInAsOfficer(page, '/officer/schedule');
   await page.getByRole('button', { name: 'End shift' }).click();
   const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
+  if (testInfo.project.name.includes('mobile')) {
+    const end = await dialog.getByRole('button', { name: 'Record debrief and end shift' }).boundingBox();
+    expect(end && end.x >= 0 && end.x + end.width <= 320 && end.y >= 0 && end.y + end.height <= 600).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('officer-end-shift-short-phone.png') });
+  }
   const summary = dialog.getByLabel('How did the shift go?');
   await summary.fill('Handover in progress.');
   page.once('dialog', (confirmation) => confirmation.dismiss());
