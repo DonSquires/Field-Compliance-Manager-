@@ -8,6 +8,41 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Person profile flags, source documents and welfare (local acceptance, 2026-11-07):
+
+- **Before:** verified-person POI actions were buried in Identity Records;
+  the main person profile had no equivalent controls. Historical notice import
+  and canonical homelessness fields existed without profile entry paths.
+  Atlas's legacy `persons`/`person_flags` gaps were not the canonical spine;
+  live catalog inspection also found welfare columns omitted from Atlas.
+- **During:** one shared profile panel in person search and Identity Records
+  offers audited POI raise/resolve, homelessness updates and private original
+  attachments. Administrators need an active canonical person linked to their
+  organisation's local record; confirmed welfare status and new POI flags also
+  require verified local and canonical identities. Officers retain authorised,
+  redacted read-only flags and welfare status, not private reasons or documents.
+  Welfare notes belong to the shared canonical person, not a vehicle or a
+  tenant-private case file; the panel explains this before entry.
+- **After:** request-bound receipts and optimistic concurrency prevent duplicate
+  documents/notices and stale welfare overwrites. Original PDFs/images remain
+  private and immutable once registered, with SHA-256 provenance, size/type
+  checks, uploader ownership and short-lived administrator download links.
+  Existing warning/trespass sources require human comparison, client agreement,
+  source date and affected place; the existing notice importer supplies the
+  downstream register. Uploading does not serve a new notice, verify identity,
+  run OCR or send evidence to an external model. Options come from configuration
+  tables, not a second UI-specific lifecycle.
+- **Acceptance:** disposable PostgreSQL exercises actual notice import/expiry
+  and flag functions, administrator parity, officer/outsider denial, restrictive
+  storage guards, request replay, concurrent welfare updates and audit rollback.
+  Synthetic desktop/phone walkthroughs cover all three actions, lost-response
+  recovery with one persisted notice, repeat flagging after resolution, draft
+  preservation, explicit failures, read-only officer views and horizontal fit.
+  No real identity, welfare record, notice or source file was altered.
+- **Release gates:** protected PR/CI, governed migration application, live
+  schema/type regeneration, Atlas refresh and a production read-only smoke check
+  remain required. Local browser fixtures are not proof of live acceptance.
+
 Officer attendance, evidence and payroll recovery (local work, 2026-11-06):
 
 - **Before:** single-site shifts required disconnected attendance actions;
