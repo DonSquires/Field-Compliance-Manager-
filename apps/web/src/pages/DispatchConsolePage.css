@@ -528,6 +528,7 @@
 }
 
 .dispatch-runsheet-action select,
+.dispatch-runsheet-action input,
 .dispatch-runsheet-action textarea {
   width: 100%;
   min-height: 38px;
@@ -697,6 +698,7 @@
 }
 
 .admin-shell[data-theme='light'] .dispatch-runsheet-action select,
+.admin-shell[data-theme='light'] .dispatch-runsheet-action input,
 .admin-shell[data-theme='light'] .dispatch-runsheet-action textarea {
   border-color: #c8c0b3;
   color: #241f18;
