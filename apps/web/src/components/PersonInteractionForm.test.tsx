@@ -31,6 +31,38 @@ describe('PersonInteractionForm', () => {
     expect((screen.getByLabelText('Name as given') as HTMLInputElement).value).toBe('');
   });
 
+  it('sends only the details the officer filled in and does not reveal whether the name matched', async () => {
+    rpc.mockResolvedValue({ data: { interaction_id: 'pi-2', person_record_id: null }, error: null });
+    open();
+    fireEvent.change(screen.getByLabelText('Name as given'), { target: { value: 'Grey Hoodie Male' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Asked to leave the covered area.' } });
+    fireEvent.click(screen.getByText('Add person details (optional)'));
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: '  Tall,   grey hoodie ' } });
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '021 555 0101' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save person' }));
+    expect(await screen.findByText(/Any details you added will be checked by an administrator/)).toBeTruthy();
+    expect(rpc).toHaveBeenCalledWith('record_person_interaction', expect.objectContaining({
+      p_details: { description: 'Tall, grey hoodie', phone: '021 555 0101' },
+    }));
+    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('');
+  });
+
+  it('sends no details when none were added and reports server-side review state', async () => {
+    rpc.mockResolvedValueOnce({ data: { interaction_id: 'pi-3', person_record_id: 'pr-1' }, error: null })
+      .mockResolvedValueOnce({ data: { interaction_id: 'pi-4', person_record_id: 'pr-1', details_status: 'pending' }, error: null });
+    open();
+    fireEvent.change(screen.getByLabelText('Name as given'), { target: { value: 'Jo Bloggs' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Spoke with them.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save person' }));
+    expect(await screen.findByText(/Recorded for Jo Bloggs/)).toBeTruthy();
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_details: null });
+    fireEvent.change(screen.getByLabelText('Name as given'), { target: { value: 'Jo Bloggs' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Gave an address.' } });
+    fireEvent.change(screen.getByLabelText('Address'), { target: { value: '1 Example Street' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save person' }));
+    expect(await screen.findByText(/waiting for an administrator to review/)).toBeTruthy();
+  });
+
   it('keeps the same request id when a save fails so a retry cannot double-record', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: new Error('Network dropped') })
       .mockResolvedValueOnce({ data: { interaction_id: 'pi-1', person_record_id: 'pr-1' }, error: null });

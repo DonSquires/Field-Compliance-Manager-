@@ -18,13 +18,20 @@ const catalogFunction = (name) => {
 
 test('person interaction RPCs are signed-in only, definer-owned and audited', () => {
   for (const signature of [
-    'record_person_interaction\\(uuid, uuid, text, text, uuid, text, uuid, uuid, timestamptz, text\\)',
+    'record_person_interaction\\(uuid, uuid, text, text, uuid, text, uuid, uuid, timestamptz, text, jsonb\\)',
     'get_person_interactions\\(uuid, integer\\)',
+    'review_person_detail_update\\(uuid, text, text\\)',
+    'get_pending_person_detail_updates\\(integer\\)',
   ]) {
     assert.match(migration, new RegExp(`REVOKE ALL ON FUNCTION public\\.${signature} FROM PUBLIC, anon;`));
     assert.match(migration, new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${signature} TO authenticated, service_role;`));
   }
-  assert.equal((migration.match(/SECURITY DEFINER\s+SET search_path TO 'public'/g) || []).length, 2);
+  assert.equal((migration.match(/SECURITY DEFINER\s+SET search_path TO 'public'/g) || []).length, 4);
+  // The internal apply helper is never callable by signed-in users; only the reviewed RPCs reach it.
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.apply_person_interaction_details\(uuid, text\) FROM PUBLIC, anon, authenticated;/);
+  assert.doesNotMatch(migration, /GRANT EXECUTE ON FUNCTION public\.apply_person_interaction_details/);
+  assert.match(migration, /PERFORM public\.manage_identity_person\(/);
+  assert.match(migration, /'person_detail_update_' \|\| v_status/);
   assert.match(migration, /'person_interaction_recorded'/);
   assert.match(migration, /'manual_review_required'/);
   assert.doesNotMatch(migration, /GRANT (?:INSERT|UPDATE|DELETE|ALL) ON (?:TABLE )?public\.person_interactions/i);
@@ -50,6 +57,10 @@ test('officers record people on their own work; admins add history; privacy hold
   const req2 = '20000000-0000-4000-8000-000000000102';
   const req3 = '20000000-0000-4000-8000-000000000103';
   const req4 = '20000000-0000-4000-8000-000000000104';
+  const req5 = '20000000-0000-4000-8000-000000000105';
+  const req6 = '20000000-0000-4000-8000-000000000106';
+  const req7 = '20000000-0000-4000-8000-000000000107';
+  const req8 = '20000000-0000-4000-8000-000000000108';
   let created = false;
   try {
     docker(['run', '--detach', '--name', name, '--network', 'none', '--mount', 'type=tmpfs,destination=/var/lib/postgresql/data',
@@ -93,7 +104,7 @@ test('officers record people on their own work; admins add history; privacy hold
       );
       CREATE TABLE public.canonical_people (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), canonical_key text UNIQUE, display_name text,
-        normalized_name text, metadata jsonb, review_state text
+        normalized_name text, metadata jsonb, review_state text, date_of_birth date, updated_at timestamptz
       );
       CREATE TABLE public.canonical_person_links (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), canonical_person_id uuid, source_table text, source_id uuid,
@@ -121,6 +132,7 @@ test('officers record people on their own work; admins add history; privacy hold
       $f$;
       ${catalogFunction('normalize_person_name')}
       ${catalogFunction('ensure_canonical_person_for_record')}
+      ${catalogFunction('manage_identity_person')}
       CREATE FUNCTION public.assert_ok(ok boolean, label text) RETURNS void LANGUAGE plpgsql AS $f$
         BEGIN IF ok IS DISTINCT FROM true THEN RAISE EXCEPTION 'Assertion failed: %', label; END IF; END $f$;
       CREATE FUNCTION public.expect_error(statement text, expected text) RETURNS void LANGUAGE plpgsql AS $f$
@@ -138,7 +150,14 @@ test('officers record people on their own work; admins add history; privacy hold
       CREATE FUNCTION public.record_id_for(text) RETURNS uuid LANGUAGE sql SECURITY DEFINER AS $f$
         SELECT id FROM public.person_records WHERE display_name = $1
       $f$;
-      GRANT EXECUTE ON FUNCTION public.assert_ok(boolean, text), public.expect_error(text, text), public.canonical_for(uuid), public.record_id_for(text) TO authenticated;
+      CREATE FUNCTION public.details_of(uuid) RETURNS jsonb LANGUAGE sql SECURITY DEFINER AS $f$
+        SELECT metadata->'profile_details' FROM public.person_records WHERE id = $1
+      $f$;
+      CREATE FUNCTION public.interaction_for(uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER AS $f$
+        BEGIN RETURN (SELECT id FROM public.person_interactions WHERE client_request_id = $1); END
+      $f$;
+      GRANT EXECUTE ON FUNCTION public.assert_ok(boolean, text), public.expect_error(text, text), public.canonical_for(uuid), public.record_id_for(text),
+        public.details_of(uuid), public.interaction_for(uuid) TO authenticated;
 
       INSERT INTO public.organizations VALUES ('${org}', 'R and M'), ('${otherOrg}', 'Other');
       INSERT INTO public.user_profiles VALUES
@@ -156,7 +175,8 @@ test('officers record people on their own work; admins add history; privacy hold
 
       ${migration}
 
-      SELECT public.assert_ok(NOT has_function_privilege('anon', 'public.record_person_interaction(uuid,uuid,text,text,uuid,text,uuid,uuid,timestamptz,text)', 'EXECUTE'), 'anon cannot record');
+      SELECT public.assert_ok(NOT has_function_privilege('anon', 'public.record_person_interaction(uuid,uuid,text,text,uuid,text,uuid,uuid,timestamptz,text,jsonb)', 'EXECUTE'), 'anon cannot record');
+      SELECT public.assert_ok(NOT has_function_privilege('authenticated', 'public.apply_person_interaction_details(uuid,text)', 'EXECUTE'), 'apply helper is internal');
       SELECT public.assert_ok(NOT has_table_privilege('authenticated', 'public.person_interactions', 'INSERT'), 'no direct table writes');
 
       SET ROLE authenticated;
@@ -191,6 +211,40 @@ test('officers record people on their own work; admins add history; privacy hold
       SELECT public.assert_ok((SELECT h->>'place_name' = 'Burger N Beast Richmond' AND h->>'officer_name' = 'Officer One'
         FROM jsonb_array_elements(public.get_person_interactions(public.canonical_for('${existing}'))) h), 'history credits the job officer and place');
       SELECT public.assert_ok(jsonb_array_length(public.get_person_interactions(public.canonical_for(public.record_id_for('Unknown Male')))) = 2, 'admin sees the officer-recorded history');
+
+      -- Officers add a new person with identifying details: the draft carries them, and the match outcome stays private.
+      SELECT set_config('request.jwt.claim.sub', '${officer}', false);
+      SELECT public.assert_ok((SELECT r->>'outcome' = 'recorded' AND NOT r ? 'details_status' AND NOT r ? 'person_created'
+        FROM ${call(req5, `p_interaction_type => 'trespass_notice_served', p_notes => 'Trespass notice served at the covered area.', p_new_person_name => 'Grey Hoodie Male', p_dispatch_job_id => '${job}', p_details => '{"description":"Tall, grey hoodie, beard","date_of_birth":"1990-04-12","phone":"021 555 0100","address":"No fixed abode"}'`)} r), 'officer adds a new person with details');
+      SELECT public.expect_error($q$SELECT ${call(req8, `p_interaction_type => 'spoken_to', p_notes => 'Spoke to them.', p_new_person_name => 'Someone', p_dispatch_job_id => '${job}', p_details => '{"licence":"X"}'`)}$q$,
+        'may only include');
+      SELECT public.expect_error($q$SELECT ${call(req8, `p_interaction_type => 'spoken_to', p_notes => 'Spoke to them.', p_new_person_name => 'Someone', p_dispatch_job_id => '${job}', p_details => '{"date_of_birth":"2999-01-01"}'`)}$q$,
+        'between 1900 and today');
+      -- Officers update a person who already has a record: the details wait for review and never overwrite it directly.
+      SELECT public.assert_ok((SELECT r->>'outcome' = 'recorded' AND NOT r ? 'details_status'
+        FROM ${call(req6, `p_interaction_type => 'spoken_to', p_notes => 'Spoke with them near the entrance.', p_new_person_name => 'known person', p_dispatch_job_id => '${job}', p_details => '{"phone":"021 555 0101","description":"Red jacket"}'`)} r), 'officer submits details for an existing person');
+      SELECT public.assert_ok(public.details_of('${existing}') IS NULL, 'existing record unchanged before review');
+      SELECT ${call(req7, `p_interaction_type => 'observed', p_notes => 'Seen at the car park.', p_new_person_name => 'Known Person', p_dispatch_job_id => '${job}', p_details => '{"address":"12 Wrong Street"}'`)};
+      SELECT public.assert_ok(public.get_pending_person_detail_updates() = '[]'::jsonb, 'officers cannot see the review queue');
+      SELECT public.expect_error($q$SELECT public.review_person_detail_update(public.interaction_for('${req6}'), 'apply', 'Self approval')$q$,
+        'Only an administrator');
+
+      SELECT set_config('request.jwt.claim.sub', '${admin}', false);
+      SELECT public.assert_ok((SELECT jsonb_array_length(q) = 2 AND q->0->>'person_name' = 'Known Person' AND q->0->'proposed_details'->>'phone' = '021 555 0101'
+        FROM public.get_pending_person_detail_updates() q), 'admin sees pending details oldest first');
+      SELECT public.expect_error($q$SELECT public.review_person_detail_update(public.interaction_for('${req6}'), 'apply', '')$q$, 'A reason is required');
+      SELECT public.assert_ok((public.review_person_detail_update(public.interaction_for('${req6}'), 'apply', 'Confirmed with the officer'))->>'proposal_status' = 'applied', 'admin applies details');
+      SELECT public.assert_ok((SELECT d->>'phone' = '021 555 0101' AND d->>'notes' = 'Red jacket' FROM public.details_of('${existing}') d), 'applied details reach the person record');
+      SELECT public.expect_error($q$SELECT public.review_person_detail_update(public.interaction_for('${req6}'), 'dismiss', 'Second look')$q$, 'already been reviewed');
+      SELECT public.assert_ok((public.review_person_detail_update(public.interaction_for('${req7}'), 'dismiss', 'Address not verified'))->>'proposal_status' = 'dismissed', 'admin dismisses details');
+      SELECT public.assert_ok(NOT (public.details_of('${existing}') ? 'address'), 'dismissed details are not applied');
+      -- Administrators' own details apply immediately through the registry path.
+      SELECT public.assert_ok((SELECT r->>'details_status' = 'applied'
+        FROM ${call(req8, `p_interaction_type => 'spoken_to', p_notes => 'Confirmed date of birth.', p_person_record_id => '${existing}', p_dispatch_job_id => '${job}', p_source => 'admin', p_details => '{"date_of_birth":"1985-02-03"}'`)} r), 'admin details apply directly');
+      SELECT public.assert_ok((SELECT d->>'date_of_birth' = '1985-02-03' AND d->>'phone' = '021 555 0101' FROM public.details_of('${existing}') d), 'admin update merges with earlier details');
+      SELECT public.assert_ok(public.get_pending_person_detail_updates() = '[]'::jsonb, 'queue is empty after review');
+      SELECT public.assert_ok((SELECT count(*) = 1 FROM jsonb_array_elements(public.get_person_interactions(public.canonical_for('${existing}'))) h
+        WHERE h->>'proposal_status' = 'dismissed' AND h->'proposed_details'->>'address' = '12 Wrong Street'), 'admin history shows the review outcome');
       RESET ROLE;
 
       SELECT public.assert_ok((SELECT count(*) = 1 FROM public.person_records WHERE display_name = 'Unknown Male'
@@ -198,7 +252,14 @@ test('officers record people on their own work; admins add history; privacy hold
       SELECT public.assert_ok((SELECT count(*) = 2 FROM public.person_interactions pi JOIN public.person_records pr ON pr.id = pi.person_record_id
         WHERE pr.display_name = 'Unknown Male' AND pi.person_id IS NOT NULL), 'both interactions link the draft and its canonical identity');
       SELECT public.assert_ok((SELECT zone_id = '${zone}' AND shift_id = '${shift}' FROM public.person_interactions WHERE client_request_id = '${req2}'), 'shift interaction anchored to the shift place');
-      SELECT public.assert_ok((SELECT count(*) = 3 FROM public.audit_log WHERE action = 'person_interaction_recorded'), 'each write is audited');
+      SELECT public.assert_ok((SELECT count(*) = 7 FROM public.audit_log WHERE action = 'person_interaction_recorded'), 'each write is audited');
+      SELECT public.assert_ok((SELECT count(*) = 1 FROM public.audit_log WHERE action = 'person_detail_update_applied')
+        AND (SELECT count(*) = 1 FROM public.audit_log WHERE action = 'person_detail_update_dismissed')
+        AND (SELECT count(*) = 2 FROM public.audit_log WHERE action = 'identity_person_update'), 'reviews and registry updates are audited');
+      SELECT public.assert_ok((SELECT d->>'notes' = 'Tall, grey hoodie, beard' AND d->>'date_of_birth' = '1990-04-12' AND d->>'phone' = '021 555 0100'
+        FROM public.person_records pr, LATERAL (SELECT pr.metadata->'profile_details' AS d) x
+        WHERE pr.display_name = 'Grey Hoodie Male' AND pr.review_state = 'manual_review_required'), 'new draft carries officer details');
+      SELECT public.assert_ok((SELECT proposal_status = 'applied_to_draft' FROM public.person_interactions WHERE client_request_id = '${req5}'), 'draft details marked applied_to_draft');
       SELECT public.assert_ok((SELECT officer_user_id = '${officer}' AND created_by = '${admin}' FROM public.person_interactions WHERE client_request_id = '${req4}'), 'admin entry credits the officer');
     `;
     docker(['exec', '-i', name, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], sql);
