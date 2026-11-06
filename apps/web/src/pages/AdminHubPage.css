@@ -44,7 +44,7 @@
 .admin-shell[data-theme] .adminhub-command :is(.admin-refresh-block button, .admin-queue-footer button, .admin-section-heading button):hover { border-color: var(--hub-accent-border); color: var(--hub-accent-soft); background: var(--hub-accent-bg); }
 .admin-shell[data-theme] .adminhub-command button:focus-visible, .adminhub-command summary:focus-visible, .adminhub-command section:focus-visible { outline: 2px solid var(--hub-accent); outline-offset: -2px; }
 .admin-shell[data-theme] .adminhub-command button:disabled { opacity: .55; cursor: default; }
-.admin-shell[data-theme] .adminhub-command .admin-metric-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); flex: 0 0 auto; margin: 0; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--hub-line); overflow-x: auto; }
+.admin-shell[data-theme] .adminhub-command .admin-metric-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); flex: 0 0 auto; margin: 0; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--hub-line); overflow-x: auto; }
 .admin-shell[data-theme] .adminhub-command .admin-metric { display: grid; grid-template-columns: auto 1fr; align-content: center; align-items: center; gap: 0 8px; min-height: 64px; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--hub-line-soft); border-radius: 7px; color: var(--hub-muted); background: var(--hub-surface-raised); text-align: left; }
 .admin-shell[data-theme] .adminhub-command .admin-metric:hover:not(:disabled) { border-color: var(--hub-accent-border); background: var(--color-bg-hover); }
 .adminhub-command .admin-metric > .admin-metric-icon { grid-row: 1 / 3; color: var(--color-brand-primary); background: none; width: auto; height: auto; border: 0; padding: 0; }
@@ -106,7 +106,7 @@
 .adminhub-command th { color: var(--hub-label); font-weight: 800; text-transform: uppercase; font-size: 10px; }
 .adminhub-command .admin-pane-switcher { display: none; }
 @media (max-width: 767px) {
-  .admin-shell[data-theme] .adminhub-command .admin-metric-grid { grid-template-columns: repeat(5,minmax(145px,1fr)); gap: 8px; padding: 10px 12px; }
+  .admin-shell[data-theme] .adminhub-command .admin-metric-grid { grid-auto-columns: minmax(145px,1fr); gap: 8px; padding: 10px 12px; }
   .adminhub-command .admin-refresh-block time { display: none; }
   .admin-shell[data-theme] .adminhub-command .admin-overview-header { min-height: 48px; padding: 0 12px; }
   .adminhub-command .admin-pane-switcher { display: flex; flex: 0 0 44px; border-bottom: 1px solid var(--hub-line); }
