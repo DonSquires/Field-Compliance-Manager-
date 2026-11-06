@@ -43,10 +43,10 @@ test('start_officer_shift names the shift it stopped in its receipt, and the off
 
 test('the officer is told before the earlier shift is ended, and afterwards on the receipt and the card', () => {
   assert.match(schedulePage, /const stillOn = assigned\.find\(\(item\) => item\.status === 'in_progress' && item\.id !== shift\.id\) \?\? null;/);
-  assert.match(schedulePage, /if \(stillOn \|\| position\.status === 'off_site' \|\| position\.status === 'no_gps'\) setStartAdvisory\(\{ shift, position, coords, reason: '', stillOn \}\);/);
+  assert.match(schedulePage, /if \(stillOn \|\| position\.status === 'off_site' \|\| position\.status === 'no_gps' \|\| position\.status === 'unverified_site'\) setStartAdvisory\(\{ shift, position, coords, reason: '', stillOn \}\);/);
   assert.match(schedulePage, /startAdvisory\.stillOn \? "You're still on another shift"/);
-  assert.match(schedulePage, /You can only be on one shift at a time, so starting this one ends it now\./);
-  assert.match(schedulePage, /startAdvisory\.stillOn \? 'End it and start this one' : 'Start anyway'/);
+  assert.match(schedulePage, /Starting this shift ends your previous in-progress shift\. Unfinished work remains on record/);
+  assert.match(schedulePage, /Start shift\{startAdvisory\.stillOn \? ' and end previous shift' : ''\}/);
   assert.match(schedulePage, /Your earlier \$\{\(receipt\.superseded_service_type \?\? 'other'\)\.replaceAll\('_', ' '\)\} shift was ended at \$\{at\}; anything left open on it is on record\./);
   assert.match(schedulePage, /ended_reason === 'superseded_by_next_shift' \? ' · ended when your next shift started' : ''/);
   assert.match(mobileClock, /receipt\.superseded_shift_id \? ` Your earlier/);

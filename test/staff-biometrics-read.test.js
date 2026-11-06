@@ -5,6 +5,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
+if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-record-photos-migration.test.js');
+
 const migration = fs.readFileSync(path.join(__dirname,
   '../supabase/migrations/20261103090000_staff_biometrics_self_admin_read.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');

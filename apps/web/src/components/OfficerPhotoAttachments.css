@@ -1,0 +1,9 @@
+.officer-photo-attachments { padding: 1rem; border: 1px solid var(--border-color, #64748b); border-radius: .75rem; min-width: 0; margin-block: 1rem; }
+.officer-photo-attachments p, .officer-photo-attachments span { overflow-wrap: anywhere; }
+.officer-photo-attachments__controls { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
+.officer-photo-attachments__controls label { display: grid; gap: .5rem; min-width: 0; max-width: 100%; }
+.officer-photo-attachments input { max-width: 100%; }
+.officer-photo-attachments button { min-height: 44px; margin-block: .5rem; }
+.officer-photo-attachments__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1rem; padding: 0; list-style: none; }
+.officer-photo-attachments__list li { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.officer-photo-attachments__list img { width: 100%; max-height: 220px; object-fit: contain; }

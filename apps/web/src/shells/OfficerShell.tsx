@@ -20,6 +20,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { OfficerAppInstall } from '../components/OfficerAppInstall';
 import {
   Activity,
   BadgeCheck,
@@ -595,6 +596,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
         {!isOnline && <div role="status" className="officer-shell-offline-banner">No connection — field evidence will remain queued until the device is back online.</div>}
         {(officerState === 'standby' || officerState === 'home') && (
           <React.Suspense fallback={<LazyPageFallback />}>
+            <OfficerAppInstall />
             <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} onRefreshShift={refreshShift} />
           </React.Suspense>
         )}

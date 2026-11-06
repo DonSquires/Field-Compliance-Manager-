@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, MapPin, RefreshCw, ShieldCheck, Users, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { EndShiftDialog, type EndShiftDestination } from '../components/EndShiftDialog';
+import { OfficerShiftBreakControl } from '../components/OfficerShiftBreakControl';
 import { claimShiftCoverage } from '../lib/shiftCoverage';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
@@ -24,10 +25,9 @@ interface AssignedShift {
   total_stops: number;
   ended_reason: string | null;
 }
-interface StartPosition { status: 'on_site' | 'near_site' | 'off_site' | 'no_gps' | 'no_place'; place_name?: string | null; distance_m?: number | null; advisory_radius_m?: number; route_shift?: boolean; }
+interface StartPosition { status: 'on_site' | 'near_site' | 'off_site' | 'no_gps' | 'no_place' | 'unverified_site'; place_name?: string | null; distance_m?: number | null; advisory_radius_m?: number; route_shift?: boolean; }
 const describeDistance = (metres: number | null | undefined) => metres == null ? 'an unknown distance' : metres >= 1000 ? `about ${(metres / 1000).toFixed(1)} km` : `about ${Math.round(metres)} m`;
 interface BreakEntitlement { worked_hours: number; rest_breaks_required: number; meal_breaks_required: number; rest_breaks_taken: number; meal_breaks_taken: number; compliant: boolean; }
-interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal'; started_at: string; }
 interface SwapOfficer { id: string; label: string; }
 interface PendingSwap { id: string; original_shift_id: string; status: string; }
 interface OnCallPeriod { id: string; period_type: string; starts_at: string; ends_at: string; flat_rate: number | null; status: string; notes: string | null; }
@@ -82,6 +82,7 @@ const startOpensWords = (scheduledStart: string): string => {
 const OfficerSchedulePage: React.FC = () => {
   const location=useLocation();
   const requestedSlotId=new URLSearchParams(location.search).get('slot');
+  const requestedShiftId=new URLSearchParams(location.search).get('shift');
   const { profile } = useAuth();
   const [view, setView] = useState<ScheduleView>('assigned');
   const [assigned, setAssigned] = useState<AssignedShift[]>([]);
@@ -97,11 +98,11 @@ const OfficerSchedulePage: React.FC = () => {
   const [responding, setResponding] = useState<{ slot: RosterSlot; response: 'accept' | 'decline' } | null>(null);
   const [declineReason, setDeclineReason] = useState('');
   const [breakEntitlement, setBreakEntitlement] = useState<Record<string, BreakEntitlement>>({});
-  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
   const [breakSaving, setBreakSaving] = useState(false);
   const [swapRequest, setSwapRequest] = useState<AssignedShift | null>(null);
   const [swapReason, setSwapReason] = useState('');
   const [startingShiftId, setStartingShiftId] = useState<string | null>(null);
+  const startRequests = useRef(new Map<string, string>());
   const [startBriefing, setStartBriefing] = useState<{ shift: AssignedShift; briefing: SafetyBriefing } | null>(null);
   const [startAdvisory, setStartAdvisory] = useState<{ shift: AssignedShift; position: StartPosition; coords: { lat: number | null; lng: number | null }; reason: string; stillOn: AssignedShift | null } | null>(null);
   const [endingShift, setEndingShift] = useState<AssignedShift | null>(null);
@@ -190,15 +191,13 @@ const OfficerSchedulePage: React.FC = () => {
     const activeShift = assignedRows.find((shift) => shift.status === 'in_progress');
     let assetError: { message: string } | null = null;
     if (activeShift) {
-      const [entitlementResponse, breakResponse, assetResponse, availableResponse] = await Promise.all([
+      const [entitlementResponse, assetResponse, availableResponse] = await Promise.all([
         supabase.rpc('get_shift_break_entitlement', { p_shift_id: activeShift.id }),
-        supabase.from('shift_breaks').select('id, shift_id, break_type, started_at').eq('shift_id', activeShift.id).is('ended_at', null).maybeSingle(),
         supabase.from('shift_assets').select('id, asset_id, assigned_at, asset:asset_id(id, name, asset_type, registration, serial_number)').eq('shift_id', activeShift.id).is('returned_at', null).order('assigned_at'),
         supabase.from('assets').select('id, name, asset_type, registration, serial_number').eq('organization_id', profile.organizationId).eq('status', 'available').order('asset_type').order('name').limit(100),
       ]);
       const entitlement = (Array.isArray(entitlementResponse.data) ? entitlementResponse.data[0] : entitlementResponse.data) as BreakEntitlement | null;
       if (entitlement) setBreakEntitlement({ [activeShift.id]: entitlement });
-      setActiveBreak((breakResponse.data as ActiveBreak | null) ?? null);
       setActiveShiftId(activeShift.id);
       setShiftAssets(((assetResponse.data as Array<Omit<ShiftAssetLink, 'asset'> & { asset: AssetSummary | AssetSummary[] | null }>) ?? []).map((link) => ({
         ...link,
@@ -206,7 +205,7 @@ const OfficerSchedulePage: React.FC = () => {
       })));
       setAvailableAssets((availableResponse.data as AssetSummary[]) ?? []);
       assetError = assetResponse.error ?? availableResponse.error;
-    } else { setActiveBreak(null); setBreakEntitlement({}); setActiveShiftId(null); setShiftAssets([]); setAvailableAssets([]); }
+    } else { setBreakEntitlement({}); setActiveShiftId(null); setShiftAssets([]); setAvailableAssets([]); }
     const staffId = (staffResponse.data as { id: string } | null)?.id;
     let slotError: { message: string } | null = null;
     if (staffId) {
@@ -282,23 +281,6 @@ const OfficerSchedulePage: React.FC = () => {
     if (responseError || !receipt) setError(responseError?.message ?? 'Assignment response receipt was not confirmed.');
     else { setResponseReceipt({ slotId: receipt.slot_id, slotStatus: receipt.slot_status, shiftId: receipt.shift_id, shiftStatus: receipt.shift_status });setNotice(responding.response === 'accept' ? 'Assignment accepted and confirmed.' : 'Assignment declined with your recorded reason.'); setResponding(null); setDeclineReason(''); await loadSchedule(); }
     setClaiming(false);
-  };
-
-  const startBreak = async (shiftId: string, breakType: 'rest' | 'meal') => {
-    setBreakSaving(true); setError(null); setNotice(null);
-    const { data, error: breakError } = await supabase.rpc('start_shift_break', { p_client_request_id: crypto.randomUUID(), p_shift_id: shiftId, p_break_type: breakType });
-    if (breakError || !data) setError(describeLoadFailures([['break', breakError]]) ?? 'Break could not be started.');
-    else { setActiveBreak(data as ActiveBreak); setNotice(`${breakType === 'meal' ? 'Meal' : 'Rest'} break started and recorded.`); }
-    setBreakSaving(false);
-  };
-
-  const endBreak = async () => {
-    if (!activeBreak) return;
-    setBreakSaving(true); setError(null); setNotice(null);
-    const { error: breakError } = await supabase.rpc('end_shift_break', { p_break_id: activeBreak.id, p_notes: null });
-    if (breakError) setError(describeLoadFailures([['break', breakError]]) ?? 'Break could not be ended.');
-    else { setActiveBreak(null); setNotice('Break ended and duration recorded.'); await loadSchedule(); }
-    setBreakSaving(false);
   };
 
   const requestSwap = async () => {
@@ -416,9 +398,11 @@ const OfficerSchedulePage: React.FC = () => {
 
   const submitStart = async (shift: AssignedShift, coords: { lat: number | null; lng: number | null }, reason: string | null) => {
     // ATLAS WRITES: start_officer_shift (records the start position and any off-site reason in its audit row; one shift at a time — an earlier in-progress shift is stopped and named in the receipt)
-    const response = await supabase.rpc('start_officer_shift', { p_client_request_id: crypto.randomUUID(), p_shift_id: shift.id, p_expected_status: shift.status, p_gps_lat: coords.lat, p_gps_lng: coords.lng, p_off_site_reason: reason });
+    const requestId = startRequests.current.get(shift.id) ?? crypto.randomUUID();
+    startRequests.current.set(shift.id, requestId);
+    const response = await supabase.rpc(shift.service_type === 'static_guarding' ? 'start_officer_static_shift' : 'start_officer_shift', { p_client_request_id: requestId, p_shift_id: shift.id, p_expected_status: shift.status, p_gps_lat: coords.lat, p_gps_lng: coords.lng, p_off_site_reason: reason });
     const receipt = (response.data as Array<{ shift_id: string; shift_status: string; started_at: string; position_status: string | null; place_name: string | null; distance_m: number | null; superseded_shift_id: string | null; superseded_service_type: string | null }> | null)?.[0];
-    if (response.error || !receipt) setError(describeLoadFailures([['shift start', response.error]]) ?? 'Shift start was not confirmed.');
+    if (response.error || !receipt || receipt.shift_id !== shift.id || receipt.shift_status !== 'in_progress' || !Number.isFinite(Date.parse(receipt.started_at))) setError(describeLoadFailures([['shift start', response.error]]) ?? 'Shift start was not confirmed.');
     else {
       const at = new Date(receipt.started_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
       const where = receipt.position_status === 'on_site' ? ` at ${receipt.place_name}` : receipt.position_status === 'near_site' ? `, ${describeDistance(receipt.distance_m)} from ${receipt.place_name}` : receipt.position_status === 'off_site' ? `, recorded as away from ${receipt.place_name} (${describeDistance(receipt.distance_m)})` : receipt.position_status === 'no_gps' ? ' without a GPS position' : '';
@@ -432,11 +416,12 @@ const OfficerSchedulePage: React.FC = () => {
   const continueStart = async (shift: AssignedShift) => {
     const coords = await currentPosition();
     // ATLAS READS: evaluate_shift_start_position — advisory only; the officer is told, never blocked
-    const { data } = await supabase.rpc('evaluate_shift_start_position', { p_shift_id: shift.id, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
+    const { data, error: positionError } = await supabase.rpc(shift.service_type === 'static_guarding' ? 'evaluate_static_shift_position' : 'evaluate_shift_start_position', { p_shift_id: shift.id, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
+    if (positionError || !data) { setError(positionError?.message ?? 'Start position could not be checked. Retry or contact operations.'); return; }
     const position = (data ?? { status: 'no_place' }) as StartPosition;
     // One shift at a time: starting this one ends the shift the officer is still on, so it is confirmed first.
     const stillOn = assigned.find((item) => item.status === 'in_progress' && item.id !== shift.id) ?? null;
-    if (stillOn || position.status === 'off_site' || position.status === 'no_gps') setStartAdvisory({ shift, position, coords, reason: '', stillOn });
+    if (stillOn || position.status === 'off_site' || position.status === 'no_gps' || position.status === 'unverified_site') setStartAdvisory({ shift, position, coords, reason: '', stillOn });
     else await submitStart(shift, coords, null);
   };
 
@@ -473,7 +458,21 @@ const OfficerSchedulePage: React.FC = () => {
 
       {loading ? <div className="officer-schedule-empty"><RefreshCw size={20} className="is-spinning" />Checking roster</div> : view === 'assigned' ? (
         assigned.length + workforceSlots.length === 0 ? <div className="officer-schedule-empty"><CalendarDays size={23} />No upcoming assigned shifts</div> : <div className="officer-schedule-list">
-          {assigned.map((shift) => { const slot = slots.find((item) => item.linked_shift_id === shift.id); const unit = slot ? workUnits.find((item) => item.id === slot.work_unit_id) : undefined; const entitlement = breakEntitlement[shift.id]; const pendingSwap = pendingSwaps.find((item) => item.original_shift_id === shift.id); return <article id={slot?`officer-roster-slot-${slot.id}`:undefined} className={`officer-assigned-shift ${slot?.id===requestedSlotId?'is-context-focus':''}`} key={shift.id}><div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div><div><strong>{unit?.name ?? shift.service_type.replaceAll('_', ' ')}</strong><small>{unit ? `${shift.service_type.replaceAll('_', ' ')} · ` : ''}{shift.total_stops} planned {shift.total_stops === 1 ? 'stop' : 'stops'}{shift.notes ? ` · ${shift.notes}` : ''}{shift.instructionsWithheld ? ' · Briefing notes are not shown here; ask operations.' : ''}{shift.ended_reason === 'superseded_by_next_shift' ? ' · ended when your next shift started' : ''}</small></div><span className={`status-${shift.status}`}>{officerShiftStatusLabel(shift.status)}</span>{pendingSwap ? <button type="button" className="officer-swap-button" onClick={() => setCancelSwap(pendingSwap)}>Cancel pending swap</button> : slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}{!pendingSwap && ['scheduled', 'published', 'accepted'].includes(shift.status) && <><button type="button" className="officer-swap-button" onClick={() => setSwapRequest(shift)}>Request swap</button>{canStartNow(shift.scheduled_start) ? <button type="button" className="officer-swap-button" onClick={() => void startShift(shift)} disabled={startingShiftId === shift.id}>{startingShiftId === shift.id ? 'Starting…' : 'Start shift'}</button> : <small className="officer-start-opens">{startOpensWords(shift.scheduled_start)}</small>}</>}{shift.status === 'in_progress' && <div className="officer-break-controls"><small>{entitlement ? `${entitlement.rest_breaks_taken}/${entitlement.rest_breaks_required} rest · ${entitlement.meal_breaks_taken}/${entitlement.meal_breaks_required} meal` : 'Break entitlement loading'}</small>{activeBreak?.shift_id === shift.id ? <button type="button" onClick={() => void endBreak()} disabled={breakSaving}>End {activeBreak.break_type} break</button> : <><button type="button" onClick={() => void startBreak(shift.id, 'rest')} disabled={breakSaving}>Start rest break</button><button type="button" onClick={() => void startBreak(shift.id, 'meal')} disabled={breakSaving}>Start meal break</button></>}<button type="button" className="officer-end-shift-button" onClick={() => setEndingShift(shift)}>End shift</button></div>}</article>; })}
+          {assigned.map((shift) => {
+            const slot = slots.find((item) => item.linked_shift_id === shift.id);
+            const unit = slot ? workUnits.find((item) => item.id === slot.work_unit_id) : undefined;
+            const entitlement = breakEntitlement[shift.id];
+            const pendingSwap = pendingSwaps.find((item) => item.original_shift_id === shift.id);
+            return <article id={slot ? `officer-roster-slot-${slot.id}` : `officer-shift-${shift.id}`} className={`officer-assigned-shift ${slot?.id === requestedSlotId || shift.id === requestedShiftId ? 'is-context-focus' : ''}`} key={shift.id}>
+              <div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div>
+              <div><strong>{unit?.name ?? shift.service_type.replaceAll('_', ' ')}</strong><small>{unit ? `${shift.service_type.replaceAll('_', ' ')} · ` : ''}{shift.total_stops} planned {shift.total_stops === 1 ? 'stop' : 'stops'}{shift.notes ? ` · ${shift.notes}` : ''}{shift.instructionsWithheld ? ' · Briefing notes are not shown here; ask operations.' : ''}{shift.ended_reason === 'superseded_by_next_shift' ? ' · ended when your next shift started' : ''}</small></div>
+              <span className={`status-${shift.status}`}>{officerShiftStatusLabel(shift.status)}</span>
+              {!shift.instructionsWithheld && shift.service_type === 'static_guarding' && <button type="button" onClick={() => navigate(`/officer/site_guard?shift=${encodeURIComponent(shift.id)}`)}>Open assigned site and job</button>}
+              {pendingSwap ? <button type="button" className="officer-swap-button" onClick={() => setCancelSwap(pendingSwap)}>Cancel pending swap</button> : slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}
+              {!pendingSwap && ['scheduled', 'published', 'accepted'].includes(shift.status) && <><button type="button" className="officer-swap-button" onClick={() => setSwapRequest(shift)}>Request swap</button>{canStartNow(shift.scheduled_start) ? <button type="button" className="officer-swap-button" onClick={() => void startShift(shift)} disabled={startingShiftId === shift.id}>{startingShiftId === shift.id ? 'Starting…' : 'Start shift'}</button> : <small className="officer-start-opens">{startOpensWords(shift.scheduled_start)}</small>}</>}
+              {shift.status === 'in_progress' && <div className="officer-break-controls"><small>{entitlement ? `${entitlement.rest_breaks_taken}/${entitlement.rest_breaks_required} rest · ${entitlement.meal_breaks_taken}/${entitlement.meal_breaks_required} meal` : 'Break entitlement loading'}</small><OfficerShiftBreakControl shiftId={shift.id} /><button type="button" className="officer-end-shift-button" onClick={() => setEndingShift(shift)}>End shift</button></div>}
+            </article>;
+          })}
           {workforceSlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <article id={`officer-roster-slot-${slot.id}`} className={`officer-assigned-shift officer-internal-slot ${slot.id===requestedSlotId?'is-context-focus':''}`} key={slot.id}><div className="officer-schedule-date"><strong>{formatDate(slot.scheduled_start)}</strong><span>{formatTime(slot.scheduled_start)} - {formatTime(slot.scheduled_end)}</span></div><div><strong>{unit?.name ?? 'Internal assignment'}</strong><small>{unit?.service_type.replaceAll('_', ' ')}{slot.notes ? ` · ${slot.notes}` : ''}</small></div><span className={`status-${slot.status}`}>{slot.status}</span>{slot.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
         </div>
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
@@ -484,7 +483,12 @@ const OfficerSchedulePage: React.FC = () => {
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
       {endingShift && <EndShiftDialog shiftId={endingShift.id} shiftStatus={endingShift.status} serviceType={endingShift.service_type} recoveryReadiness={Boolean(endingShift.instructionsWithheld)} stopsUnavailableReason={endingShift.instructionsWithheld ? 'Stops for this earlier shift cannot be opened here yet. Contact operations to finish them.' : undefined} dispatchUnavailableReason={endingShift.instructionsWithheld ? 'Dispatch jobs for this earlier shift cannot be opened here yet. Contact operations to finish them.' : undefined} onClose={() => setEndingShift(null)} onNavigate={(destination) => endShiftDestination(destination, endingShift)} onEnded={async ({ completed_at }) => { setEndingShift(null); setNotice(`Shift ended at ${new Date(completed_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Record your worked time on the timesheet when you are ready.`); await loadSchedule(); }} />}
       {startBriefing && <SafetyBriefingDialog briefing={startBriefing.briefing} title={`Before you start: risks on this shift`} acknowledgeLabel="I've read these risks – start shift" onClose={() => setStartBriefing(null)} onReload={async () => { try { const next = await fetchShiftSafetyBriefing(startBriefing.shift.id); setStartBriefing({ shift: startBriefing.shift, briefing: next }); return next; } catch { return null; } }} onAcknowledged={async () => { const { shift } = startBriefing; setStartBriefing(null); setStartingShiftId(shift.id); await continueStart(shift); setStartingShiftId(null); }} />}
-      {startAdvisory && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="start-advisory-title"><header><div><span>Before you start</span><h2 id="start-advisory-title">{startAdvisory.stillOn ? "You're still on another shift" : startAdvisory.position.status === 'no_gps' ? 'No GPS position' : `You're not at ${startAdvisory.position.place_name ?? 'the shift location'}`}</h2></div><button type="button" onClick={() => setStartAdvisory(null)} title="Close"><X size={18} /></button></header>{startAdvisory.stillOn && <p>Your {startAdvisory.stillOn.service_type.replaceAll('_', ' ')} shift ({formatDate(startAdvisory.stillOn.scheduled_start)}, {formatTime(startAdvisory.stillOn.scheduled_start)} - {formatTime(startAdvisory.stillOn.scheduled_end)}) is still in progress. You can only be on one shift at a time, so starting this one ends it now. Anything still open on it — stops, tasks, the debrief — goes on record as left open. If you meant to finish it properly, choose Not yet and use End shift.</p>}{(startAdvisory.position.status === 'off_site' || startAdvisory.position.status === 'no_gps') && <p>{startAdvisory.position.status === 'no_gps' ? 'Your location could not be read, so the start will be recorded without a position. Turn location on if you can, or start anyway and say where you are.' : `You are ${describeDistance(startAdvisory.position.distance_m)} from ${startAdvisory.position.place_name ?? 'the shift location'}${startAdvisory.position.route_shift ? ' (the nearest stop on this run)' : ''}. You can still start; the start is recorded as away from site and your supervisor can see that. If there is a reason, say so.`}</p>}{(startAdvisory.position.status === 'off_site' || startAdvisory.position.status === 'no_gps') && <label><span>Reason (optional)</span><textarea rows={3} value={startAdvisory.reason} onChange={(event) => setStartAdvisory({ ...startAdvisory, reason: event.target.value })} placeholder="e.g. Starting from the depot, travelling to site now" /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setStartAdvisory(null)}>Not yet</button><button type="button" disabled={startingShiftId === startAdvisory.shift.id} onClick={() => { setStartingShiftId(startAdvisory.shift.id); void submitStart(startAdvisory.shift, startAdvisory.coords, startAdvisory.reason.trim() || null).finally(() => setStartingShiftId(null)); }}>{startAdvisory.stillOn ? 'End it and start this one' : 'Start anyway'}</button></div></div></div>}
+      {startAdvisory && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="start-advisory-title">
+        <header><h2 id="start-advisory-title">{startAdvisory.stillOn ? "You're still on another shift" : 'Attendance needs review'}</h2><button type="button" onClick={() => setStartAdvisory(null)} title="Close"><X size={18} /></button></header>
+        {startAdvisory.stillOn && <p>Starting this shift ends your previous in-progress shift. Unfinished work remains on record. Choose Not yet to finish it properly first.</p>}
+        {startAdvisory.position.status !== 'on_site' && <><p>{startAdvisory.position.status === 'no_gps' ? 'GPS is unavailable.' : startAdvisory.position.status === 'unverified_site' ? 'This site has no verified boundary.' : 'GPS does not confirm you are at the assigned place.'} Available GPS and your explanation are recorded for operations review, not as verified attendance.</p><label><span>Attendance explanation {startAdvisory.shift.service_type === 'static_guarding' ? '(required)' : '(optional)'}</span><textarea rows={3} value={startAdvisory.reason} onChange={(event) => setStartAdvisory({ ...startAdvisory, reason: event.target.value })} /></label></>}
+        <div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setStartAdvisory(null)}>Not yet</button><button type="button" disabled={startingShiftId === startAdvisory.shift.id || (startAdvisory.shift.service_type === 'static_guarding' && startAdvisory.position.status !== 'on_site' && !startAdvisory.reason.trim())} onClick={() => { setStartingShiftId(startAdvisory.shift.id); void submitStart(startAdvisory.shift, startAdvisory.coords, startAdvisory.reason.trim() || null).finally(() => setStartingShiftId(null)); }}>Start shift{startAdvisory.stillOn ? ' and end previous shift' : ''}</button></div>
+      </div></div>}
       {responding && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="assignment-response-title"><header><div><span>Roster response</span><h2 id="assignment-response-title">{responding.response === 'accept' ? 'Accept assignment?' : 'Decline assignment?'}</h2></div><button type="button" onClick={() => setResponding(null)} title="Close"><X size={18} /></button></header><p>{responding.response === 'accept' ? 'Accepting makes this shift yours. It moves to your assigned shifts and your supervisor is told.' : 'Declining hands the shift back to the roster team so they can cover it. Tell them why you cannot take it.'}</p>{responding.response === 'decline' && <label><span>Decline reason</span><textarea required rows={4} value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setResponding(null)}>Back</button><button type="button" onClick={() => void respondToSlot()} disabled={claiming || (responding.response === 'decline' && !declineReason.trim())}>{claiming ? 'Saving' : responding.response === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></div></div>}
       {swapRequest && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-title"><header><div><span>Roster change</span><h2 id="shift-swap-title">Request shift swap?</h2></div><button type="button" onClick={() => setSwapRequest(null)} title="Close"><X size={18} /></button></header><p>{formatDate(swapRequest.scheduled_start)} · {formatTime(swapRequest.scheduled_start)} - {formatTime(swapRequest.scheduled_end)}. This opens the shift for roster review; the shift remains assigned until approved.</p><label><span>Replacement officer (optional)</span><select value={swapOfficerId} onChange={(event) => setSwapOfficerId(event.target.value)}><option value="">Open coverage request</option>{swapOfficers.map((officer) => <option key={officer.id} value={officer.id}>{officer.label}</option>)}</select></label><label><span>Reason</span><textarea required rows={4} value={swapReason} onChange={(event) => setSwapReason(event.target.value)} placeholder="Why can you no longer work this shift?" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSwapRequest(null)}>Cancel</button><button type="button" onClick={() => void requestSwap()} disabled={breakSaving || !swapReason.trim()}>Submit swap request</button></div></div></div>}
       {cancelSwap && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-swap-title" onSubmit={cancelPendingSwap}><header><div><span>Roster change</span><h2 id="cancel-swap-title">Cancel pending swap?</h2></div><button type="button" onClick={() => setCancelSwap(null)} title="Close"><X size={18} /></button></header><p>The shift will remain assigned to you and the pending swap request will be withdrawn.</p><label><span>Cancellation reason</span><textarea required rows={4} value={cancelSwapReason} onChange={(event) => setCancelSwapReason(event.target.value)} /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setCancelSwap(null)}>Back</button><button type="submit" disabled={breakSaving || !cancelSwapReason.trim()}>Cancel swap request</button></div></form></div>}

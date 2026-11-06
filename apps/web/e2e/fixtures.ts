@@ -729,6 +729,9 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
 }
 
 export async function installOfficerScheduleFixtures(page: Page, options: { freedomCamping?: boolean } = {}): Promise<void> {
+  if (process.env.E2E_OFFLINE === '1') {
+    await page.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), async (route) => route.fulfill({ status: 204, body: '' }));
+  }
   let internalSlotStatus = 'published';
   let linkedSlotStatus = 'published';
   let linkedShiftStatus = 'published';
@@ -817,6 +820,14 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
     }
     if (resource === 'shift_debriefs') {
       await route.fulfill(fulfillJson([]));
+      return;
+    }
+    if (resource === 'get_officer_break_plan') {
+      await route.fulfill(fulfillJson({ shift_id: request.postDataJSON().p_shift_id, planned_minutes: 0, unpaid: false, taken_minutes: 0 }));
+      return;
+    }
+    if (resource === 'shift_breaks') {
+      await route.fulfill(fulfillJson(null));
       return;
     }
     if (resource === 'officer_field_reports') {

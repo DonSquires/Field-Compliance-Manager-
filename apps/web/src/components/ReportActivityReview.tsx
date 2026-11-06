@@ -39,6 +39,7 @@ import {
   type TriageDecision,
 } from '../lib/reportActivity';
 import { MarkupText } from './ReportMarkupText';
+import { SERVICE_DELIVERY_LABELS } from '../lib/reportServiceDelivery';
 import './ReportActivityReview.css';
 
 const ENTRY_PAGE = 60;
@@ -1061,6 +1062,16 @@ function ActivityReportBody({ packId, updatedAt, report: sourceReport, status, h
         ) : <Empty>No pest-control work was recorded at these locations during the period.</Empty>}
       </Group>
 
+      {report.serviceDelivery && (
+        <Group title="Officer service evidence" meta="Count-only supplement">
+          <p>Agreement-attributed records. Provenance overlaps are already in the activity ledger; these counts must not be added to activity totals. Private officer notes and identities are not included.</p>
+          <ActivityTable
+            label="Officer service evidence"
+            columns={[{ label: 'Evidence' }, { label: 'Recorded', numeric: true }, { label: 'Already in activity', numeric: true }, { label: 'Additional records', numeric: true }]}
+            rows={report.serviceDelivery.map((row) => [SERVICE_DELIVERY_LABELS[row.kind], count(row.recorded), count(row.alreadyInActivity), count(row.additional)])}
+          />
+        </Group>
+      )}
       {hunters && (
         <Group title="Hunter kill returns" meta={counted(hunters.returns, 'return', 'returns')}>
           {hunters.returns > 0 ? (

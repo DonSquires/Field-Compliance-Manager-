@@ -368,5 +368,12 @@
 .hr-setup-details{margin-top:20px;border-top:1px solid #2b3d4c}
 .hr-setup-details summary{padding:12px 0;color:#b9cbd5;font-size:14px;font-weight:800;cursor:pointer}
 .hr-setup-details[open] summary{margin-bottom:8px}
+.hr-schedule-recovery{width:min(920px,96vw);max-height:90vh;overflow-y:auto}
+.hr-schedule-recovery fieldset{margin:12px 0;padding:12px;min-width:0;border:1px solid #335361;border-radius:6px}
+.hr-schedule-recovery legend{max-width:100%;padding:0 6px}
+.hr-schedule-recovery legend label{display:flex;align-items:flex-start;gap:8px}
+.hr-schedule-recovery input[type=checkbox]{width:auto;min-height:20px;flex-shrink:0}
+.hr-source-provenance{overflow-wrap:anywhere;font-size:12px}
+@media(max-width:600px){.hr-schedule-recovery .form-row{display:flex;flex-direction:column}.hr-schedule-recovery footer{flex-wrap:wrap}}
 @media(max-width:700px){.hr-start-panel{grid-template-columns:1fr}.hr-start-panel .btn{width:100%}}
 @media(max-width:560px){.roster-hr-page .crm-branch-filter{flex-wrap:wrap}.roster-hr-page .roster-hr-tab-list{overflow:visible;flex-wrap:wrap}.roster-hr-page .roster-hr-tab-list .btn{flex:0 0 auto}}

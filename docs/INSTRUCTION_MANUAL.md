@@ -248,8 +248,42 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 
 ### Section 2: Service Provider Administration (`admin`, `admin_officer`)
 - Client portfolio management (CRM), service agreements, site/zone geofence management, workforce rostering, HR leave & credentials, and operational finance.
+- On a roster slot, set optional break minutes and **unpaid** when applicable;
+  creation, editing and repeat/copy retain the plan. The allowance is not an
+  automatic deduction.
+- In HR timesheets, use **Recover scheduled shift into timesheet**, then
+  **Preview scheduled rows**, amend the actual times and give a reason before
+  **Save manual timesheet for review**. This creates reviewable administrative
+  provenance, not fabricated GPS attendance. Another authorised reviewer must
+  approve it.
+- **Pay code / rate** opens **THIS TIMESHEET ONLY** corrections for
+  payroll-authorised administrators. A reason is mandatory; employment rates
+  are not changed. **Review breaks** shows recorded duration and missing,
+  short or long planned-break discrepancies.
+- Reports show count-only **Officer service evidence** with recorded,
+  already-counted and additional records. This does not publish private officer
+  narratives or unreviewed photos. After the supporting migration is released,
+  regenerate monthly drafts to include the new supplement; issued packs and
+  custom reports are not rewritten. **Recorded travel** is distance evidence,
+  not a financial cost calculation.
 
 ### Section 3: Specialist Field Officer Portals (`officer`)
+- On Home, **Install FCM on this phone** offers the browser installation prompt
+  or home-screen instructions (Safari: Share, then Add to Home Screen).
+  The installed shortcut uses the Iron Eagle icon. This is a PWA, not an APK or
+  widget: it still needs connectivity for records and does not guarantee
+  background GPS or lock-screen notifications.
+- A static assignment links to its exact shift. Start/end the shift once;
+  separate arrival/departure actions are not needed. If GPS or the site boundary
+  cannot verify attendance, give an explanation for operations review.
+- **Start break** becomes **Finish break**. A planned unpaid break shows its
+  remaining allowance, recovered from the saved start after refresh. Finish it
+  explicitly; payroll uses actual unpaid time. Finish an open break before
+  ending the shift.
+- In **Report**, save the report before attaching camera/gallery photos.
+  Photos can also target an assigned incident. Check each upload confirmation
+  and retry failures; saving the report alone does not confirm its photos.
+  Original photos remain private evidence, not automatically client-published.
 - The bottom field navigation provides **Home**, **Schedule**, **Tools**,
   **Report**, and **SOS**. The home page keeps the current assignment and
   personal safety visible; expand **More tools, open shifts and status** for

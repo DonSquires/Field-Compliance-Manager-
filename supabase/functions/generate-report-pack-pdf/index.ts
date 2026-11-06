@@ -16,7 +16,7 @@ import { privacyHoldReason } from '../_shared/report-privacy-oracle.mjs';
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v21';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v22';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');

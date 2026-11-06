@@ -1,0 +1,15 @@
+{
+  "id": "/officer",
+  "name": "Field Compliance Manager",
+  "short_name": "FCM",
+  "description": "Iron Eagle field operations",
+  "start_url": "/officer",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    { "src": "/assets/pwa/ie-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/pwa/ie-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

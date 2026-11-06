@@ -38,9 +38,9 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('Commercial readiness exceptions');
   });
   it('creates slots and materializes only field work through governed RPCs', () => {
-    expect(page).toContain("supabase.rpc('create_roster_slot'");
-    expect(page).toContain("supabase.rpc('materialize_roster_slot'");
-    expect(page).toContain("unit?.work_unit_type === 'patrol' || unit?.work_unit_type === 'static'");
+    expect(page).toContain("supabase.rpc('create_roster_slot_with_break'");
+    expect(page).toContain('p_planned_break_minutes: Number(form.breakMinutes)');
+    expect(page).toContain('p_break_unpaid: form.breakUnpaid');
     expect(page).toContain('Open shift — advertise to available staff');
     expect(page).toContain('required={Boolean(editingSlot)}');
     expect(page).not.toContain(".from('shifts').insert");

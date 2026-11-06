@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-static-breaks-migration.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101140000_officer_person_search_access.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');

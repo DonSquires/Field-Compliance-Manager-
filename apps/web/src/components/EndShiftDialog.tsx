@@ -18,6 +18,8 @@ export interface EndShiftReadiness {
   blockers: string[];
   can_end: boolean;
   can_end_after_debrief: boolean;
+  single_site_attendance: boolean;
+  open_break_count: number;
 }
 
 export type EndShiftDestination = 'stops' | 'dispatch' | 'debrief' | 'timesheet' | 'home';
@@ -50,7 +52,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isEndShiftReadiness = (value: unknown, shiftId: string): value is EndShiftReadiness => {
   if (!isRecord(value)) return false;
-  const counts = ['open_stop_count', 'open_required_task_count', 'open_dispatch_job_count', 'active_welfare_alert_count'];
+  const counts = ['open_stop_count', 'open_required_task_count', 'open_dispatch_job_count', 'active_welfare_alert_count', 'open_break_count'];
   return value.shift_id === shiftId
     && typeof value.status === 'string'
     && typeof value.scheduled_end === 'string' && Number.isFinite(Date.parse(value.scheduled_end))
@@ -60,6 +62,7 @@ const isEndShiftReadiness = (value: unknown, shiftId: string): value is EndShift
       && typeof stop.stop_id === 'string' && typeof stop.place === 'string' && typeof stop.status === 'string'
       && (stop.module_key === null || typeof stop.module_key === 'string'))
     && Array.isArray(value.blockers) && value.blockers.every((blocker: unknown) => typeof blocker === 'string')
+    && typeof value.single_site_attendance === 'boolean'
     && typeof value.debrief_submitted === 'boolean' && typeof value.can_end === 'boolean' && typeof value.can_end_after_debrief === 'boolean';
 };
 
@@ -76,7 +79,7 @@ const isDebriefReceipt = (value: unknown): boolean =>
   && 'submitted_at' in value && typeof value.submitted_at === 'string' && Number.isFinite(Date.parse(value.submitted_at));
 
 /** One place to end a shift: shows what is still open, takes the debrief if it is missing, then ends. */
-export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryReadiness = false, stopsUnavailableReason, dispatchUnavailableReason, onClose, onEnded, onNavigate }: EndShiftDialogProps) {
+export function EndShiftDialog({ shiftId, shiftStatus, serviceType, stopsUnavailableReason, dispatchUnavailableReason, onClose, onEnded, onNavigate }: EndShiftDialogProps) {
   const [readiness, setReadiness] = useState<EndShiftReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,8 +91,9 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
   const [equipmentIssue, setEquipmentIssue] = useState(false);
   const [followUp, setFollowUp] = useState(false);
   const [followUpNotes, setFollowUpNotes] = useState('');
+  const [attendanceReason, setAttendanceReason] = useState('');
   const [debriefEventId] = useState(() => crypto.randomUUID());
-  const dirty = Boolean(ending || (!(readiness?.debrief_submitted || debriefConfirmed) && (summary || safetyIncident || equipmentIssue || followUp || followUpNotes)));
+  const dirty = Boolean(ending || attendanceReason || (!(readiness?.debrief_submitted || debriefConfirmed) && (summary || safetyIncident || equipmentIssue || followUp || followUpNotes)));
   const clearUnsavedWork = useOfficerUnsavedWork(dirty);
   const leaveDialog = (action: () => void) => {
     if (dirty && !window.confirm('Your debrief is not confirmed. Leave and lose the unsubmitted writing?')) return;
@@ -99,11 +103,8 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    // ATLAS READS: get_shift_end_readiness
-    // ATLAS READS: get_officer_recovery_readiness
-    const { data, error: readError } = recoveryReadiness
-      ? await supabase.rpc('get_officer_recovery_readiness', { p_shift_id: shiftId })
-      : await supabase.rpc('get_shift_end_readiness', { p_shift_id: shiftId });
+    // ATLAS READS: get_officer_attendance_readiness
+    const { data, error: readError } = await supabase.rpc('get_officer_attendance_readiness', { p_shift_id: shiftId });
     if (readError || !isEndShiftReadiness(data, shiftId)) {
       const message = readError?.message ? `Shift status could not be checked: ${readError.message}. Check again or contact operations.` : 'Shift status could not be confirmed. Check again or contact operations.';
       setReadiness(null); setError(message); setLoading(false);
@@ -112,7 +113,7 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
     setReadiness(data);
     setLoading(false);
     return null;
-  }, [shiftId, recoveryReadiness]);
+  }, [shiftId]);
   useEffect(() => { void load(); }, [load]);
 
   const needsDebrief = readiness ? !readiness.debrief_submitted : false;
@@ -123,6 +124,16 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
   const endShift = async () => {
     if (!readiness) return;
     setEnding(true); setError(null);
+    const coords = await currentPosition();
+    if (readiness.single_site_attendance) {
+      const position = await supabase.rpc('evaluate_static_shift_position', { p_shift_id: shiftId, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
+      if (position.error || !isRecord(position.data) || typeof position.data.verified_attendance !== 'boolean') {
+        setError(position.error?.message ?? 'Attendance position could not be checked. Retry or contact operations.'); setEnding(false); return;
+      }
+      if (!position.data.verified_attendance && !attendanceReason.trim()) {
+        setError('GPS does not verify attendance at this site. Enter an attendance explanation for operations review.'); setEnding(false); return;
+      }
+    }
     if (needsDebrief) {
       // ATLAS WRITES: submit_shift_debrief (the debrief is part of ending the shift when it has not been recorded yet)
       const { data: debriefData, error: debriefError } = await supabase.rpc('submit_shift_debrief', { p_shift_id: shiftId, p_client_event_id: debriefEventId, p_summary: summary.trim(), p_safety_incident_reported: safetyIncident, p_equipment_issue_reported: equipmentIssue, p_follow_up_required: followUp, p_follow_up_notes: followUp ? (followUpNotes.trim() || null) : null });
@@ -137,9 +148,10 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
       setDebriefUnconfirmed(false);
       setDebriefConfirmed(true);
     }
-    const coords = await currentPosition();
     // ATLAS WRITES: complete_officer_shift (server re-checks every rule; the end position is recorded, never a gate)
-    const { data, error: endError } = await supabase.rpc('complete_officer_shift', { p_shift_id: shiftId, p_expected_status: shiftStatus, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
+    const { data, error: endError } = readiness.single_site_attendance
+      ? await supabase.rpc('complete_officer_static_shift', { p_shift_id: shiftId, p_expected_status: shiftStatus, p_gps_lat: coords.lat, p_gps_lng: coords.lng, p_off_site_reason: attendanceReason.trim() || null })
+      : await supabase.rpc('complete_officer_shift', { p_shift_id: shiftId, p_expected_status: shiftStatus, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
     const receipt: unknown = Array.isArray(data) ? data[0] : data;
     if (endError || !isShiftEndReceipt(receipt, shiftId)) {
       const endFailure = (endError?.message || 'No valid completion receipt was returned').replace(/[.!?]+$/, '');
@@ -171,12 +183,15 @@ export function EndShiftDialog({ shiftId, shiftStatus, serviceType, recoveryRead
         {error && <p className="end-shift-error" role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}</p>}
         {loading ? <p className="end-shift-note"><RefreshCw size={16} className="is-spinning" aria-hidden="true" /> Checking what is still open…</p> : !readiness ? <footer><button type="button" onClick={() => void load()}>Check again</button></footer> : <>
           <p className="end-shift-note">{readiness.actual_start ? `On shift for ${workedFor(readiness.actual_start)}.` : ''} Everything below needs a tick before the shift can end.</p>
+          {readiness.single_site_attendance && <p>Ending this single-site shift also records departure. No separate off-site action is needed.</p>}
           <ul className="end-shift-checklist" aria-label="Before the shift can end">
             {item(readiness.open_stop_count === 0 && readiness.open_required_task_count === 0, readiness.open_stop_count === 0 && readiness.open_required_task_count === 0 ? 'Every stop is done' : readiness.open_stop_count ? `${readiness.open_stop_count} ${readiness.open_stop_count === 1 ? 'stop' : 'stops'} still open` : `${readiness.open_required_task_count} required ${readiness.open_required_task_count === 1 ? 'task' : 'tasks'} not done`, readiness.open_stops.length ? readiness.open_stops.map((stop) => stop.place).join(', ') : readiness.open_stop_count && readiness.open_required_task_count ? `${readiness.open_required_task_count} required ${readiness.open_required_task_count === 1 ? 'task' : 'tasks'} not done` : null, stopsUnavailableReason ? undefined : { label: 'Open stops', destination: stopsDestination }, readiness.open_stop_count > 0 || readiness.open_required_task_count > 0 ? stopsUnavailableReason : undefined)}
             {item(readiness.open_dispatch_job_count === 0, readiness.open_dispatch_job_count === 0 ? 'No dispatch jobs open' : `${readiness.open_dispatch_job_count} dispatch ${readiness.open_dispatch_job_count === 1 ? 'job' : 'jobs'} still open`, null, dispatchUnavailableReason ? undefined : { label: 'Open dispatch', destination: 'dispatch' }, readiness.open_dispatch_job_count > 0 ? dispatchUnavailableReason : undefined)}
             {item(readiness.active_welfare_alert_count === 0, readiness.active_welfare_alert_count === 0 ? 'No welfare alerts active' : `${readiness.active_welfare_alert_count} welfare ${readiness.active_welfare_alert_count === 1 ? 'alert' : 'alerts'} to resolve`, readiness.active_welfare_alert_count ? 'Resolve it from the safety panel, or call your supervisor.' : null)}
+            {item(readiness.open_break_count === 0, readiness.open_break_count ? 'Finish your break first' : 'No break in progress', null)}
             {item(readiness.debrief_submitted, readiness.debrief_submitted ? 'Debrief recorded' : 'Debrief', readiness.debrief_submitted ? null : 'A few words about the shift, below.')}
           </ul>
+          {readiness.single_site_attendance && <label><span>Attendance explanation (required if GPS or the site boundary cannot verify your position)</span><textarea rows={2} maxLength={2000} value={attendanceReason} onChange={(event) => setAttendanceReason(event.target.value)} disabled={ending} /></label>}
           {needsDebrief && <div className="end-shift-debrief">
             <label><span>How did the shift go?</span><textarea rows={3} maxLength={5000} value={summary} onChange={(event) => setSummary(event.target.value)} disabled={debriefFieldsDisabled} placeholder="What happened, anything the next officer or your supervisor should know (at least 10 characters)" /></label>
             <div className="end-shift-flags">
