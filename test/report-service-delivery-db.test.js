@@ -20,7 +20,7 @@ test('isolated Postgres service delivery auth, attribution, privacy and provenan
     if (!ready) throw new Error('Isolated fixture Postgres did not become ready');
     docker(['exec', name, 'createdb', '-U', 'postgres', '-T', 'template0', 'fcm_report_fixture']);
     const [before, after] = fs.readFileSync(path.join(__dirname, 'fixtures', 'report-service-delivery-db.sql'), 'utf8').split('-- APPLY MIGRATION HERE');
-    const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261106022918_report_service_delivery_summary.sql'), 'utf8');
+    const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261106120300_report_service_delivery_summary.sql'), 'utf8');
     try {
       docker(['exec', '-i', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'fcm_report_fixture'], `${before}\n${migration}\n${after}`);
     } catch (error) {

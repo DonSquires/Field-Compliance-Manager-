@@ -7,7 +7,7 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 
-const migration = readFileSync(join(__dirname, '../supabase/migrations/20261106022056_officer_record_photo_attachments.sql'), 'utf8');
+const migration = readFileSync(join(__dirname, '../supabase/migrations/20261106120200_officer_record_photo_attachments.sql'), 'utf8');
 const integrity = readFileSync(join(__dirname, '../supabase/migrations/20261010192005_allow_external_record_photos.sql'), 'utf8');
 const trigger = integrity.slice(integrity.indexOf('CREATE OR REPLACE FUNCTION'), integrity.indexOf('$function$;') + '$function$;'.length);
 

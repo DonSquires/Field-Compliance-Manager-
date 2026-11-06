@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261106022918_report_service_delivery_summary.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261106120300_report_service_delivery_summary.sql'), 'utf8');
 
 test('listed CI place-workflow entrypoint runs service evidence database checks under BOB_TEST_POSTGRES', () => {
   const entrypoint = fs.readFileSync(path.join(__dirname, 'rm-simple-place-workflows.test.js'), 'utf8');
@@ -21,7 +21,8 @@ test('service evidence is a count-only supplement, not private officer prose or 
   assert.match(migration, /recorded - represented/);
   assert.match(migration, /->'client'/);
   assert.doesNotMatch(migration, /\b(?:r\.(?:title|description|review_notes|follow_up_notes)|j\.(?:outcome_notes|briefing_notes)|d\.summary|act\.notes)\b/);
-  assert.match(migration, /r\.report_type = 'incident'/);
+  assert.match(migration, /r\.report_type in \('incident', 'health_safety'\)/);
+  assert.doesNotMatch(migration, /report_type[^\n]*'maintenance'/);
   assert.match(migration, /r\.reviewed_at is not null and r\.reviewed_by is not null/);
   assert.match(migration, /revoke all on function public\.report_service_delivery_summary.*authenticated/);
 });

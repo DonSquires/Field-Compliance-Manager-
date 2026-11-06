@@ -1,10 +1,17 @@
 /**
- * Recorded travel only. This reader does not calculate financial cost.
+ * CostOfServicePage — organisation-level cost of service.
+ *
+ * Answers: "what did it cost us to serve this client over this window?" from
+ * the finance ledger (posted costs), worked shifts and completed callouts, plus
+ * the travel officers actually recorded. Unposted labour is a labelled
+ * estimate and missing steps are named; nothing unknown is shown as $0.
+ * Pricing and invoicing stay on the finance pipeline; nothing on this page writes.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Gauge } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import PatrolTravelSummary from '../components/PatrolTravelSummary';
+import CostOfServiceSummary from '../components/CostOfServiceSummary';
 import { supabase } from '../lib/supabase';
 import { TRAVEL_WINDOW_OPTIONS } from '../lib/patrolTravel';
 import './CostOfServicePage.css';
@@ -63,10 +70,10 @@ const CostOfServicePage: React.FC = () => {
 
   if (!organizationId) {
     return <div className="cost-of-service">
-      <header className="cost-of-service-header"><div><span>Reports &amp; analytics</span><h1>Recorded travel</h1></div></header>
+      <header className="cost-of-service-header"><div><span>Reports &amp; analytics</span><h1>Cost of service</h1></div></header>
       <p className="cost-of-service-message" role="status">
         <AlertTriangle size={17} aria-hidden="true" />
-        No organisation is in context, so recorded travel is unavailable. Choose an organisation and try again.
+        No organisation is in context, so cost of service cannot be reported. Choose an organisation and try again.
       </p>
     </div>;
   }
@@ -75,15 +82,14 @@ const CostOfServicePage: React.FC = () => {
     <header className="cost-of-service-header">
       <div>
         <span>Reports &amp; analytics</span>
-        <h1><Gauge size={20} aria-hidden="true" />Recorded travel</h1>
-        <p>Travel officers recorded serving {scopeLabel}, over the last {monthsBack} months. Distance evidence only — not financial cost or an invoice.</p>
+        <h1><Gauge size={20} aria-hidden="true" />Cost of service</h1>
+        <p>Posted costs, worked labour and callouts by client agreement, then travel officers recorded serving {scopeLabel}, over the last {monthsBack} months. Operational evidence for cost of service — not an invoice.</p>
       </div>
     </header>
 
     {scopeError && <p className="cost-of-service-message" role="alert"><AlertTriangle size={17} aria-hidden="true" />{scopeError}</p>}
 
-    <p className="cost-of-service-message" role="note">Financial cost of service is not calculated on this page. Officer logs, static attendance and dispatch jobs do not imply recorded travel. Missing distance, wages or rates are not zero cost.</p>
-    <div className="cost-of-service-filters" role="group" aria-label="Recorded travel scope">
+    <div className="cost-of-service-filters" role="group" aria-label="Cost of service scope">
       <label>
         <span>Window</span>
         <select value={monthsBack} onChange={(event) => setMonthsBack(Number(event.target.value))}>
@@ -91,14 +97,14 @@ const CostOfServicePage: React.FC = () => {
         </select>
       </label>
       <label>
-        <span>Officer</span>
+        <span>Officer (travel)</span>
         <select value={officerId} onChange={(event) => setOfficerId(event.target.value)} disabled={scopeLoading}>
           <option value="">All officers</option>
           {officers.map((officer) => <option value={officer.id} key={officer.id}>{officer.label}</option>)}
         </select>
       </label>
       <label>
-        <span>Place</span>
+        <span>Place (travel)</span>
         <select value={siteId} onChange={(event) => setSiteId(event.target.value)} disabled={scopeLoading}>
           <option value="">All places</option>
           {sites.map((site) => <option value={site.id} key={site.id}>{site.label}</option>)}
@@ -106,6 +112,8 @@ const CostOfServicePage: React.FC = () => {
       </label>
       <button type="button" onClick={() => { setOfficerId(''); setSiteId(''); }} disabled={!officerId && !siteId}>Clear scope</button>
     </div>
+
+    <CostOfServiceSummary organizationId={organizationId} monthsBack={monthsBack} />
 
     <PatrolTravelSummary
       organizationId={organizationId}

@@ -6,7 +6,7 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const schema = readFileSync(join(__dirname, '../supabase/schema.sql'), 'utf8');
-const migration = readFileSync(join(__dirname, '../supabase/migrations/20261106021829_officer_static_attendance_and_rostered_breaks.sql'), 'utf8');
+const migration = readFileSync(join(__dirname, '../supabase/migrations/20261106120000_officer_static_attendance_and_rostered_breaks.sql'), 'utf8');
 function fn(name) {
   const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${name}"`);
   assert.ok(start >= 0, name);

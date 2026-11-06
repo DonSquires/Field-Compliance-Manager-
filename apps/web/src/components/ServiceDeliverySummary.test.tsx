@@ -21,7 +21,7 @@ describe('Reports & Accountability service evidence', () => {
     expect(rpc).toHaveBeenCalledWith('get_agreement_service_delivery_summary', {
       p_agreement_ids: ['agreement-1', 'agreement-2'], p_from: '2026-11-01T00:00:00.000Z', p_to: '2026-11-08T00:00:00.000Z',
     });
-    expect(screen.getByText(/2 officer incident reports awaiting review/)).toBeTruthy();
+    expect(screen.getByText(/2 officer incident or site hazard reports awaiting review/)).toBeTruthy();
     expect(screen.getByText(/1 shift handovers received/)).toBeTruthy();
     expect(screen.queryByText('PRIVATE')).toBeNull();
   });

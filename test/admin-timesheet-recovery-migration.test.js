@@ -6,7 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
-const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20261106021912_admin_scheduled_timesheet_recovery.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20261106120100_admin_scheduled_timesheet_recovery.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(root, 'supabase/schema.sql'), 'utf8');
 const table = (name) => {
   const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS "public"."${name}" (`);

@@ -10,6 +10,7 @@ const { applyApprovalRuling } = require('./fixtures/client-approval-ruling');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./rm-monthly-activity-report.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./report-privacy-save-permission.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./report-service-delivery-db.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-ledger-cost-db.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');

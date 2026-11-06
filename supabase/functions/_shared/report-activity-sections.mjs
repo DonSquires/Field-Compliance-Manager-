@@ -736,7 +736,7 @@ export function serviceDeliveryRows(value) {
   const counts = obj(summary?.counts);
   if (summary?.version !== 1 || !counts) return null;
   const labels = {
-    reviewedReports: 'Reviewed officer incident reports',
+    reviewedReports: 'Reviewed officer incident and site hazard reports',
     completedDispatch: 'Completed dispatch jobs',
     completedStatic: 'Completed static attendances',
   };
