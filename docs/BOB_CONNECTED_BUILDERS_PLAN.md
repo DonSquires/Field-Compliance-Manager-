@@ -67,7 +67,7 @@ During:
   failure found in the last turns. `node --check` on a web `.ts/.tsx` file is
   rewritten to the web type check. The frontend lane provisions web
   dependencies (`prepareWorkspace`) before the author starts. Prompt version
-  is `agentic-engineer-v18`.
+  is `agentic-engineer-v19`.
 - Scope amendments: when the root cause sits in another changed file in the
   same lane, an acceptance entry may carry
   `scope_amendment {file, reason}`. The reason must be at least 30
