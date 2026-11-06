@@ -14,9 +14,10 @@
  *   Supabase JWT required. Caller must be admin/master/grand_master/admin_officer.
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import * as XLSX from 'https://esm.sh/xlsx@0.18.5';
-import JSZip from 'https://esm.sh/jszip@3.10.1';
-import { extractText as extractPdfTextContent, getDocumentProxy } from 'https://esm.sh/unpdf@0.12.1?target=deno';
+// npm: specifiers: esm.sh deno-target builds pull deno.land/std node polyfills that crash the Edge Runtime.
+import * as XLSX from 'npm:xlsx@0.18.5';
+import JSZip from 'npm:jszip@3.10.1';
+import { extractText as extractPdfTextContent, getDocumentProxy } from 'npm:unpdf@0.12.1';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';

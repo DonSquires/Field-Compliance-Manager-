@@ -70,6 +70,7 @@ import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
   buildOfficerBreadcrumb,
   captureOfficerBreadcrumb,
+  canRecordOfficerBreadcrumbs,
   flushOfficerBreadcrumbs,
   isBreadcrumbDue,
 } from '../lib/officerBreadcrumb';
@@ -275,15 +276,18 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
 
   useEffect(() => {
     if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    const ownerUserId = profile.id;
+    const recordsBreadcrumbs = canRecordOfficerBreadcrumbs(profile.role);
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         safety.recordMovement(position.coords.latitude, position.coords.longitude);
+        if (!recordsBreadcrumbs) return;
         const capturedAt = Date.now();
         if (!isBreadcrumbDue(lastBreadcrumbAtRef.current, capturedAt)) return;
         lastBreadcrumbAtRef.current = capturedAt;
         void resolveAddressForCoordinates(position.coords.latitude, position.coords.longitude)
           .catch(() => null)
-          .then((address) => captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id, address?.label ?? null)))
+          .then((address) => captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id, address?.label ?? null), ownerUserId))
           .then((result) => {
             setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
           });
@@ -292,13 +296,14 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
       { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [activeShift?.id, profile?.id, safety.recordMovement]);
+  }, [activeShift?.id, profile?.id, profile?.role, safety.recordMovement]);
 
   useEffect(() => {
-    if (!profile?.id || typeof window === 'undefined') return;
+    if (!profile?.id || typeof window === 'undefined' || !canRecordOfficerBreadcrumbs(profile.role)) return;
+    const ownerUserId = profile.id;
     let active = true;
     const flush = () => {
-      void flushOfficerBreadcrumbs().then((result) => {
+      void flushOfficerBreadcrumbs(ownerUserId).then((result) => {
         if (!active) return;
         setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
       });
@@ -309,7 +314,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
       active = false;
       window.removeEventListener('online', flush);
     };
-  }, [profile?.id]);
+  }, [profile?.id, profile?.role]);
 
   // Load offered shift count
   useEffect(() => {

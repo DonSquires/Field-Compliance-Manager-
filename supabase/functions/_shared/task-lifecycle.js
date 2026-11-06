@@ -83,6 +83,9 @@ async function finishToolExecution(supabase, taskLedger, chosenTool, result) {
     // Tool encountered a blocker (e.g., missing data, permission denied)
     const reason = result.meta.preflight_reason || result.meta.error || 'Blocked';
     updateResult = await blockStep(supabase, taskLedger.task.id, currentStep, reason);
+  } else if (outcome === 'proposed') {
+    // Governed write staged for human approval; the step's work is done.
+    updateResult = await completeStep(supabase, taskLedger.task.id, currentStep, 'Proposal staged for human approval');
   } else {
     // Unknown outcome — treat as success but log
     console.warn(`[task-lifecycle] Unknown outcome for ${chosenTool}: ${outcome}`);

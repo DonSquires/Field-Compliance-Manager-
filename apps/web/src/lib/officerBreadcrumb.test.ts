@@ -4,7 +4,7 @@ vi.mock('./supabase', () => ({
   supabase: { rpc: vi.fn() },
 }));
 
-import { BREADCRUMB_INTERVAL_MS, buildOfficerBreadcrumb, isBreadcrumbDue } from './officerBreadcrumb';
+import { BREADCRUMB_INTERVAL_MS, buildOfficerBreadcrumb, canRecordOfficerBreadcrumbs, isBreadcrumbDue, isPermanentBreadcrumbRejection } from './officerBreadcrumb';
 
 describe('officer breadcrumb capture', () => {
   it('preserves device capture metadata and converts speed to kilometres per hour', () => {
@@ -43,5 +43,20 @@ describe('officer breadcrumb capture', () => {
     expect(isBreadcrumbDue(null, 1_000)).toBe(true);
     expect(isBreadcrumbDue(1_000, 1_000 + BREADCRUMB_INTERVAL_MS - 1)).toBe(false);
     expect(isBreadcrumbDue(1_000, 1_000 + BREADCRUMB_INTERVAL_MS)).toBe(true);
+  });
+
+  it('records only for roles the breadcrumb RPC accepts', () => {
+    expect(canRecordOfficerBreadcrumbs('officer')).toBe(true);
+    expect(canRecordOfficerBreadcrumbs('admin_officer')).toBe(true);
+    expect(canRecordOfficerBreadcrumbs('scan_operator')).toBe(true);
+    expect(canRecordOfficerBreadcrumbs('grand_master')).toBe(false);
+    expect(canRecordOfficerBreadcrumbs('admin')).toBe(false);
+    expect(canRecordOfficerBreadcrumbs(undefined)).toBe(false);
+  });
+
+  it('treats database validation rejections as permanent and network failures as retryable', () => {
+    expect(isPermanentBreadcrumbRejection({ code: 'P0001', message: 'recorded_at is outside the accepted capture window' })).toBe(true);
+    expect(isPermanentBreadcrumbRejection(new TypeError('Failed to fetch'))).toBe(false);
+    expect(isPermanentBreadcrumbRejection({ code: '57014', message: 'statement timeout' })).toBe(false);
   });
 });

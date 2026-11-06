@@ -427,3 +427,16 @@ verify_jwt = false
 
 [functions.website-news]
 verify_jwt = false
+
+# pg_cron + pg_net scheduler targets (ops.enqueue_*). The Vault apikey is an
+# sb_secret key, not a JWT, so gateway JWT verification rejects every tick.
+# Each function fails closed in code unless x-cron-secret or the exact
+# service-role key is presented.
+[functions.welfare-escalation-tick]
+verify_jwt = false
+
+[functions.notify-credential-expiry]
+verify_jwt = false
+
+[functions.bob-refresh-canonical-ta-names]
+verify_jwt = false

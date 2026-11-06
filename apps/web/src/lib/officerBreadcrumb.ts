@@ -19,6 +19,24 @@ interface QueuedBreadcrumb {
   id: string;
   attempts: number;
   event: OfficerBreadcrumb;
+  /** Absent on items queued before ownership was recorded. */
+  ownerUserId?: string;
+}
+
+// Mirrors the role gate in public.record_officer_breadcrumb.
+const BREADCRUMB_ROLES = new Set(['officer', 'admin_officer', 'scan_operator']);
+
+export function canRecordOfficerBreadcrumbs(role: string | null | undefined): boolean {
+  return typeof role === 'string' && BREADCRUMB_ROLES.has(role);
+}
+
+/**
+ * record_officer_breadcrumb raises P0001 only for validation failures (stale
+ * capture window, bad coordinates, foreign shift, non-officer session). Those
+ * can never succeed on retry and would otherwise block the queue forever.
+ */
+export function isPermanentBreadcrumbRejection(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P0001';
 }
 
 export type BreadcrumbDeliveryResult =
@@ -104,35 +122,58 @@ async function sendBreadcrumb(event: OfficerBreadcrumb): Promise<void> {
   if (error) throw error;
 }
 
-export async function captureOfficerBreadcrumb(event: OfficerBreadcrumb): Promise<BreadcrumbDeliveryResult> {
-  const queued: QueuedBreadcrumb = { id: event.clientEventId, attempts: 0, event };
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return fallback;
+}
+
+async function pendingCountFor(ownerUserId: string): Promise<number> {
+  const items = await listQueuedBreadcrumbs();
+  return items.filter((item) => belongsTo(item, ownerUserId)).length;
+}
+
+function belongsTo(item: QueuedBreadcrumb, ownerUserId: string): boolean {
+  return item.ownerUserId === undefined || item.ownerUserId === ownerUserId;
+}
+
+export async function captureOfficerBreadcrumb(event: OfficerBreadcrumb, ownerUserId: string): Promise<BreadcrumbDeliveryResult> {
+  const queued: QueuedBreadcrumb = { id: event.clientEventId, attempts: 0, event, ownerUserId };
   try {
     await saveQueuedBreadcrumb(queued);
     await sendBreadcrumb(event);
     await removeQueuedBreadcrumb(queued.id);
-    return { confirmed: true, pendingCount: (await listQueuedBreadcrumbs()).length };
+    return { confirmed: true, pendingCount: await pendingCountFor(ownerUserId) };
   } catch (error) {
+    if (isPermanentBreadcrumbRejection(error)) await removeQueuedBreadcrumb(queued.id).catch(() => undefined);
     return {
       confirmed: false,
-      pendingCount: await listQueuedBreadcrumbs().then((items) => items.length).catch(() => 1),
-      error: error instanceof Error ? error.message : 'Breadcrumb receipt was not confirmed.',
+      pendingCount: await pendingCountFor(ownerUserId).catch(() => 1),
+      error: errorMessage(error, 'Breadcrumb receipt was not confirmed.'),
     };
   }
 }
 
-export async function flushOfficerBreadcrumbs(): Promise<BreadcrumbDeliveryResult> {
+/** Sends only the signed-in officer's queued positions; another login's items wait for that login. */
+export async function flushOfficerBreadcrumbs(ownerUserId: string): Promise<BreadcrumbDeliveryResult> {
   try {
-    const queued = await listQueuedBreadcrumbs();
+    const queued = (await listQueuedBreadcrumbs()).filter((item) => belongsTo(item, ownerUserId));
     for (const item of queued) {
       try {
         await sendBreadcrumb(item.event);
         await removeQueuedBreadcrumb(item.id);
       } catch (error) {
+        if (isPermanentBreadcrumbRejection(error)) {
+          await removeQueuedBreadcrumb(item.id);
+          continue;
+        }
         await saveQueuedBreadcrumb({ ...item, attempts: item.attempts + 1 });
         return {
           confirmed: false,
-          pendingCount: (await listQueuedBreadcrumbs()).length,
-          error: error instanceof Error ? error.message : 'Queued breadcrumbs remain unconfirmed.',
+          pendingCount: await pendingCountFor(ownerUserId),
+          error: errorMessage(error, 'Queued breadcrumbs remain unconfirmed.'),
         };
       }
     }

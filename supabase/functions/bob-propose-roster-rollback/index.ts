@@ -33,7 +33,7 @@ Deno.serve(async (request) => {
       action_type: 'rollback_bob_roster_plan',
       context_page: 'roster', context_record_id: plan.id, context_table: 'bob_roster_plans',
       proposed_payload: { plan_id: plan.id, reason: body.reason ?? 'Rollback requested by human', triggered_by: caller.id },
-      status: 'pending', triggered_by: caller.id, idempotency_key,
+      status: 'pending', triggered_by: caller.id, idempotency_key: idempotencyKey,
       bob_reasoning: 'Rollback is limited to assignments that remain unchanged draft slots. Published or human-edited slots fail closed.',
       context_summary: `Rollback roster plan ${plan.id}`,
     }).select('id').single();
