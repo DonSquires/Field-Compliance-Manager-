@@ -692,6 +692,17 @@ test('managed user spine routes identity and access through governed RPCs', () =
   assert.equal(atlas.edges.some((edge) => ['components/UserIdentityWorkspace', 'pages/UserManagementPage', 'pages/AccessControlPage'].includes(edge.source_name) && ['user_profiles', 'preset_assignments', 'staff_area_grants'].includes(edge.target_name) && edge.edge_kind === 'writes'), false);
 });
 
+test('managed Atlas maps the staff profile to its private HR records and governed writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+
+  assert.equal(hasEdge('pages/StaffProfilePage', 'staff_profiles', 'reads'), true);
+  assert.equal(hasEdge('pages/StaffProfilePage', 'staff_documents', 'reads'), true);
+  assert.equal(hasEdge('pages/StaffProfilePage', 'manage_user_identity_access', 'calls'), true);
+  assert.equal(hasEdge('pages/StaffProfilePage', 'set_staff_employment_setup', 'calls'), true);
+  assert.equal(hasEdge('pages/StaffProfilePage', 'record_staff_document_upload', 'calls'), true);
+});
+
 test('Atlas refresh preserves manual and unmarked generator rows', () => {
   const manifest = {
     capabilities: [{
