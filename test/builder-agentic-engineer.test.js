@@ -1102,6 +1102,49 @@ test('a review revision starts from the previous patch; an unappliable seed stop
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('draft discovery finds new files and excludes ignored, generated and secret paths', t => {
+  const repo = makeRepo();
+  t.after(() => fs.rmSync(repo.root, { recursive: true, force: true }));
+  const tools = createTools({ workspacePath: repo.source, repoRoot: repo.source, lane: 'backend', limits: DEFAULT_LIMITS, log() {} });
+  assert.ok(!tools.write_file({ path: 'lib/draft.js', content: 'const greeting = "Bob Test draft discovery";\n' }).error);
+  fs.writeFileSync(path.join(repo.source, 'lib/draft.test.js'), '// Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, '.env.draft'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'draft.pem'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, '.gitignore'), 'ignored-draft.js\n');
+  fs.writeFileSync(path.join(repo.source, 'ignored-draft.js'), 'Bob Test draft discovery\n');
+  fs.mkdirSync(path.join(repo.source, 'dist'));
+  fs.writeFileSync(path.join(repo.source, 'dist/draft.js'), 'Bob Test draft discovery\n');
+  fs.mkdirSync(path.join(repo.source, 'node_modules'));
+  fs.writeFileSync(path.join(repo.source, 'node_modules/draft.js'), 'Bob Test draft discovery\n');
+
+  assert.deepEqual(tools.find_files({ name: 'DRAFT', limit: 1 }), {
+    name: 'draft', matches: 2, paths: ['lib/draft.js'], truncated: true,
+  });
+  assert.deepEqual(tools.find_files({ name: 'absent' }).paths, []);
+  assert.match(tools.find_files({}).error, /name must be/);
+  const found = tools.search({ query: 'Bob Test draft discovery' });
+  assert.equal(found.matches, 2, JSON.stringify(found));
+  assert.ok(found.results.every(line => line.startsWith('lib/draft')));
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: '.env.draft' }).matches, 0);
+});
+
+test('draft search preserves space-containing paths and rejects invalid scopes instead of searching everything', t => {
+  const repo = makeRepo();
+  t.after(() => fs.rmSync(repo.root, { recursive: true, force: true }));
+  const tools = createTools({ workspacePath: repo.source, repoRoot: repo.source, lane: 'backend', limits: DEFAULT_LIMITS, log() {} });
+  tools.write_file({ path: 'lib/new source.js', content: 'const greeting = "Bob Test scoped search";\n' });
+  const found = tools.search({ query: 'Bob Test scoped search', path: 'lib/new source.js' });
+  assert.deepEqual(found.paths, ['lib/new source.js']);
+  assert.equal(found.matches, 1, JSON.stringify(found));
+  assert.equal(tools.search({ query: 'Bob Test scoped search', path: ['lib/*.js'] }).matches, 1);
+  assert.equal(tools.search({ query: 'sum', path: '.' }).error, undefined);
+  for (const scope of [null, '../lib', '/', '/lib', [''], ['lib', '../test'], ['C:/Windows'], [42]]) {
+    assert.match(tools.search({ query: 'sum', path: scope }).error, /repository-relative/);
+  }
+  assert.match(tools.search({ query: 'sum', paths: ['lib'] }).error, /path, not paths/);
+  assert.ok(tools.search({ query: '[', regex: true }).error);
+});
+
 test('search honours several pathspecs and treats no matches as a result; apply_patch tolerates fences and miscounted hunks', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

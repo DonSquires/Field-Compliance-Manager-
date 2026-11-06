@@ -30,7 +30,7 @@ const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generatio
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
 
-const PROMPT_VERSION = 'agentic-engineer-v18';
+const PROMPT_VERSION = 'agentic-engineer-v19';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 // Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
@@ -100,6 +100,12 @@ function normalizeRunCommand(command, workspacePath = null) {
 
 const PRESERVE_TESTS = 'Existing tests are the repository\'s evidence and must keep passing: keep every existing test and its title, and add new tests alongside them (replace_in_file to insert; never write_file over an existing test file). If the approved behavior changes what an existing test asserts, edit that assertion in place under the same title. run {"command":"git show HEAD:<file>"} shows the pinned version.';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
+const PRIVATE_SEARCH_PATH = /(?:^|\/)(?:\.env(?:\.|$)|id_rsa[^/]*$|id_ed25519[^/]*$)|\.(?:pem|key|pfx|p12|crt|keystore)$/i;
+const SEARCH_EXCLUDES = [
+  ...[...SKIP_DIRS].map(dir => `:(glob,exclude)**/${dir}/**`),
+  ...['.env', '.env.*', 'id_rsa*', 'id_ed25519*', '*.pem', '*.key', '*.pfx', '*.p12', '*.crt', '*.keystore']
+    .map(pattern => `:(glob,exclude,icase)**/${pattern}`),
+];
 
 function git(cwd, args, options = {}) {
   try {
@@ -315,7 +321,8 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- list_dir {path}                        list a directory (node_modules/.git skipped)',
     `- read_file {path, start_line?, end_line?}   read a text file (max ${limits.readCapChars} chars per call). An oversized range returns the real head AND tail with the omitted line range named; never invent the omitted body — search it or request that range.`,
     '- outline {path, pattern?}              declaration index of one file: every function/const/class/type/case/SQL object with its line number (pattern narrows it). USE THIS FIRST on any file over ~800 lines, then read_file only the ranges you need — never walk a big file window by window.',
-    '- search {query, path?, regex?, context?}   git grep across the worktree (path = pathspec, e.g. "supabase/functions"); regex defaults to false; context = lines of surrounding code per hit (0-8) so a hit often needs no follow-up read',
+    '- find_files {name, limit?}               discover filenames by a case-insensitive path fragment (2-100 characters), including new draft files. This is not content or semantic search. Ignored/generated files and secret paths are excluded.',
+    '- search {query, path?, regex?, context?}   literal case-sensitive text across tracked and new draft files, excluding ignored/generated files and secret paths. path = repository-relative file/directory/glob or array; use an array for multiple paths containing spaces. regex defaults to false; context = lines around each hit (0-8). This is not semantic search; discover filenames with find_files, then read the owning source.',
     '- git_log {path?, limit?}               recent commits (optionally for a path)',
     '- git_diff {}                            your uncommitted changes so far',
     '- write_file {path, content}             create or overwrite a file (full content)',
@@ -418,7 +425,7 @@ function readingMap(transcript) {
 // do"); it is the budget failing. Live job 118731bd: 42 reads, 11 searches, 60 turns, zero edits,
 // then "cannot complete within the remaining budget" — parked as if the task were impossible.
 function classifyNoChange({ reason, turns, transcript, limits }) {
-  const exploring = transcript.filter((entry) => ['read_file', 'search', 'outline', 'list_dir', 'git_log', 'atlas', 'live_count'].includes(entry.tool)).length;
+  const exploring = transcript.filter((entry) => ['read_file', 'search', 'find_files', 'outline', 'list_dir', 'git_log', 'atlas', 'live_count'].includes(entry.tool)).length;
   const lateFinish = turns >= Math.ceil(limits.maxTurns * 0.5);
   const mentionsBudget = /\b(budget|turns?|remaining|ran out|could not (?:complete|finish)|cannot be completed)\b/i.test(String(reason || ''));
   return exploring >= 8 && (lateFinish || mentionsBudget);
@@ -648,7 +655,7 @@ function applyEnvelopeUpdate(content, lines, file) {
   return { content: source.join('\n') };
 }
 
-function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines }) {
+function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true }) {
   const generatedBaselines = new Map();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
   const runs = [];
@@ -864,14 +871,40 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       const { entries, total_lines, omitted } = outlineLines(buffer.toString('utf8'), { pattern: filter, cap: limits.listCapEntries });
       return { path: normalized, total_lines, entries, omitted: omitted || undefined, hint: omitted ? `${omitted} variable declarations were left out to fit; pass pattern to narrow. read_file the line ranges you need; search with context for call sites` : 'read_file the line ranges you need; search with context for call sites' };
     },
-    search({ query, path: pathspec, regex, context }) {
+    find_files({ name, limit } = {}) {
+      const term = typeof name === 'string' ? name.trim().toLowerCase() : '';
+      if (term.length < 2 || term.length > 100) return { error: 'name must be a filename/path fragment of 2-100 characters, not a natural-language question' };
+      const cap = Math.min(100, Math.max(1, Number(limit) || 50));
+      try {
+        const files = execFileSync('git', ['ls-files', '-z', '--cached', ...(includeUntracked ? ['--others', '--exclude-standard'] : [])],
+          { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+        const matches = [...new Set(files.split('\0'))].filter(file => file && file.toLowerCase().includes(term)
+          && !PRIVATE_SEARCH_PATH.test(file) && !file.split('/').some(part => SKIP_DIRS.has(part))
+          && fs.existsSync(path.join(workspacePath, file)) && fs.lstatSync(path.join(workspacePath, file)).isFile()).sort();
+        return { name: term, matches: matches.length, paths: matches.slice(0, cap), truncated: matches.length > cap };
+      } catch (error) {
+        return { error: `filename discovery failed: ${clip(redactGitError(error.message), 500)}` };
+      }
+    },
+    search(args = {}) {
+      const { query, path: pathspec, regex, context } = args;
       if (!query || typeof query !== 'string') return { error: 'query is required' };
+      if (Object.hasOwn(args, 'paths')) return { error: 'search accepts path, not paths; use a repository-relative string or array' };
+      if (pathspec !== undefined && typeof pathspec !== 'string' && !Array.isArray(pathspec)) {
+        return { error: 'search path must be a repository-relative string or array' };
+      }
       // Models pass several pathspecs at once ("services/fcm-api/src/bob test"); honour each one.
-      const pathspecs = (Array.isArray(pathspec) ? pathspec : String(pathspec ?? '').split(/[\s,]+/))
-        .map((value) => normalizeRepoPath(value)).filter(Boolean);
+      const requested = Array.isArray(pathspec) ? pathspec
+        : typeof pathspec === 'string' && fs.existsSync(path.join(workspacePath, pathspec)) ? [pathspec]
+        : String(pathspec ?? '').split(/[\s,]+/).filter(Boolean);
+      const pathspecs = requested.map(value => value === './' ? '.' : typeof value === 'string' ? value.replace(/^\.\//, '').replace(/\/+$/, '') : value);
+      if (pathspecs.some(value => typeof value !== 'string' || !value.trim() || /^(?:\/|[A-Za-z]:|:)|\\|[\0\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(value)
+        || (value !== '.' && !normalizeRepoPath(value)))) {
+        return { error: 'search path must be repository-relative, not an absolute path, traversal or Git magic expression. Use find_files to discover source paths.' };
+      }
       const around = Math.min(8, Math.max(0, Number(context) || 0));
-      const args = ['grep', '-n', '-I', regex ? '-E' : '-F', ...(around ? [`-C${around}`] : []), '-e', query, '--', ...(pathspecs.length ? pathspecs : ['.'])];
-      const result = spawnSync('git', args, { cwd: workspacePath, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const argv = ['grep', ...(includeUntracked ? ['--untracked', '--exclude-standard'] : []), '-n', '-I', regex ? '-E' : '-F', ...(around ? [`-C${around}`] : []), '-e', query, '--', ...(pathspecs.length ? pathspecs : ['.']), ...SEARCH_EXCLUDES];
+      const result = spawnSync('git', argv, { cwd: workspacePath, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       // git grep: 0 = matches, 1 = no matches, anything else is a real error.
       if (result.status !== 0 && result.status !== 1) return { error: clip(redactGitError(result.stderr || result.error?.message || `git grep exited ${result.status}`), 500) };
       const lines = String(result.stdout || '').split('\n').filter(Boolean);

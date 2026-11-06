@@ -232,7 +232,7 @@ test('the advertised human_test tool clears a misrouted browser check using the 
 });
 
 test('native tools share edit contracts and describe literal source discovery precisely', () => {
-  const definitions = vibe.vibeNativeTools({ read_file() {}, search() {}, replace_in_file() {}, __policyCheck() {} });
+  const definitions = vibe.vibeNativeTools({ read_file() {}, search() {}, find_files() {}, replace_in_file() {}, __policyCheck() {} });
   const replacement = definitions.find(tool => tool.function.name === 'replace_in_file').function;
   assert.deepEqual(replacement.parameters.required, ['path', 'old_text', 'new_text']);
   assert.equal(replacement.parameters.properties.new_text.type, 'string');
@@ -240,7 +240,43 @@ test('native tools share edit contracts and describe literal source discovery pr
   assert.deepEqual(read.parameters.required, ['path']);
   assert.equal(read.parameters.properties.start_line.type, 'integer');
   assert.match(definitions.find(tool => tool.function.name === 'search').function.description, /not semantic questions/);
+  const discovery = definitions.find(tool => tool.function.name === 'find_files').function;
+  assert.deepEqual(discovery.parameters.required, ['name']);
+  assert.equal(discovery.parameters.properties.limit.maximum, 100);
+  assert.match(discovery.description, /filename/);
   assert.ok(definitions.every(tool => !tool.function.name.startsWith('__')));
+});
+
+test('Vibe can discover source filenames through its actual guarded tool loop', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'find_files', args: { name: 'hello' } },
+    { tool: 'reply', args: { message: 'Located the greeting source.', no_change_reason: 'Only filename discovery was requested.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Find the greeting source filename.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  const receipt = store.state.rows.find(row => row.payload?.tool === 'find_files');
+  assert.equal(receipt.payload.ok, true);
+  assert.match(receipt.payload.preview, /apps\/web\/src\/hello\.ts/);
+});
+
+test('Vibe invalidates filename discovery after an edit and searches its new draft file', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'find_files', args: { name: 'draft-greeting' } },
+    { tool: 'write_file', args: { path: 'lib/draft-greeting.js', content: 'module.exports = "Bob Test draft greeting";\n' } },
+    { tool: 'find_files', args: { name: 'draft-greeting' } },
+    { tool: 'search', args: { query: 'Bob Test draft greeting', path: 'lib' } },
+    { tool: 'reply', args: { message: 'Added and checked the draft greeting.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Add a draft greeting module.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  const discoveries = store.state.rows.filter(row => row.payload?.tool === 'find_files');
+  assert.match(discoveries[0].payload.preview, /"matches":0/);
+  assert.match(discoveries[1].payload.preview, /lib\/draft-greeting\.js/);
+  const search = store.state.rows.find(row => row.payload?.tool === 'search');
+  assert.equal(search.payload.ok, true);
+  assert.match(search.payload.preview, /lib\/draft-greeting\.js/);
 });
 
 for (const [refusal, protocol] of [
