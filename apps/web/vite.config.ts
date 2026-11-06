@@ -74,6 +74,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     alias: [
       { find: /^react-native$/, replacement: fileURLToPath(new URL('./test/mocks/reactNative.tsx', import.meta.url)) },
       { find: /^react(?=\/|$)/, replacement: fileURLToPath(new URL('./node_modules/react', import.meta.url)) },
