@@ -125,6 +125,58 @@ nullable cover column and index only. Human approval, code review, protected
 paths, the verified release identity and the PR-only path to `main` are
 unchanged.
 
+### Vibe continuation and browser diagnosis
+
+Before: a Vibe draft can span several committed turns. Its old `git_diff`
+only showed uncommitted changes, and a long opening packet could exceed a
+local model's context even after later turns were compacted. Chained test
+receipts omitted the individual commands' output; failing output could also
+lose the assertion at the end. In the observed Builder Control Room draft,
+the same three browser failures were independently reproduced against its
+unchanged pinned base. That baseline is evidence about those failures, not
+proof that the draft itself passes.
+
+During: Vibe's diff is relative to the session's pinned base and includes
+current uncommitted changes. The model request is fitted to the gateway's
+context calculation, retaining the current request, selected attachment
+context and outstanding failures. Private-model continuations also retain
+every available earlier owner instruction. If required context cannot fit,
+Vibe reports the blocker instead of truncating it. Earlier attachment history
+stays out of automatically assembled cloud context, including the compatibility
+`user_prompt` field, earlier session titles, commit subjects, changed paths and
+automatic recovery diffs; outstanding checks are described by type without
+arguments or prior output. Cloud models cannot be assumed to know earlier
+owner constraints when that history is withheld. Fresh tool results can still
+contain current workspace material that has not been provenance-classified;
+use a private model if it may include sensitive attachment-derived content.
+Failed command
+output retains a bounded head and tail, and chained checks record each executed
+step separately. A failed or unavailable check cannot be reported as a
+successful completion.
+
+Vibe can call `browser_test` for one to six exact Playwright specs in the
+existing offline browser worker. It may compare the draft with a temporary,
+detached worktree at the pinned base; that comparison never changes the
+session branch. Baseline results do not prove the draft passes, and a passing
+targeted check does not clear a failed full `human_test`. Unavailable browser
+infrastructure is reported as unverified, without repeating the same
+unavailable walk in the same turn. Complete evidence for unchanged UI files
+can be reused with an explicit receipt; a fresh walk remains available when
+requested, and incomplete or infrastructure-failure results are not cached.
+When earlier attachments exist, cloud models do not reuse private browser
+reports. Verification receipts are read across the session, not only the
+recent prompt window. Publication still runs fresh full browser verification
+and reruns every requested worktree spec, including previously passing ones.
+Missing or invalid targeted requests stay visible as blockers.
+
+After: the owner retains the same session and branch for Vibe to diagnose,
+repair and verify. No schema, protected-path policy, approval or release gate
+is relaxed; neither the product draft nor this runtime change is automatically
+shipped by the diagnostic tools. Local regression tests cover context fitting,
+privacy, saved diffs, chained receipts, isolated base comparisons and fresh
+publication verification. A successful production continuation still requires
+the updated runtime to be deployed and an authorized continuation to run.
+
 ### Owner-confirmed saved-patch verifier retry (2026-11-02)
 
 Before: successor job `402bfd7e-17f6-4b82-83c2-0a2048ec1722` is blocked after

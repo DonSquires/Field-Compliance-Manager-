@@ -183,11 +183,17 @@ under these egress controls:
 - Earlier attachment context is never authorized by the current opt-in.
   When any earlier owner message in the session carried attachments (checked
   session-wide, not just within the recent history window), earlier
-  conversation, execution logs, pre-cloud model/tool exchanges and file-search
-  terms drawn from earlier messages are withheld from the cloud packet to
+  conversation, session titles, commit subjects, changed paths, execution logs,
+  pre-cloud model/tool exchanges and file-search terms drawn from earlier
+  messages are withheld from the automatically assembled cloud packet to
   avoid forwarding paraphrased private analysis. A failed check recorded
   before the message still blocks handoff, but the cloud model receives only
-  its command, never its earlier output. Private models retain that history.
+  the verification type, not its arguments, paths or earlier output. Automatic
+  recovery also withholds earlier tool output and the branch diff; cloud models
+  cannot reuse a browser report produced privately or in an earlier turn.
+  Private models retain that history. Freshly requested tool results reflect
+  the current workspace and are not provenance-classified; use a private model
+  if workspace material may contain sensitive attachment-derived content.
   Consent does not authorize promoting any source into business records or
   changing record access.
 - Ollama Cloud receives structured JSON requests, never native tool

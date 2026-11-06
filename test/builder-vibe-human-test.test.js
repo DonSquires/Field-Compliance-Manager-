@@ -108,6 +108,41 @@ test('runs the vibe-human-qa worker offline and maps its report back to the host
   assert.equal(path.dirname(result.evidence_directory), path.join(path.dirname(ws), '.human-test-runs'));
 });
 
+test('targeted Playwright specs use the same offline worker and do not claim a full walk', async t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  const spec = 'e2e/greeting.spec.ts';
+  fs.writeFileSync(path.join(ws, 'apps/web', spec), '');
+  let request;
+  const execute = async options => {
+    request = options;
+    fs.writeFileSync(path.join(options.artifactDir, 'results.json'), JSON.stringify({
+      errors: [], suites: [{ specs: [{ file: 'greeting.spec.ts', title: 'greeting', tests: [{ status: 'expected', results: [{}] }] }] }],
+    }));
+    return { status: 'succeeded' };
+  };
+  const result = await runVibeHumanTest({ workspacePath: ws, specs: [spec], reason: 'targeted check', image: 'img', execute });
+  assert.equal(result.ok, true);
+  assert.equal(result.complete, true);
+  assert.equal(result.scope, 'targeted');
+  assert.deepEqual(result.specs, [spec]);
+  assert.equal(request.profile, 'vibe-human-qa');
+  assert.deepEqual(request.environment, { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' });
+  assert.equal(fs.readFileSync(path.join(request.artifactDir, 'specs.txt'), 'utf8'), `${spec}\n`);
+  assert.match(result.note, /does not replace the full human walk/);
+});
+
+test('targeted browser paths must be existing, regular, bounded spec files', async t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  const options = { workspacePath: ws, image: 'img', execute: async () => { throw new Error('must not execute'); } };
+  await assert.rejects(runVibeHumanTest({ ...options, specs: ['e2e/../secret.spec.ts'] }), /Invalid browser spec/);
+  await assert.rejects(runVibeHumanTest({ ...options, specs: ['e2e/missing.spec.ts'] }), /missing or not a regular file/);
+  await assert.rejects(runVibeHumanTest({ ...options, specs: Array(7).fill(HUMAN_SPEC) }), /one to six/);
+  fs.symlinkSync(path.join(ws, 'apps/web', HUMAN_SPEC), path.join(ws, 'apps/web/e2e/linked.spec.ts'));
+  await assert.rejects(runVibeHumanTest({ ...options, specs: ['e2e/linked.spec.ts'] }), /not a regular file/);
+});
+
 test('a missing report or worker image fails closed', async () => {
   const ws = workspace();
   const result = await runVibeHumanTest({ workspacePath: ws, image: 'img', execute: async () => ({ status: 'succeeded', stdout: '', stderr: '' }), timeoutMs: 1000 });
