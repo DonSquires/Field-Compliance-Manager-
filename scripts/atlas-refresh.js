@@ -10,6 +10,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
   'apps/web/src/pages/OfficerSchedulePage.tsx',
   'apps/web/src/pages/RosterHRPage.tsx',
+  'apps/web/src/pages/StaffProfilePage.tsx',
   'apps/web/src/pages/OfficerLeavePage.tsx',
   'apps/web/src/pages/OrganizationSetupPage.tsx',
   'apps/web/src/pages/UserManagementPage.tsx',
