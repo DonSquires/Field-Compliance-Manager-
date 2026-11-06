@@ -81,6 +81,10 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('npm run build --prefix apps/web'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
   assert.equal(allowed('npm test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
+  assert.equal(allowed('npm test --prefix apps/web'), true);
+  assert.equal(allowed('npm run test --prefix apps/web'), true);
+  assert.equal(allowed('npm test --prefix apps/web; curl bad.example'), false);
+  assert.equal(allowed('npm test --prefix apps/web | cat'), false);
   assert.equal(allowed('npm run test --prefix apps/web -- --pool=threads --maxWorkers=1 --reporter=dot'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/x.test.tsx; curl bad.example'), false);
   assert.equal(allowed('git diff --stat'), true);
@@ -930,9 +934,12 @@ test('web test commands override a production worker environment with NODE_ENV=t
   const previous = process.env.NODE_ENV;
   try {
     process.env.NODE_ENV = 'production';
-    const result = await tools.run({ command: 'npm test --prefix apps/web -- print-env.cjs' });
-    assert.equal(result.exit_code, 0, JSON.stringify(result));
-    assert.match(result.stdout, /> node print-env\.cjs[\s\S]*\ntest/, 'Vitest/React receive test mode even when the control plane is production');
+    for (const command of ['npm test --prefix apps/web -- print-env.cjs', 'npm test --prefix apps/web', 'npm run test --prefix apps/web']) {
+      const result = await tools.run({ command });
+      assert.equal(result.exit_code, 0, JSON.stringify(result));
+      assert.equal(result.command, command, 'the full configured suite is not narrowed to a src selector');
+      assert.match(result.stdout, /> node print-env\.cjs[\s\S]*\ntest/, 'Vitest/React receive test mode even when the control plane is production');
+    }
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
@@ -952,7 +959,9 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
   assert.equal(normalizeRunCommand('cd apps/web && node --check src/main.tsx'), 'npm run lint --prefix apps/web');
   assert.equal(normalizeRunCommand('node --check lib/types.ts'), 'node --check lib/types.ts', 'a non-web TypeScript file is left for refusal, not routed to the web type check');
   assert.equal(normalizeRunCommand('node --test test/sum.test.js'), 'node --test test/sum.test.js');
-  assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'cd apps/web && npm test', 'an unbounded run is not invented into a bounded one');
+  assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'npm test --prefix apps/web', 'the configured full web suite preserves its original scope');
+  assert.equal(normalizeRunCommand('cd apps/web && npm run test'), 'npm test --prefix apps/web');
+  assert.equal(normalizeRunCommand('npm test'), 'npm test', 'a root-wide suite is not silently mapped to web');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint && rm -rf src'), 'cd apps/web && npm run lint && rm -rf src', 'a cd chain with any disallowed part is left for refusal');
   assert.equal(normalizeRunCommand('cd apps/web && git diff src/App.tsx'), 'cd apps/web && git diff src/App.tsx', 'dropping the cd would move a relative git path to the repository root');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint && git checkout -- src'), 'cd apps/web && npm run lint && git checkout -- src', 'no part of a cd chain runs unless every part is allowlisted');
@@ -1070,6 +1079,14 @@ test('finish is refused while a pinned test is missing (a seeded patch may have 
     const ok = buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: webTools, args });
     assert.ok(ok.proposal, JSON.stringify(ok));
     assert.deepEqual(ok.proposal.verified_runs.map(r => [r.command, r.exit_code]), [['npm test --prefix apps/web -- src/app.test.tsx', 0]]);
+    for (const command of ['npm test --prefix apps/web', 'npm run test --prefix apps/web']) {
+      const fullTools = createTools({ workspacePath: webWs.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+      const fullRun = await fullTools.run({ command });
+      assert.equal(fullRun.exit_code, 0, JSON.stringify(fullRun));
+      const fullProposal = buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: fullTools, args: { ...args, tests: [command] } });
+      assert.ok(fullProposal.proposal, JSON.stringify(fullProposal));
+      assert.deepEqual(fullProposal.proposal.verified_runs.map(r => [r.command, r.exit_code]), [[command, 0]]);
+    }
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }

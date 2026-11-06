@@ -172,6 +172,20 @@ the verified author through the PR path (rebase merge, not squash).
 
 ### Vibe automatic task continuation (2026-11-07)
 
+Routine verification commands do not require owner approval. The shared engineer
+and Vibe run tool accept `npm test --prefix apps/web` and
+`npm run test --prefix apps/web` as the full configured Vitest suite, with
+`NODE_ENV=test`. They preserve that scope rather than silently adding a `src`
+selector. Targeted commands, shell restrictions, protected package files and the
+independent Playwright verifier retain their existing boundaries.
+
+Vibe can record `abandon_failed_edit {path, reason}` for one outstanding failed
+edit when that edit was an unnecessary workaround. The receipt and final reply
+identify the unapplied path and rationale; restart restores the decision. This
+changes no file, grants no protected-file access and clears no failed test,
+typecheck or browser evidence. Actual verification must pass before a green
+handoff or publication.
+
 Before: the Builder chat-dock task remained on its intended branch, but its
 targeted browser check failed. A finite coding turn could stop even while
 repair work advanced, requiring another owner "continue". A successful diff

@@ -1205,7 +1205,7 @@ for (const compact of [false, true]) test(`cloud ${compact ? 'compacted ' : ''}c
     ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud', num_ctx: 24576, max_output_tokens: 8192 },
   });
   await vibe.processVibeMessage({
-    store, message: ownerMessage(compact ? `Continue ${'a'.repeat(37700)}` : 'Continue.'), deps,
+    store, message: ownerMessage(compact ? `Continue ${'a'.repeat(36000)}` : 'Continue.'), deps,
   });
   assert.ok(cloudModel.calls.length);
   assert.doesNotMatch(JSON.stringify(cloudModel.calls), /private-(?:branch|commit|session-title|check|output)-marker/);
@@ -1534,6 +1534,95 @@ test('a reply cannot claim a file whose edits failed just because another file c
   assert.doesNotMatch(outcome.reply, /has been removed/);
 });
 
+test('a rejected package workaround can be abandoned after the full web suite actually passes', async t => {
+  const reason = 'The original package script already runs the full suite; the supported command needs no package change.';
+  const fixture = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'node verify-test.cjs', new_text: 'node unnecessary.cjs' } },
+    { tool: 'run', args: { command: 'npm test --prefix apps/web' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason } },
+    { tool: 'reply', args: { message: 'The configured web suite passed without changing package scripts.' } },
+  ]);
+  t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
+  installFixtureChecks(fixture.repo);
+  const original = fs.readFileSync(path.join(fixture.repo.dir, 'apps/web/package.json'), 'utf8');
+  fixture.store.recentExecution = async () => [{
+    role: 'tool', kind: 'test', payload: { tool: 'run', command: 'npm test --prefix apps/web', ok: false, preview: 'command not allowed' },
+  }];
+  const message = ownerMessage('verify the web suite');
+  const outcome = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(outcome.error, undefined, outcome.reply);
+  assert.equal(fixture.store.state.completed[message.id], 'done');
+  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/package.json:/);
+  assert.doesNotMatch(outcome.reply, /Changes are not verified|Not done:|human.*approval/i);
+  const receipts = fixture.store.state.rows.filter(row => row.role === 'tool').map(row => row.payload);
+  assert.equal(receipts.find(row => row.tool === 'replace_in_file').ok, false, 'protected package edits remain refused');
+  assert.equal(receipts.find(row => row.tool === 'run').ok, true, 'the full command really ran');
+  assert.equal(receipts.find(row => row.tool === 'abandon_failed_edit').ok, true);
+  const workspace = vibe.vibeWorkspacePath(fixture.workspaceRoot, SESSION_ID);
+  assert.equal(fs.readFileSync(path.join(workspace, 'apps/web/package.json'), 'utf8'), original);
+  assert.equal(git(workspace, ['status', '--porcelain']), '');
+  const contract = fixture.model.calls[0].request.output_schema.oneOf.find(item => item.properties.tool.const === 'abandon_failed_edit');
+  assert.deepEqual(contract.properties.args.required, ['path', 'reason']);
+});
+
+test('abandoning an unnecessary edit never clears a failing test or permits a green handoff', async t => {
+  const fixture = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'node verify-test.cjs', new_text: 'node unnecessary.cjs' } },
+    { tool: 'run', args: { command: 'npm test --prefix apps/web' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: 'Changing the package script would only hide the real failing application test.' } },
+    { tool: 'reply', args: { message: 'All tests passed.' } },
+  ]);
+  t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
+  installFixtureChecks(fixture.repo);
+  fs.writeFileSync(path.join(fixture.repo.dir, 'apps/web/src/hello.ts'), 'export const hello = "BROKEN";\n');
+  git(fixture.repo.dir, ['add', '.']);
+  git(fixture.repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'failing test fixture']);
+  fixture.repo.sha = git(fixture.repo.dir, ['rev-parse', 'HEAD']);
+  const message = ownerMessage('verify the web suite');
+  const outcome = await vibe.processVibeMessage({
+    store: fixture.store, message, deps: fixture.deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 },
+  });
+  assert.equal(outcome.error, true);
+  assert.equal(fixture.store.state.completed[message.id], 'failed');
+  assert.match(outcome.reply, /Changes are not verified: npm test --prefix apps\/web failed/);
+  assert.match(outcome.reply, /Unneeded edits not applied/);
+  assert.doesNotMatch(outcome.reply, /All tests passed/);
+});
+
+test('failed-edit abandonment rejects unknown paths and invalid reasons without clearing the real blocker', async t => {
+  const fixture = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'lint', new_text: 'other' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: ' ' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: 'x'.repeat(1001) } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/src/hello.ts', reason: 'This different file is not needed for the current verification task.' } },
+    { tool: 'reply', args: { message: 'The package edit remains blocked.', blocked_reason: 'The failed edit has not been resolved.' } },
+  ]);
+  t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
+  const outcome = await vibe.processVibeMessage({ store: fixture.store, message: ownerMessage('verify configuration'), deps: fixture.deps });
+  assert.equal(outcome.error, true);
+  assert.match(outcome.reply, /Not done: these edits failed.*apps\/web\/package.json/);
+  const receipts = fixture.store.state.rows.filter(row => row.payload?.tool === 'abandon_failed_edit');
+  assert.equal(receipts.length, 3);
+  assert.ok(receipts.every(row => row.payload.ok === false));
+});
+
+test('restarted turns retain a recorded failed-workaround abandonment without replaying the edit', async t => {
+  const reason = 'The existing package configuration is correct; supported test commands require no package edit.';
+  const fixture = setup([{ tool: 'reply', args: { message: 'The earlier test pass remains recorded; package scripts were not changed.' } }]);
+  t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
+  const message = ownerMessage('verify configuration');
+  interruptedWorkspace(fixture, message);
+  fixture.store.state.rows.push(
+    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/package.json' }, edit_targets: ['apps/web/package.json'], ok: false, preview: 'protected file refused' } },
+    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason }, ok: true } },
+  );
+  const outcome = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(outcome.error, undefined, outcome.reply);
+  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/package.json:/);
+  assert.doesNotMatch(outcome.reply, /Not done: these edits failed/);
+  assert.equal(fixture.store.state.rows.filter(row => row.payload?.tool === 'replace_in_file').length, 1);
+});
+
 test('a failed edit later retried successfully on the same file does not block the reply', async () => {
   const { store, deps, model } = setup([
     { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"missing"', new_text: '"x"' } },
@@ -1842,7 +1931,7 @@ test('a compacted cloud continuation retains failed check types without earlier 
     { seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'node --check private-command-marker.js' }, ok: false, preview: 'private-failure-marker' } },
     { seq: 2, kind: 'test', payload: { tool: 'browser_test', ok: false, preview: 'private-browser-output', browser_test: { revision: 'worktree', specs: ['e2e/private-spec-marker.spec.ts'] } } },
   ];
-  const current = `Continue ${'a'.repeat(37700)}`;
+  const current = `Continue ${'a'.repeat(36000)}`;
   await vibe.processVibeMessage({ store, message: ownerMessage(current), deps });
   const request = model.calls[0].request;
   assert.equal(promptFitsProvider(request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
