@@ -31782,6 +31782,7 @@ export type Database = {
       }
       staff_documents: {
         Row: {
+          client_request_id: string | null
           created_at: string
           credential_id: string | null
           description: string | null
@@ -31799,6 +31800,7 @@ export type Database = {
           uploaded_by: string | null
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
           credential_id?: string | null
           description?: string | null
@@ -31816,6 +31818,7 @@ export type Database = {
           uploaded_by?: string | null
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
           credential_id?: string | null
           description?: string | null
@@ -31859,6 +31862,29 @@ export type Database = {
             columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_employee_number_counters: {
+        Row: {
+          last_number: number
+          organization_id: string
+        }
+        Insert: {
+          last_number?: number
+          organization_id: string
+        }
+        Update: {
+          last_number?: number
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_employee_number_counters_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -47755,6 +47781,10 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: string[]
       }
+      next_staff_employee_number: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
       normalize_person_name: { Args: { p_name: string }; Returns: string }
       normalize_plate_number: { Args: { p_plate: string }; Returns: string }
       notice_expiry_state: {
@@ -49504,6 +49534,41 @@ export type Database = {
           verified: boolean
           verified_at: string
         }[]
+      }
+      record_staff_document_upload: {
+        Args: {
+          p_client_request_id: string
+          p_description?: string
+          p_document_type: string
+          p_expiry_date?: string
+          p_file_name: string
+          p_staff_id: string
+          p_storage_path: string
+        }
+        Returns: {
+          client_request_id: string | null
+          created_at: string
+          credential_id: string | null
+          description: string | null
+          document_type: string
+          expiry_date: string | null
+          file_name: string
+          file_size_bytes: number | null
+          id: string
+          mime_type: string | null
+          notes: string | null
+          organization_id: string
+          staff_id: string
+          storage_path: string
+          uploaded_at: string
+          uploaded_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_documents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       record_staff_training: {
         Args: {
