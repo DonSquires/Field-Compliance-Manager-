@@ -1,0 +1,14 @@
+.person-record-operations { width: 100%; min-width: 0; padding: 1rem; border: 1px solid var(--border-color, #d6dbe4); border-radius: .75rem; }
+.person-record-operations fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.person-record-operations form, .person-record-operations fieldset > section { display: grid; gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #d6dbe4); }
+.person-record-operations label, .person-record-operations__notice { display: grid; gap: .4rem; min-width: 0; }
+.person-record-operations__notice { gap: .75rem; }
+.person-record-operations input:not([type="checkbox"]), .person-record-operations select, .person-record-operations textarea { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: .6rem; }
+.person-record-operations button, .person-record-operations a { min-height: 44px; padding: .5rem .75rem; white-space: normal; overflow-wrap: anywhere; }
+.person-record-operations button { justify-self: start; }
+.person-record-operations h3, .person-record-operations h4, .person-record-operations p { margin: 0 0 .5rem; }
+.person-record-operations ul { padding: 0; list-style: none; }
+.person-record-operations li, .person-record-operations__flag { display: grid; gap: .5rem; margin-bottom: .75rem; overflow-wrap: anywhere; }
+.person-record-operations .person-record-operations__confirmation { display: flex; align-items: flex-start; }
+.person-record-operations [role="alert"] { border-left: 4px solid #b91c1c; padding: .75rem; }
+.person-record-operations [role="status"] { padding: .75rem 0; }

@@ -3,6 +3,7 @@
 // review passes '{}', and in-app Bob's register step can meet a plate another administrator registered a moment
 // earlier). The migration makes an omitted note mean "keep". Synthetic data only.
 const test = require('node:test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./person-record-operations-migration.test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
