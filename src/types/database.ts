@@ -21803,6 +21803,94 @@ export type Database = {
           },
         ]
       }
+      officer_record_photos: {
+        Row: {
+          evidence_id: string
+          field_report_id: string | null
+          id: string
+          incident_id: string | null
+          officer_id: string
+          organization_id: string
+          original_name: string
+          registered_at: string
+          selected_at: string
+          sha256_hash: string
+          shift_id: string | null
+          storage_path: string
+        }
+        Insert: {
+          evidence_id: string
+          field_report_id?: string | null
+          id?: string
+          incident_id?: string | null
+          officer_id: string
+          organization_id: string
+          original_name: string
+          registered_at?: string
+          selected_at: string
+          sha256_hash: string
+          shift_id?: string | null
+          storage_path: string
+        }
+        Update: {
+          evidence_id?: string
+          field_report_id?: string | null
+          id?: string
+          incident_id?: string | null
+          officer_id?: string
+          organization_id?: string
+          original_name?: string
+          registered_at?: string
+          selected_at?: string
+          sha256_hash?: string
+          shift_id?: string | null
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "officer_record_photos_evidence_id_fkey"
+            columns: ["evidence_id"]
+            isOneToOne: true
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_field_report_id_fkey"
+            columns: ["field_report_id"]
+            isOneToOne: false
+            referencedRelation: "officer_field_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_incident_id_fkey"
+            columns: ["incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_officer_id_fkey"
+            columns: ["officer_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       officer_welfare_settings: {
         Row: {
           admin_escalation_time: number
@@ -28447,6 +28535,7 @@ export type Database = {
       }
       roster_slots: {
         Row: {
+          break_unpaid: boolean
           client_request_id: string
           created_at: string
           created_by: string | null
@@ -28455,6 +28544,7 @@ export type Database = {
           linked_shift_id: string | null
           notes: string | null
           organization_id: string
+          planned_break_minutes: number
           scheduled_end: string
           scheduled_start: string
           staff_id: string | null
@@ -28463,6 +28553,7 @@ export type Database = {
           work_unit_id: string
         }
         Insert: {
+          break_unpaid?: boolean
           client_request_id: string
           created_at?: string
           created_by?: string | null
@@ -28471,6 +28562,7 @@ export type Database = {
           linked_shift_id?: string | null
           notes?: string | null
           organization_id: string
+          planned_break_minutes?: number
           scheduled_end: string
           scheduled_start: string
           staff_id?: string | null
@@ -28479,6 +28571,7 @@ export type Database = {
           work_unit_id: string
         }
         Update: {
+          break_unpaid?: boolean
           client_request_id?: string
           created_at?: string
           created_by?: string | null
@@ -28487,6 +28580,7 @@ export type Database = {
           linked_shift_id?: string | null
           notes?: string | null
           organization_id?: string
+          planned_break_minutes?: number
           scheduled_end?: string
           scheduled_start?: string
           staff_id?: string | null
@@ -32725,14 +32819,20 @@ export type Database = {
           branch_reviewed_organization_id: string | null
           client_event_id: string | null
           created_at: string
+          hourly_rate_override: number | null
           id: string
           notes: string | null
           organization_id: string
           overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
           payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
           period_end: string
           period_start: string
+          recovery_request: Json | null
           review_notes: string | null
+          revision: number
           scheduled_hours: number | null
           shift_id: string | null
           staff_id: string
@@ -32752,14 +32852,20 @@ export type Database = {
           branch_reviewed_organization_id?: string | null
           client_event_id?: string | null
           created_at?: string
+          hourly_rate_override?: number | null
           id?: string
           notes?: string | null
           organization_id: string
           overtime_hours?: number
+          pay_code_override?: string | null
+          pay_override_reason?: string | null
           payroll_export_batch_id?: string | null
+          payroll_snapshot?: Json | null
           period_end: string
           period_start: string
+          recovery_request?: Json | null
           review_notes?: string | null
+          revision?: number
           scheduled_hours?: number | null
           shift_id?: string | null
           staff_id: string
@@ -32779,14 +32885,20 @@ export type Database = {
           branch_reviewed_organization_id?: string | null
           client_event_id?: string | null
           created_at?: string
+          hourly_rate_override?: number | null
           id?: string
           notes?: string | null
           organization_id?: string
           overtime_hours?: number
+          pay_code_override?: string | null
+          pay_override_reason?: string | null
           payroll_export_batch_id?: string | null
+          payroll_snapshot?: Json | null
           period_end?: string
           period_start?: string
+          recovery_request?: Json | null
           review_notes?: string | null
+          revision?: number
           scheduled_hours?: number | null
           shift_id?: string | null
           staff_id?: string
@@ -36860,6 +36972,16 @@ export type Database = {
         }
         Returns: undefined
       }
+      attach_officer_record_photo: {
+        Args: {
+          p_original_name: string
+          p_record_id: string
+          p_record_kind: string
+          p_selected_at: string
+          p_sha256: string
+        }
+        Returns: Json
+      }
       attach_tender_document: {
         Args: {
           p_document_name: string
@@ -40580,6 +40702,20 @@ export type Database = {
           shift_status: string
         }[]
       }
+      complete_officer_static_shift: {
+        Args: {
+          p_expected_status: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_off_site_reason?: string
+          p_shift_id: string
+        }
+        Returns: {
+          completed_at: string
+          shift_id: string
+          shift_status: string
+        }[]
+      }
       complete_patrol_session: {
         Args: { p_notes?: string; p_patrol_id: string }
         Returns: {
@@ -40832,14 +40968,69 @@ export type Database = {
           branch_reviewed_organization_id: string | null
           client_event_id: string | null
           created_at: string
+          hourly_rate_override: number | null
           id: string
           notes: string | null
           organization_id: string
           overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
           payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
           period_end: string
           period_start: string
+          recovery_request: Json | null
           review_notes: string | null
+          revision: number
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      correct_timesheet_pay: {
+        Args: {
+          p_client_request_id: string
+          p_expected_revision: number
+          p_hourly_rate: number
+          p_pay_code: string
+          p_reason: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          hourly_rate_override: number | null
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
+          payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
+          period_end: string
+          period_start: string
+          recovery_request: Json | null
+          review_notes: string | null
+          revision: number
           scheduled_hours: number | null
           shift_id: string | null
           staff_id: string
@@ -41808,6 +41999,7 @@ export type Database = {
           p_work_unit_id: string
         }
         Returns: {
+          break_unpaid: boolean
           client_request_id: string
           created_at: string
           created_by: string | null
@@ -41816,6 +42008,44 @@ export type Database = {
           linked_shift_id: string | null
           notes: string | null
           organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_roster_slot_with_break: {
+        Args: {
+          p_break_unpaid?: boolean
+          p_client_request_id: string
+          p_notes?: string
+          p_planned_break_minutes?: number
+          p_publish?: boolean
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+          p_work_unit_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
           scheduled_end: string
           scheduled_start: string
           staff_id: string | null
@@ -42626,6 +42856,10 @@ export type Database = {
         Args: { p_gps_lat: number; p_gps_lng: number; p_shift_id: string }
         Returns: Json
       }
+      evaluate_static_shift_position: {
+        Args: { p_gps_lat: number; p_gps_lng: number; p_shift_id: string }
+        Returns: Json
+      }
       expire_cctv_biometric_templates: {
         Args: {
           p_limit?: number
@@ -43261,6 +43495,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_agreement_service_delivery_summary: {
+        Args: { p_agreement_ids: string[]; p_from: string; p_to: string }
+        Returns: Json
+      }
       get_approvals_activity: {
         Args: {
           p_action_types?: string[]
@@ -43461,6 +43699,10 @@ export type Database = {
           source_organization_id: string
           source_organization_name: string
         }[]
+      }
+      get_cost_of_service_summary: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: Json
       }
       get_crm_activation_handoffs: {
         Args: never
@@ -43900,6 +44142,11 @@ export type Database = {
           zone_id: string
         }[]
       }
+      get_officer_attendance_readiness: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
+      get_officer_break_plan: { Args: { p_shift_id: string }; Returns: Json }
       get_officer_data_package: { Args: { p_shift_id?: string }; Returns: Json }
       get_officer_patrol_stops: { Args: { p_shift_id?: string }; Returns: Json }
       get_officer_recovery_readiness: {
@@ -44143,6 +44390,26 @@ export type Database = {
           training_status: string
           user_id: string
           work_ready: boolean
+        }[]
+      }
+      get_timesheet_break_review: {
+        Args: { p_timesheet_id: string }
+        Returns: {
+          planned_minutes: number
+          review_status: string
+          shift_id: string
+          taken_minutes: number
+          unpaid: boolean
+        }[]
+      }
+      get_timesheet_payroll_export: {
+        Args: { p_batch_id: string }
+        Returns: {
+          payroll_snapshot: Json
+          period_end: string
+          period_start: string
+          staff_id: string
+          timesheet_id: string
         }[]
       }
       get_user_spine_readiness: {
@@ -44428,6 +44695,7 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: boolean
       }
+      is_timesheet_payroll_admin: { Args: { p_org: string }; Returns: boolean }
       is_zone_closed: {
         Args: { p_at?: string; p_zone_id: string }
         Returns: Json
@@ -47474,6 +47742,14 @@ export type Database = {
           offers_created: number
         }[]
       }
+      officer_photo_path_allowed: { Args: { p_path: string }; Returns: boolean }
+      officer_photo_target_context: {
+        Args: { p_record_id: string; p_record_kind: string }
+        Returns: {
+          organization_id: string
+          shift_id: string
+        }[]
+      }
       open_callout: {
         Args: {
           p_after_minimum_rate?: number
@@ -47894,6 +48170,23 @@ export type Database = {
           templates_applied: number
         }[]
       }
+      preview_scheduled_timesheet: {
+        Args: {
+          p_period_end: string
+          p_period_start: string
+          p_staff_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          shift_id: string
+          source_id: string
+          source_type: string
+          source_version: string
+        }[]
+      }
       preview_work_unit_coverage: {
         Args: {
           p_scheduled_end?: string
@@ -47902,6 +48195,10 @@ export type Database = {
           p_work_unit_id: string
         }
         Returns: Json
+      }
+      project_dispatch_job_to_ledger: {
+        Args: { p_job_id: string }
+        Returns: string
       }
       project_historical_patrol_roster: {
         Args: {
@@ -47913,6 +48210,10 @@ export type Database = {
           p_source_codes: string[]
         }
         Returns: Json
+      }
+      project_officer_field_report_to_ledger: {
+        Args: { p_report_id: string }
+        Returns: string
       }
       promote_approved_rnm_vehicle_mentions: {
         Args: { p_provider_organization_id: string }
@@ -49144,6 +49445,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_static_shift_presence: {
+        Args: {
+          p_action: string
+          p_gps_lat: number
+          p_gps_lng: number
+          p_reason: string
+          p_request_id: string
+          p_shift_id: string
+        }
+        Returns: undefined
+      }
       record_update_target_org: {
         Args: { p_record_id: string; p_record_kind: string }
         Returns: string
@@ -49180,6 +49492,56 @@ export type Database = {
           p_region_code: string
         }
         Returns: undefined
+      }
+      recover_scheduled_timesheet: {
+        Args: {
+          p_client_request_id: string
+          p_overtime_hours: number
+          p_period_end: string
+          p_period_start: string
+          p_reason: string
+          p_rows: Json
+          p_staff_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          hourly_rate_override: number | null
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
+          payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
+          period_end: string
+          period_start: string
+          recovery_request: Json | null
+          review_notes: string | null
+          revision: number
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       recover_stale_cctv_inference_jobs: { Args: never; Returns: number }
       refresh_canonical_ta_names: {
@@ -49494,6 +49856,10 @@ export type Database = {
       report_redact_identified_persons: {
         Args: { p_text: string }
         Returns: string
+      }
+      report_service_delivery_summary: {
+        Args: { p_agreement_id: string; p_from: string; p_to: string }
+        Returns: Json
       }
       report_service_line: { Args: { p_value: string }; Returns: string }
       report_text_or_null: {
@@ -50353,14 +50719,20 @@ export type Database = {
           branch_reviewed_organization_id: string | null
           client_event_id: string | null
           created_at: string
+          hourly_rate_override: number | null
           id: string
           notes: string | null
           organization_id: string
           overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
           payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
           period_end: string
           period_start: string
+          recovery_request: Json | null
           review_notes: string | null
+          revision: number
           scheduled_hours: number | null
           shift_id: string | null
           staff_id: string
@@ -51009,14 +51381,20 @@ export type Database = {
           branch_reviewed_organization_id: string | null
           client_event_id: string | null
           created_at: string
+          hourly_rate_override: number | null
           id: string
           notes: string | null
           organization_id: string
           overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
           payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
           period_end: string
           period_start: string
+          recovery_request: Json | null
           review_notes: string | null
+          revision: number
           scheduled_hours: number | null
           shift_id: string | null
           staff_id: string
@@ -51647,6 +52025,38 @@ export type Database = {
           p_pack_id: string
         }
         Returns: Json
+      }
+      set_roster_slot_break: {
+        Args: {
+          p_break_unpaid: boolean
+          p_expected_status: string
+          p_planned_break_minutes: number
+          p_slot_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_site_geometry: {
         Args: {
@@ -52646,6 +53056,28 @@ export type Database = {
           superseded_started_at: string
         }[]
       }
+      start_officer_static_shift: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_off_site_reason?: string
+          p_shift_id: string
+        }
+        Returns: {
+          created: boolean
+          distance_m: number
+          place_name: string
+          position_status: string
+          shift_id: string
+          shift_status: string
+          started_at: string
+          superseded_service_type: string
+          superseded_shift_id: string
+          superseded_started_at: string
+        }[]
+      }
       start_patrol_session: {
         Args: { p_shift_id: string }
         Returns: {
@@ -53139,6 +53571,14 @@ export type Database = {
         Args: { p_timesheet_id: string }
         Returns: string
       }
+      timesheet_effective_pay: {
+        Args: { p_timesheet_id: string }
+        Returns: {
+          hourly_rate: number
+          pay_code: string
+          rate_rule_id: string
+        }[]
+      }
       unlockrows: { Args: { "": string }; Returns: number }
       unpublish_roster_slot: {
         Args: {
@@ -53414,6 +53854,7 @@ export type Database = {
           p_staff_id: string
         }
         Returns: {
+          break_unpaid: boolean
           client_request_id: string
           created_at: string
           created_by: string | null
@@ -53422,6 +53863,43 @@ export type Database = {
           linked_shift_id: string | null
           notes: string | null
           organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_roster_slot_with_break: {
+        Args: {
+          p_break_unpaid?: boolean
+          p_expected_status: string
+          p_notes?: string
+          p_planned_break_minutes?: number
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_slot_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
           scheduled_end: string
           scheduled_start: string
           staff_id: string | null
