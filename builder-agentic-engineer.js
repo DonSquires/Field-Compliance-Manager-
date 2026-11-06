@@ -30,7 +30,7 @@ const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generatio
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
 
-const PROMPT_VERSION = 'agentic-engineer-v19';
+const PROMPT_VERSION = 'agentic-engineer-v20';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 // Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
@@ -55,13 +55,13 @@ const RUN_ALLOWLIST = [
   /^node --check [A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/,
   /^node -e "require\('\.\/[A-Za-z0-9_./-]+'\)"$/,
   /^npm run (?:lint|build) --prefix apps\/web$/,
-  /^npm run test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
-  /^npm test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
+  /^npm (?:run )?test --prefix apps\/web(?: -- [A-Za-z0-9_./*=\- ]+)?$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
-const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
+const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm test --prefix apps/web (full configured Vitest suite) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
 const RUN_REFUSED = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs.`;
 const WEB_TEST_ARG = /^[A-Za-z0-9_./*=-]+$/;
+const WEB_TEST_COMMAND = /^npm (?:run )?test --prefix apps\/web(?: -- |$)/;
 
 function isWebTestPath(workspacePath, arg) {
   if (/^(?:\.\/)?apps\/web\//.test(arg)) return true;
@@ -81,6 +81,7 @@ function normalizeRunPart(part, inWeb, workspacePath) {
   const args = String(runner[2] ?? '').split(' ').filter((arg) => arg && !['--', '--run', 'run'].includes(arg));
   const files = args.filter((arg) => !arg.startsWith('-'));
   const web = inWeb || Boolean(runner[1]) || (files.length > 0 && files.every((arg) => isWebTestPath(workspacePath, arg)));
+  if (web && !args.length) return 'npm test --prefix apps/web';
   if (!web || !files.length) return part;
   const relative = args.map((arg) => arg.replace(/^(?:\.\/)?apps\/web\//, ''));
   return relative.every((arg) => WEB_TEST_ARG.test(arg)) ? `npm test --prefix apps/web -- ${relative.join(' ')}` : part;
@@ -304,7 +305,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
-    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; web lint/types "npm run lint --prefix apps/web". Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
+    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; full configured web unit suite "npm test --prefix apps/web"; web lint/types "npm run lint --prefix apps/web". A command-policy refusal is not a request for human approval: use a supported command, never edit protected package scripts to work around command syntax. Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
     '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; prefer a Vitest test under apps/web/src that you can run yourself. Before adding a Playwright spec, inspect apps/web/e2e/fixtures.ts and a passing authenticated spec, reuse their setup/navigation, and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid or use a bare unauthenticated page for a protected route.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen in this run. After the pull request merges, the release lane applies new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas; report those only from their receipts.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
@@ -330,7 +331,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- apply_patch {diff}                     apply a git unified diff or a "*** Begin Patch"/"*** Update File: <path>" envelope; use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
-    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
+    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web (full configured unit suite) or npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
@@ -689,7 +690,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     // Asynchronous: a full test suite can run for a minute, and a blocked event loop would stall
     // the control plane's own HTTP server (health, model gateway) for that long.
     return new Promise((resolve) => {
-      const webTest = /^npm (?:run test|test) --prefix apps\/web -- /.test(text);
+      const webTest = WEB_TEST_COMMAND.test(text);
       // `tsc --noEmit` on apps/web needs more than V8's ~1 GB container default (frontend-worker NODE_OPTIONS).
       const webTypecheck = /^npm run (?:lint|build) --prefix apps\/web$/.test(text);
       const child = spawn(argv[0], argv.slice(1), {
@@ -1434,7 +1435,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
   const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
-  const passingTestRuns = sessionRuns.filter((r) => /^(?:node --test\b|npm (?:run )?test --prefix apps\/web -- )/.test(r.command) && r.exit_code === 0);
+  const passingTestRuns = sessionRuns.filter((r) => (/^node --test\b/.test(r.command) || WEB_TEST_COMMAND.test(r.command)) && r.exit_code === 0);
   const touchesTests = files.some((file) => /^test\/|\.test\.(?:[cm]?js|tsx?)$/.test(file));
   const testsNotRunReason = String(args.tests_not_run_reason ?? '').trim();
   if (touchesTests && !passingTestRuns.length && !testsNotRunReason) {

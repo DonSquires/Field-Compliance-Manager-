@@ -98,6 +98,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'You are Bob Builder in a live vibe-coding session with the platform owner of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root, tests in test/ and apps/web).',
     'The owner describes what they want in plain language. You make it real in your worktree, the way a senior engineer pairing with them would: understand, change, verify, then reply briefly in plain language.',
     'WORKING RULES:',
+    '- Routine command syntax does not need human approval. The full configured web unit suite is npm test --prefix apps/web; a targeted suite adds -- src/<path>.test.tsx. Do not change protected package scripts as a command workaround. If a rejected edit is genuinely unnecessary, use abandon_failed_edit {path, reason}; this records the decision without editing that file or waiving any verification failure. Never claim an abandoned edit was applied.',
     ATLAS_RESEARCH_GUIDANCE,
     '- Read before you write: search / outline / read_file the code you will change; check the live Atlas (atlas, live_count) before touching a shared table, RPC or edge function. Never invent tables, columns or behaviour; verify against supabase/schema.sql.',
     '- Diagnose navigation before/during/after: find the clicked control, its URL, the router, and the destination data/permission path. Routes live in apps/web/src/App.tsx, routing/RoleRouter.tsx and shells/AdminShell.tsx; do not guess a routes.tsx file. Vibe preview uses /vibe/<session-id>/, unlike production at /. Check basename and native links/popouts that might escape it.',
@@ -221,6 +222,7 @@ function vibeToolSchema(tools) {
     replace_in_file: { properties: { path: nonEmpty, old_text: nonEmpty, new_text: text, all: { type: 'boolean' } }, required: ['path', 'old_text', 'new_text'] },
     apply_patch: { properties: { diff: nonEmpty }, required: ['diff'] },
     delete_file: { properties: { path: nonEmpty }, required: ['path'] },
+    abandon_failed_edit: { properties: { path: nonEmpty, reason: { type: 'string', minLength: 20, maxLength: 1000 } }, required: ['path', 'reason'] },
     run: { properties: { command: nonEmpty }, required: ['command'] },
     generate_visual_baselines: {
       properties: { paths: { type: 'array', items: nonEmpty, minItems: 1, maxItems: 6 }, reason: nonEmpty },
@@ -279,6 +281,7 @@ function vibeNativeTools(tools) {
     write_file: 'Write complete file content after inspecting existing source. Protected paths remain refused.',
     apply_patch: 'Apply a git unified diff or a "*** Begin Patch / *** Update File: <path>" envelope with @@ context hunks. A failed envelope changes nothing. Protected paths and binary patches remain refused.',
     delete_file: 'Delete an inspected, unprotected file only when required by the task.',
+    abandon_failed_edit: 'Record why a failed edit is unnecessary, without changing any file or clearing failed checks. Use for an abandoned workaround, never to claim an unapplied edit succeeded.',
     run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
     atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
     reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure, or no_change_reason when the request truly needs no file change.',
@@ -788,6 +791,17 @@ const trackedBrowserVerification = result => Array.isArray(result?.specs)
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
   const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {}, generateBaselines: deps.generateBaselines });
+  const failedEdits = new Map();
+  const abandonedEdits = new Map();
+  tools.abandon_failed_edit = ({ path: file, reason } = {}) => {
+    if (typeof file !== 'string' || typeof reason !== 'string' || reason.trim().length < 20 || reason.trim().length > 1000) {
+      return { error: 'Name one failed edit path and a specific reason of 20 to 1000 characters explaining why that edit is unnecessary.' };
+    }
+    if (!failedEdits.has(file)) return { error: 'There is no outstanding failed edit for that exact path. No edit or verification state was changed.' };
+    failedEdits.delete(file);
+    abandonedEdits.set(file, reason.trim());
+    return { abandoned_edit: file, reason: reason.trim(), file_changed: false, verification_waived: false };
+  };
   const uncommittedDiff = tools.git_diff;
   tools.git_diff = () => {
     const current = uncommittedDiff();
@@ -924,9 +938,17 @@ async function runConversation({ store, session, message, workspacePath, branch,
     && interruptedExecution.some(entry => EDIT_VIBE_TOOLS.has(entry.payload?.tool) && entry.payload?.ok === true) ? 1 : 0;
   let noChangeReplyCorrected = false;
   // Edit targets whose latest edit failed; a success elsewhere must not let the reply claim these were done.
-  const failedEdits = new Map();
   for (const entry of interruptedExecution) {
     const payload = entry.payload || {};
+    if (payload.tool === 'abandon_failed_edit' && payload.ok === true) {
+      if (typeof payload.args?.path !== 'string' || typeof payload.args?.reason !== 'string'
+        || payload.args.reason.trim().length < 20 || payload.args.reason.trim().length > 1000) {
+        throw new Error('Interrupted failed-edit abandonment evidence is unavailable; the session cannot resume safely.');
+      }
+      failedEdits.delete(payload.args.path);
+      abandonedEdits.set(payload.args.path, payload.args.reason.trim());
+      continue;
+    }
     if (!EDIT_VIBE_TOOLS.has(payload.tool)) continue;
     const targets = Array.isArray(payload.edit_targets) ? payload.edit_targets : editTargets(payload.tool, payload.args);
     if ((!targets.length || targets.includes(UNKNOWN_PATCH_TARGET))
@@ -934,7 +956,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       throw new Error('Interrupted edit targets are unavailable; review the saved edit evidence before resuming.');
     }
     for (const target of targets) {
-      if (payload.ok === true) failedEdits.delete(target);
+      if (payload.ok === true) { failedEdits.delete(target); abandonedEdits.delete(target); }
       else if (payload.ok === false && !/^no-op edit refused/.test(String(payload.preview || ''))) failedEdits.set(target, clip(String(payload.preview || 'Edit failed.'), 200));
     }
   }
@@ -1234,6 +1256,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
     const noChange = !effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply);
+    const abandoned = abandonedEdits.size
+      ? `\n\nUnneeded edits not applied:\n${[...abandonedEdits].map(([file, reason]) => `- ${file}: ${reason}`).join('\n')}` : '';
     if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
     if (noChange) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk${humanTestRan.reused ? ' (earlier evidence reused; no new walk)' : ' (fixture data, desktop)'}: ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
@@ -1246,8 +1270,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
       unverifiedReply = `${failedEdits.size ? `These edits failed and were not applied: ${[...failedEdits.keys()].join(', ')}.\n` : ''}A completion claim was withheld because verification failed.`;
     }
     return lastVerification?.failed
-      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}`, error: true, tools, model }
-      : { reply: `${clip(reply, 8000)}${walked}`, ...(failedEdits.size ? { error: true } : {}), tools, model };
+      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}${abandoned}`, error: true, tools, model }
+      : { reply: `${clip(reply, 8000)}${walked}${abandoned}`, ...(failedEdits.size ? { error: true } : {}), tools, model };
   };
   let turnCeiling = limits.maxTurns;
   let wallCeiling = limits.wallBudgetMs;
@@ -1276,6 +1300,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const progressFingerprint = () => crypto.createHash('sha256')
     .update(uiFingerprint(changedVsBase())).update('\0')
     .update([...failedVerifications.keys()].sort().join('\0')).update('\0')
+    .update([...failedEdits.keys()].sort().join('\0')).update('\0')
     .update([...investigated].sort().join('\0')).update('\0')
     .update([...verificationProgress].sort().join('\0')).digest('hex');
   const seenProgress = new Set(priorContinuations.map(entry => entry.payload?.state_fingerprint).filter(Boolean));
@@ -1633,7 +1658,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
         if (EDIT_VIBE_TOOLS.has(call.tool)) {
           for (const target of editTargets(call.tool, args)) {
-            if (!result?.error) failedEdits.delete(target);
+            if (!result?.error) { failedEdits.delete(target); abandonedEdits.delete(target); }
             else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
           }
         }
