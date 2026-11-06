@@ -2060,6 +2060,44 @@ test('a corrected targeted request clears a malformed-request blocker', async t 
   assert.equal(receipts[0].payload.browser_test.verification_key, 'browser_test:invalid-request');
 });
 
+test('an invalid browser revision blocks publication across turns until a worktree check corrects it', async t => {
+  verifiedFixtureIdentity(t);
+  let published = false;
+  const passed = { ok: true, status: 'succeeded', complete: true, passed: 1, failed: 0, errors: [], warnings: [] };
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'draft', reason: 'check the workflow' } },
+    { tool: 'reply', args: { blocked_reason: 'The browser request needs correction.' } },
+  ], {
+    humanTest: async () => passed,
+    publish: async () => { published = true; },
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/12', number: 12 }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(draft.error, true);
+  const receipt = store.state.rows.find(row => row.payload?.tool === 'browser_test');
+  assert.equal(receipt.payload.browser_test.verification_key, 'browser_test:invalid-request');
+  assert.match(receipt.payload.preview, /Choose browser_test revision/);
+  store.verificationHistory = async () => store.state.rows.filter(row => row.kind === 'test');
+  const refused = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(refused.error, true);
+  assert.match(refused.reply, /malformed browser request/);
+  assert.equal(published, false);
+
+  const corrected = scriptedModel([
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'correct the request' } },
+    { tool: 'reply', args: { message: 'The targeted check passed.' } },
+  ]);
+  deps.callModel = corrected.callModel;
+  const retry = await vibe.processVibeMessage({ store, message: ownerMessage('Rerun the browser check.'), deps });
+  assert.equal(retry.error, undefined, retry.reply);
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined, shipped.reply);
+  assert.equal(published, true);
+});
+
 test('Bob can request the walk as a tool and the handoff reuses it for unchanged files', async () => {
   const walk = fakeHumanTest([walkPassed]);
   const { store, deps } = setup([

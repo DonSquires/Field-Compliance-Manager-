@@ -732,6 +732,8 @@ async function withPinnedBaseWorkspace(workspacePath, baseSha, run) {
 
 const INVALID_BROWSER_KEY = 'browser_test:invalid-request';
 const browserVerificationKey = specs => `browser_test:${[...new Set(specs)].sort().join(',')}`;
+const trackedBrowserVerification = result => Array.isArray(result?.specs)
+  && (result.revision === 'worktree' || (result.revision !== 'base' && result.verification_key === INVALID_BROWSER_KEY));
 
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
@@ -891,7 +893,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       else if (payload.ok === true) failedVerifications.delete('human_test');
       continue;
     }
-    if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
+    if (payload.tool === 'browser_test' && trackedBrowserVerification(payload.browser_test)) {
       const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
       if (payload.ok === false) failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
       else if (payload.ok === true) { failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); }
@@ -1049,11 +1051,12 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const runBrowserTest = async args => {
     const revision = args?.revision;
     const requestedSpecs = Array.isArray(args?.specs) ? args.specs : [];
-    const validRequest = requestedSpecs.length > 0 && requestedSpecs.length <= 6 && requestedSpecs.every(isBrowserSpecPath);
+    const validRevision = ['worktree', 'base'].includes(revision);
+    const validRequest = validRevision && requestedSpecs.length > 0 && requestedSpecs.length <= 6 && requestedSpecs.every(isBrowserSpecPath);
     const key = validRequest ? browserVerificationKey(requestedSpecs) : INVALID_BROWSER_KEY;
     let checked;
     try {
-      if (!['worktree', 'base'].includes(revision)) throw new Error('Choose browser_test revision "worktree" or "base".');
+      if (!validRevision) throw new Error('Choose browser_test revision "worktree" or "base".');
       if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('Provide a reason for the targeted browser check.');
       const changedFiles = changedVsBase();
       const fingerprint = revision === 'base' ? baseSha : uiFingerprint(humanTestInputFiles(changedFiles));
@@ -1092,7 +1095,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         scope: 'targeted', revision, specs: requestedSpecs, verification_key: key, base_sha: baseSha,
       };
     }
-    if (revision === 'worktree') {
+    if (revision === 'worktree' || !validRevision) {
       const verification = { command: key, failed: !checked.ok, preview: humanTestPreview(checked) };
       if (verification.failed) failedVerifications.set(key, verification);
       else { failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); }
@@ -1540,7 +1543,7 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
       if (payload.ok === false) requiresBrowser = true;
       continue;
     }
-    if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
+    if (payload.tool === 'browser_test' && trackedBrowserVerification(payload.browser_test)) {
       const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
       if (key !== INVALID_BROWSER_KEY) requestedBrowser.set(key, payload.browser_test.specs);
       if (payload.ok === false) unresolvedBrowser.set(key, payload.browser_test.specs);
@@ -1576,6 +1579,9 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
   }
   if (requiresBrowser) {
     if (!deps.humanTest) return { error: true, reply: 'Publication refused: browser verification is unavailable. Configure the Dr Bob worker and rerun Ship as PR. The branch is preserved.' };
+    if (unresolvedBrowser.has(INVALID_BROWSER_KEY)) {
+      return { error: true, reply: 'Publication refused: a malformed browser request must be corrected and rerun on the worktree. The branch is preserved.' };
+    }
     const browserSpecs = [...requestedBrowser.values(), ...unresolvedBrowser.values()];
     const additionalSpecs = [...new Set(browserSpecs.flat())];
     try { for (const specs of browserSpecs) validateBrowserSpecs(workspacePath, specs); }
