@@ -7,6 +7,7 @@ const read = (file) => fs.readFileSync(path.resolve(__dirname, file), 'utf8').re
 const employeeMigration = read('../supabase/migrations/20261107100000_staff_profile_employee_numbers.sql');
 const documentMigration = read('../supabase/migrations/20261107110000_private_staff_document_uploads.sql');
 const documentHardeningMigration = read('../supabase/migrations/20261107130000_staff_document_legacy_path_hardening.sql');
+const documentAuthorizationMigration = read('../supabase/migrations/20261107140000_staff_document_admin_only_reads.sql');
 const profilePage = read('../apps/web/src/pages/StaffProfilePage.tsx');
 const rosterPage = read('../apps/web/src/pages/RosterHRPage.tsx');
 const adminShell = read('../apps/web/src/shells/AdminShell.tsx');
@@ -78,4 +79,13 @@ test('staff uploads are private, tenant-scoped, bounded, and registered through 
   assert.match(profilePage, /storage\.from\(STAFF_DOCUMENT_BUCKET\)\.upload/);
   assert.match(profilePage, /createSignedUrl\(storagePath, 60/);
   assert.match(profilePage, /Object\.entries\(selectedRecord\)\.filter\(\(\[key\]\) => !\['id', 'storage_path'\]\.includes\(key\)\)/);
+});
+
+test('staff document metadata and policies are limited to authenticated HR administrators', () => {
+  assert.match(documentAuthorizationMigration, /REVOKE SELECT ON TABLE public\.staff_documents\s+FROM PUBLIC, anon/);
+  for (const action of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
+    assert.match(documentAuthorizationMigration, new RegExp(`FOR ${action}[\\s\\S]*?TO authenticated`));
+  }
+  assert.match(documentAuthorizationMigration, /USING \(public\.is_admin_for_org\(organization_id\)\)/);
+  assert.match(documentAuthorizationMigration, /WITH CHECK \(public\.is_admin_for_org\(organization_id\)\)/);
 });
