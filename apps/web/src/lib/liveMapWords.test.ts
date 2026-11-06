@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alertWords, clock, gpsAgeWords, officerActivityWords, safetyWords } from './liveMapWords';
+import { alertWords, clock, gpsAgeWords, officerActivityWords, safetyWords, sitePresenceWords } from './liveMapWords';
 
 const NOW = new Date('2026-09-21T08:05:00+12:00').getTime();
 // Clock words follow the runner's local time zone, as they do in the browser.
@@ -21,6 +21,14 @@ describe('live officer map words', () => {
     expect(officerActivityWords({ shift: null, activity_type: 'gps_update', speed_kmh: null, zone_name: null })).toBe('Position update');
     expect(officerActivityWords({ shift: null, activity_type: 'sos', speed_kmh: null, zone_name: null })).toBe('SOS raised');
     expect(officerActivityWords({ shift: null, activity_type: null, speed_kmh: null, zone_name: null })).toBe('Off shift');
+  });
+
+  it("places a static shift on its contracted site, whether or not a provider zone exists", () => {
+    const site = { id: 'site1', name: 'Wāhi Oranga', on_site: true, distance_m: 0 };
+    expect(officerActivityWords({ shift, activity_type: 'gps_update', speed_kmh: 0, zone_name: 'Hospital car park', site })).toBe(`On shift · Nelson parking run · ${shiftHours} · on site at Wāhi Oranga`);
+    expect(officerActivityWords({ shift, activity_type: 'gps_update', speed_kmh: null, zone_name: null, site: { ...site, on_site: false, distance_m: 10571 } })).toBe(`On shift · Nelson parking run · ${shiftHours} · 10.6 km from Wāhi Oranga`);
+    expect(officerActivityWords({ shift, activity_type: null, speed_kmh: null, zone_name: null, site: { ...site, on_site: null, distance_m: null } })).toBe(`On shift · Nelson parking run · ${shiftHours} · for Wāhi Oranga`);
+    expect(sitePresenceWords({ ...site, on_site: false, distance_m: 41 })).toBe('41 m from Wāhi Oranga');
   });
 
   it('names alert types plainly', () => {

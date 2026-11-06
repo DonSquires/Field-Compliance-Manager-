@@ -6,12 +6,24 @@ import { plainWords } from './rosterWords';
 export interface LiveShift { id: string; status: string; scheduled_start: string; scheduled_end: string; organization_id: string; organization_name: string | null; service_type: string | null; zone_id: string | null; route_name: string | null; work_unit_name: string | null }
 export interface LiveWelfare { enabled: boolean | null; check_interval_minutes: number | null; last_checkin_at: string | null }
 export interface LiveAlert { id: string; alert_type: string; status: string; triggered_at: string }
+/** The contracted place a current shift is for, and whether the latest fix is on it. */
+export interface LiveSite { id: string; name: string; on_site: boolean | null; distance_m: number | null }
 export interface LiveOfficer {
   officer_id: string; officer_name: string; home_organization_id: string | null;
   gps_lat: number | null; gps_lng: number | null; accuracy_meters: number | null; heading: number | null; speed_kmh: number | null;
   activity_type: string | null; recorded_at: string | null; physical_address: string | null; detected_zone_id: string | null; zone_name: string | null;
   position_organization_id: string | null; shift: LiveShift | null; welfare: LiveWelfare | null; alert: LiveAlert | null;
+  site?: LiveSite | null;
 }
+
+const distanceWords = (metres: number): string => metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`;
+
+/** `On site at X`, `500 m from X`, or `X` when there is no fix to measure. */
+export const sitePresenceWords = (site: LiveSite): string => {
+  if (site.on_site) return `on site at ${site.name}`;
+  if (site.on_site === false && site.distance_m != null) return `${distanceWords(site.distance_m)} from ${site.name}`;
+  return `for ${site.name}`;
+};
 
 export const STATUS_LABEL: Record<OfficerPinStatus, string> = {
   ok: 'Safety OK', due: 'Check-in due', overdue: 'Check-in overdue', alerting: 'Active alert', offline: 'GPS offline', unknown: 'Safety unknown',
@@ -28,11 +40,12 @@ export const gpsAgeWords = (recordedAt: string | null, nowMs = Date.now()): stri
 };
 
 /** What the officer is doing, from the shift and the last breadcrumb. */
-export const officerActivityWords = (officer: Pick<LiveOfficer, 'shift' | 'activity_type' | 'speed_kmh' | 'zone_name'>): string => {
+export const officerActivityWords = (officer: Pick<LiveOfficer, 'shift' | 'activity_type' | 'speed_kmh' | 'zone_name' | 'site'>): string => {
   const parts: string[] = [];
   if (officer.shift) parts.push(`${officer.shift.status === 'in_progress' ? 'On shift' : officer.shift.status === 'accepted' ? 'Shift accepted' : 'Shift offered'} · ${officer.shift.work_unit_name ?? officer.shift.route_name ?? plainWords(officer.shift.service_type ?? '', 'Field work')} · ${clock(officer.shift.scheduled_start)}–${clock(officer.shift.scheduled_end)}`);
   else if (officer.activity_type) parts.push(officer.activity_type === 'sos' ? 'SOS raised' : officer.activity_type === 'active_welfare_alert' ? 'Welfare alert open' : plainWords(officer.activity_type.replace('gps_update', 'position update')));
-  if (officer.zone_name) parts.push(`in ${officer.zone_name}`);
+  if (officer.shift && officer.site) parts.push(sitePresenceWords(officer.site));
+  else if (officer.zone_name) parts.push(`in ${officer.zone_name}`);
   if (officer.speed_kmh != null && officer.speed_kmh >= 1) parts.push(`${officer.speed_kmh.toFixed(0)} km/h`);
   return parts.join(' · ') || 'Off shift';
 };
