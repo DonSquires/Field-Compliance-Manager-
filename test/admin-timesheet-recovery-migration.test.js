@@ -18,6 +18,28 @@ const fn = (name) => {
   assert.notEqual(start, -1, name);
   return schema.slice(start, schema.indexOf('$function$;', start) + 11);
 };
+// After the live catalog refresh the snapshot already contains this migration's
+// in-place rewrite; restore the pre-migration rate lookup so the test replays it.
+const preMigrationFinanceFn = () => fn('post_finance_timesheet_labour_cost')
+  .replace('  SELECT p.rate_rule_id, p.hourly_rate AS amount INTO v_rate FROM public.timesheet_effective_pay(v_sheet.id) p;', `  SELECT r.id AS rate_rule_id, r.amount
+  INTO v_rate
+  FROM public.rate_rules r
+  WHERE r.organization_id = v_org
+    AND r.rule_kind = 'pay'
+    AND r.rate_type = 'hourly'
+    AND r.active
+    AND (r.role_code IS NULL OR r.role_code = v_staff.role_code)
+    AND (r.service_type IS NULL OR r.service_type = v_shift.service_type)
+    AND (r.effective_from IS NULL OR r.effective_from <= v_sheet.period_start)
+    AND (r.effective_to IS NULL OR r.effective_to >= v_sheet.period_start)
+  ORDER BY
+    (r.role_code IS NOT NULL)::integer DESC,
+    (r.service_type IS NOT NULL)::integer DESC,
+    r.priority DESC,
+    r.effective_from DESC NULLS LAST
+  LIMIT 1;`)
+  .replace("CASE WHEN v_rate.amount IS NULL THEN 'unresolved' ELSE 'resolved' END", "CASE WHEN v_rate.rate_rule_id IS NULL THEN 'unresolved' ELSE 'resolved' END")
+  .replaceAll("'pay_code_override', v_sheet.pay_code_override, 'pay_override_reason', v_sheet.pay_override_reason, 'hourly_rate', COALESCE(v_rate.amount, 0)", "'hourly_rate', COALESCE(v_rate.amount, 0)");
 test('manual recovery shares the officer overlap lock and never writes attendance or employment rates', () => {
   assert.match(migration, /'timesheet_submission:' \|\| v_staff.id::text/);
   assert.match(migration, /'evidence_kind','manual_admin'/);
@@ -61,9 +83,12 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       ${['timesheets','roster_slots','shifts','shift_breaks','rate_rules','payroll_export_batches',
         'finance_pl_periods','service_agreements','service_agreement_locations','service_agreement_modules',
         'finance_service_costs','finance_labour_cost_postings','cost_centres'].map(table).join('\n')}
-      ALTER TABLE public.roster_slots ADD COLUMN planned_break_minutes integer NOT NULL DEFAULT 0,ADD COLUMN break_unpaid boolean NOT NULL DEFAULT false;
+      ALTER TABLE public.roster_slots ADD COLUMN IF NOT EXISTS planned_break_minutes integer NOT NULL DEFAULT 0,ADD COLUMN IF NOT EXISTS break_unpaid boolean NOT NULL DEFAULT false;
+      ALTER TABLE public.timesheets DROP COLUMN IF EXISTS recovery_request,DROP COLUMN IF EXISTS pay_code_override,
+        DROP COLUMN IF EXISTS hourly_rate_override,DROP COLUMN IF EXISTS pay_override_reason,
+        DROP COLUMN IF EXISTS payroll_snapshot,DROP COLUMN IF EXISTS revision;
       CREATE FUNCTION public.timesheet_dispatch_pay_review_blocker(uuid) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
-      ${fn('post_finance_timesheet_labour_cost')}
+      ${preMigrationFinanceFn()}
       ${fn('create_payroll_export_batch')}
       ${migration}
       CREATE FUNCTION public.expect_error(p_sql text,p_message text) RETURNS void LANGUAGE plpgsql AS $$

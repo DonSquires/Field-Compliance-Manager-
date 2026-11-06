@@ -73,6 +73,7 @@ test('static attendance, break plan, authorization, retries and completion are t
       create table public.leave_requests(staff_id uuid,status text,starts_on date,ends_on date);
       ${['shifts', 'shift_stops', 'shift_stop_modules', 'shift_stop_actions', 'shift_breaks', 'shift_debriefs', 'roster_slots', 'roster_work_units'].map(table).join('\n')}
       alter table public.roster_slots add primary key(id);
+      alter table public.roster_slots drop column if exists planned_break_minutes, drop column if exists break_unpaid;
       alter table public.shift_breaks add unique(organization_id,client_request_id);
       alter table public.shift_stops add check(arrival_verification is null or arrival_verification in
         ('verified_on_site','near_site','off_site','unverified_boundary','no_geofence','no_gps'));
