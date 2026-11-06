@@ -28,7 +28,7 @@ export function workforceSectionFor(page: string, search: string): WorkforceSect
     case 'roster-targets': return 'roster-coverage';
     case 'users': return 'people-access';
     case 'people-hr':
-      if (new URLSearchParams(search).has('profile')) return null;
+      if (new URLSearchParams(search).has('profile')) return 'people-hr';
       return isRosteringHrView(search) ? 'roster-setup' : 'people-hr';
     default: return null;
   }

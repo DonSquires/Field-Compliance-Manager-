@@ -8,8 +8,10 @@ const migration = (name: string) => {
 };
 const ledger = migration('20260904170000_staff_onboarding_ledger.sql');
 const evidence = migration('20260904180000_staff_onboarding_evidence.sql');
+const documentHardening = migration('20261107130000_staff_document_legacy_path_hardening.sql');
 const employment = migration('20261018075927_govern_staff_employment_setup.sql');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 'utf8');
+const profilePage = readFileSync(resolve(process.cwd(), 'src/pages/StaffProfilePage.tsx'), 'utf8');
 
 describe('governed staff onboarding', () => {
   it('keeps staff onboarding separate from client onboarding invitations', () => {
@@ -33,25 +35,24 @@ describe('governed staff onboarding', () => {
     expect(ledger).toContain('Staff onboarding blockers remain');
   });
 
-  it('governs skills, reporting, induction, and documents through one HR evidence RPC', () => {
+  it('governs onboarding evidence and routes document uploads through the private profile flow', () => {
     expect(evidence).toContain('CREATE OR REPLACE FUNCTION public.manage_staff_onboarding_evidence');
     expect(evidence).toContain("p_action = 'add_skill'");
     expect(evidence).toContain("p_action = 'assign_line_manager'");
     expect(evidence).toContain("p_action = 'record_induction'");
-    expect(evidence).toContain("p_action = 'record_document'");
     expect(evidence).toContain("'staff_onboarding_evidence_recorded'");
+    expect(documentHardening).toContain("RAISE EXCEPTION 'Staff documents must be uploaded through record_staff_document_upload'");
+    expect(documentHardening).toContain("(storage.foldername(storage.objects.name))[1] = document.organization_id::text");
+    expect(documentHardening).toContain("(storage.foldername(storage.objects.name))[3] = document.staff_id::text");
   });
 
   it('surfaces the canonical queue and uses the governed lifecycle RPCs', () => {
-    expect(page).toContain("{ id: 'onboarding', label: 'Onboarding' }");
-    expect(page).toContain("get_staff_onboarding_readiness");
-    expect(page).toContain("start_staff_onboarding");
-    expect(page).toContain("manage_staff_onboarding");
-    expect(page).toContain("manage_staff_onboarding_evidence");
-    expect(page).toContain("'add_skill'");
-    expect(page).toContain("'assign_line_manager'");
-    expect(page).toContain("'record_induction'");
-    expect(page).toContain("'record_document'");
+    expect(page).not.toContain("{ id: 'onboarding', label: 'Onboarding' }");
+    expect(profilePage).toContain("get_staff_onboarding_readiness");
+    expect(profilePage).toContain("start_staff_onboarding");
+    expect(profilePage).toContain("manage_staff_onboarding");
+    expect(profilePage).toContain("manage_staff_onboarding_evidence");
+    expect(page).toContain("ledger.next_action === 'Upload evidence') openStaffProfile(person, 'onboarding')");
   });
 
   it('treats employment setup as one governed, race-checked onboarding action', () => {

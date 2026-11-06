@@ -152,11 +152,11 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('staff_profiles').update");
   });
 
-  it('assigns staff payroll roles from active reference codes through the governed RPC', () => {
+  it('saves staff payroll roles as part of governed employment setup', () => {
     expect(page).toContain(".from('reference_codes')");
     expect(page).toContain(".eq('code_type', 'role_code')");
-    expect(staffProfilePage).toContain("supabase.rpc('set_staff_pay_role_code'");
-    expect(staffProfilePage).toContain('Save payroll role');
+    expect(staffProfilePage).toContain("supabase.rpc('set_staff_employment_setup'");
+    expect(staffProfilePage).toContain('Save employment details');
     expect(page).toContain("supabase.rpc('manage_pay_role_code'");
     expect(page).toContain('Create payroll role code');
     expect(page).toContain('Add its pay rule for each branch');
@@ -164,20 +164,21 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('reference_codes').insert");
   });
 
-  it('uses a searchable one-row staff directory and independent profile route', () => {
+  it('uses a searchable one-row staff directory and in-shell profile route', () => {
     expect(page).toContain('type="search"');
     expect(page).toContain('filteredStaff');
     expect(page).toContain('staffAttention');
     expect(page).toContain('hr-attention-');
     expect(page).toContain('Open profile ↗');
-    expect(page).toContain("url.searchParams.set('profile', person.staff_id)");
-    expect(page).toContain("url.searchParams.set('popout', '1')");
-    expect(page).toContain("window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`");
+    expect(page).toContain("const params = new URLSearchParams({ profile: person.staff_id, profileTab })");
+    expect(page).toContain("navigate({ pathname: staffProfileHref, search: params.toString() })");
+    expect(page).not.toContain("url.searchParams.set('popout', '1')");
+    expect(page).not.toContain('window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`');
     expect(staffProfilePage).toContain("{ id: 'credentials', label: 'Credentials' }");
     expect(staffProfilePage).toContain("{ id: 'skills-training', label: 'Skills & training' }");
     expect(staffProfilePage).toContain("{ id: 'health-safety', label: 'H&S' }");
-    expect(staffProfilePage).toContain("url.searchParams.set('recordKind', kind)");
-    expect(staffProfilePage).toContain("detailWindow.opener = null");
+    expect(staffProfilePage).toContain("next.set('recordKind', kind)");
+    expect(staffProfilePage).not.toContain('detailWindow.opener = null');
   });
 
   it('uses the searchable onboarding row and schema-backed profile read paths', () => {

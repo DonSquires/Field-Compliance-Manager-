@@ -935,7 +935,6 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
-  const isStaffProfilePopout = activePage === 'people-hr' && new URLSearchParams(location.search).has('profile') && new URLSearchParams(location.search).get('popout') === '1';
   const isVehicleSearchPopout = activePage === 'field-ops' && fieldOpsSubArea === 'vehicle-search' && new URLSearchParams(location.search).get('popout') === '1';
   const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
     || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
@@ -968,10 +967,10 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
       <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
     </div>
   </details>;
-  if (isVideoWall || isStaffProfilePopout || isVehicleSearchPopout) {
+  if (isVideoWall || isVehicleSearchPopout) {
     return (
       <div className="admin-shell admin-shell-video-wall" data-theme="dark">
-        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : isVehicleSearchPopout ? 'is-vehicle-search-popout' : 'is-staff-profile-popout'}`}>
+        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : 'is-vehicle-search-popout'}`}>
           <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
             <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
           </LazyPageRecovery>

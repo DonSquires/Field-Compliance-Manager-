@@ -10,6 +10,30 @@
 > This document is the single source of truth for all design decisions.  
 > If code conflicts with this document, the code is wrong.
 
+### Owner ruling 2026-11-07: Staff Profile is the workforce record of action
+
+After a hire is confirmed, Staff Profile is the primary place to complete and
+maintain that employee's organisation-owned record: identity and contact,
+employment setup, onboarding, credentials, skills, training, inductions,
+documents, and delivery branch authorisations. Recruitment remains a separate
+pre-hire pipeline, and roster, payroll, leave, and other operational review
+queues remain available as queues; person-specific setup should return to the
+Staff Profile instead of requiring the administrator to find a second
+workspace.
+
+Assign an organisation-unique employee number automatically when a staff
+profile is created. Preserve existing identifiers during migration; blank
+profiles receive the next `EMP-######` value for their organisation. Employment
+belongs to the employing organisation. Branch authorisations describe delivery
+locations and control roster eligibility; they do not move ownership of the
+employment record.
+
+Staff documents are sensitive evidence. Store new uploads in a private,
+organisation- and staff-scoped bucket, register metadata through an audited
+server-owned function, and issue only short-lived authorized download links.
+Never use a shared general-purpose upload bucket or treat a storage path as
+public access.
+
 ---
 
 ## 1. Design Philosophy
