@@ -50,7 +50,7 @@ export function OfficerAppInstall() {
       setPrompt(null); setError('Installation was not confirmed. Use the browser menu below, or reload and try again.');
     } finally { setBusy(false); }
   };
-  if (isInstalled) return <p className="officer-install-status" role="status">FCM is running as an installed app.</p>;
+  if (isInstalled) return <p className="officer-install officer-install-status" role="status">FCM is running as an installed app.</p>;
   return <section className="officer-install" aria-label="Install officer app">
     <button type="button" className="officer-install-button" onClick={() => void install()} disabled={busy}><Download size={20} aria-hidden="true" />{busy ? 'Opening installation...' : 'Install FCM on this phone'}</button>
     {error && <p role="alert">{error}</p>}
