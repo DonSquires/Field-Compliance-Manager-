@@ -193,7 +193,16 @@ describe('governed HR administration', () => {
   it('provisions accepted candidates with employer-owned employment and a branch authorization', () => {
     expect(page).toContain('employer_organization_id: profile.employerOrganizationId ?? profile.organizationId');
     expect(page).toContain('branch_authorisations: [{ branch_org_id: branchOrganizationId');
-    expect(page).toContain('operatingOrganizationId ?? profile.organizationId');
+    expect(page).toContain('const branchOrganizationId = offerAction.branchId;');
+  });
+
+  it('hires only into an active delivery branch and keeps provisioning failures visible in the dialog', () => {
+    expect(page).toMatch(/hireDialogOpen[\s\S]{0,400}\.eq\('organization_type', 'branch'\)\.eq\('active', true\)/);
+    expect(page).toContain('Delivery branch');
+    expect(page).toContain("setOfferError('Choose the delivery branch they will be rostered at.')");
+    expect(page).toContain('provisionError.context instanceof Response');
+    expect(page).toContain('{offerError && <p className="hr-review-error" role="alert">{offerError}</p>}');
+    expect(page).not.toContain('const branchOrganizationId = operatingOrganizationId ?? profile.organizationId;');
   });
 
   it('records credential renewals through a governed, race-checked RPC', () => {
