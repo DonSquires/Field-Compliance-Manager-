@@ -43902,6 +43902,10 @@ export type Database = {
       }
       get_officer_data_package: { Args: { p_shift_id?: string }; Returns: Json }
       get_officer_patrol_stops: { Args: { p_shift_id?: string }; Returns: Json }
+      get_officer_recovery_readiness: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
       get_officer_static_post: { Args: { p_shift_id?: string }; Returns: Json }
       get_officer_timesheet_work: {
         Args: { p_period_end: string; p_period_start: string }
