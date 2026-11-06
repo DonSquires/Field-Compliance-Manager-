@@ -25429,6 +25429,24 @@ export type Database = {
           },
         ]
       }
+      person_housing_status_definitions: {
+        Row: {
+          code: string
+          label: string
+          requires_verified_identity: boolean
+        }
+        Insert: {
+          code: string
+          label: string
+          requires_verified_identity?: boolean
+        }
+        Update: {
+          code?: string
+          label?: string
+          requires_verified_identity?: boolean
+        }
+        Relationships: []
+      }
       person_identity_documents: {
         Row: {
           attachment_id: string | null
@@ -26022,6 +26040,111 @@ export type Database = {
             columns: ["retired_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      person_record_document_types: {
+        Row: {
+          code: string
+          label: string
+          notice_type: string | null
+        }
+        Insert: {
+          code: string
+          label: string
+          notice_type?: string | null
+        }
+        Update: {
+          code?: string
+          label?: string
+          notice_type?: string | null
+        }
+        Relationships: []
+      }
+      person_record_documents: {
+        Row: {
+          canonical_person_id: string
+          client_request_id: string
+          created_at: string
+          document_type: string
+          file_name: string
+          file_size_bytes: number
+          id: string
+          mime_type: string
+          notice_id: string | null
+          organization_id: string
+          request_payload: Json
+          sha256: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          canonical_person_id: string
+          client_request_id: string
+          created_at?: string
+          document_type: string
+          file_name: string
+          file_size_bytes: number
+          id?: string
+          mime_type: string
+          notice_id?: string | null
+          organization_id: string
+          request_payload: Json
+          sha256: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          canonical_person_id?: string
+          client_request_id?: string
+          created_at?: string
+          document_type?: string
+          file_name?: string
+          file_size_bytes?: number
+          id?: string
+          mime_type?: string
+          notice_id?: string | null
+          organization_id?: string
+          request_payload?: Json
+          sha256?: string
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_record_documents_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_document_type_fkey"
+            columns: ["document_type"]
+            isOneToOne: false
+            referencedRelation: "person_record_document_types"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "person_record_documents_notice_id_fkey"
+            columns: ["notice_id"]
+            isOneToOne: false
+            referencedRelation: "notices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -44348,6 +44471,14 @@ export type Database = {
         Args: { p_canonical_person_id: string; p_limit?: number }
         Returns: Json
       }
+      get_person_interest_summary: {
+        Args: { p_person_id: string }
+        Returns: Json
+      }
+      get_person_record_operations: {
+        Args: { p_organization_id: string; p_person_id: string }
+        Returns: Json
+      }
       get_person_search_access: { Args: { p_user_id: string }; Returns: Json }
       get_place_hazard_register: {
         Args: { p_include_retired?: boolean; p_location_id: string }
@@ -48021,6 +48152,18 @@ export type Database = {
         Args: { p_holder: string; p_reason: string; p_seconds: number }
         Returns: string
       }
+      person_document_orphan_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
+      person_document_read_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
+      person_document_upload_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
       person_name_extends: {
         Args: { p_full: string; p_recorded: string }
         Returns: boolean
@@ -48038,6 +48181,10 @@ export type Database = {
           p_window_days?: number
         }
         Returns: string
+      }
+      person_record_admin_allowed: {
+        Args: { p_organization_id: string; p_person_id: string }
+        Returns: boolean
       }
       platform_list_subscribers: {
         Args: never
@@ -49478,6 +49625,20 @@ export type Database = {
           p_payload: Json
         }
         Returns: string
+      }
+      record_person_document: {
+        Args: {
+          p_client_request_id: string
+          p_document_type: string
+          p_file_name: string
+          p_notice?: Json
+          p_organization_id: string
+          p_person_id: string
+          p_reason: string
+          p_sha256: string
+          p_storage_path: string
+        }
+        Returns: Json
       }
       record_person_interaction: {
         Args: {
@@ -54039,6 +54200,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      update_person_housing_status: {
+        Args: {
+          p_client_request_id: string
+          p_expected_version: string
+          p_notes: string
+          p_organization_id: string
+          p_person_id: string
+          p_reason: string
+          p_status: string
+        }
+        Returns: Json
       }
       update_roster_slot: {
         Args: {
