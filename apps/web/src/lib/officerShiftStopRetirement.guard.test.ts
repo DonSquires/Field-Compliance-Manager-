@@ -12,6 +12,10 @@ const completionAuthority = readFileSync(
   'utf8',
 );
 const schema = readFileSync(resolve(root, 'supabase/schema.sql'), 'utf8');
+const attendanceReadiness = readFileSync(
+  resolve(root, 'supabase/migrations/20261106120000_officer_static_attendance_and_rostered_breaks.sql'),
+  'utf8',
+);
 const databaseTypes = readFileSync(resolve(root, 'src/types/database.ts'), 'utf8');
 const endShiftDialog = readFileSync(
   resolve(root, 'apps/web/src/components/EndShiftDialog.tsx'),
@@ -48,7 +52,9 @@ describe('unsafe officer shift stop retirement', () => {
       "update public.roster_slots set status='completed'",
     );
     expect(completionAuthority).toContain("'officer_shift_completed'");
-    expect(endShiftDialog).toContain("supabase.rpc('get_shift_end_readiness'");
+    expect(endShiftDialog).toContain("supabase.rpc('get_officer_attendance_readiness'");
+    expect(attendanceReadiness).toContain('v_source := public.get_officer_recovery_readiness(p_shift_id);');
+    expect(attendanceReadiness).toContain("(v_source->>'open_dispatch_job_count')::integer = 0 and (v_source->>'active_welfare_alert_count')::integer = 0 and v_open_breaks = 0");
     expect(endShiftDialog).toContain("supabase.rpc('submit_shift_debrief'");
   });
 });
