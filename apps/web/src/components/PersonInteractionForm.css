@@ -57,6 +57,35 @@
   font-weight: 600;
 }
 
+.person-interaction-details {
+  padding: 0.75rem;
+  border: 1px dashed var(--color-border, #2b3d4f);
+  border-radius: 8px;
+}
+
+.person-interaction-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.person-interaction-details[open] > * + * {
+  margin-top: 0.75rem;
+}
+
+.person-interaction-hint {
+  margin: 0;
+  color: var(--color-text-secondary, #9fb3c8);
+}
+
+.person-interaction-detail-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
 @media (max-width: 720px) {
   .person-interaction-open,
   .person-interaction-actions .btn {

@@ -479,9 +479,76 @@
   color: var(--color-status-critical-text);
 }
 
-.person-notice-badge.is-expiring_soon {
+.person-notice-badge.is-expiring_soon,
+.person-notice-badge.is-pending {
   border-color: var(--color-status-watch-border);
   color: var(--color-warning);
+}
+
+.person-details-review {
+  margin-bottom: 16px;
+}
+
+.person-details-review .form-group {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.person-details-review input {
+  min-height: 44px;
+}
+
+.person-details-review__changes {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.person-details-review__changes dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.person-details-review__changes dd {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.person-details-review__changes small {
+  color: var(--color-text-secondary);
+}
+
+.person-details-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.person-details-review__actions .btn {
+  min-height: 44px;
+}
+
+.person-details-review__receipt {
+  margin: 0;
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.person-details-review__error {
+  margin: 0;
+  color: var(--color-status-critical-text);
+  font-weight: 600;
+}
+
+.person-details-review__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
 }
 
 .person-notice__dates,

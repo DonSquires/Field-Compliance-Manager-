@@ -1448,7 +1448,7 @@ test('a person interaction on a job is previewed, anchored and applied idempoten
     p_client_request_id: await mod.deterministicUuid(`${PLAN}:0`), p_organization_id: ORG,
     p_interaction_type: 'trespass_notice_served', p_notes: 'Trespass notice served under the covered area.',
     p_person_record_id: null, p_new_person_name: 'Unknown male', p_dispatch_job_id: JOB, p_shift_id: null,
-    p_interacted_at: null, p_source: 'bob',
+    p_interacted_at: null, p_source: 'bob', p_details: null,
   });
   const retry = fakeRpc({ record_person_interaction: ok({ interaction_id: OBS, person_record_id: PERSON, outcome: 'already_recorded' }) });
   assert.equal((await mod.applyRecordUpdatePlan({ rpc: retry.rpc, organizationId: ORG, pending })).receipts[0].status, 'already_present');
@@ -1461,4 +1461,41 @@ test('a person interaction on a job is previewed, anchored and applied idempoten
   assert.equal(bound.steps[0].person_record_id, PERSON);
   assert.equal(bound.steps[0].new_person_name, undefined);
   assert.match(caddie, /kind: \\"person_interaction\\"/);
+});
+
+test('person details given with an interaction are validated, previewed and sent for review', async () => {
+  const mod = await load();
+  const JOB = '11000000-0000-4000-8000-000000000008';
+  const { plan } = mod.validateRecordUpdatePlan({
+    source_summary: 'Gibbons callout outcome',
+    operations: [
+      { kind: 'person_interaction', person: 'Known Person', interaction_type: 'spoken_to', notes: 'Gave a phone number.', dispatch_job_id: JOB,
+        details: { phone: ' 021  555 0101 ', description: 'Red jacket' } },
+      { kind: 'person_interaction', person: 'Other Person', interaction_type: 'spoken_to', notes: 'Bad key.', dispatch_job_id: JOB, details: { email: 'a@b.co' } },
+      { kind: 'person_interaction', person: 'Third Person', interaction_type: 'spoken_to', notes: 'Future birth.', dispatch_job_id: JOB, details: { date_of_birth: '2999-01-01' } },
+      { kind: 'person_interaction', person: 'Fourth Person', interaction_type: 'spoken_to', notes: 'Letters in phone.', dispatch_job_id: JOB, details: { phone: 'call me' } },
+    ],
+  });
+  assert.deepEqual(plan.operations.map((op) => op.index), [0]);
+  assert.deepEqual(plan.operations[0].details, { phone: '021 555 0101', description: 'Red jacket' });
+  assert.match(plan.held[0].reason, /only description, date of birth, phone and address/);
+  assert.match(plan.held[1].reason, /date of birth must be a date between 1900 and today/);
+  assert.match(plan.held[2].reason, /phone may only use digits/);
+
+  const officer = fakeRpc({ find_person_matches: fail('permission denied (42501)') });
+  const { steps } = await mod.resolveRecordUpdatePlan({ rpc: officer.rpc, organizationId: ORG, plan });
+  assert.match(steps[0].label, /with person details description Red jacket, phone 021 555 0101/);
+  assert.match(steps[0].label, /an administrator applies them/);
+
+  const pending = { plan_id: PLAN, source_summary: 'Gibbons callout outcome', steps };
+  const db = fakeRpc({ record_person_interaction: ok({ interaction_id: OBS, person_record_id: PERSON, outcome: 'recorded' }) });
+  const officerResult = await mod.applyRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, pending });
+  assert.deepEqual(db.calls[0].args.p_details, { phone: '021 555 0101', description: 'Red jacket' });
+  // Without search access the database withholds the review state, so the receipt stays the same either way.
+  assert.match(officerResult.receipts[0].detail, /checked by an administrator/);
+
+  const reviewer = fakeRpc({ record_person_interaction: ok({ interaction_id: OBS, person_record_id: PERSON, outcome: 'recorded', details_status: 'pending' }) });
+  const reviewed = await mod.applyRecordUpdatePlan({ rpc: reviewer.rpc, organizationId: ORG, pending });
+  assert.match(reviewed.receipts[0].detail, /waiting for an administrator to review/);
+  assert.match(caddie, /details\?: \{ description\?, date_of_birth\?/);
 });

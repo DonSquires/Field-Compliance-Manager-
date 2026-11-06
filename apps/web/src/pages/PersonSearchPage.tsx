@@ -67,7 +67,138 @@ interface PersonInteraction {
   job_type: string | null;
   place_name: string | null;
   officer_name: string | null;
+  proposal_status?: string | null;
+  proposed_details?: Record<string, string> | null;
 }
+
+const DETAIL_LABELS: Record<string, string> = {
+  description: 'Description', date_of_birth: 'Date of birth', phone: 'Phone', address: 'Address',
+};
+
+const PROPOSAL_LABELS: Record<string, string> = {
+  pending: 'Details awaiting review',
+  applied: 'Details applied',
+  applied_to_draft: 'Details saved to new record',
+  dismissed: 'Details dismissed',
+};
+
+const detailEntries = (details: Record<string, string> | null | undefined) =>
+  Object.entries(details ?? {}).filter(([key, value]) => key in DETAIL_LABELS && typeof value === 'string' && value.length > 0);
+
+interface PendingPersonDetails {
+  interaction_id: string;
+  organization_name: string;
+  person_name: string;
+  proposed_details: Record<string, string>;
+  current_details: Record<string, string> | null;
+  interaction_type: string;
+  interacted_at: string;
+  officer_name: string | null;
+  place_name: string | null;
+}
+
+// ATLAS CALLS: rpc get_pending_person_detail_updates (reads person_interactions); rpc review_person_detail_update (writes person_interactions, person_records via manage_identity_person, audit_log)
+const PendingPersonDetailsQueue: React.FC<{ onApplied: () => void }> = ({ onApplied }) => {
+  const [rows, setRows] = useState<PendingPersonDetails[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setFailed(false);
+    const { data, error } = await supabase.rpc('get_pending_person_detail_updates', { p_limit: 50 });
+    if (error) { setFailed(true); return; }
+    setRows((Array.isArray(data) ? data : []).filter((row): row is PendingPersonDetails =>
+      Boolean(row) && typeof row.interaction_id === 'string' && typeof row.person_name === 'string'));
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const review = async (row: PendingPersonDetails, decision: 'apply' | 'dismiss') => {
+    const reason = (reasons[row.interaction_id] ?? '').trim();
+    if (reason.length < 3) {
+      setRowError({ id: row.interaction_id, message: 'Give a short reason before applying or dismissing.' });
+      return;
+    }
+    setBusyId(row.interaction_id);
+    setRowError(null);
+    setReceipt(null);
+    const { error } = await supabase.rpc('review_person_detail_update', {
+      p_interaction_id: row.interaction_id, p_decision: decision, p_reason: reason,
+    });
+    setBusyId(null);
+    if (error) {
+      setRowError({ id: row.interaction_id, message: error.message || 'The review could not be saved.' });
+      return;
+    }
+    setReceipt(decision === 'apply' ? `Details applied to ${row.person_name}.` : `Details for ${row.person_name} dismissed.`);
+    setRows((current) => current?.filter((item) => item.interaction_id !== row.interaction_id) ?? null);
+    if (decision === 'apply') onApplied();
+  };
+
+  if (rows === null && !failed) return null;
+  if (!failed && rows?.length === 0 && !receipt) return null;
+
+  return (
+    <section className="person-search-profile-section person-details-review" aria-labelledby="person-details-review-title">
+      <header className="person-search-section-head">
+        <div><p className="eyebrow">Officer submissions</p><h2 id="person-details-review-title">Person details to review</h2></div>
+        <span className="person-search-count">{rows?.length ?? '—'}</span>
+      </header>
+      {receipt && <p className="person-details-review__receipt" role="status">{receipt}</p>}
+      {failed && (
+        <div className="person-search-register-error" role="alert">
+          <span>Details waiting for review could not be loaded.</span>
+          <button type="button" className="btn btn-secondary" onClick={() => void load()}>Retry</button>
+        </div>
+      )}
+      {rows?.length === 0 && <p className="person-search-section-empty">Nothing left to review.</p>}
+      {rows && rows.length > 0 && (
+        <ul className="person-notice-list">
+          {rows.map((row) => {
+            const reasonId = `person-details-reason-${row.interaction_id}`;
+            return (
+              <li key={row.interaction_id} className="person-notice">
+                <div className="person-notice__head">
+                  <div>
+                    <strong>{row.person_name}</strong>
+                    <p>{[row.organization_name, interactionLabel(row.interaction_type), row.place_name, row.officer_name ? `by ${row.officer_name}` : null].filter(Boolean).join(' · ')}</p>
+                  </div>
+                  <span className="person-notice-badge">{formatNzDate(row.interacted_at)}</span>
+                </div>
+                <dl className="person-details-review__changes">
+                  {detailEntries(row.proposed_details).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{DETAIL_LABELS[key]}</dt>
+                      <dd>
+                        <span>{value}</span>
+                        {key !== 'description' && <small>Currently: {row.current_details?.[key] || 'not recorded'}</small>}
+                        {key === 'description' && <small>Added to the record notes</small>}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="form-group">
+                  <label htmlFor={reasonId}>Reason for your decision</label>
+                  <input id={reasonId} value={reasons[row.interaction_id] ?? ''} maxLength={500} disabled={busyId === row.interaction_id}
+                    onChange={(event) => setReasons((current) => ({ ...current, [row.interaction_id]: event.target.value }))}
+                    placeholder="For example: confirmed with the officer's report" />
+                </div>
+                {rowError?.id === row.interaction_id && <p className="person-details-review__error" role="alert">{rowError.message}</p>}
+                <div className="person-details-review__actions">
+                  <button type="button" className="btn btn-primary" disabled={busyId !== null} onClick={() => void review(row, 'apply')}>
+                    {busyId === row.interaction_id ? 'Saving…' : 'Apply to record'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={busyId !== null} onClick={() => void review(row, 'dismiss')}>Dismiss</button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+};
 
 const interactionLabel = (type: string) => INTERACTION_TYPES.find((option) => option.value === type)?.label ?? type.replace(/_/g, ' ');
 
@@ -111,6 +242,12 @@ const PersonInteractionHistory: React.FC<{ canonicalPersonId: string }> = ({ can
                 <span className="person-notice-badge">{formatNzDate(row.interacted_at)}</span>
               </div>
               {row.notes && <p>{row.notes}</p>}
+              {row.proposal_status && PROPOSAL_LABELS[row.proposal_status] && (
+                <p className="person-details-review__status">
+                  <span className={`person-notice-badge is-${row.proposal_status}`}>{PROPOSAL_LABELS[row.proposal_status]}</span>
+                  {detailEntries(row.proposed_details).map(([key, value]) => `${DETAIL_LABELS[key]}: ${value}`).join(' · ')}
+                </p>
+              )}
             </li>
           ))}
         </ul>
@@ -126,6 +263,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
   const identityOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const canManagePeople = !officer && isAdminTierRole(profile?.role) && Boolean(profile?.id && identityOrganizationId);
   const [identityEditorFor, setIdentityEditorFor] = useState<string | null>(null);
+  const [reviewVersion, setReviewVersion] = useState(0);
   const [searchParams] = useSearchParams();
   const routedPersonId = searchParams.get('person');
   const routedState = location.state as { personQuery?: unknown } | null;
@@ -267,6 +405,13 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
           )}
         </aside>
       </header>
+
+      {canManagePeople && (
+        <PendingPersonDetailsQueue onApplied={() => {
+          setReviewVersion((current) => current + 1);
+          if (personSearchQueryIsValid(query)) void runSearch(query, selectedId, true);
+        }} />
+      )}
 
       <section className="person-search-command" aria-labelledby="person-search-title">
         <div className="person-search-command__intro">
@@ -434,7 +579,7 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
 
               <SafetyWarningsPanel entityType="person" entityId={selected.canonical_person_id} entityLabel="this person" />
 
-              {!officer && <PersonInteractionHistory canonicalPersonId={selected.canonical_person_id} />}
+              {!officer && <PersonInteractionHistory key={`${selected.canonical_person_id}-${reviewVersion}`} canonicalPersonId={selected.canonical_person_id} />}
 
               <section className="person-search-profile-section" aria-labelledby="person-notices-title">
                 <header className="person-search-section-head">

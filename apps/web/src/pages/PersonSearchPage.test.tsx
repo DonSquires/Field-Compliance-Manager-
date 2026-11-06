@@ -57,6 +57,7 @@ describe('person search', () => {
     auth.profile = null;
     rpc.mockImplementation(async (name: string) => {
       if (name === 'get_person_interactions') return { data: [], error: null };
+      if (name === 'get_pending_person_detail_updates') return { data: [], error: null };
       if (name === 'get_notice_expiry_register') return { data: [{
         notice_id: 'notice-2', organization_id: 'org', organization_name: 'Client Forest', notice_type: 'warning', notice_number: null,
         issued_at: '2024-11-01T00:00:00Z', expires_at: '2026-11-01T00:00:00Z', expiry_state: 'expiring_soon', days_remaining: 6,
@@ -72,7 +73,8 @@ describe('person search', () => {
     const defaultRpc = rpc.getMockImplementation();
     rpc.mockImplementation(async (name: string, args?: unknown) => name === 'get_person_interactions'
       ? { data: [{ id: 'pi-1', organization_name: 'R&M', interaction_type: 'trespass_notice_served', notes: 'Served at the covered area.',
-        interacted_at: '2026-11-04T09:30:00Z', source: 'field', job_type: 'callout', place_name: 'Burger N Beast Richmond', officer_name: 'Officer One' }], error: null }
+        interacted_at: '2026-11-04T09:30:00Z', source: 'field', job_type: 'callout', place_name: 'Burger N Beast Richmond', officer_name: 'Officer One',
+        proposal_status: 'pending', proposed_details: { phone: '021 555 0101' } }], error: null }
       : defaultRpc?.(name, args));
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
@@ -83,6 +85,8 @@ describe('person search', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByText('Trespass notice served')).toBeTruthy();
     expect(screen.getByText(/Burger N Beast Richmond · by Officer One/)).toBeTruthy();
+    expect(screen.getByText('Details awaiting review')).toBeTruthy();
+    expect(screen.getByText(/Phone: 021 555 0101/)).toBeTruthy();
     expect(rpc).toHaveBeenCalledWith('get_person_interactions', { p_canonical_person_id: 'person-1', p_limit: 50 });
     fireEvent.click(screen.getByRole('button', { name: /Edit details/ }));
     expect(screen.getByRole('dialog', { name: 'Identity records' }).textContent).toContain('Test Person');
@@ -97,6 +101,46 @@ describe('person search', () => {
     expect(await screen.findByRole('heading', { name: 'Test Person' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Edit details/ })).toBeNull();
     expect(rpc).not.toHaveBeenCalledWith('get_person_interactions', expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith('get_pending_person_detail_updates', expect.anything());
+  });
+
+  it('lets administrators apply or dismiss officer-submitted person details with a reason', async () => {
+    auth.profile = { id: 'admin-1', role: 'admin', organizationId: 'org' };
+    const defaultRpc = rpc.getMockImplementation();
+    const pending = (id: string, name: string, details: Record<string, string>) => ({
+      interaction_id: id, organization_id: 'org', organization_name: 'R&M', person_record_id: `pr-${id}`, canonical_person_id: `cp-${id}`,
+      person_name: name, proposed_details: details, current_details: {}, interaction_type: 'spoken_to',
+      interacted_at: '2026-11-04T09:30:00Z', source: 'field', officer_name: 'Officer One', place_name: 'Burger N Beast Richmond',
+    });
+    rpc.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === 'get_pending_person_detail_updates') return { data: [
+        pending('pi-1', 'Known Person', { phone: '021 555 0101', description: 'Red jacket' }),
+        pending('pi-2', 'Other Person', { address: '1 Example Street' }),
+      ], error: null };
+      if (name === 'review_person_detail_update') return { data: { proposal_status: 'applied' }, error: null };
+      return defaultRpc?.(name, args);
+    });
+    renderPage();
+    const queue = await screen.findByRole('region', { name: 'Person details to review' });
+    expect(within(queue).getByText('021 555 0101')).toBeTruthy();
+    expect(within(queue).getAllByText('Currently: not recorded')).toHaveLength(2);
+
+    const [applyFirst] = within(queue).getAllByRole('button', { name: 'Apply to record' });
+    fireEvent.click(applyFirst);
+    expect(within(queue).getByRole('alert').textContent).toMatch(/Give a short reason/);
+    expect(rpc).not.toHaveBeenCalledWith('review_person_detail_update', expect.anything());
+
+    const [firstReason, secondReason] = within(queue).getAllByLabelText('Reason for your decision');
+    fireEvent.change(firstReason, { target: { value: 'Confirmed with officer' } });
+    fireEvent.click(applyFirst);
+    expect(await within(queue).findByText('Details applied to Known Person.')).toBeTruthy();
+    expect(rpc).toHaveBeenCalledWith('review_person_detail_update', { p_interaction_id: 'pi-1', p_decision: 'apply', p_reason: 'Confirmed with officer' });
+    expect(within(queue).queryByText('Known Person')).toBeNull();
+
+    fireEvent.change(secondReason, { target: { value: 'Not verified' } });
+    fireEvent.click(within(queue).getByRole('button', { name: 'Dismiss' }));
+    expect(await within(queue).findByText('Details for Other Person dismissed.')).toBeTruthy();
+    expect(within(queue).getByText('Nothing left to review.')).toBeTruthy();
   });
 
   it('shows the expiry register and opens the person behind an alert', async () => {

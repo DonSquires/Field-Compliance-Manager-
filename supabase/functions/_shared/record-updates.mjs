@@ -149,6 +149,31 @@ function describeFields(fields) {
   return Object.entries(fields).map(([key, value]) => `${key.replace(/_/g, ' ')} ${value}`).join(', ');
 }
 
+const INTERACTION_DETAIL_LIMITS = { description: 1000, date_of_birth: 10, phone: 40, address: 300 };
+
+// Mirrors record_person_interaction's p_details checks so a bad value is held before the officer confirms.
+function interactionDetails(raw) {
+  if (raw === undefined || raw === null) return { details: null };
+  if (!isObject(raw)) return { details: null, problem: 'person details must be given as description, date of birth, phone or address' };
+  const unknown = Object.keys(raw).filter((key) => !(key in INTERACTION_DETAIL_LIMITS));
+  if (unknown.length) return { details: null, problem: `only description, date of birth, phone and address can be added with an interaction (not ${unknown.join(', ')})` };
+  const details = {};
+  for (const [key, max] of Object.entries(INTERACTION_DETAIL_LIMITS)) {
+    const value = text(raw[key], max + 1);
+    if (!value) continue;
+    if (value.length > max) return { details: null, problem: `${key.replace(/_/g, ' ')} is longer than ${max} characters` };
+    details[key] = value;
+  }
+  if (details.date_of_birth) {
+    const dob = details.date_of_birth;
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(dob) && !Number.isNaN(Date.parse(`${dob}T00:00:00Z`))
+      && dob >= '1900-01-01' && dob <= new Date().toISOString().slice(0, 10);
+    if (!valid) return { details: null, problem: 'date of birth must be a date between 1900 and today (YYYY-MM-DD)' };
+  }
+  if (details.phone && !/^[0-9+() -]{5,40}$/.test(details.phone)) return { details: null, problem: 'phone may only use digits, spaces, +, ( ) or -' };
+  return { details: Object.keys(details).length ? details : null };
+}
+
 function normaliseOperation(raw, index, planSummary) {
   const hold = (reason) => ({ held: { index, statement: text(raw?.statement ?? raw?.kind ?? 'update', 200), reason } });
   if (!isObject(raw)) return hold('This item was not a structured update.');
@@ -251,7 +276,9 @@ function normaliseOperationBody(raw, index, sourceSummary, hold) {
         if (!Number.isFinite(parsed) || parsed > Date.now() + 5 * 60 * 1000) return hold('The interaction time must be a valid time that is not in the future.');
         interactedAt = new Date(parsed).toISOString();
       }
-      return { op: { index, kind, person, interaction_type: interactionType, notes, dispatch_job_id: jobId, shift_id: shiftId, interacted_at: interactedAt } };
+      const { details, problem: detailsProblem } = interactionDetails(raw.details);
+      if (detailsProblem) return hold(`${person.name}: ${detailsProblem}.`);
+      return { op: { index, kind, person, interaction_type: interactionType, notes, dispatch_job_id: jobId, shift_id: shiftId, interacted_at: interactedAt, details } };
     }
     case 'unsupported':
       return { held: { index, statement: text(raw.statement, 200) || 'update', reason: text(raw.reason, 300) || 'There is no governed way to record this yet.' } };
@@ -308,7 +335,7 @@ function sourceShape(op) {
     case 'record_note': return { kind: op.kind, record_kind: op.record_kind, record_id: op.record_id, entry_kind: op.entry_kind, body: op.body };
     case 'person_interaction': return compact({
       kind: op.kind, person: personSource(op.person), interaction_type: op.interaction_type, notes: op.notes,
-      dispatch_job_id: op.dispatch_job_id, shift_id: op.shift_id, interacted_at: op.interacted_at,
+      dispatch_job_id: op.dispatch_job_id, shift_id: op.shift_id, interacted_at: op.interacted_at, details: op.details,
     });
     default: return null;
   }
@@ -373,7 +400,7 @@ function operationKey(op) {
       return `warning:${target}:${op.hazard_class}`;
     }
     case 'record_note': return `note:${op.record_id}:${op.entry_kind}:${personKey(op.body)}`;
-    case 'person_interaction': return `interaction:${op.person.ref}:${op.dispatch_job_id ?? op.shift_id}:${op.interaction_type}:${personKey(op.notes)}`;
+    case 'person_interaction': return `interaction:${op.person.ref}:${op.dispatch_job_id ?? op.shift_id}:${op.interaction_type}:${personKey(op.notes)}:${op.details ? personKey(JSON.stringify(op.details)) : ''}`;
     default: return `other:${op.index}`;
   }
 }
@@ -897,7 +924,10 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
         new_person_name: state.state === 'bound' ? null : op.person.name,
         person_from_create: fromCreate || null,
         interaction_type: op.interaction_type, notes: op.notes, dispatch_job_id: op.dispatch_job_id, shift_id: op.shift_id, interacted_at: op.interacted_at,
-        label: `Record ${INTERACTION_LABELS[op.interaction_type]} for ${who} on ${anchor}: ${quote(op.notes, 1000)} (shows on their person history and the place)`,
+        details: op.details,
+        label: `Record ${INTERACTION_LABELS[op.interaction_type]} for ${who} on ${anchor}: ${quote(op.notes, 1000)} (shows on their person history and the place)${op.details
+          ? `; with person details ${describeFields(op.details)} (saved on a new record; for someone already on file an administrator applies them, and an administrator's own details apply straight away)`
+          : ''}`,
       }));
     } else if (op.kind === 'record_note') {
       steps.push({
@@ -1187,12 +1217,15 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending, dead
         p_organization_id: organizationId, p_interaction_type: step.interaction_type, p_notes: step.notes,
         p_person_record_id: personRecordId, p_new_person_name: personRecordId ? null : step.new_person_name,
         p_dispatch_job_id: step.dispatch_job_id ?? null, p_shift_id: step.shift_id ?? null,
-        p_interacted_at: step.interacted_at ?? null, p_source: 'bob',
+        p_interacted_at: step.interacted_at ?? null, p_source: 'bob', p_details: step.details ?? null,
       });
       if (error) { receipt(step, 'failed', errorMessage(error)); continue; }
       if (isUuid(data?.person_record_id) && !people.has(step.person_ref)) people.set(step.person_ref, { person_record_id: data.person_record_id, canonical_person_id: isUuid(data?.canonical_person_id) ? data.canonical_person_id : null });
-      receipt(step, data?.outcome === 'already_recorded' ? 'already_present' : 'applied',
-        data?.person_created ? 'A draft person record was created for administrator review.' : undefined);
+      const detailNote = data?.details_status === 'pending' ? 'The person details are waiting for an administrator to review.'
+        : data?.details_status === 'applied' ? 'The person details were updated.'
+          : step.details && !data?.details_status && data?.outcome !== 'already_recorded' ? 'Any person details are checked by an administrator before an existing record changes.' : null;
+      const notes = [data?.person_created ? 'A draft person record was created for administrator review.' : null, detailNote].filter(Boolean).join(' ');
+      receipt(step, data?.outcome === 'already_recorded' ? 'already_present' : 'applied', notes || undefined);
     } else if (step.kind === 'record_note') {
       const existing = await call(rpc, 'list_record_updates', { p_record_kind: step.record_kind, p_record_id: step.record_id });
       if (!existing.error && isRepeatRecordUpdate(Array.isArray(existing.data) ? existing.data : [], step)) {
