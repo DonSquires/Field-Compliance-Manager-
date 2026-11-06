@@ -134,16 +134,19 @@ search instead of an explicit error.
 
 During: the shared coding tools now expose `find_files {name, limit?}` and
 search tracked plus untracked draft files. Both exclude ignored/generated paths
-and conventional environment/private-key filenames. Filename discovery, literal
-text search, source outlines and Atlas remain distinct capabilities; none claims
-semantic code understanding. Invalid scopes fail explicitly. Native and JSON
+and conventional environment/private-key paths, including matching directories.
+A search scope string is one pathspec, including spaces; use an array for multiple
+scopes. Filename discovery, literal text search, source outlines and Atlas remain
+distinct capabilities; none claims semantic code understanding. Invalid scopes
+fail explicitly. Native and JSON
 Vibe contracts, tool receipts, discovery caching and edit invalidation are wired.
 Builder chat reuses the implementation in tracked-only mode, preserving its
 current-main source boundary.
 
 After: regression coverage exercises real untracked draft contents, filenames,
-space-containing paths, scope refusal and the guarded Vibe tool loop. This is
-local verification until the change is released.
+tracked and untracked private paths, space-containing file and glob scopes,
+scope refusal and the guarded Vibe tool loop. This is local verification until
+the change is released.
 
 Read-only deployed audit, 2026-11-06:
 
