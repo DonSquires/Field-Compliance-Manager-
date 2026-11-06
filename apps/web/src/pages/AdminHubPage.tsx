@@ -94,6 +94,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
+  // A deliberate "off" switch is a setting, not missing evidence; loading and read errors still fail closed below.
+  const welfareSwitchedOff = moduleStatus === 'configured' && !welfareEnabled;
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -322,7 +324,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     };
   }, [loadDashboard, organizationId, welfareEnabled]);
 
-  const attentionMetrics = [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value];
+  const attentionMetrics = [...(welfareSwitchedOff ? [] : [metrics.welfare.value]), metrics.breaches.value, metrics.activeDispatch.value];
   const attentionCount = attentionMetrics.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const attentionUnavailable = attentionMetrics.some((value) => value === null);
   const overviewMessage = attentionUnavailable
@@ -352,9 +354,9 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
         <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
         <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
-        <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" />}>
+        {!welfareSwitchedOff && <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" />}>
           <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
-        </SafetyGate>
+        </SafetyGate>}
       </section>
       <div className="admin-console-status" role="status">{loading ? 'Updating operational evidence…' : overviewMessage}</div>
 

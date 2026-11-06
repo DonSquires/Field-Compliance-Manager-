@@ -71,6 +71,13 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toMatch(/renderUnavailable=\{\(message\) => <MetricCard[^>]+label="Welfare alerts"[^>]+tone="red" \/>\}/);
   });
 
+  it('treats a deliberately switched-off welfare module as a setting, not missing evidence', () => {
+    expect(source).toContain("const welfareSwitchedOff = moduleStatus === 'configured' && !welfareEnabled;");
+    expect(source).toContain('{!welfareSwitchedOff && <SafetyGate');
+    expect(source).toContain('...(welfareSwitchedOff ? [] : [metrics.welfare.value])');
+    expect(css).toContain('grid-auto-flow: column; grid-auto-columns: minmax(0,1fr);');
+  });
+
   it('uses canonical high-contrast tokens and hierarchy for dashboard headings', () => {
     expect(css).toContain('--hub-ink: var(--color-accent-silver-light);');
     expect(css).toContain('--hub-heading: var(--color-brand-primary);');
