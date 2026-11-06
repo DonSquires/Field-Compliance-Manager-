@@ -13,6 +13,7 @@ const rosterPage = read('../apps/web/src/pages/RosterHRPage.tsx');
 const adminShell = read('../apps/web/src/shells/AdminShell.tsx');
 const workforceSections = read('../apps/web/src/lib/workforceSections.ts');
 const productDesign = read('../docs/canon/PRODUCT_DESIGN.md');
+const branchPanel = read('../apps/web/src/components/StaffBranchAccessPanel.tsx');
 
 test('employee numbers are unique, organisation-scoped, and assigned for blank profiles', () => {
   assert.match(employeeMigration, /staff_employee_number_counters/);
@@ -88,4 +89,10 @@ test('staff document metadata and policies are limited to authenticated HR admin
   }
   assert.match(documentAuthorizationMigration, /USING \(public\.is_admin_for_org\(organization_id\)\)/);
   assert.match(documentAuthorizationMigration, /WITH CHECK \(public\.is_admin_for_org\(organization_id\)\)/);
+});
+
+test('branch access only offers active delivery branches, not the home organisation', () => {
+  assert.match(branchPanel, /\.from\('organizations'\)\.select\('id,name'\)\.in\('id', branchIds\)\.eq\('organization_type', 'branch'\)\.eq\('active', true\)/);
+  assert.match(branchPanel, /deliveryBranches\.map\(\(branch\) => <option key=\{branch\.id\} value=\{branch\.id\}>/);
+  assert.doesNotMatch(branchPanel, /branches\.map\(\(branch\) => <option/);
 });
