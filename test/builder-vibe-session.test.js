@@ -600,6 +600,74 @@ test('automatic continuation stops on no progress, a round cap, and a wall-clock
   assert.equal(timed.store.state.completed[timedMessage.id], 'failed');
 });
 
+test('distinct completed checks advance continuation once per source revision, including after restart', async () => {
+  const check = { tool: 'run', args: { command: 'node --check verify.js' } };
+  const edit = { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"draft"' } };
+  const prepare = fixture => {
+    fs.writeFileSync(path.join(fixture.repo.dir, 'verify.js'), 'const verified = true;\n');
+    git(fixture.repo.dir, ['add', 'verify.js']);
+    git(fixture.repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add verification fixture']);
+    fixture.repo.sha = git(fixture.repo.dir, ['rev-parse', 'HEAD']);
+  };
+  const limits = { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 };
+  const passing = setup([edit, check, { tool: 'reply', args: { message: 'Checked the greeting.' } }]);
+  prepare(passing);
+  const passed = await vibe.processVibeMessage({ store: passing.store, message: ownerMessage('improve greeting'), deps: passing.deps, limits });
+  assert.equal(passed.error, undefined, passed.reply);
+  assert.equal(passing.store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 2);
+  assert.ok(passing.store.state.rows.find(row => row.payload?.args?.command === 'node --check verify.js').payload.verification_progress.length);
+
+  const steps = [edit, check, check, { tool: 'reply', args: { message: 'Done.' } }];
+  const repeated = setup(steps);
+  prepare(repeated);
+  const message = ownerMessage('improve greeting');
+  const stopped = await vibe.processVibeMessage({ store: repeated.store, message, deps: repeated.deps, limits });
+  assert.equal(stopped.error, true);
+  assert.match(stopped.reply, /no new code, investigation evidence, or verification progress/);
+  const checkReceipts = repeated.store.state.rows.filter(row => row.payload?.args?.command === 'node --check verify.js');
+  assert.deepEqual(checkReceipts[0].payload.verification_progress, checkReceipts[1].payload.verification_progress);
+  assert.equal(repeated.model.calls.length, 3);
+  const rounds = repeated.store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length;
+  assert.equal(rounds, 2);
+
+  message.payload.restart_retries = 1;
+  message.payload.governed_recovery_committed_edits = true;
+  steps.unshift(check);
+  const resumed = await vibe.processVibeMessage({ store: repeated.store, message, deps: repeated.deps, limits });
+  assert.equal(resumed.error, true);
+  assert.match(resumed.reply, /no new code, investigation evidence, or verification progress/);
+  assert.equal(repeated.store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, rounds);
+});
+
+test('execution timing is recorded before the model call and survives a restart before any continuation', async () => {
+  const fresh = setup([{ tool: 'reply', args: { blocked_reason: 'A human decision is required.' } }]);
+  fresh.deps.callModel = async request => {
+    const receipts = fresh.store.state.rows.filter(row => row.payload?.reason === 'vibe_execution_started');
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].payload.timing_source, 'new_turn');
+    return fresh.model.callModel(request);
+  };
+  await vibe.processVibeMessage({ store: fresh.store, message: ownerMessage('improve greeting'), deps: fresh.deps });
+
+  const interrupted = setup([{ tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }]);
+  const message = ownerMessage('improve greeting');
+  interruptedWorkspace(interrupted, message);
+  const startedAt = new Date(Date.now() - 2_000).toISOString();
+  interrupted.store.state.rows.push({
+    seq: 11, role: 'system', kind: 'status',
+    payload: { message_id: message.id, reason: 'vibe_execution_started', started_at: startedAt },
+  });
+  const result = await vibe.processVibeMessage({
+    store: interrupted.store, message, deps: interrupted.deps,
+    limits: { ...vibe.VIBE_LIMITS, autoContinuationWallMs: 1_000 },
+  });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /automatic continuation reached its safety limit/);
+  assert.equal(interrupted.model.calls.length, 0);
+  assert.equal(interrupted.store.state.rows.filter(row => row.payload?.reason === 'vibe_execution_started').length, 1);
+  assert.equal(interrupted.store.state.completed[message.id], 'failed');
+});
+
 test('automatic continuation repairs a failing check and requires a fresh pass', async () => {
   const { store, deps, repo, model } = setup([
     { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
@@ -736,6 +804,20 @@ test('interrupted failed patch targets remain blockers after an unrelated succes
   assert.match(result.reply, /Not done: these edits failed and were not applied — apps\/web\/src\/hello\.ts/);
 });
 
+test('legacy failed patches without recorded targets stop rather than being cleared by an unrelated patch', async () => {
+  const fixture = setup([{ tool: 'reply', args: { message: 'Done.' } }]);
+  const message = ownerMessage('change both files');
+  interruptedWorkspace(fixture, message);
+  fixture.store.state.rows.push(
+    { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'apply_patch', args: { bytes: 42 }, ok: false, preview: 'Patch did not apply' } },
+    { seq: 12, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'apply_patch', args: { bytes: 56 }, ok: true } },
+  );
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.match(result.error, /Interrupted edit targets are unavailable/);
+  assert.equal(fixture.model.calls.length, 0);
+  assert.equal(fixture.store.state.completed[message.id], 'failed');
+});
+
 test('restart recovery honors the previous automatic-round limit and newer owner instructions', async () => {
   const capped = setup([{ tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"draft"' } }]);
   const message = ownerMessage('improve greeting');
@@ -810,6 +892,37 @@ test('automatic continuation keeps attachment-derived verification details out o
   const continuation = JSON.stringify(model.calls[1].request);
   assert.match(continuation, /arguments withheld/);
   assert.doesNotMatch(continuation, /private-command-marker|private-failure-marker/);
+});
+
+test('restored failed-edit details stay private while remaining available to a local model and owner', async () => {
+  for (const external of [false, true]) {
+    const provider = external ? 'ollama_cloud' : 'gpu_workstation';
+    const health = { [provider]: { configured: true, healthy: true, models: ['model'], installed: ['model'], ready_model: 'model' } };
+    const fixture = setup([
+      { tool: 'reply', args: { message: 'The draft is complete.' } },
+      { tool: 'reply', args: { blocked_reason: 'The earlier edit still needs repair.' } },
+    ], { allowCloud: external, fetchHealth: async () => health });
+    const message = ownerMessage('improve greeting');
+    const workspace = interruptedWorkspace(fixture, message);
+    fs.writeFileSync(path.join(workspace, 'apps/web/src/hello.ts'), 'export const hello = "draft";\n');
+    fixture.store.hasEarlierAttachments = async () => true;
+    fixture.store.state.rows.push(
+      { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts' }, ok: true } },
+      { seq: 12, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'private-path-marker.ts' },
+        edit_targets: ['private-path-marker.ts'], ok: false, preview: 'private-output-marker' } },
+    );
+    const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+    assert.equal(result.error, true);
+    assert.match(result.reply, /private-path-marker/);
+    const correction = JSON.stringify(fixture.model.calls[1].request);
+    if (external) {
+      assert.doesNotMatch(correction, /private-path-marker|private-output-marker/);
+      assert.match(correction, /failed edit paths and output withheld/);
+    } else {
+      assert.match(correction, /private-path-marker/);
+      assert.match(correction, /private-output-marker/);
+    }
+  }
 });
 
 test('failing checks get several repair rounds while Bob makes progress, then an honest unverified handoff', async () => {

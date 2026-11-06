@@ -1,4 +1,4 @@
--- Service-only, explicitly targeted recovery of one failed Vibe coding turn.
+-- Service-only, explicitly targeted and audited recovery of one failed Vibe coding turn.
 CREATE OR REPLACE FUNCTION public.builder_vibe_recover_failed_turn(
   p_session_id uuid,
   p_message_id uuid,
