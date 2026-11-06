@@ -124,6 +124,10 @@ that the source does not establish. These records are source-reported and are
 not FCM GPS-verified attendance. Finance may resolve only when a linked shift
 identifies an officer and dispatch-origin coordinates cannot be mistaken for
 travel evidence; otherwise finance remains for human review.
+Any existing response SLA clock is anchored to the register's received time,
+not the later import time, before the normal arrival trigger calculates its
+verdict. The audit receipt retains both the previous clock and the resulting
+source-based response duration; a late response is not erased by reconciliation.
 
 ## 3. Confidentiality rules (data layer, not just rendering)
 
