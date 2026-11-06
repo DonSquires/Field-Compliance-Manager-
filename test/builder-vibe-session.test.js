@@ -779,6 +779,7 @@ test('governed recovery can verify an already-committed draft without inventing 
   git(workspace, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'interrupted draft']);
   fixture.store.state.session.head_sha = git(workspace, ['rev-parse', 'HEAD']);
   message.payload.governed_recovery_committed_edits = true;
+  message.payload.governed_recovery_expected_head = fixture.store.state.session.head_sha;
   fixture.store.state.rows.push(
     { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts' }, ok: true } },
     { seq: 12, role: 'tool', kind: 'test', payload: { message_id: message.id, tool: 'run', args: { command: 'npm run lint --prefix apps/web' }, ok: false, preview: 'The earlier check failed.' } },
@@ -854,6 +855,29 @@ test('restart recovery refuses to recreate a missing worktree or reset its branc
   assert.equal(fixture.model.calls.length, 0);
   assert.equal(git(fixture.repo.dir, ['branch', '--list', vibe.vibeBranchName(SESSION_ID)]), '');
   assert.equal(fixture.store.state.completed[message.id], 'failed');
+});
+
+test('governed recovery refuses a workspace or session head that moved after scheduling', async () => {
+  for (const moved of ['workspace', 'session']) {
+    const fixture = setup([{ tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }]);
+    const message = ownerMessage('improve greeting');
+    const workspace = interruptedWorkspace(fixture, message);
+    const expected = fixture.store.state.session.head_sha;
+    message.payload.governed_recovery_expected_head = expected;
+    if (moved === 'workspace') {
+      fs.writeFileSync(path.join(workspace, 'moved.js'), 'const moved = true;\n');
+      git(workspace, ['add', 'moved.js']);
+      git(workspace, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'workspace moved']);
+    } else {
+      fixture.store.state.session.head_sha = 'b'.repeat(40);
+    }
+    const before = git(workspace, ['rev-parse', 'HEAD']);
+    const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+    assert.match(result.error, /branch head no longer matches/);
+    assert.equal(git(workspace, ['rev-parse', 'HEAD']), before);
+    assert.equal(fixture.model.calls.length, 0);
+    assert.equal(fixture.store.state.completed[message.id], 'failed');
+  }
 });
 
 test('a restart does not repeat a live configuration change without a fresh owner instruction', async () => {
