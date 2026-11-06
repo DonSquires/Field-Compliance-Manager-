@@ -35,16 +35,30 @@ function sourceRepo() {
 
 function memoryStore(session, ownerMessages = []) {
   const rows = [...ownerMessages];
-  const state = { session: { ...session }, rows, completed: {} };
+  const state = { session: { ...session }, rows, completed: {}, ownerQueued: false };
   return {
     state,
     async session() { return { ...state.session }; },
-    async updateSession(_id, patch) { Object.assign(state.session, patch); },
+    async updateSession(_id, patch, { unlessClosed = false } = {}) {
+      if (unlessClosed && state.session.status === 'closed') return false;
+      Object.assign(state.session, patch);
+      return true;
+    },
+    async continuationState() { return { closed: state.session.status === 'closed', ownerQueued: state.ownerQueued }; },
+    async continuationHistory(_id, messageId) {
+      return rows.filter(row => row.payload?.message_id === messageId && row.payload?.reason === 'automatic_continuation');
+    },
     async post(_id, row) { rows.push({ seq: rows.length + 100, ...row }); },
     async complete(id, status) { state.completed[id] = status; },
     async history() { return []; },
     async recentExecution() { return []; },
-    async verificationHistory(sessionId, beforeSeq) { return this.recentExecution(sessionId, beforeSeq); },
+    async executionForMessage(_id, messageId) {
+      return rows.filter(row => row.payload?.message_id === messageId && ['tool', 'test', 'error', 'status', 'diff'].includes(row.kind));
+    },
+    async verificationHistory(sessionId, beforeSeq, { messageId } = {}) {
+      if (messageId) return rows.filter(row => row.payload?.message_id === messageId && ['run', 'human_test', 'browser_test'].includes(row.payload?.tool));
+      return this.recentExecution(sessionId, beforeSeq);
+    },
   };
 }
 
@@ -81,6 +95,18 @@ function setup(steps, extra = {}) {
 }
 
 const ownerMessage = (content, action = 'message') => ({ id: `m-${Math.random()}`, seq: 10, session_id: SESSION_ID, role: 'owner', content, payload: { action } });
+
+function interruptedWorkspace(fixture, message) {
+  const ws = vibe.ensureVibeWorkspace({
+    workspaceRoot: fixture.workspaceRoot,
+    session: fixture.store.state.session,
+    sourceDirFor: fixture.deps.sourceDirFor,
+    resolveHead: fixture.deps.resolveHead,
+  });
+  Object.assign(fixture.store.state.session, { base_sha: ws.baseSha, branch: ws.branch, head_sha: ws.baseSha });
+  message.payload.restart_retries = 1;
+  return ws.workspacePath;
+}
 
 function installFixtureTypecheck(repo) {
   fs.writeFileSync(path.join(repo.dir, 'apps/web/package.json'), JSON.stringify({ scripts: { lint: 'node verify.cjs' } }));
@@ -463,11 +489,11 @@ test('step-budget exhaustion still verifies and labels a broken draft', async ()
   ]);
   installFixtureTypecheck(repo);
   const result = await vibe.processVibeMessage({
-    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
+    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0, autoContinuationRounds: 0 },
   });
   assert.equal(result.error, true);
   assert.match(result.reply, /Changes are not verified/);
-  assert.match(result.reply, /ran out of steps/);
+  assert.match(result.reply, /automatic continuation reached its safety limit/);
 });
 
 test('a step budget that runs out mid-repair is extended once so Bob can fix the failing check', async () => {
@@ -496,11 +522,294 @@ test('a step budget that runs out mid-repair is extended once so Bob can fix the
   ]);
   installFixtureTypecheck(stuck.repo);
   const unverified = await vibe.processVibeMessage({
-    store: stuck.store, message: ownerMessage('improve greeting'), deps: stuck.deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 2 },
+    store: stuck.store, message: ownerMessage('improve greeting'), deps: stuck.deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 2, autoContinuationRounds: 0 },
   });
   assert.equal(unverified.error, true);
   assert.match(unverified.reply, /Changes are not verified/);
   assert.equal(stuck.store.state.rows.filter(row => row.payload?.reason === 'verification_repair_extension').length, 1);
+});
+
+test('unfinished coding continues through multiple progress rounds and verifies the final draft', async () => {
+  let browserChecks = 0;
+  const { store, deps, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"first"' } },
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"first"', new_text: '"second"' } },
+    { tool: 'run', args: { command: 'npm run lint --prefix apps/web' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"second"', new_text: '"final"' } },
+    { tool: 'reply', args: { message: 'The greeting is updated and checked.' } },
+  ], {
+    humanTest: async ({ workspacePath }) => {
+      browserChecks++;
+      assert.match(fs.readFileSync(path.join(workspacePath, 'apps/web/src/hello.ts'), 'utf8'), /"final"/);
+      return { ok: true, complete: true, status: 'succeeded', passed: 1, failed: 0, errors: [] };
+    },
+  });
+  const message = ownerMessage('improve greeting');
+  const result = await vibe.processVibeMessage({
+    store, message, deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 2, repairTurns: 0 },
+  });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(store.state.completed[message.id], 'done');
+  assert.equal(browserChecks, 1);
+  assert.equal(store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 2);
+  assert.equal(new Set(model.calls.map(call => call.idempotency_key)).size, 6);
+  assert.equal(store.state.rows.filter(row => row.role === 'owner').length, 0, 'continuation does not invent an owner message');
+});
+
+test('automatic continuation stops on no progress, a round cap, and a wall-clock cap', async () => {
+  const read = { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } };
+  const stuck = setup([read, read, read]);
+  const stuckMessage = ownerMessage('improve greeting');
+  const noProgress = await vibe.processVibeMessage({
+    store: stuck.store, message: stuckMessage, deps: stuck.deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
+  });
+  assert.equal(noProgress.error, true);
+  assert.match(noProgress.reply, /no new code, investigation evidence, or verification progress/);
+  assert.equal(stuck.model.calls.length, 2);
+  assert.equal(stuck.store.state.completed[stuckMessage.id], 'failed');
+
+  const edits = [
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"one"' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"one"', new_text: '"two"' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"two"', new_text: '"three"' } },
+    { tool: 'reply', args: { message: 'Done.' } },
+  ];
+  const capped = setup([...edits]);
+  const cappedMessage = ownerMessage('improve greeting');
+  const capResult = await vibe.processVibeMessage({
+    store: capped.store, message: cappedMessage, deps: capped.deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0, autoContinuationRounds: 2 },
+  });
+  assert.equal(capResult.error, true);
+  assert.match(capResult.reply, /automatic continuation reached its safety limit/);
+  assert.equal(capped.model.calls.length, 3);
+  assert.equal(capped.store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 2);
+  assert.equal(capped.store.state.completed[cappedMessage.id], 'failed');
+
+  const timed = setup([...edits]);
+  const timedMessage = ownerMessage('improve greeting');
+  const timeResult = await vibe.processVibeMessage({
+    store: timed.store, message: timedMessage, deps: timed.deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0, autoContinuationWallMs: 0 },
+  });
+  assert.equal(timeResult.error, true);
+  assert.match(timeResult.reply, /automatic continuation reached its safety limit/);
+  assert.equal(timed.model.calls.length, 1);
+  assert.equal(timed.store.state.completed[timedMessage.id], 'failed');
+});
+
+test('automatic continuation repairs a failing check and requires a fresh pass', async () => {
+  const { store, deps, repo, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"repaired"' } },
+    { tool: 'reply', args: { message: 'The greeting is repaired.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({
+    store, message: ownerMessage('improve greeting'), deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
+  });
+  assert.equal(result.error, undefined, result.reply);
+  assert.deepEqual(store.state.rows.filter(row => row.payload?.reason === 'web_typescript_handoff').map(row => row.payload.ok), [false, true]);
+  assert.match(JSON.stringify(model.calls[1].request.messages), /fixture TypeScript failure/);
+  assert.equal(store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 2);
+});
+
+test('verification repairs continue automatically after the correction limit when the draft advances', async () => {
+  const { store, deps, repo, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'reply', args: { message: 'Done.' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: 'BROKEN /* partial */' } },
+    { tool: 'reply', args: { message: 'Done now.' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN /* partial */', new_text: '"fixed"' } },
+    { tool: 'reply', args: { message: 'The greeting is repaired.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const message = ownerMessage('improve greeting');
+  const result = await vibe.processVibeMessage({
+    store, message, deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 1 },
+  });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(store.state.completed[message.id], 'done');
+  assert.equal(model.calls.length, 6);
+  assert.equal(store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 1);
+  assert.deepEqual(store.state.rows.filter(row => row.payload?.reason === 'web_typescript_handoff').map(row => row.payload.ok), [false, false, true]);
+});
+
+for (const interruption of ['owner', 'closed']) test(`automatic continuation stops for ${interruption === 'owner' ? 'a newer owner instruction' : 'session closure'}`, async () => {
+  const { store, deps, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"first"' } },
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"first"', new_text: '"too late"' } },
+  ]);
+  deps.callModel = async request => {
+    const response = await model.callModel(request);
+    if (model.calls.length === 2) {
+      if (interruption === 'owner') store.state.ownerQueued = true;
+      else store.state.session.status = 'closed';
+    }
+    return response;
+  };
+  const message = ownerMessage('improve greeting');
+  const result = await vibe.processVibeMessage({
+    store, message, deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
+  });
+  assert.equal(model.calls.length, 2);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'read_file').length, 0, 'a newly returned model action is not run after the interruption');
+  assert.equal(store.state.completed[message.id], 'failed');
+  if (interruption === 'owner') {
+    assert.equal(result.error, true);
+    assert.match(result.reply, /newer owner instruction/);
+    assert.equal(store.state.session.status, 'open');
+  } else {
+    assert.deepEqual(result, { skipped: true });
+    assert.equal(store.state.session.status, 'closed');
+  }
+});
+
+test('a model-reported blocker leaves the owner turn failed even without a failing check', async () => {
+  const { store, deps } = setup([{ tool: 'reply', args: { blocked_reason: 'A human decision is required.' } }]);
+  const message = ownerMessage('improve greeting');
+  const result = await vibe.processVibeMessage({ store, message, deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /A human decision is required/);
+  assert.equal(store.state.completed[message.id], 'failed');
+});
+
+test('an interrupted owner turn restores its later verification and uses fresh model idempotency keys', async () => {
+  const fixture = setup([
+    { tool: 'reply', args: { message: 'All done.' } },
+    { tool: 'reply', args: { blocked_reason: 'The earlier test still needs repair.' } },
+  ]);
+  const message = ownerMessage('improve greeting');
+  const workspace = interruptedWorkspace(fixture, message);
+  fs.writeFileSync(path.join(workspace, 'apps/web/src/hello.ts'), 'export const hello = "draft";\n');
+  fixture.store.state.rows.push(
+    { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts' }, edit_targets: ['apps/web/src/hello.ts'], ok: true } },
+    { seq: 12, role: 'tool', kind: 'test', payload: { message_id: message.id, tool: 'run', args: { command: 'npm test -- --testNamePattern greeting' }, ok: false, preview: 'AssertionError: interrupted failure' } },
+  );
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /AssertionError: interrupted failure/);
+  assert.match(fixture.model.calls[0].request.messages[1].content, /AssertionError: interrupted failure/);
+  assert.match(fixture.model.calls[0].idempotency_key, /::restart-1::vibe-1$/);
+  assert.ok(fixture.model.calls[1].request.messages.some(row => String(row.content).includes('Handoff refused')));
+  assert.equal(fixture.store.state.completed[message.id], 'failed');
+});
+
+test('governed recovery can verify an already-committed draft without inventing another edit', async () => {
+  const fixture = setup([
+    { tool: 'run', args: { command: 'npm run lint --prefix apps/web' } },
+    { tool: 'reply', args: { message: 'The current draft is verified.' } },
+  ]);
+  const message = ownerMessage('improve greeting');
+  const workspace = interruptedWorkspace(fixture, message);
+  fs.writeFileSync(path.join(workspace, 'apps/web/src/hello.ts'), 'export const hello = "draft";\n');
+  git(workspace, ['add', 'apps/web/src/hello.ts']);
+  git(workspace, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'interrupted draft']);
+  fixture.store.state.session.head_sha = git(workspace, ['rev-parse', 'HEAD']);
+  message.payload.governed_recovery_committed_edits = true;
+  fixture.store.state.rows.push(
+    { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts' }, ok: true } },
+    { seq: 12, role: 'tool', kind: 'test', payload: { message_id: message.id, tool: 'run', args: { command: 'npm run lint --prefix apps/web' }, ok: false, preview: 'The earlier check failed.' } },
+  );
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.doesNotMatch(result.reply, /No files changed during this message/);
+  assert.equal(fixture.model.calls.length, 2);
+  assert.equal(fixture.store.state.completed[message.id], 'done');
+});
+
+test('interrupted failed patch targets remain blockers after an unrelated successful edit', async () => {
+  const fixture = setup([{ tool: 'reply', args: { blocked_reason: 'The patch needs repair.' } }]);
+  const message = ownerMessage('change both files');
+  const workspace = interruptedWorkspace(fixture, message);
+  fs.writeFileSync(path.join(workspace, 'apps/web/src/other.ts'), 'export const other = 1;\n');
+  fixture.store.state.rows.push(
+    { seq: 11, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'apply_patch', args: { bytes: 42 }, edit_targets: ['apps/web/src/hello.ts'], ok: false, preview: 'Patch did not apply' } },
+    { seq: 12, role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'write_file', args: { path: 'apps/web/src/other.ts' }, edit_targets: ['apps/web/src/other.ts'], ok: true } },
+  );
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Not done: these edits failed and were not applied — apps\/web\/src\/hello\.ts/);
+});
+
+test('restart recovery honors the previous automatic-round limit and newer owner instructions', async () => {
+  const capped = setup([{ tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"draft"' } }]);
+  const message = ownerMessage('improve greeting');
+  interruptedWorkspace(capped, message);
+  capped.store.state.rows.push({
+    seq: 11, role: 'system', kind: 'status',
+    payload: { message_id: message.id, reason: 'automatic_continuation', round: 1, started_at: new Date().toISOString(), state_fingerprint: 'a'.repeat(64) },
+  });
+  const result = await vibe.processVibeMessage({
+    store: capped.store, message, deps: capped.deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0, autoContinuationRounds: 1 },
+  });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /automatic continuation reached its safety limit/);
+  assert.equal(capped.store.state.rows.filter(row => row.payload?.reason === 'automatic_continuation').length, 1);
+
+  const interrupted = setup([{ tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }]);
+  const superseded = ownerMessage('improve greeting');
+  interruptedWorkspace(interrupted, superseded);
+  interrupted.store.state.ownerQueued = true;
+  const stopped = await vibe.processVibeMessage({ store: interrupted.store, message: superseded, deps: interrupted.deps });
+  assert.equal(stopped.error, true);
+  assert.match(stopped.reply, /newer owner instruction/);
+  assert.equal(interrupted.model.calls.length, 0);
+});
+
+test('restart recovery refuses to recreate a missing worktree or reset its branch', async () => {
+  const fixture = setup([{ tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }]);
+  const message = ownerMessage('improve greeting');
+  message.payload.restart_retries = 1;
+  Object.assign(fixture.store.state.session, { base_sha: fixture.repo.sha, head_sha: fixture.repo.sha, branch: vibe.vibeBranchName(SESSION_ID) });
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.match(result.error, /workspace is missing.*without recreating or resetting the branch/);
+  assert.equal(fixture.model.calls.length, 0);
+  assert.equal(git(fixture.repo.dir, ['branch', '--list', vibe.vibeBranchName(SESSION_ID)]), '');
+  assert.equal(fixture.store.state.completed[message.id], 'failed');
+});
+
+test('a restart does not repeat a live configuration change without a fresh owner instruction', async () => {
+  let liveChanges = 0;
+  const fixture = setup([
+    { tool: 'firewall_change', args: { op: 'add', rule: { chain: 'input', action: 'allow', port: 4321 }, purpose: 'fixture' } },
+  ], {
+    firewall: { status: () => ({}), change: async () => { liveChanges++; return { changed: true }; } },
+  });
+  const message = ownerMessage('change the firewall');
+  interruptedWorkspace(fixture, message);
+  const result = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /cannot be repeated after an interrupted turn/);
+  assert.equal(liveChanges, 0);
+  assert.equal(fixture.store.state.completed[message.id], 'failed');
+});
+
+test('automatic continuation keeps attachment-derived verification details out of cloud requests', async t => {
+  const health = { ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud' } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"draft"' } },
+    { tool: 'reply', args: { blocked_reason: 'The earlier check still needs repair.' } },
+  ], { allowCloud: true, fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.hasEarlierAttachments = async () => true;
+  store.recentExecution = async () => [{
+    seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'npm test -- --testNamePattern private-command-marker' }, ok: false, preview: 'private-failure-marker' },
+  }];
+  const result = await vibe.processVibeMessage({
+    store, message: ownerMessage('improve greeting'), deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 0 },
+  });
+  assert.equal(result.error, true);
+  assert.equal(model.calls.length, 2);
+  const continuation = JSON.stringify(model.calls[1].request);
+  assert.match(continuation, /arguments withheld/);
+  assert.doesNotMatch(continuation, /private-command-marker|private-failure-marker/);
 });
 
 test('failing checks get several repair rounds while Bob makes progress, then an honest unverified handoff', async () => {
@@ -1747,6 +2056,80 @@ test('a closed session is skipped', async () => {
   const message = ownerMessage('hello');
   assert.deepEqual(await vibe.processVibeMessage({ store, message, deps }), { skipped: true });
   assert.equal(store.state.completed[message.id], 'failed');
+});
+
+test('continuation state and guarded session updates fail closed on database errors or closure', async () => {
+  const calls = [];
+  let queueError = null;
+  const supabase = {
+    from(table) {
+      let updated = false;
+      const query = {
+        select() { return this; },
+        update() { updated = true; return this; },
+        eq(field, value) { calls.push([table, 'eq', field, value]); return this; },
+        neq(field, value) { calls.push([table, 'neq', field, value]); return this; },
+        gt(field, value) { calls.push([table, 'gt', field, value]); return this; },
+        limit() { return this; },
+        async maybeSingle() { return { data: updated ? null : { status: 'working' }, error: null }; },
+        then(resolve, reject) { return Promise.resolve({ data: queueError ? null : [{ id: 'later' }], error: queueError }).then(resolve, reject); },
+      };
+      return query;
+    },
+  };
+  const store = vibe.createVibeStore(supabase);
+  assert.deepEqual(await store.continuationState(SESSION_ID, 10), { closed: false, ownerQueued: true });
+  assert.ok(calls.some(call => call[0] === 'builder_vibe_messages' && call[1] === 'gt' && call[2] === 'seq' && call[3] === 10));
+  assert.equal(await store.updateSession(SESSION_ID, { status: 'open' }, { unlessClosed: true }), false);
+  assert.ok(calls.some(call => call[0] === 'builder_vibe_sessions' && call[1] === 'neq' && call[2] === 'status' && call[3] === 'closed'));
+  queueError = { message: 'queue unavailable' };
+  await assert.rejects(store.continuationState(SESSION_ID, 10), /continuation queue read failed: queue unavailable/);
+});
+
+test('interrupted execution and verification receipts are message-scoped and paginated', async () => {
+  const wanted = Array.from({ length: 205 }, (_, i) => ({
+    seq: i + 1, session_id: SESSION_ID, role: 'tool', kind: 'test',
+    payload: { message_id: 'wanted', tool: 'run', ok: false },
+  }));
+  const other = Array.from({ length: 5 }, (_, i) => ({
+    seq: i + 206, session_id: SESSION_ID, role: 'tool', kind: 'test',
+    payload: { message_id: 'other', tool: 'run', ok: true },
+  }));
+  const rows = [...wanted, ...other];
+  const requests = [];
+  const supabase = {
+    from(table) {
+      const filters = [];
+      let limit = 0;
+      const query = {
+        select() { return this; },
+        eq(field, value) { filters.push(['eq', field, value]); return this; },
+        lt(field, value) { filters.push(['lt', field, value]); return this; },
+        in(field, value) { filters.push(['in', field, value]); return this; },
+        order() { return this; },
+        limit(value) { limit = value; return this; },
+        then(resolve, reject) {
+          requests.push({ table, filters: [...filters], limit });
+          const valueFor = (row, field) => field.startsWith('payload->>') ? row.payload[field.slice(10)] : row[field];
+          const page = rows.filter(row => filters.every(([op, field, value]) => {
+            const actual = valueFor(row, field);
+            return op === 'eq' ? actual === value : op === 'lt' ? actual < value : value.includes(actual);
+          })).sort((a, b) => b.seq - a.seq).slice(0, limit);
+          return Promise.resolve({ data: page, error: null }).then(resolve, reject);
+        },
+      };
+      return query;
+    },
+  };
+  const store = vibe.createVibeStore(supabase);
+  const execution = await store.executionForMessage(SESSION_ID, 'wanted');
+  const verification = await store.verificationHistory(SESSION_ID, Number.MAX_SAFE_INTEGER, { messageId: 'wanted' });
+  assert.equal(execution.length, 205);
+  assert.equal(verification.length, 205);
+  assert.deepEqual(execution.map(row => row.seq), wanted.map(row => row.seq));
+  assert.deepEqual(verification.map(row => row.seq), wanted.map(row => row.seq));
+  assert.equal(requests.length, 4);
+  assert.ok(requests.every(request => request.filters.some(filter => filter[1] === 'payload->>message_id' && filter[2] === 'wanted')));
 });
 
 test('preview cookies are bound to one session and expire', () => {
