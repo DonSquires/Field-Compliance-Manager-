@@ -125,6 +125,48 @@ nullable cover column and index only. Human approval, code review, protected
 paths, the verified release identity and the PR-only path to `main` are
 unchanged.
 
+### Builder tool readiness and draft search (2026-11-06)
+
+Before: Builder chat alone exposed filename discovery. Builder's engineer and
+Vibe could search tracked source text, but not a newly created untracked draft.
+Space-containing scopes were split and invalid scopes could become a repository
+search instead of an explicit error.
+
+During: the shared coding tools now expose `find_files {name, limit?}` and
+search tracked plus untracked draft files. Both exclude ignored/generated paths
+and conventional environment/private-key filenames. Filename discovery, literal
+text search, source outlines and Atlas remain distinct capabilities; none claims
+semantic code understanding. Invalid scopes fail explicitly. Native and JSON
+Vibe contracts, tool receipts, discovery caching and edit invalidation are wired.
+Builder chat reuses the implementation in tracked-only mode, preserving its
+current-main source boundary.
+
+After: regression coverage exercises real untracked draft contents, filenames,
+space-containing paths, scope refusal and the guarded Vibe tool loop. This is
+local verification until the change is released.
+
+Read-only deployed audit, 2026-11-06:
+
+| Capability | Present evidence | Remaining limit |
+|---|---|---|
+| Coding CLI | Control plane has Git, Node, npm, Docker and OpenSSH. | Author `run` accepts bounded Git/Node/npm checks, not arbitrary terminal commands or package installation. |
+| Browser and web tests | Deployed worker resolves TypeScript, Vitest and Playwright; isolated network-disabled Chromium launches and renders fixture text. | Installation/launch is not a successful application workflow or live-user acceptance. |
+| Root test dependencies | Deployed worker resolves Supabase JS, ExcelJS, undici and ws. | Resolution does not prove every root test passes. |
+| Platform diagnostics | Deployed source assessment and selected Docker inventory succeed. | These tools are injected into private Builder chat, not either coding loop; private-evidence egress must be governed before extending them. |
+| Atlas/schema | Live Atlas metadata/RPC reads succeed; source edges exist for both runtimes. | Their component capability entries and queried component reach are absent. Empty map results do not prove missing source or execution. |
+| Models | Health reports configured/healthy OpenAI, VPS Ollama, laptop GPU and Ollama Cloud. | No inference request or owner turn was exercised by this audit. |
+| Public web research | Existing explicit owner-approved Builder chat research path. | Neither coding loop exposes a web-search/fetch tool; approved research is not automatic private-context transfer. |
+| MCP | Coding loops dispatch their own native/JSON tools. | No MCP discovery/execution adapter is wired. A separately installed MCP server would not become callable automatically. |
+| Backend execution | Worker has Python; Node/TypeScript checks are implemented. | Author commands and the backend profile do not execute Python tests or Deno. The backend worker explicitly does not execute migrations in disposable PostgreSQL/Supabase. |
+| Release APIs | GitHub publication and the governed Supabase/VPS release lane use server adapters. | `gh`, Supabase CLI and Deno are absent inside the control plane; CLI absence is not evidence that these adapter paths are absent. No hPanel API connector was verified. |
+
+No packages, MCP servers, credentials, tenant records, firewall rules or live
+Vibe drafts were changed by the audit. The deployed release marker remained
+`bd8d647267e2`; the release service was failed. PR #396's squash merge replaced
+the exact required author identity with the GitHub profile identity. Its merged
+tree must not be described as deployed; subsequent release commits must retain
+the verified author through the PR path (rebase merge, not squash).
+
 ### Vibe continuation and browser diagnosis
 
 Before: a Vibe draft can span several committed turns. Its old `git_diff`

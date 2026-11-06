@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v20';
+const PROMPT_VERSION = 'vibe-v21';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -119,7 +119,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '',
     'Reply with ONLY one JSON object per message: {"thought": string, "tool": string, "args": object}.',
     'TOOLS:',
-    '- list_dir {path} lists filenames. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". git_log {path?, limit?} | git_diff {}',
+    '- find_files {name, limit?} discovers filenames by a case-insensitive path fragment (2-100 characters), including new draft files. list_dir {path} lists a directory. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside tracked and new draft files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". path accepts repository-relative files/directories/globs or an array; use an array for multiple paths containing spaces. Ignored/generated files and secret paths are excluded from discovery/search. git_log {path?, limit?} | git_diff {}',
     '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text. apply_patch accepts a git unified diff or a "*** Begin Patch" / "*** Update File: <path>" envelope.',
     '- generate_visual_baselines {paths, reason}  1-6 exact existing Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/, only after a visual assertion reports a mismatch on an intentionally changed spec. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     '- human_test {reason, rerun?}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Complete evidence for unchanged UI files is reused; set rerun: true only when the owner requests a fresh walk or the test environment changed. Returns passed/failed/skipped, failing tests, findings and an evidence directory. Not a live tenant test or merge approval.',
@@ -184,7 +184,7 @@ function toolCallKey(tool, args) {
   return `${tool}:${JSON.stringify(canonical(normalized))}`;
 }
 
-const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
+const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'find_files', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
 const EDIT_VIBE_TOOLS = new Set(['write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'generate_visual_baselines']);
 // Files an edit call targets, so a failure on one file is cleared only by a later success on that file.
 function editTargets(tool, args = {}) {
@@ -212,6 +212,7 @@ function vibeToolSchema(tools) {
   const text = { type: 'string' };
   const nonEmpty = { type: 'string', minLength: 1 };
   const contracts = {
+    find_files: { properties: { name: { type: 'string', minLength: 2, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['name'] },
     write_file: { properties: { path: nonEmpty, content: text }, required: ['path', 'content'] },
     replace_in_file: { properties: { path: nonEmpty, old_text: nonEmpty, new_text: text, all: { type: 'boolean' } }, required: ['path', 'old_text', 'new_text'] },
     apply_patch: { properties: { diff: nonEmpty }, required: ['diff'] },
@@ -264,6 +265,7 @@ function vibeNativeTools(tools) {
     finish: { properties: { message: path, blocked_reason: text, no_change_reason: text }, required: ['message'] },
   };
   const descriptions = {
+    find_files: 'Discover filenames by a case-insensitive path fragment, including new draft files. Not content or semantic search; ignored/generated files and secret paths are excluded.',
     list_dir: 'List existing file/directory names, not file contents.',
     read_file: 'Read actual numbered source lines. Use this before editing. For long files choose a bounded line range.',
     outline: 'Inspect declarations and line numbers in an existing source file.',
@@ -305,7 +307,7 @@ function describeArgs(tool, args) {
 
 function toolHeadline(tool, args) {
   const target = tool === 'firewall_change' && args.rule ? `${args.op} ${args.rule.chain} ${args.rule.action} ${args.rule.protocol || 'tcp'}/${args.rule.port || 'any'}` : args.path || args.query || args.command || args.name || args.table || '';
-  const verbs = { human_test: 'Dr Bob browser walk', browser_test: 'Targeted browser check', list_dir: 'Listing', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note', firewall_status: 'Checking the firewall', firewall_change: 'Changing the firewall', tailnet_status: 'Checking the tailnet', tailnet_acl: 'Tailnet policy' };
+  const verbs = { human_test: 'Dr Bob browser walk', browser_test: 'Targeted browser check', list_dir: 'Listing', find_files: 'Finding files', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note', firewall_status: 'Checking the firewall', firewall_change: 'Changing the firewall', tailnet_status: 'Checking the tailnet', tailnet_acl: 'Tailnet policy' };
   return `${verbs[tool] || tool}${target ? ` ${String(target).slice(0, 160)}` : ''}`;
 }
 
@@ -1441,7 +1443,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         if (call.tool === 'search' && result?.matches === 0) {
           result = {
             ...result,
-            hint: 'No literal text matched. This tool is not semantic search and does not discover filenames. Do not keep appending words like layout/components to the query. Use read_file or outline on the verified source path, list_dir for filenames, or search an exact visible label/import/class name (matching its case).',
+            hint: 'No literal text matched. This tool is not semantic search and does not discover filenames. Do not keep appending words like layout/components to the query. Use find_files for filename discovery, list_dir for a directory, read_file or outline on the verified source path, or search an exact visible label/import/class name (matching its case).',
           };
         }
         if (CACHEABLE_VIBE_TOOLS.has(call.tool)) toolCache.set(callKey, result);

@@ -217,7 +217,7 @@ function validateProposal(args) {
 }
 
 function createBuilderChatTools({ supabase, workspacePath, limits, platformTools, retrieveKnowledge }) {
-  const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} }) : {};
+  const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {}, includeUntracked: false }) : {};
   const tools = Object.fromEntries(READ_TOOLS.filter(name => typeof base[name] === 'function').map(name => [name, base[name]]));
   for (const name of Object.keys(PLATFORM_CONTRACTS)) {
     if (typeof platformTools?.[name] === 'function') tools[name] = platformTools[name];
@@ -239,26 +239,8 @@ function createBuilderChatTools({ supabase, workspacePath, limits, platformTools
         ...(end > boundedEnd ? { requested_end_line: end, note: 'Read capped at 120 lines; follow next_start_line only if the next range is relevant.' } : {}),
       };
     };
-    tools.search = (args = {}) => {
-      if (Object.hasOwn(args, 'paths')) return { error: 'search accepts path, not paths; use a repository-relative string or array' };
-      if (args.path !== undefined && typeof args.path !== 'string' && !Array.isArray(args.path)) {
-        return { error: 'search path must be a repository-relative string or array' };
-      }
-      const paths = Array.isArray(args.path) ? args.path : String(args.path ?? '').split(/[\s,]+/).filter(Boolean);
-      if (paths.some(value => typeof value !== 'string' || !value.trim() || /^(?:\/|[A-Za-z]:)|\\|[\0\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(value))) {
-        return { error: 'search path must be repository-relative, not a VPS/absolute path or traversal. Use find_files for source paths or platform_capabilities for available read-only diagnostics; search never reads the host filesystem.' };
-      }
-      return base.search({ ...args, path: paths });
-    };
+    tools.find_files = base.find_files;
   }
-  if (workspacePath) tools.find_files = ({ name, limit } = {}) => {
-    const term = typeof name === 'string' ? name.trim().toLowerCase() : '';
-    if (term.length < 2 || term.length > 100) return { error: 'name must be a filename/path fragment of 2-100 characters, not a natural-language question' };
-    const cap = Math.min(100, Math.max(1, Number(limit) || 50));
-    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
-    const matches = tracked.split('\0').filter(file => file && file.toLowerCase().includes(term)).sort();
-    return { name: term, matches: matches.length, paths: matches.slice(0, cap), truncated: matches.length > cap };
-  };
   tools.list_jobs = async ({ status, limit } = {}) => {
     let query = supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(Math.min(Math.max(Number(limit) || 10, 1), 25));
     if (typeof status === 'string' && status.trim()) query = query.eq('status', status.trim());
