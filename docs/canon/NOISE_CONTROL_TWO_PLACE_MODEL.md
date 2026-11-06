@@ -105,6 +105,26 @@ Design decisions and why:
   END that is not linked to a dispatch job. Officer-initiated observations
   without a complaint use the abatement path (s322(1)(c)).
 
+## 2.1 Retrospective source-register reconciliation
+
+Owner ruling, 2026-11-07: "complete the jobs as intended by the app, and close
+them as intended by the app, do this as a human would." For a pending historical
+noise-control job, an administrator may use a source register to record the
+source-reported received, on-site, and off-site times and outcome when the
+register reference exactly matches the job. The source file name and SHA-256,
+reference, local time zone, acting administrator, and reason are retained in an
+audit receipt.
+
+This is a narrow historical-record path, not a way to simulate a live officer
+visit. The source-reported on-site/off-site values may populate the dispatch
+job lifecycle and flow through the normal completed-job ledger projection, but
+the outcome must say that the times came from the register. It must not create
+GPS coordinates, a geofence result, a shift stop, or an officer attribution
+that the source does not establish. These records are source-reported and are
+not FCM GPS-verified attendance. Finance may resolve only when a linked shift
+identifies an officer and dispatch-origin coordinates cannot be mistaken for
+travel evidence; otherwise finance remains for human review.
+
 ## 3. Confidentiality rules (data layer, not just rendering)
 
 | Reader | Source place, matrix, action, END, times, verification | Complainant place / address | Complainant identity & contact | Interaction summaries |
