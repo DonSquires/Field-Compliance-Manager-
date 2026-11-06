@@ -155,6 +155,7 @@ type RunsheetAction =
   | 'amend'
   | 'escalate'
   | 'cancel_shift'
+  | 'close_shift'
   | 'reorder'
   | 'skip'
   | 'cancel_stop';
@@ -166,7 +167,13 @@ interface RunsheetActionDraft {
   reason: string;
   notes: string;
   newOrder: number | null;
+  endedAt: string;
 }
+
+const toLocalDateTimeInput = (value: Date) => {
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
 
 const JOB_STATUS_LABELS: Record<JobStatus, string> = { pending: 'Waiting to dispatch', pending_approval: 'Waiting for approval', dispatched: 'Dispatched', acknowledged: 'Acknowledged', en_route: 'On the way', on_scene: 'On site', completed: 'Completed', cancelled: 'Cancelled' };
 
@@ -971,6 +978,9 @@ const DispatchConsolePage: React.FC = () => {
 
   const openRunsheetAction = (target: 'shift' | 'stop', action: RunsheetAction) => {
     const notes = target === 'shift' && action === 'amend' ? selectedShift?.notes ?? '' : '';
+    const scheduledEnd = selectedShift?.scheduledEnd ? new Date(selectedShift.scheduledEnd) : null;
+    const now = new Date();
+    const defaultEnd = scheduledEnd && !Number.isNaN(scheduledEnd.getTime()) && scheduledEnd < now ? scheduledEnd : now;
     setRunsheetAction({
       target,
       action,
@@ -978,6 +988,7 @@ const DispatchConsolePage: React.FC = () => {
       reason: '',
       notes,
       newOrder: target === 'stop' && action === 'reorder' ? selectedStop?.sequence ?? null : null,
+      endedAt: action === 'close_shift' ? toLocalDateTimeInput(defaultEnd) : '',
     });
     setError(null);
     setNotice(null);
@@ -1002,6 +1013,24 @@ const DispatchConsolePage: React.FC = () => {
     if (runsheetAction.target === 'shift' && runsheetAction.action === 'amend' && !runsheetAction.notes.trim()) {
       setError('Write the updated shift note.');
       return;
+    }
+    let closeEndIso: string | null = null;
+    if (runsheetAction.target === 'shift' && runsheetAction.action === 'close_shift') {
+      const ended = new Date(runsheetAction.endedAt);
+      const started = selectedShift?.actualStart ? new Date(selectedShift.actualStart) : null;
+      if (!runsheetAction.endedAt || Number.isNaN(ended.getTime())) {
+        setError('Enter the time the shift actually ended.');
+        return;
+      }
+      if (started && ended <= started) {
+        setError('The end time must be after the shift started.');
+        return;
+      }
+      if (ended > new Date()) {
+        setError('The end time cannot be in the future.');
+        return;
+      }
+      closeEndIso = ended.toISOString();
     }
 
     setOperatorBusy(true);
@@ -1037,6 +1066,30 @@ const DispatchConsolePage: React.FC = () => {
     } else {
       if (!selectedShift) {
         setError('The selected shift is no longer available.');
+        setOperatorBusy(false);
+        return;
+      }
+      if (runsheetAction.action === 'close_shift' && closeEndIso) {
+        // ATLAS CALLS: close_unfinished_officer_shift (admin closes a shift the officer could not end, with audit receipt)
+        const { data, error: closeError } = await supabase.rpc('close_unfinished_officer_shift', {
+          p_client_request_id: runsheetAction.clientRequestId,
+          p_shift_id: selectedShift.id,
+          p_expected_status: selectedShift.status,
+          p_expected_updated_at: selectedShift.updatedAt,
+          p_actual_end: closeEndIso,
+          p_reason: runsheetAction.reason.trim(),
+        });
+        if (closeError) setError(closeError.message);
+        else {
+          const replayed = Boolean((data as { replayed?: boolean } | null)?.replayed);
+          const endedLabel = new Date(closeEndIso).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' });
+          setNotice(`Shift closed at ${endedLabel} with an audit receipt${replayed ? ' (replayed safely)' : ''}.`);
+          setRunsheetAction(null);
+          await loadPhaseA();
+          setSelectedShiftId(null);
+          setSelectedStopId(null);
+          setShiftStops([]);
+        }
         setOperatorBusy(false);
         return;
       }
@@ -1076,6 +1129,8 @@ const DispatchConsolePage: React.FC = () => {
       ? 'Escalate attendance'
       : runsheetAction?.action === 'cancel_shift'
         ? 'Cancel shift'
+        : runsheetAction?.action === 'close_shift'
+          ? 'Close unfinished shift'
         : runsheetAction?.action === 'reorder'
           ? 'Change stop position'
           : runsheetAction?.action === 'skip'
@@ -1117,6 +1172,19 @@ const DispatchConsolePage: React.FC = () => {
             />
           </label>
         )}
+        {runsheetAction.action === 'close_shift' && (
+          <label>
+            <span>Shift ended at</span>
+            <input
+              type="datetime-local"
+              value={runsheetAction.endedAt}
+              max={toLocalDateTimeInput(new Date())}
+              onChange={(event) => setRunsheetAction((current) => current ? { ...current, endedAt: event.target.value } : current)}
+              disabled={operatorBusy}
+              required
+            />
+          </label>
+        )}
         <label>
           <span>Operational reason</span>
           <textarea
@@ -1128,7 +1196,9 @@ const DispatchConsolePage: React.FC = () => {
             disabled={operatorBusy}
           />
         </label>
-        <p>This changes the live officer run sheet and writes a before-and-after audit receipt. It does not rewrite completed attendance.</p>
+        <p>{runsheetAction.action === 'close_shift'
+          ? 'Use this when the officer could not end the shift themselves. Stops they reached are finished at this time, stops they never reached are marked skipped, and a before-and-after audit receipt is written.'
+          : 'This changes the live officer run sheet and writes a before-and-after audit receipt. It does not rewrite completed attendance.'}</p>
         <div className="dispatch-runsheet-action__footer">
           <button type="button" onClick={closeRunsheetAction} disabled={operatorBusy}>Keep current run sheet</button>
           <button type="submit" disabled={operatorBusy}>{operatorBusy ? 'Applying change' : `Confirm ${runsheetActionLabel.toLowerCase()}`}</button>
@@ -1144,9 +1214,11 @@ const DispatchConsolePage: React.FC = () => {
       <div>
         <button type="button" onClick={() => openRunsheetAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button>
         <button type="button" onClick={() => openRunsheetAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button>
-        <button type="button" onClick={() => openRunsheetAction('shift', 'cancel_shift')} disabled={operatorBusy || Boolean(selectedShift.actualStart)}>Cancel shift</button>
+        {selectedShift.status === 'in_progress' && selectedShift.actualStart
+          ? <button type="button" onClick={() => openRunsheetAction('shift', 'close_shift')} disabled={operatorBusy}>Close unfinished shift</button>
+          : <button type="button" onClick={() => openRunsheetAction('shift', 'cancel_shift')} disabled={operatorBusy || Boolean(selectedShift.actualStart)}>Cancel shift</button>}
       </div>
-      {selectedShift.actualStart && <small>A started shift cannot be cancelled. Amend its note or escalate attendance instead.</small>}
+      {selectedShift.actualStart && <small>A started shift cannot be cancelled. If the officer could not end it, close it at the time the work finished.</small>}
       {renderRunsheetAction('shift')}
     </div>
   );
