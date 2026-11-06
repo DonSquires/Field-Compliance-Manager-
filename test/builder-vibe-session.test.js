@@ -89,6 +89,32 @@ function installFixtureTypecheck(repo) {
   repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
 }
 
+function installFixtureChecks(repo) {
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/package.json'), JSON.stringify({ scripts: { lint: 'node verify.cjs', test: 'node verify-test.cjs' } }));
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/verify.cjs'), 'process.exit(0);\n');
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/verify-test.cjs'), [
+    'const source = require("fs").readFileSync("src/hello.ts", "utf8");',
+    'if (source.includes("BROKEN")) {',
+    '  console.log("verbose output ".repeat(1500));',
+    '  console.log("AssertionError: expected the repaired greeting");',
+    '  process.exit(1);',
+    '}',
+    'console.log("1 test passed");',
+  ].join('\n'));
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add test fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
+function installBrowserSpec(repo) {
+  const dir = path.join(repo.dir, 'apps/web/e2e');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'greeting.spec.ts'), '// fixture spec\n');
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add browser fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
 function verifiedFixtureIdentity(t) {
   const previous = { name: process.env.BOB_BUILDER_GIT_NAME, email: process.env.BOB_BUILDER_GIT_EMAIL };
   process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
@@ -295,6 +321,91 @@ test('a continuation repairs the preserved failing draft and clears its exact ve
   assert.match(model.calls[1].request.messages[1].content, /without changing other behavior/);
   assert.match(fs.readFileSync(path.join(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), 'apps/web/src/hello.ts'), 'utf8'), /repaired/);
   assert.equal(store.state.rows.filter(row => row.payload?.automatic).at(-1).payload.ok, true);
+});
+
+test('a continuation retains failure tails and clears a previous failure only when that step passes in a chain', async t => {
+  const testCommand = 'npm run test --prefix apps/web -- src/greeting.test.tsx';
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'run', args: { command: testCommand } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"repaired"' } },
+    { tool: 'run', args: { command: `npm run lint --prefix apps/web && ${testCommand}` } },
+    { tool: 'reply', args: { message: 'Repaired and verified.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installFixtureChecks(repo);
+  const first = await vibe.processVibeMessage({
+    store, message: ownerMessage('repair the greeting'), deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 2, repairTurns: 0 },
+  });
+  assert.equal(first.error, true);
+  const failed = store.state.rows.find(row => row.payload?.tool === 'run' && row.payload.ok === false);
+  assert.match(failed.payload.preview, /AssertionError: expected the repaired greeting/);
+  assert.match(first.reply, /AssertionError: expected the repaired greeting/);
+  const previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => ['test', 'diff', 'error'].includes(row.kind));
+  const second = await vibe.processVibeMessage({ store, message: ownerMessage('continue'), deps });
+  assert.equal(second.error, undefined, second.reply);
+  assert.match(model.calls[2].request.messages[1].content, /AssertionError: expected the repaired greeting/);
+  const chain = store.state.rows.find(row => row.payload?.args?.command?.includes(' && '));
+  assert.deepEqual(chain.payload.verification_steps.map(step => [step.command, step.ok]), [
+    ['npm run lint --prefix apps/web', true], [testCommand, true],
+  ]);
+  assert.match(chain.payload.preview, /1 test passed/);
+});
+
+test('an unexecuted later step in a failed chain does not clear an earlier failure', async t => {
+  const testCommand = 'npm run test --prefix apps/web -- src/greeting.test.tsx';
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'run', args: { command: `node --check missing.js && ${testCommand}` } },
+    { tool: 'write_file', args: { path: 'missing.js', content: 'const valid = true;\n' } },
+    { tool: 'run', args: { command: 'node --check missing.js' } },
+    { tool: 'reply', args: { blocked_reason: 'The previous test still needs repair.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installFixtureChecks(repo);
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'run', args: { command: testCommand }, ok: false, preview: 'exit 1\nEarlier test failed' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the prior failure'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Earlier test failed/);
+  const receipt = store.state.rows.find(row => row.payload?.args?.command?.includes(' && '));
+  assert.deepEqual(receipt.payload.verification_steps.map(step => step.command), ['node --check missing.js']);
+  assert.ok(store.state.rows.some(row => row.payload?.ok === false));
+});
+
+test('continuation git_diff includes committed changes relative to the session base', async t => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"saved"' } },
+    { tool: 'reply', args: { message: 'Saved the greeting.' } },
+    { tool: 'git_diff', args: {} },
+    { tool: 'reply', args: { message: 'The greeting changed.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('what changed?'), deps });
+  const result = model.calls.at(-1).request.messages.at(-1).content;
+  assert.match(result, /base_sha/);
+  assert.match(result, /apps\/web\/src\/hello\.ts/);
+  assert.match(result, /\+export const hello = \\"saved\\"/);
+});
+
+test('continuation git_diff combines committed changes, the current draft and untracked paths', async t => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"saved"' } },
+    { tool: 'reply', args: { message: 'Saved.' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"saved"', new_text: '"draft"' } },
+    { tool: 'write_file', args: { path: 'apps/web/src/new.ts', content: 'export const added = true;\n' } },
+    { tool: 'git_diff', args: {} },
+    { tool: 'reply', args: { message: 'Draft updated.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('continue editing the draft'), deps });
+  const result = model.calls.at(-1).request.messages.at(-1).content;
+  assert.match(result, /\+export const hello = \\"draft\\"/);
+  assert.match(result, /untracked_files.*apps\/web\/src\/new\.ts/);
 });
 
 test('an earlier passing model check cannot verify a later broken edit', async () => {
@@ -1066,6 +1177,86 @@ test('continuation receives prior answers, failures, successful edits and commit
   assert.match(task, /COMMITTED diff:.*files=apps\/web\/src\/hello.ts/);
 });
 
+test('oversized continuation fits the real local context budget and retains the owner request and failed receipt', async t => {
+  const { promptFitsProvider } = require('../builder-model-gateway');
+  const health = { gpu_workstation: { configured: true, healthy: true, models: ['local'], installed: ['local'], ready_model: 'local', num_ctx: 24576, max_output_tokens: 8192 } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'reply', args: { blocked_reason: 'The browser failure still needs repair.' } },
+  ], { fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.history = async () => Array.from({ length: 30 }, (_, index) => ({
+    role: 'owner', content: index === 0 ? 'Original task: preserve the existing branch and do not ship.'
+      : index === 15 ? 'Do not alter the existing browser specs.'
+        : `Owner message ${index}: ${'detail '.repeat(500)}`,
+  }));
+  store.recentExecution = async () => [{
+    seq: 5, kind: 'test', content: 'Browser failed',
+    payload: { tool: 'human_test', ok: false, preview: 'FAILED: timeout selecting Jobs & approvals' },
+  }];
+  const current = 'Continue the same work without opening a pull request.';
+  await vibe.processVibeMessage({ store, message: ownerMessage(current), deps });
+  const request = model.calls[0].request;
+  assert.equal(promptFitsProvider(request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
+  const task = request.messages[1].content;
+  assert.match(task, /Original task: preserve the existing branch and do not ship/);
+  assert.match(task, /Do not alter the existing browser specs/);
+  assert.match(task, /timeout selecting Jobs & approvals/);
+  assert.ok(task.includes(current));
+  assert.match(task, /condensed to fit the model/);
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_compacted'));
+});
+
+test('compaction never sends earlier attachment history or its failure output to a cloud fallback', async t => {
+  const health = { ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud', num_ctx: 24576, max_output_tokens: 8192 } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'reply', args: { blocked_reason: 'Need local evidence.' } },
+  ], { allowCloud: true, fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.history = async () => [{
+    role: 'owner', content: 'private-history-marker '.repeat(3000),
+    payload: { attachment_context: [{ context: 'private-attachment-marker' }] },
+  }];
+  store.recentExecution = async () => [{
+    seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'node --check missing.js' }, ok: false, preview: 'private-failure-marker' },
+  }];
+  await vibe.processVibeMessage({ store, message: ownerMessage('continue without attachments'), deps });
+  assert.equal(model.calls[0].provider, 'ollama_cloud');
+  const request = JSON.stringify(model.calls[0].request);
+  assert.doesNotMatch(request, /private-history-marker|private-attachment-marker|private-failure-marker/);
+  assert.match(request, /withheld from external models/);
+});
+
+test('a request that cannot fit mandatory context is not silently truncated or sent', async t => {
+  const health = { gpu_workstation: { configured: true, healthy: true, models: ['small'], ready_model: 'small', num_ctx: 16384, max_output_tokens: 8192 } };
+  const { store, deps, repo, workspaceRoot, model } = setup([], { fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage(`Continue: ${'required owner text '.repeat(2000)}`), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /context is too small/);
+  assert.match(result.reply, /This oversized request was not truncated or sent/);
+  assert.equal(model.calls.length, 0);
+  assert.deepEqual(store.state.session.changed_files, []);
+});
+
+test('a gateway context limit discovered after health lookup is fitted before retrying', async t => {
+  const { promptFitsProvider } = require('../builder-model-gateway');
+  const calls = [];
+  const { store, deps, repo, workspaceRoot } = setup([], {
+    callModel: async ({ modelRequest }) => {
+      calls.push(modelRequest);
+      if (calls.length === 1) return { ok: false, status: 413, code: 'context_exceeded', error: 'prompt exceeds the gpu_workstation context window (24576 tokens)' };
+      return { ok: true, data: { content: JSON.stringify({ tool: 'reply', args: { blocked_reason: 'No further change requested.' } }) } };
+    },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.history = async () => Array.from({ length: 30 }, (_, i) => ({ role: 'owner', content: `Previous ${i}: ${'context '.repeat(500)}` }));
+  await vibe.processVibeMessage({ store, message: ownerMessage('continue safely'), deps });
+  assert.equal(calls.length, 2);
+  assert.equal(promptFitsProvider(calls[1].request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
+  assert.ok(calls[1].request.messages[1].content.includes('continue safely'));
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_window_discovered'));
+});
+
 test('a command with nonzero exit status is recorded as failed for subsequent turns', async () => {
   const { store, deps } = setup([
     { thought: 'check missing file', tool: 'run', args: { command: 'node --check missing.js' } },
@@ -1075,6 +1266,21 @@ test('a command with nonzero exit status is recorded as failed for subsequent tu
   assert.equal(receipt.payload.ok, false);
   assert.match(receipt.payload.preview, /^exit 1/);
   assert.ok(receipt.payload.message_id);
+});
+
+test('a contradictory legacy success flag cannot clear a failed test or produce a success claim', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'reply', args: { blocked_reason: 'All tests passed.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'run', args: { command: 'node --check missing.js' }, ok: true, preview: 'exit 1\nSyntaxError: failed' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the prior test'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /SyntaxError: failed/);
+  assert.match(result.reply, /completion claim was withheld/);
+  assert.doesNotMatch(result.reply, /All tests passed/);
 });
 
 test('protected paths are refused and never committed', async () => {
@@ -1451,14 +1657,120 @@ test('a failing browser walk refuses the handoff once and then reports the chang
   assert.ok(model.calls.some(request => JSON.stringify(request).includes('Handoff refused: the latest verification failed')));
 });
 
-test('browser walk infrastructure failures are reported but do not block the handoff', async () => {
+test('browser walk infrastructure failures block verification without repeating the unchanged walk', async () => {
   const walk = fakeHumanTest([new Error('docker unavailable')]);
   const { store, deps } = setup([editHello, { thought: 'done', tool: 'reply', args: { message: 'Greeting updated.' } }], { humanTest: walk.humanTest });
   const result = await vibe.processVibeMessage({ store, message: ownerMessage('friendlier greeting'), deps });
-  assert.equal(result.error, undefined);
-  assert.match(result.reply, /browser walk could not run: docker unavailable/);
+  assert.equal(result.error, true);
+  assert.match(result.reply, /browser walk \(fixture, desktop\) could not run: docker unavailable/);
+  assert.equal(walk.calls.length, 1);
   const row = store.state.rows.find(entry => entry.payload?.tool === 'human_test');
   assert.equal(row.payload.infrastructure, true);
+});
+
+test('targeted browser checks compare the pinned base and draft without changing the branch', async t => {
+  const calls = [];
+  const humanTest = async options => {
+    calls.push({
+      ...options,
+      head: git(options.workspacePath, ['rev-parse', 'HEAD']),
+      source: fs.readFileSync(path.join(options.workspacePath, 'apps/web/src/hello.ts'), 'utf8'),
+    });
+    if (!options.specs) return walkPassed;
+    return {
+      ok: options.reason !== 'reproduce on base', status: options.reason === 'reproduce on base' ? 'failed' : 'succeeded',
+      complete: true, passed: 1, failed: options.reason === 'reproduce on base' ? 1 : 0,
+      skipped: 0, failures: [], errors: [], warnings: [],
+    };
+  };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    editHello,
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'base', reason: 'reproduce on base' } },
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'test the draft' } },
+    { tool: 'reply', args: { message: 'Greeting changed and checked.' } },
+  ], { humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.ok(model.calls[0].request.tools.some(entry => entry.function.name === 'browser_test'));
+  assert.ok(model.calls[0].request.output_schema.properties.tool.enum.includes('browser_test'));
+  assert.equal(calls.length, 3, 'targeted tests do not replace the full walk');
+  assert.equal(calls[0].head, repo.sha);
+  assert.match(calls[0].source, /"hi"/);
+  assert.match(calls[1].source, /"hello"/);
+  assert.notEqual(calls[0].workspacePath, calls[1].workspacePath);
+  assert.equal(fs.existsSync(calls[0].workspacePath), false, 'the pinned-base worktree is removed');
+  assert.equal(calls[2].specs, undefined);
+  const receipts = store.state.rows.filter(row => row.payload?.tool === 'browser_test');
+  assert.deepEqual(receipts.map(row => [row.payload.browser_test.revision, row.payload.ok]), [['base', false], ['worktree', true]]);
+  assert.match(receipts[1].payload.preview, /Targeted browser check \(worktree/);
+});
+
+test('a passing targeted browser check cannot clear a failed full walk', async t => {
+  const targetedPass = { ok: true, status: 'succeeded', complete: true, passed: 1, failed: 0, skipped: 0, failures: [], errors: [], warnings: [] };
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'inspect the specific failure' } },
+    { tool: 'reply', args: { blocked_reason: 'The full walk still needs repair.' } },
+  ], { humanTest: async () => targetedPass });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'human_test', ok: false, preview: 'The complete browser walk failed.' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the browser failure'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /human_test failed/);
+  assert.match(result.reply, /complete browser walk failed/);
+});
+
+test('publication includes unresolved targeted specs in its fresh full browser walk', async t => {
+  verifiedFixtureIdentity(t);
+  const calls = [];
+  const humanTest = async options => {
+    calls.push(options);
+    if (options.specs) return { ok: false, status: 'failed', complete: true, passed: 1, failed: 1, failures: [], errors: [], warnings: [] };
+    return walkPassed;
+  };
+  const published = [];
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'check the draft' } },
+    { tool: 'reply', args: { blocked_reason: 'Targeted browser check failed.' } },
+  ], { humanTest, publish: async value => published.push(value), openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/12', number: 12 }) });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(draft.error, true);
+  const previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined, shipped.reply);
+  assert.equal(published.length, 1);
+  assert.ok(calls.at(-1).changedFiles.includes('apps/web/e2e/greeting.spec.ts'));
+  assert.equal(calls.at(-1).specs, undefined, 'publication still runs the complete human walk');
+});
+
+test('publication refuses when an unresolved targeted browser spec is missing', async t => {
+  verifiedFixtureIdentity(t);
+  let published = false;
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'reply', args: { message: 'Draft saved.' } },
+  ], {
+    humanTest: async () => walkPassed,
+    publish: async () => { published = true; },
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/12', number: 12 }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'browser_test', ok: false, browser_test: { revision: 'worktree', specs: ['e2e/missing.spec.ts'] } },
+  }];
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, true);
+  assert.match(shipped.reply, /unresolved browser spec cannot be rerun/);
+  assert.equal(published, false);
 });
 
 test('Bob can request the walk as a tool and the handoff reuses it for unchanged files', async () => {
@@ -1476,6 +1788,89 @@ test('Bob can request the walk as a tool and the handoff reuses it for unchanged
   assert.equal(rows.length, 1);
   assert.equal(rows[0].kind, 'test');
   assert.equal(rows[0].payload.automatic, undefined);
+});
+
+test('complete failed browser evidence is reused across turns unless a fresh walk is explicitly requested', async t => {
+  const walk = fakeHumanTest([
+    { ...walkFailed, complete: true },
+    { ...walkPassed, complete: true },
+  ]);
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'human_test', args: { reason: 'initial check' } },
+    { tool: 'reply', args: { blocked_reason: 'The walk still fails.' } },
+    { tool: 'human_test', args: { reason: 'inspect the same branch' } },
+    { tool: 'reply', args: { blocked_reason: 'The walk still fails.' } },
+    { tool: 'human_test', args: { reason: 'owner requested a fresh walk', rerun: true } },
+    { tool: 'reply', args: { message: 'A fresh browser walk passed.' } },
+  ], { humanTest: walk.humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const first = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(first.error, true);
+  let previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
+  const second = await vibe.processVibeMessage({ store, message: ownerMessage('inspect the browser failure'), deps });
+  assert.equal(second.error, true);
+  assert.equal(walk.calls.length, 1);
+  const reused = store.state.rows.filter(row => row.payload?.tool === 'human_test').at(-1);
+  assert.equal(reused.payload.reused, true);
+  assert.match(reused.payload.preview, /no new walk ran/);
+  previous = store.state.rows.slice();
+  const third = await vibe.processVibeMessage({ store, message: ownerMessage('rerun the browser walk'), deps });
+  assert.equal(third.error, undefined, third.reply);
+  assert.equal(walk.calls.length, 2);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'human_test').at(-1).payload.reused, false);
+});
+
+test('an incomplete browser report is never cached as a completed walk', async t => {
+  const walk = fakeHumanTest([
+    { ...walkFailed, complete: false, status: 'timed_out', report_errors: ['report incomplete'] },
+    { ...walkPassed, complete: true },
+  ]);
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'human_test', args: { reason: 'initial check' } },
+    { tool: 'human_test', args: { reason: 'retry after incomplete report' } },
+    { tool: 'reply', args: { message: 'The browser walk passed.' } },
+  ], { humanTest: walk.humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(walk.calls.length, 2);
+  assert.ok(store.state.rows.filter(row => row.payload?.tool === 'human_test').every(row => row.payload.reused === false));
+});
+
+test('a complete report with an unexplained worker failure is not reused as test evidence', async t => {
+  const walk = fakeHumanTest([
+    { ...walkFailed, complete: true, failed: 0, failures: [], errors: [], output_tail: 'browser worker exited unexpectedly' },
+    { ...walkPassed, complete: true },
+  ]);
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'human_test', args: { reason: 'initial check' } },
+    { tool: 'human_test', args: { reason: 'retry worker failure' } },
+    { tool: 'reply', args: { message: 'A new browser walk passed.' } },
+  ], { humanTest: walk.humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(walk.calls.length, 2);
+  const first = store.state.rows.find(row => row.payload?.tool === 'human_test');
+  assert.match(first.payload.preview, /browser worker exited unexpectedly/);
+  assert.match(first.payload.human_test.output_tail, /browser worker exited unexpectedly/);
+});
+
+test('contradictory successful browser evidence is reported as unverified', async t => {
+  const walk = fakeHumanTest([{ ...walkPassed, complete: false }]);
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'reply', args: { blocked_reason: 'Browser evidence is incomplete.' } },
+  ], { humanTest: walk.humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Browser evidence was incomplete/);
+  assert.equal(walk.calls.length, 1);
 });
 
 test('a pure answer with no tool use does not trigger the browser walk', async () => {

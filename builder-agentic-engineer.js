@@ -693,20 +693,27 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let finished = false;
       const cap = 64 * 1024 * 1024;
       child.stdout.on('data', (chunk) => { if (stdout.length < cap) stdout += chunk.toString('utf8'); });
       child.stderr.on('data', (chunk) => { if (stderr.length < cap) stderr += chunk.toString('utf8'); });
       const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch { /* gone */ } }, limits.runTimeoutMs);
       const finish = (status, spawnError) => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
         runs.push({ command: text, exit_code: status, at: new Date(started).toISOString(), duration_ms: Date.now() - started, fingerprint, timed_out: timedOut });
+        const output = (value, label) => status === 0 && !timedOut
+          ? clip(value, limits.runCapChars, label)
+          : compactExcerpt(value, limits.runCapChars);
         resolve({
           command: text,
           exit_code: status,
           timed_out: timedOut,
           duration_ms: Date.now() - started,
-          stdout: clip(stdout, limits.runCapChars, 'stdout'),
-          stderr: clip(redactGitError(spawnError ? `${stderr}\n${spawnError.message}` : stderr), limits.runCapChars, 'stderr'),
+          ...(spawnError ? { error: redactGitError(spawnError.message) } : {}),
+          stdout: output(stdout, 'stdout'),
+          stderr: output(redactGitError(spawnError ? `${stderr}\n${spawnError.message}` : stderr), 'stderr'),
         });
       };
       child.on('error', (error) => finish(null, error));
@@ -1075,7 +1082,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (parts.length <= 1) return { ...(await run(normalized)), ...rewritten };
       const results = [];
       for (const part of parts) {
-        const result = await run(part);
+        const result = { command: part, ...await run(part) };
         results.push(result);
         if (result.error || result.exit_code !== 0) break;
       }

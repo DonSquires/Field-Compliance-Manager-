@@ -14,12 +14,12 @@ const { lookup } = require('node:dns/promises');
 const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
-const { humanTestInputFiles } = require('./builder-vibe-human-test');
+const { humanTestInputFiles, validateBrowserSpecs } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v19';
+const PROMPT_VERSION = 'vibe-v20';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -105,7 +105,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- You write the code and supply complete tool arguments. A tool validation error is yours to repair, not a reason to ask the owner for source code, filenames or replacement text already discoverable in the worktree. For UI changes, read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md and the existing page CSS/design tokens; do not append a second screen implementation to the application shell.',
     '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair. A failing check refuses your reply for up to ' + (limits.repairRounds ?? VIBE_LIMITS.repairRounds) + ' repair rounds while each round makes progress, and a step budget that runs out mid-repair is extended once: use those rounds to fix the cause, not to restate the claim.',
-    '- Match the runner to the test: npm run test --prefix apps/web runs Vitest with selectors relative to apps/web (src/..., not apps/web/src/...). Playwright specs under e2e/ belong to human_test, not Vitest. A runner-discovery error is not an application defect: fix the runner configuration, never add any-typed imports, VITEST branches, empty placeholder edits or skipped assertions to a Playwright spec. A legitimate source repair allows a fresh check; unchanged failed checks do not justify a retry loop.',
+    '- Match the runner to the test: npm run test --prefix apps/web runs Vitest with selectors relative to apps/web (src/..., not apps/web/src/...). Playwright specs under e2e/ belong to browser_test or human_test, not Vitest. A runner-discovery error is not an application defect: fix the runner configuration, never add any-typed imports, VITEST branches, empty placeholder edits or skipped assertions to a Playwright spec. A legitimate source repair allows a fresh check; unchanged failed checks do not justify a retry loop.',
     '- Workflow acceptance: read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md section 8. Define expected BEFORE (role, organisation, route, records), DURING (selection, validation, request/RPC, audit, loading/errors), AFTER (saved record, reload, back/forward, downstream status and next actor). Use Atlas capability/direct edges/flow_reach and schema writers; keep structural fk_reach separate. The generic human_test walk is read-only smoke/UX evidence, not proof of writes or persistence. Add targeted fixture-backed workflow assertions for those outcomes; name untested stages instead of declaring the whole workflow passed.',
     '- Test data: text values start with "Bob Test"; numeric-only values start with "999"; dates may be chosen for the scenario. For constrained fields (email, UUID, enum, phone, bounded number), use a valid dedicated fixture value and record why the prefix cannot apply. Archive/suspend/reactivate only records created by that test, identified by ID, tenant and run provenance, never a real record that happens to share a prefix. Test data labels do not grant live-write, messaging, billing or destructive authority.',
     '- Browser verification: when you change what a person sees (apps/web/src), Dr Bob walks the rendered app like a human before your reply is accepted (human_test: offline fixture data, desktop, his admin/officer/client walk plus the e2e specs that target your changed files). The runtime runs it automatically at handoff when the changed web files differ from the last walk; call human_test yourself earlier when you want the evidence. After any failed walk, inspect the exact failure receipt and current diff; map each failing assertion to the changed code path, and run only the smallest relevant unit/type/browser check that adds evidence. Do not rerun an unchanged full walk or repeat a failed command unchanged. Fix failures the change could cause. If a failure appears outside the changed path, do not alter fixtures, weaken/delete assertions, or claim it is pre-existing without reproducing it on the pinned base. When no safe baseline comparison is available, state causality is unknown; report the exact failing spec, assertion, count, targeted checks passed, and that the requested change remains unverified via args.blocked_reason. Keep the human_test receipt visible; a passing focused test does not erase a failed browser walk. A screenshot mismatch on a spec you intentionally changed is not a regression to hide: regenerate that exact baseline with generate_visual_baselines and say so.',
@@ -121,7 +121,8 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- list_dir {path} lists filenames. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". git_log {path?, limit?} | git_diff {}',
     '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text. apply_patch accepts a git unified diff or a "*** Begin Patch" / "*** Update File: <path>" envelope.',
     '- generate_visual_baselines {paths, reason}  1-6 exact existing Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/, only after a visual assertion reports a mismatch on an intentionally changed spec. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
-    '- human_test {reason}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Returns passed/failed/skipped, failing tests (screenshot mismatches flagged), Dr Bob\'s error findings and UX/layout warnings, and an evidence directory. Not a live tenant test or merge approval.',
+    '- human_test {reason, rerun?}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Complete evidence for unchanged UI files is reused; set rerun: true only when the owner requests a fresh walk or the test environment changed. Returns passed/failed/skipped, failing tests, findings and an evidence directory. Not a live tenant test or merge approval.',
+    '- browser_test {specs: ["e2e/example.spec.ts"], revision: "worktree"|"base", reason} runs 1-6 exact existing Playwright specs offline in the same isolated browser worker. Use revision "base" to reproduce on the pinned base without changing the branch, then "worktree" to test a repair. This targeted check never replaces the full human_test or fresh publication verification.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
@@ -203,7 +204,7 @@ function editTargets(tool, args = {}) {
 const isVerificationCommand = command => /^(?:node --(?:test|check)\b|npm (?:run (?:test|lint|build)|test)\b)/.test(command);
 const verificationKey = command => /^npm (?:run test|test) --prefix apps\/web -- .*?\be2e\//.test(command) ? 'human_test'
   : /^npm (?:run test|test)\b/.test(command)
-  ? command.replace(/\s+--environment(?:=|\s+)(?:node|jsdom)\b/g, '').trim()
+  ? command.replace(/^npm run test\b/, 'npm test').replace(/\s+--environment(?:=|\s+)(?:node|jsdom)\b/g, '').trim()
   : command.trim();
 
 function vibeToolSchema(tools) {
@@ -219,7 +220,11 @@ function vibeToolSchema(tools) {
       properties: { paths: { type: 'array', items: nonEmpty, minItems: 1, maxItems: 6 }, reason: nonEmpty },
       required: ['paths', 'reason'],
     },
-    human_test: { properties: { reason: nonEmpty }, required: ['reason'] },
+    human_test: { properties: { reason: nonEmpty, rerun: { type: 'boolean' } }, required: ['reason'] },
+    browser_test: {
+      properties: { specs: { type: 'array', items: nonEmpty, minItems: 1, maxItems: 6 }, revision: { type: 'string', enum: ['worktree', 'base'] }, reason: nonEmpty },
+      required: ['specs', 'revision', 'reason'],
+    },
   };
   const names = [...Object.keys(tools).filter(name => !name.startsWith('__')), 'reply', 'finish'];
   const callSchema = (tool, args) => ({
@@ -273,6 +278,7 @@ function vibeNativeTools(tools) {
     finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures, or no_change_reason when no file change is needed.',
     generate_visual_baselines: 'Generate up to six exact allowed Playwright PNG paths with an intentional-change rationale, never merely to bless a mismatch.',
     human_test: 'Run Dr Bob\'s human browser walk of this branch (offline fixtures, desktop) plus e2e specs targeting the changed web files. Slow (minutes): use after UI edits are lint-clean.',
+    browser_test: 'Run exact Playwright specs offline on the worktree or its pinned base. Targeted results do not replace the full human walk or publication verification.',
   };
   const schema = vibeToolSchema(tools);
   return schema.properties.tool.enum.map(name => {
@@ -298,14 +304,15 @@ function describeArgs(tool, args) {
 
 function toolHeadline(tool, args) {
   const target = tool === 'firewall_change' && args.rule ? `${args.op} ${args.rule.chain} ${args.rule.action} ${args.rule.protocol || 'tcp'}/${args.rule.port || 'any'}` : args.path || args.query || args.command || args.name || args.table || '';
-  const verbs = { human_test: 'Dr Bob browser walk', list_dir: 'Listing', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note', firewall_status: 'Checking the firewall', firewall_change: 'Changing the firewall', tailnet_status: 'Checking the tailnet', tailnet_acl: 'Tailnet policy' };
+  const verbs = { human_test: 'Dr Bob browser walk', browser_test: 'Targeted browser check', list_dir: 'Listing', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note', firewall_status: 'Checking the firewall', firewall_change: 'Changing the firewall', tailnet_status: 'Checking the tailnet', tailnet_acl: 'Tailnet policy' };
   return `${verbs[tool] || tool}${target ? ` ${String(target).slice(0, 160)}` : ''}`;
 }
 
 function humanTestPreview(result) {
   if (!result || typeof result !== 'object') return clip(result, HUMAN_TEST_PREVIEW_CHARS);
-  if (result.infrastructure || (result.error && typeof result.passed !== 'number')) return clip(`Dr Bob's browser walk could not run: ${result.error}`, HUMAN_TEST_PREVIEW_CHARS);
-  const lines = [`Dr Bob browser walk (fixture, desktop): ${result.ok ? 'passed' : 'FAILED'} — ${result.passed || 0} passed, ${result.failed || 0} failed, ${result.skipped || 0} skipped${result.status && result.status !== 'succeeded' && result.status !== 'failed' ? ` (${result.status})` : ''}. Specs: ${(result.specs || []).join(', ')}`];
+  const label = result.scope === 'targeted' ? `Targeted browser check (${result.revision || 'worktree'}, fixture, desktop)` : 'Dr Bob browser walk (fixture, desktop)';
+  if (result.infrastructure || (result.error && typeof result.passed !== 'number')) return clip(`${label} could not run: ${result.error}`, HUMAN_TEST_PREVIEW_CHARS);
+  const lines = [`${label}: ${result.ok ? 'passed' : 'FAILED'} — ${result.passed || 0} passed, ${result.failed || 0} failed, ${result.skipped || 0} skipped${result.status && result.status !== 'succeeded' && result.status !== 'failed' ? ` (${result.status})` : ''}.${result.reused ? ' Reused earlier evidence for unchanged files; no new walk ran.' : ''} Specs: ${(result.specs || []).join(', ')}`];
   for (const failure of result.failures || []) {
     lines.push(`FAILED ${failure.file} > ${failure.title}${failure.screenshot_mismatch ? ' [screenshot mismatch: if this UI change is intentional, regenerate that baseline with generate_visual_baselines]' : ''}: ${clip(failure.error, 300)}`);
   }
@@ -317,11 +324,52 @@ function humanTestPreview(result) {
   return clip(lines.join('\n'), HUMAN_TEST_PREVIEW_CHARS);
 }
 
+function reusableHumanTest(result) {
+  if (!result || result.infrastructure || result.complete !== true || !['succeeded', 'failed'].includes(result.status)) return false;
+  const findings = Array.isArray(result.errors) ? result.errors.length : 0;
+  if (result.ok === true) return result.status === 'succeeded' && result.passed > 0 && result.failed === 0 && findings === 0;
+  return result.failed > 0 || findings > 0;
+}
+
 function resultPreview(result) {
   if (!result || typeof result !== 'object') return clip(result, STREAM_PREVIEW_CHARS);
   if (result.error) return clip(result.error, STREAM_PREVIEW_CHARS);
-  if (typeof result.exit_code !== 'undefined') return clip(`exit ${result.exit_code}${result.timed_out ? ' (timed out)' : ''}\n${result.stdout || ''}${result.stderr ? `\n${result.stderr}` : ''}`, STREAM_PREVIEW_CHARS);
+  if (Array.isArray(result.steps)) {
+    return boundedPreview(result.steps.map(step => `$ ${step.command}\n${resultPreview(step)}`).join('\n\n'), STREAM_PREVIEW_CHARS);
+  }
+  if (typeof result.exit_code !== 'undefined') return boundedPreview(`exit ${result.exit_code === null ? 'unavailable' : result.exit_code}${result.timed_out ? ' (timed out)' : ''}\n${result.stdout || ''}${result.stderr ? `\n${result.stderr}` : ''}`, STREAM_PREVIEW_CHARS);
   return clip(JSON.stringify(result), STREAM_PREVIEW_CHARS);
+}
+
+function boundedPreview(value, cap) {
+  const text = String(value ?? '');
+  if (text.length <= cap) return text;
+  const marker = '\n[… output omitted …]\n';
+  const head = Math.floor((cap - marker.length) * 0.4);
+  return `${text.slice(0, head)}${marker}${text.slice(-(cap - marker.length - head))}`;
+}
+
+function runVerificationSteps(command, result) {
+  const steps = Array.isArray(result?.steps) ? result.steps : [{ ...result, command: result?.command || command }];
+  return steps.filter(step => isVerificationCommand(String(step.command || ''))).map(step => ({
+    command: step.command,
+    ok: !step.error && !step.timed_out && step.exit_code === 0,
+    preview: resultPreview(step),
+  }));
+}
+
+function savedVerificationSteps(payload) {
+  const honest = step => ({
+    ...step,
+    ok: step.ok === true && !/^exit (?:[1-9]\d*|null|unavailable)\b/.test(String(step.preview || '')),
+  });
+  if (Array.isArray(payload.verification_steps)) {
+    return payload.verification_steps.filter(step => typeof step.command === 'string' && typeof step.ok === 'boolean').map(honest);
+  }
+  const command = String(payload.args?.command || '');
+  return isVerificationCommand(command) && typeof payload.ok === 'boolean'
+    ? [honest({ command, ok: payload.ok, preview: payload.preview })]
+    : [];
 }
 
 function createVibeStore(supabase) {
@@ -651,10 +699,41 @@ function branchState(workspacePath, baseSha) {
   return { head, files, commits };
 }
 
+async function withPinnedBaseWorkspace(workspacePath, baseSha, run) {
+  if (!baseSha) throw new Error('The session has no pinned base for a browser comparison.');
+  const target = fs.mkdtempSync(path.join(path.dirname(workspacePath), '.vibe-browser-base-'));
+  let attached = false;
+  try {
+    git(workspacePath, ['worktree', 'add', '--detach', target, baseSha]);
+    attached = true;
+    return await run(target);
+  } finally {
+    if (attached) git(workspacePath, ['worktree', 'remove', target]);
+    else fs.rmdirSync(target);
+  }
+}
+
+const browserVerificationKey = specs => `browser_test:${[...new Set(specs)].sort().join(',')}`;
+
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
   const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {}, generateBaselines: deps.generateBaselines });
-  if (deps.humanTest) tools.human_test = async args => (await runHumanTest({ reason: String(args?.reason || 'requested by Bob'), automatic: false })).result;
+  const uncommittedDiff = tools.git_diff;
+  tools.git_diff = () => {
+    const current = uncommittedDiff();
+    if (!baseSha) return current;
+    const changed = git(workspacePath, ['diff', '--name-only', baseSha]).split('\n').filter(Boolean);
+    return {
+      base_sha: baseSha,
+      changed_files: [...new Set([...changed, ...current.untracked_files])].sort(),
+      untracked_files: current.untracked_files,
+      diff: clip(git(workspacePath, ['diff', '--no-color', baseSha]), limits.readCapChars),
+    };
+  };
+  if (deps.humanTest) {
+    tools.human_test = async args => (await runHumanTest({ reason: String(args?.reason || 'requested by Bob'), automatic: false, rerun: args?.rerun === true })).result;
+    tools.browser_test = args => runBrowserTest(args);
+  }
   if (deps.firewall) {
     tools.firewall_status = () => deps.firewall.status();
     tools.firewall_change = args => deps.firewall.change({ op: args.op, rule: args.rule, purpose: args.purpose });
@@ -704,7 +783,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
       const status = failed ? 'FAILED' : payload.ok === true ? 'SUCCEEDED' : entry.kind === 'diff' ? 'COMMITTED' : 'RECORDED (not verification)';
       const args = payload.args ? ` args=${clip(JSON.stringify(payload.args), 400)}` : '';
       const files = Array.isArray(payload.files) ? ` files=${payload.files.join(', ')}` : '';
-      const preview = payload.preview ? ` → ${clip(String(payload.preview).replace(/\s+/g, ' '), failed ? 600 : 240)}` : '';
+      const preview = payload.preview
+        ? ` → ${failed ? boundedPreview(String(payload.preview).replace(/\s+/g, ' '), 1000) : clip(String(payload.preview).replace(/\s+/g, ' '), 240)}` : '';
       return `#${entry.seq} ${status} ${payload.tool || entry.kind}: ${clip(String(entry.content || ''), 160)}${args}${files}${preview}`;
     })
     .join('\n');
@@ -764,38 +844,78 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let lastVerification = null;
   const failedVerifications = new Map();
   let humanFingerprint = null;
+  let cachedHumanTest = null;
   for (const entry of execution) {
     const payload = entry.payload || {};
     if (payload.tool === 'human_test') {
-      if (payload.source_fingerprint) humanFingerprint = payload.source_fingerprint;
-      if (payload.infrastructure) continue;
+      const report = payload.human_test;
+      const historicalResult = report ? { ...report, ok: payload.ok === true, infrastructure: Boolean(payload.infrastructure) } : null;
+      const completed = report?.complete === undefined
+        ? !payload.infrastructure && (!report?.status || ['succeeded', 'failed'].includes(report.status))
+        : reusableHumanTest(historicalResult);
+      humanFingerprint = completed ? payload.source_fingerprint || null : null;
+      cachedHumanTest = reusableHumanTest(historicalResult) && payload.source_fingerprint
+        ? { fingerprint: payload.source_fingerprint, result: historicalResult } : null;
       if (payload.ok === false) failedVerifications.set('human_test', { command: 'human_test', failed: true, preview: clip(payload.preview, 3000), historical: true });
       else if (payload.ok === true) failedVerifications.delete('human_test');
       continue;
     }
-    const command = String(payload.args?.command || '');
-    if (payload.tool !== 'run' || !isVerificationCommand(command)) continue;
-    if (payload.ok === false) failedVerifications.set(verificationKey(command), { command, failed: true, preview: clip(payload.preview, 3000), historical: true });
-    else if (payload.ok === true) failedVerifications.delete(verificationKey(command));
+    if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
+      const key = browserVerificationKey(payload.browser_test.specs);
+      if (payload.ok === false) failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
+      else if (payload.ok === true) failedVerifications.delete(key);
+      continue;
+    }
+    if (payload.tool !== 'run') continue;
+    for (const step of savedVerificationSteps(payload)) {
+      if (!step.ok) failedVerifications.set(verificationKey(step.command), { command: step.command, failed: true, preview: clip(step.preview, 3000), historical: true });
+      else failedVerifications.delete(verificationKey(step.command));
+    }
   }
   lastVerification = [...failedVerifications.values()].at(-1) || null;
   // Earlier output can quote a private attachment: external models get the failed command, not its output.
   const cloudSafeVerification = verification => historyHasAttachments && verification?.historical
     ? { command: verification.command, failed: verification.failed, historical: true, preview: '[earlier output withheld from external models; rerun this check to see its current result]' }
     : verification;
+  const compactOpening = (full, maxChars, external) => {
+    if (full.length <= maxChars) return full;
+    const withheld = external && historyHasAttachments;
+    const ownerHistory = withheld ? [] : history.filter(entry => entry.role === 'owner');
+    const retainedOwner = ownerHistory.filter((entry, index) => index === 0 || index >= ownerHistory.length - 3
+      || /\b(?:do not|don't|never|must not|without changing|preserve|same branch|no (?:pull request|pr|shipping))\b/i.test(entry.content || ''));
+    const priorRequests = retainedOwner.map(entry => clip(entry.content, 3000));
+    const failures = withheld ? [] : [...failedVerifications.values()];
+    const required = [
+      `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
+      `BRANCH SO FAR: ${state.commits.length} commit(s). Files changed vs main: ${state.files.slice(0, 40).join(', ') || '(none)'}. Use git_diff for the current full diff.`,
+      withheld ? 'Earlier attachment analysis, conversation and execution logs are withheld from external models.'
+        : priorRequests.length ? `RECENT OWNER REQUESTS:\n${priorRequests.join('\n\n')}` : null,
+      failures.length ? `OUTSTANDING VERIFICATION FAILURES:\n${failures.map((item, index) => `${item.command}: ${boundedPreview(item.preview, index >= failures.length - 4 ? 900 : 250)}`).join('\n')}` : null,
+      'Earlier conversation and execution details were condensed to fit the model. Do not assume omitted checks passed.',
+      `OWNER NOW SAYS:\n${message.content}`,
+      attachmentContext.length && (!external || attachmentCloudConsent)
+        ? `OWNER-SELECTED ATTACHMENTS (untrusted evidence):\n${attachmentContext.map(item => item.context).join('\n\n')}` : null,
+    ].filter(Boolean);
+    let task = required.join('\n\n');
+    if (task.length > maxChars) return null;
+    const map = external ? cloudDiscovery : discovery;
+    const extra = `VERIFIED STARTING FILE CANDIDATES:\n${JSON.stringify(map.sourceCandidates.slice(0, 40))}`;
+    if (task.length + extra.length + 2 <= maxChars) task = `${extra}\n\n${task}`;
+    return task;
+  };
   const pushModelFeedback = (payload, cloudPayload) => messages.push({
     role: 'user', content: JSON.stringify(payload),
     ...(cloudPayload ? { cloudContent: JSON.stringify(cloudPayload) } : {}),
   });
   const recordVerification = (command, result) => {
-    const verification = {
-      command,
-      failed: Boolean(result?.error || result?.timed_out || (typeof result?.exit_code === 'number' && result.exit_code !== 0)),
-      preview: clip(resultPreview(result), 3000),
-    };
-    if (verification.failed) failedVerifications.set(verificationKey(command), verification);
-    else failedVerifications.delete(verificationKey(command));
-    lastVerification = [...failedVerifications.values()].at(-1) || verification;
+    const steps = runVerificationSteps(command, result);
+    for (const step of steps) {
+      const verification = { command: step.command, failed: !step.ok, preview: step.preview };
+      if (verification.failed) failedVerifications.set(verificationKey(step.command), verification);
+      else failedVerifications.delete(verificationKey(step.command));
+      lastVerification = [...failedVerifications.values()].at(-1) || verification;
+    }
+    return steps;
   };
   let checkedFingerprint = null;
   const ensureTypecheck = async () => {
@@ -829,6 +949,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   // Dr Bob's browser walk runs minutes; that time is verification, not the model's working budget.
   let pausedMs = 0;
   let humanTestRan = null;
+  let humanTestAttemptedFingerprint = null;
   const changedVsBase = () => [...new Set([
     ...(baseSha ? git(workspacePath, ['diff', '--name-only', baseSha]).split('\n') : []),
     ...tools.__changedFiles(),
@@ -842,40 +963,95 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     return hash.digest('hex');
   };
-  const runHumanTest = async ({ reason, automatic }) => {
+  const runHumanTest = async ({ reason, automatic, rerun = false }) => {
     const changedFiles = changedVsBase();
     const fingerprint = uiFingerprint(humanTestInputFiles(changedFiles));
-    await store.post(session.id, {
-      role: 'system', kind: 'status',
-      content: `Dr Bob is walking this branch in a browser like a person (offline fixture data, desktop)${automatic ? ' before the reply is accepted' : ''}. This takes a few minutes.`,
-      payload: { message_id: message.id, stage: 'human_test', automatic },
-    });
-    const begun = Date.now();
     let result;
-    try {
-      result = await deps.humanTest({ workspacePath, changedFiles, reason });
-    } catch (error) {
-      result = { ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500) };
-    } finally {
-      pausedMs += Date.now() - begun;
+    if (!automatic && !rerun && cachedHumanTest?.fingerprint === fingerprint) {
+      result = { ...cachedHumanTest.result, reused: true };
+    } else {
+      await store.post(session.id, {
+        role: 'system', kind: 'status',
+        content: `Dr Bob is walking this branch in a browser like a person (offline fixture data, desktop)${automatic ? ' before the reply is accepted' : ''}. This takes a few minutes.`,
+        payload: { message_id: message.id, stage: 'human_test', automatic },
+      });
+      const begun = Date.now();
+      try {
+        result = await deps.humanTest({ workspacePath, changedFiles, reason });
+      } catch (error) {
+        result = { ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500) };
+      } finally {
+        pausedMs += Date.now() - begun;
+      }
     }
-    humanFingerprint = fingerprint;
+    if (!result || typeof result !== 'object') result = { ok: false, infrastructure: true, error: 'The browser worker returned an invalid result.' };
+    if (result.ok === true && (result.complete === false || result.failed > 0
+      || (result.errors || []).length || (result.status && result.status !== 'succeeded'))) {
+      result = { ...result, ok: false, report_errors: [...(result.report_errors || []), 'Browser evidence was incomplete or contradicted its success status.'] };
+    }
+    humanTestAttemptedFingerprint = fingerprint;
+    const completed = result.complete === undefined
+      ? !result.infrastructure && (!result.status || ['succeeded', 'failed'].includes(result.status))
+      : reusableHumanTest(result);
+    humanFingerprint = completed ? fingerprint : null;
+    cachedHumanTest = reusableHumanTest(result) ? { fingerprint, result } : null;
     humanTestRan = result;
     const preview = humanTestPreview(result);
-    if (!result.infrastructure) {
-      const verification = { command: 'human_test', failed: result.ok !== true, preview };
-      if (verification.failed) failedVerifications.set('human_test', verification);
-      else failedVerifications.delete('human_test');
-      lastVerification = [...failedVerifications.values()].at(-1) || verification;
-    }
+    const verification = { command: 'human_test', failed: result.ok !== true, preview };
+    if (verification.failed) failedVerifications.set('human_test', verification);
+    else failedVerifications.delete('human_test');
+    lastVerification = [...failedVerifications.values()].at(-1) || verification;
     return { result, preview, fingerprint };
   };
+  const runBrowserTest = async args => {
+    const revision = args?.revision;
+    if (!['worktree', 'base'].includes(revision)) throw new Error('Choose browser_test revision "worktree" or "base".');
+    if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('Provide a reason for the targeted browser check.');
+    const changedFiles = changedVsBase();
+    const fingerprint = revision === 'base' ? baseSha : uiFingerprint(humanTestInputFiles(changedFiles));
+    const execute = async target => {
+      const specs = validateBrowserSpecs(target, args.specs);
+      await store.post(session.id, {
+        role: 'system', kind: 'status',
+        content: `Running ${specs.length} targeted browser spec(s) on the ${revision === 'base' ? 'pinned base' : 'current worktree'} using offline fixtures.`,
+        payload: { message_id: message.id, stage: 'browser_test', revision, specs },
+      });
+      const begun = Date.now();
+      let result;
+      try {
+        result = await deps.humanTest({
+          workspacePath: target, changedFiles: revision === 'base' ? [] : changedFiles, specs,
+          reason: args.reason, artifactLabel: revision === 'base' ? `${path.basename(workspacePath)}-base` : undefined,
+        });
+      } catch (error) {
+        result = { ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500) };
+      } finally {
+        pausedMs += Date.now() - begun;
+      }
+      if (!result || typeof result !== 'object') result = { ok: false, infrastructure: true, error: 'The browser worker returned an invalid result.' };
+      const ok = result?.ok === true && result.complete === true && result.status === 'succeeded'
+        && result.passed > 0 && result.failed === 0 && !(result.errors || []).length;
+      const checked = { ...result, ok, scope: 'targeted', revision, specs, source_fingerprint: fingerprint, base_sha: baseSha };
+      if (!ok && !checked.infrastructure && !checked.report_errors?.length && result?.ok === true) {
+        checked.report_errors = ['Targeted browser evidence was incomplete and cannot be accepted as a pass.'];
+      }
+      if (revision === 'worktree') {
+        const key = browserVerificationKey(specs);
+        const verification = { command: key, failed: !ok, preview: humanTestPreview(checked) };
+        if (verification.failed) failedVerifications.set(key, verification);
+        else failedVerifications.delete(key);
+        lastVerification = [...failedVerifications.values()].at(-1) || verification;
+      }
+      return checked;
+    };
+    return revision === 'base' ? withPinnedBaseWorkspace(workspacePath, baseSha, execute) : execute(workspacePath);
+  };
   const humanTestPayload = (result, fingerprint) => ({
-    tool: 'human_test', ok: result.ok === true, infrastructure: Boolean(result.infrastructure), source_fingerprint: fingerprint,
+    tool: 'human_test', ok: result.ok === true, infrastructure: Boolean(result.infrastructure), reused: Boolean(result.reused), source_fingerprint: fingerprint,
     human_test: result.infrastructure ? { error: result.error } : {
-      status: result.status, passed: result.passed, failed: result.failed, skipped: result.skipped, flaky: result.flaky,
+      status: result.status, passed: result.passed, failed: result.failed, skipped: result.skipped, flaky: result.flaky, complete: result.complete,
       specs: result.specs, failures: result.failures, errors: result.errors, warnings: result.warnings,
-      screenshot_mismatches: result.screenshot_mismatches, duration_ms: result.duration_ms, evidence_directory: result.evidence_directory,
+      report_errors: result.report_errors, output_tail: result.output_tail, screenshot_mismatches: result.screenshot_mismatches, duration_ms: result.duration_ms, evidence_directory: result.evidence_directory,
     },
   });
   const ensureHumanTest = async () => {
@@ -884,7 +1060,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     // A failing typecheck/test already blocks handoff; a browser walk of code that does not compile proves nothing.
     if ([...failedVerifications.keys()].some(key => key !== 'human_test')) return;
     const uiFiles = humanTestInputFiles(changedVsBase());
-    if (!uiFiles.length || uiFingerprint(uiFiles) === humanFingerprint) return;
+    if (!uiFiles.length || uiFingerprint(uiFiles) === humanFingerprint || uiFingerprint(uiFiles) === humanTestAttemptedFingerprint) return;
     const { result, preview, fingerprint } = await runHumanTest({ reason: 'automatic pre-handoff check of the changed web files', automatic: true });
     await store.post(session.id, {
       role: 'tool', kind: 'test', content: toolHeadline('human_test', {}),
@@ -905,14 +1081,19 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const noChange = !effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply);
     if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
     if (noChange) reply = `No files changed during this message.\n\n${reply}`;
-    const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
+    const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk${humanTestRan.reused ? ' (earlier evidence reused; no new walk)' : ' (fixture data, desktop)'}: ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
+    const unverifiedReply = /\b(?:done|fixed|implemented|completed|resolved|passed|passing|successful(?:ly)?|ready)\b/i.test(reply)
+      ? `${failedEdits.size ? `These edits failed and were not applied: ${[...failedEdits.keys()].join(', ')}.\n` : ''}A completion claim was withheld because verification failed.`
+      : clip(reply, 8000);
     return lastVerification?.failed
-      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
+      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}`, error: true, tools, model }
       : { reply: `${clip(reply, 8000)}${walked}`, tools, model };
   };
   let turnCeiling = limits.maxTurns;
   let wallCeiling = limits.wallBudgetMs;
   let repairExtended = false;
+  const contextOverrides = new Map();
+  const reportedCompaction = new Set();
   for (let turn = 1; ; turn++) {
     if (turn > turnCeiling || Date.now() - started - pausedMs >= wallCeiling) {
       if (repairExtended || repairTurns < 1) break;
@@ -936,15 +1117,49 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
-    const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
-    const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
+    const rawContext = Number(contextOverrides.get(candidate.provider) || status.num_ctx);
+    const numCtx = Number.isFinite(rawContext) && rawContext > 0 ? Math.floor(rawContext) : null;
+    const rawOutput = Number(status.max_output_tokens);
+    const maxOutput = Math.min(Number.isFinite(rawOutput) && rawOutput > 0 ? rawOutput : 8192, 16384, numCtx ? Math.floor(numCtx / 2) : 8192);
+    const toolChars = candidate.provider === 'ollama_cloud' ? 0 : JSON.stringify(nativeTools).length;
+    const promptBudget = numCtx ? Math.floor((numCtx - maxOutput - 512) * 3.5) - toolChars - 16 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
     if (candidate.provider === 'ollama_cloud' && historyHasAttachments && cloudStartIndex === null) cloudStartIndex = messages.length;
     const providerMessages = (candidate.provider !== 'ollama_cloud' ? messages
       : cloudStartIndex !== null ? [messages[0], { role: 'user', content: cloudTask }, ...messages.slice(cloudStartIndex)]
         : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudTask } : entry))
       .map(({ cloudContent, ...entry }) => candidate.provider === 'ollama_cloud' && cloudContent !== undefined ? { ...entry, content: cloudContent } : entry);
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(providerMessages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
+    const availableTask = promptBudget - String(providerMessages[0].content || '').length;
+    const reserve = Number.isFinite(availableTask) ? Math.min(4000, Math.max(0, Math.floor(availableTask * 0.1))) : 0;
+    const originalTask = providerMessages[1].content;
+    const fittedTask = compactOpening(originalTask, availableTask - reserve, candidate.provider === 'ollama_cloud')
+      ?? compactOpening(originalTask, availableTask, candidate.provider === 'ollama_cloud');
+    if (fittedTask === null) {
+      if (active + 1 < candidates.length) {
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `${candidate.provider}/${candidate.model || 'configured model'} cannot fit the current request and required evidence; trying the next available model without dropping the request.`,
+          payload: { message_id: message.id, reason: 'context_too_small', provider: candidate.provider, model: candidate.model },
+        });
+        active++; turn--;
+        continue;
+      }
+      return { reply: 'The available model context is too small for your current request and required evidence. This oversized request was not truncated or sent; the existing branch is preserved. Use a larger private model or shorten the request.', error: true, tools };
+    }
+    if (fittedTask !== originalTask && !reportedCompaction.has(candidate.provider)) {
+      reportedCompaction.add(candidate.provider);
+      await store.post(session.id, {
+        role: 'system', kind: 'status', content: 'Older conversation and execution details were condensed to fit the model; the current request and outstanding failures remain visible.',
+        payload: { message_id: message.id, reason: 'context_compacted', provider: candidate.provider },
+      });
+    }
+    providerMessages[1] = { ...providerMessages[1], content: fittedTask };
+    const fittedMessages = compactMessages(providerMessages, { maxChars: promptBudget });
+    if (fittedMessages.reduce((size, entry) => size + String(entry.content || '').length, 0) > promptBudget) {
+      if (active + 1 < candidates.length) { active++; turn--; continue; }
+      return { reply: 'The model context cannot fit the current request and tool history. The existing branch is preserved; use a larger private model or start a shorter continuation.', error: true, tools };
+    }
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     if (candidate.provider === 'ollama_cloud' && !cloudEgressReceipts.has(candidate.model)) {
       await store.post(session.id, {
         role: 'system', kind: 'status',
@@ -960,6 +1175,21 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
+      if (response.status === 413 && response.code === 'context_exceeded') {
+        const reported = Number(String(response.error || '').match(/\((\d+) tokens\)/)?.[1]);
+        if (reported > 0 && (!numCtx || reported < numCtx)) {
+          contextOverrides.set(candidate.provider, reported);
+          await store.post(session.id, {
+            role: 'system', kind: 'status', content: `The gateway reported a smaller context window for ${candidate.provider}; fitting the request before retrying.`,
+            payload: { message_id: message.id, reason: 'context_window_discovered', provider: candidate.provider, num_ctx: reported },
+          });
+          turn--;
+          continue;
+        }
+        if (active + 1 >= candidates.length) {
+          return { reply: 'The model gateway rejected the fitted request as too large for its context window. No further work was claimed; the existing branch is preserved. Use a larger private model or shorten the request.', error: true, tools };
+        }
+      }
       if (['native_tool_batch_refused', 'native_tool_arguments_invalid', 'native_tool_call_missing'].includes(response.code)) {
         protocolRefusals++;
         await store.post(session.id, {
@@ -1136,7 +1366,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         if (beforeEdit !== null && !result?.error && beforeEdit !== uiFingerprint(changedVsBase())) {
           effectiveEdits++;
           for (const key of repeatedCalls.keys()) {
-            if (key.startsWith('human_test:') || key.startsWith('run:') && isVerificationCommand(JSON.parse(key.slice(4)).command || '')) repeatedCalls.delete(key);
+            if (key.startsWith('human_test:') || key.startsWith('browser_test:') || key.startsWith('run:') && isVerificationCommand(JSON.parse(key.slice(4)).command || '')) repeatedCalls.delete(key);
           }
         }
         if (call.tool === 'search' && result?.matches === 0) {
@@ -1157,17 +1387,18 @@ async function runConversation({ store, session, message, workspacePath, branch,
     } else {
       result = { error: `unknown tool ${call.tool}` };
     }
-    if (call.tool === 'run' && isVerificationCommand(String(args.command || ''))) {
-      recordVerification(args.command, result);
-    }
+    const verificationSteps = call.tool === 'run' ? recordVerification(String(args.command || ''), result) : [];
     const humanTestCall = call.tool === 'human_test' && result && !result.error?.startsWith?.('identical tool call');
+    const browserTestCall = call.tool === 'browser_test' && result && !result.error?.startsWith?.('identical tool call');
     await store.post(session.id, {
-      role: 'tool', kind: call.tool === 'run' || humanTestCall ? 'test' : 'tool', content: toolHeadline(call.tool, args),
+      role: 'tool', kind: call.tool === 'run' || humanTestCall || browserTestCall ? 'test' : 'tool', content: toolHeadline(call.tool, args),
       payload: {
         message_id: message.id, tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args),
-        ok: !result?.error && !result?.timed_out && (typeof result?.exit_code !== 'number' || result.exit_code === 0) && (!humanTestCall || result.ok === true),
-        preview: humanTestCall ? humanTestPreview(result) : resultPreview(result), turn,
+        ok: !result?.error && !result?.timed_out && (call.tool === 'run' ? result?.exit_code === 0 : typeof result?.exit_code !== 'number' || result.exit_code === 0) && (!(humanTestCall || browserTestCall) || result.ok === true),
+        preview: humanTestCall || browserTestCall ? humanTestPreview(browserTestCall ? { ...result, scope: 'targeted', revision: args.revision } : result) : resultPreview(result), turn,
+        ...(verificationSteps.length ? { verification_steps: verificationSteps } : {}),
         ...(humanTestCall ? humanTestPayload(result, humanFingerprint) : {}),
+        ...(browserTestCall && result.scope === 'targeted' ? { browser_test: result } : {}),
       },
     });
     if (repeatCount > 3) {
@@ -1226,6 +1457,7 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
     if (!file.startsWith('apps/web/') && /\.(?:js|mjs|cjs)$/.test(file) && fs.existsSync(path.join(workspacePath, file))) commands.add(`node --check ${file}`);
   }
   const unresolved = new Map();
+  const unresolvedBrowser = new Map();
   let requiresBrowser = humanTestInputFiles(state.files).length > 0;
   for (const entry of typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, beforeSeq) : []) {
     const payload = entry.payload || {};
@@ -1233,15 +1465,23 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
       if (payload.ok === false) requiresBrowser = true;
       continue;
     }
-    const command = String(payload.args?.command || '');
-    if (payload.tool !== 'run' || !isVerificationCommand(command)) continue;
-    if (payload.ok === false) unresolved.set(verificationKey(command), command);
-    else if (payload.ok === true) unresolved.delete(verificationKey(command));
+    if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
+      const key = browserVerificationKey(payload.browser_test.specs);
+      if (payload.ok === false) unresolvedBrowser.set(key, payload.browser_test.specs);
+      else if (payload.ok === true) unresolvedBrowser.delete(key);
+      continue;
+    }
+    if (payload.tool !== 'run') continue;
+    for (const step of savedVerificationSteps(payload)) {
+      if (!step.ok) unresolved.set(verificationKey(step.command), step.command);
+      else unresolved.delete(verificationKey(step.command));
+    }
   }
   for (const [key, command] of unresolved) {
     if (key === 'human_test') requiresBrowser = true;
     else commands.add(command);
   }
+  if (unresolvedBrowser.size) requiresBrowser = true;
   const verification = [];
   await store.post(session.id, {
     role: 'system', kind: 'status', content: 'Checking the current branch before publication. Failed or unavailable checks keep the work on this branch; nothing is pushed.',
@@ -1260,8 +1500,14 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
   }
   if (requiresBrowser) {
     if (!deps.humanTest) return { error: true, reply: 'Publication refused: browser verification is unavailable. Configure the Dr Bob worker and rerun Ship as PR. The branch is preserved.' };
-    const result = await deps.humanTest({ workspacePath, changedFiles: state.files, reason: 'fresh browser verification before publication' });
-    const ok = result.ok === true && !result.infrastructure && !(result.errors || []).length;
+    const additionalSpecs = [...new Set([...unresolvedBrowser.values()].flat())];
+    try { for (const specs of unresolvedBrowser.values()) validateBrowserSpecs(workspacePath, specs); }
+    catch (error) { return { error: true, reply: `Publication refused: an unresolved browser spec cannot be rerun: ${redactGitError(error.message)}. The branch is preserved.` }; }
+    const changedFiles = [...state.files, ...additionalSpecs.map(spec => `apps/web/${spec}`)];
+    const result = await deps.humanTest({ workspacePath, changedFiles, reason: 'fresh browser verification before publication' })
+      || { ok: false, infrastructure: true, error: 'The browser worker returned an invalid result.' };
+    const ok = result.ok === true && !result.infrastructure && result.complete !== false
+      && !(result.failed > 0) && !(result.errors || []).length && (!result.status || result.status === 'succeeded');
     const preview = humanTestPreview(result);
     verification.push({ command: 'human_test', ok, warnings: result.warnings?.length || 0 });
     await store.post(session.id, {

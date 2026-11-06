@@ -84,7 +84,8 @@ test('grounded discovery card preserves the private recovery boundary and verifi
 
 test('Vibe teaches workflow evidence, test-data provenance and the correct browser runner', () => {
   const prompt = vibeSystemPrompt();
-  assert.match(prompt, /Playwright specs under e2e\/ belong to human_test, not Vitest/);
+  assert.match(prompt, /Playwright specs under e2e\/ belong to browser_test or human_test, not Vitest/);
+  assert.match(prompt, /revision: "worktree"\|"base"/);
   assert.match(prompt, /AFTER \(saved record, reload, back\/forward/);
   assert.match(prompt, /numeric-only values start with "999"/);
   assert.match(prompt, /text values start with "Bob Test"/);

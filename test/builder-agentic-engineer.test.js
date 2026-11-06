@@ -898,8 +898,23 @@ test('run chains allowlisted commands with && and stops at the first failure; a 
   const refused = await tools.run({ command: 'node --check lib/sum.js && rm -rf lib' });
   assert.equal(refused.steps.length, 2);
   assert.match(refused.error, /command not allowed/);
+  assert.equal(refused.steps[1].command, 'rm -rf lib');
   assert.equal(refused.stopped_at, 'rm -rf lib');
   fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
+test('a command that cannot spawn returns an explicit failure, not a successful null exit', async t => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'aa0011aa0011aa0011aa0011', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const previous = process.env.PATH;
+  t.after(() => { process.env.PATH = previous; fs.rmSync(repo.root, { recursive: true, force: true }); });
+  process.env.PATH = '';
+  const result = await tools.run({ command: 'node --check lib/sum.js' });
+  assert.equal(result.exit_code, null);
+  assert.match(result.error, /ENOENT/);
 });
 
 test('web test commands override a production worker environment with NODE_ENV=test', async () => {
