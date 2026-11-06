@@ -180,8 +180,11 @@ inspection was not a passing application check.
 During: `vibe-v22` continues the original coding turn across step budgets and
 verification-correction limits while code, investigation or verification state
 advances. It permits at most five automatic rounds and 90 minutes from the
-original execution start, preserving the existing per-round budgets and loop
-guards. Each round has an append-only status receipt. Repeated state, exhausted
+recorded execution start, preserving the existing per-round budgets and loop
+guards. The start receipt is saved before the first model call; legacy turns
+without a timing receipt receive one new bounded window on recovery. Distinct
+completed checks count once per result and source revision, not on identical
+reruns. Each round has an append-only status receipt. Repeated state, exhausted
 limits, a genuine blocker, a closed session or newer owner instruction stops
 the turn with work preserved, explicitly failed rather than marked complete.
 No synthetic owner message, automatic PR, merge or release is introduced.
@@ -189,8 +192,10 @@ No synthetic owner message, automatic PR, merge or release is introduced.
 Restarted turns restore same-message tool and verification receipts, failed edit
 targets and continuation limits, and use restart-specific model request keys.
 A missing original workspace fails closed instead of rebuilding from main.
+Legacy failed patches without recorded targets also stop for evidence review.
 Live firewall/ACL mutations are not replayed after interruption. Historical
-attachment-derived output remains withheld from external models.
+attachment-derived output, including failed-edit feedback, remains withheld from
+external models.
 
 The service-only `builder_vibe_recover_failed_turn` RPC permits one explicit,
 audited recovery of the original completed failed coding message. It requires
