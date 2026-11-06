@@ -730,6 +730,33 @@ for (const compact of [false, true]) test(`cloud ${compact ? 'compacted ' : ''}c
   if (compact) assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_compacted'));
 });
 
+test('private continuations retain owner and branch context after attachments', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/private-branch-marker.js', content: 'export const value = 1;\n' } },
+    { tool: 'reply', args: { message: 'File updated.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('Update private-commit-marker.'), deps });
+  assert.equal(draft.error, undefined, draft.reply);
+  store.state.session.title = 'private-session-title-marker';
+  store.history = async () => [{
+    role: 'owner', content: 'Keep existing browser specs intact.',
+    payload: { attachment_context: [{ context: 'private-attachment-marker' }] },
+  }];
+  const privateModel = scriptedModel([{ tool: 'reply', args: { blocked_reason: 'The check still needs repair.' } }]);
+  deps.callModel = privateModel.callModel;
+  deps.fetchHealth = async () => ({
+    gpu_workstation: { configured: true, healthy: true, models: ['local'], ready_model: 'local' },
+  });
+  await vibe.processVibeMessage({ store, message: ownerMessage('Continue.'), deps });
+  const request = JSON.stringify(privateModel.calls[0].request);
+  assert.match(request, /private-session-title-marker/);
+  assert.match(request, /private-commit-marker/);
+  assert.match(request, /private-branch-marker/);
+  assert.match(request, /Keep existing browser specs intact/);
+  assert.match(request, /private-attachment-marker/);
+});
+
 test('the Vibe store detects attachment history across the whole session', async () => {
   const filters = [];
   const query = {
