@@ -46,6 +46,7 @@ declare
   task uuid := '90000000-0000-0000-0000-000000000001';
   job uuid := 'a0000000-0000-0000-0000-000000000001';
   report uuid := 'b0000000-0000-0000-0000-000000000001';
+  hs uuid := 'b0000000-0000-0000-0000-000000000002';
   request uuid := 'c0000000-0000-0000-0000-000000000001';
   actor uuid := 'd0000000-0000-0000-0000-000000000001';
   result jsonb;
@@ -66,16 +67,17 @@ begin
   insert into officer_field_reports select gen_random_uuid(),provider,request,'reviewed',now(),actor,null,'2026-11-02T10:00:00+13','incident',site,null,shift,'PRIVATE';
   insert into officer_field_reports select gen_random_uuid(),provider,gen_random_uuid(),'submitted',null,null,null,'2026-11-02T10:00:00+13','incident',site,null,shift,'PRIVATE';
   insert into officer_field_reports select gen_random_uuid(),provider,gen_random_uuid(),'reviewed',now(),actor,null,'2026-11-02T10:00:00+13','maintenance',site,null,shift,'PRIVATE';
-  insert into officer_field_reports select gen_random_uuid(),provider,gen_random_uuid(),'reviewed',now(),actor,null,'2026-11-02T10:00:00+13','health_safety',site,null,shift,'PRIVATE';
+  insert into officer_field_reports values(hs,provider,gen_random_uuid(),'reviewed',now(),actor,null,'2026-11-02T10:00:00+13','health_safety',site,null,shift,'PRIVATE');
   result := report_service_delivery_summary(contract,'2026-11-01T00:00:00+13','2026-11-08T00:00:00+13');
   perform fixture_check('provider custody attributes to client agreement',result#>>'{client,counts,completedDispatch,recorded}'='1');
   perform fixture_check('arrive/depart/retries count one completed attendance',result#>>'{client,counts,completedStatic,recorded}'='1');
-  perform fixture_check('same client event deduplicates imported field reports',result#>>'{client,counts,reviewedReports,recorded}'='1');
+  perform fixture_check('same client event deduplicates imported field reports, plus one site hazard report',result#>>'{client,counts,reviewedReports,recorded}'='2');
   perform fixture_check('submitted report stays internal',result#>>'{internal,awaitingReview}'='1');
   perform fixture_check('handover presence stays internal',result#>>'{internal,handoversReceived}'='1' and not (result->'client')?'internal');
   perform fixture_check('no private prose crosses projection',result::text not like '%PRIVATE%');
-  perform fixture_check('maintenance and staff H&S excluded',result#>>'{client,counts,reviewedReports,recorded}'='1');
+  perform fixture_check('maintenance excluded, H&S counted as a site hazard check',result#>>'{client,counts,reviewedReports,recorded}'='2');
   insert into location_events values(gen_random_uuid(),provider,'2026-11-02T10:00:00+13',site,null,'dispatch_job',job::text,'{}');
+  insert into location_events values(gen_random_uuid(),provider,'2026-11-02T10:00:00+13',site,null,'officer_field_report',hs::text,'{}');
   insert into observations values(gen_random_uuid(),provider,'2026-11-02T10:00:00+13',site,null,jsonb_build_object('officer_field_report_id',report));
   result := report_service_delivery_summary(contract,'2026-11-01T00:00:00+13','2026-11-08T00:00:00+13');
   perform fixture_check('dispatch mirror is overlap not additional activity',result#>>'{client,counts,completedDispatch,additional}'='0');

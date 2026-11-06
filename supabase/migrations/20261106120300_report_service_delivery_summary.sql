@@ -36,13 +36,15 @@ with agreement as materialized (
     r.id, r.client_event_id, r.status, r.reviewed_at, r.reviewed_by, r.investigation_id,
     array(
       select duplicate.id from public.officer_field_reports duplicate
-      where duplicate.organization_id = r.organization_id and duplicate.report_type = 'incident'
+      where duplicate.organization_id = r.organization_id and duplicate.report_type in ('incident', 'health_safety')
         and (duplicate.id = r.id or duplicate.client_event_id = r.client_event_id)
     ) as provenance_ids
   from public.officer_field_reports r
   join agreement a on a.provider_organization_id = r.organization_id
   where r.reported_at >= p_from and r.reported_at < p_to
-    and r.report_type = 'incident'
+    -- Health and safety reports are client site hazard checks (owner ruling
+    -- 2026-11-06); maintenance reports stay in-house.
+    and r.report_type in ('incident', 'health_safety')
     and exists (select 1 from links l where l.site_id = r.site_id or l.zone_id = r.zone_id)
     and (
       ((
@@ -240,4 +242,4 @@ from base;
 $function$;
 revoke all on function public.build_agreement_activity_report(uuid,timestamptz,timestamptz,integer) from public, anon, authenticated, service_role;
 comment on function public.report_service_delivery_summary(uuid,timestamptz,timestamptz) is
-'Internal count-only service evidence: reviewed incident reports, completed dispatch and static attendance, with provenance overlaps; private handover counts only in the provider projection. No free text or financial estimates.';
+'Internal count-only service evidence: reviewed incident and site hazard (health and safety) reports, completed dispatch and static attendance, with provenance overlaps; private handover counts only in the provider projection. No free text or financial estimates.';

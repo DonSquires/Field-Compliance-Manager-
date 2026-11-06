@@ -11,4 +11,23 @@
 .cost-of-service-filters select{min-height:34px;padding:7px 9px;border:1px solid #315969;border-radius:5px;color:#e8f0f4;background:#102833;font:inherit;font-size:12px}
 .cost-of-service-filters button{min-height:34px;padding:0 12px;border:1px solid #315969;border-radius:4px;color:#cfe3ec;background:#102833;font-size:12px;font-weight:800;cursor:pointer}
 .cost-of-service-filters button:disabled{opacity:.5;cursor:not-allowed}
-@media(max-width:760px){.cost-of-service{padding:14px}.cost-of-service-filters label{min-width:100%}.cost-of-service-filters button{width:100%}}
+.cost-of-service-message.is-warning{color:#ffe7b3;background:#3d3115}
+.cost-of-service-muted{margin:0;color:#91a6b4;font-size:13px}
+.cost-of-service-panel{display:grid;gap:12px;padding:14px;border:1px solid #28495a;border-radius:8px;background:#0c202b}
+.cost-of-service-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cost-of-service-panel h2{display:flex;align-items:center;gap:8px;margin:0;color:#e6f0f4;font-size:16px}
+.cost-of-service-panel>header p{margin:4px 0 0;color:#91a6b4;font-size:12px;line-height:1.5;max-width:75ch}
+.cost-of-service-panel>header button{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border:1px solid #315969;border-radius:4px;color:#cfe3ec;background:#102833;font-size:12px;font-weight:800;cursor:pointer}
+.cost-of-service-panel>header button:disabled{opacity:.5;cursor:not-allowed}
+.cost-of-service-agreement{display:grid;gap:10px;padding:12px;border:1px solid #23404f;border-radius:6px;background:#0f2632}
+.cost-of-service-agreement>header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cost-of-service-agreement h3{margin:0;color:#e6f0f4;font-size:14px}
+.cost-of-service-agreement>header span{color:#8fa9b5;font-size:12px}
+.cost-of-service-agreement dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:0}
+.cost-of-service-agreement dl>div{display:grid;gap:2px}
+.cost-of-service-agreement dt{color:#8fa9b5;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.cost-of-service-agreement dd{margin:0;color:#e6f0f4;font-size:16px;font-weight:700}
+.cost-of-service-agreement small{color:#91a6b4;font-size:12px;line-height:1.4}
+.cost-of-service-steps{display:grid;gap:4px;padding:10px;border-left:3px solid #d9a441;background:#1a2a24;color:#e6f0f4;font-size:13px}
+.cost-of-service-steps ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.cost-of-service-steps a{color:#8fd3ff;font-weight:700}@media(max-width:760px){.cost-of-service{padding:14px}.cost-of-service-filters label{min-width:100%}.cost-of-service-filters button{width:100%}}

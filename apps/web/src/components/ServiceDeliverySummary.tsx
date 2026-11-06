@@ -53,7 +53,7 @@ export function ServiceDeliverySummary({ agreementIds, start, end }: {
               </tr>)}</tbody>
             </table>
           </div>
-          <p>{current.overview.awaitingReview} officer incident reports awaiting review. Use Field reports in Evidence &amp; Reports to review them.</p>
+          <p>{current.overview.awaitingReview} officer incident or site hazard reports awaiting review. Use Field reports in Evidence &amp; Reports to review them.</p>
           <p>{current.overview.handoversReceived} shift handovers received (internal count only). Private handover, briefing and outcome text is not copied into client reports.</p>
           <p>Generate fresh monthly report drafts to include the safe service-count summary. Existing and issued packs are not changed.</p>
         </>}

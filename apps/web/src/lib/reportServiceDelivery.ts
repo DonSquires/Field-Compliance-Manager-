@@ -1,5 +1,5 @@
 export const SERVICE_DELIVERY_LABELS = {
-  reviewedReports: 'Reviewed officer incident reports',
+  reviewedReports: 'Reviewed officer incident and site hazard reports',
   completedDispatch: 'Completed dispatch jobs',
   completedStatic: 'Completed static attendances',
 } as const;
