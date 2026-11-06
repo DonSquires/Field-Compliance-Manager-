@@ -276,10 +276,37 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
     await load();
   };
 
-  const linkCandidates = (row: LookupRow) => (rows ?? []).filter((candidate) => candidate.entry_kind === 'lookup'
-    && !candidate.vehicle_identity_check_id
-    && ((row.plate_number && normalisePlate(candidate.plate_number) === normalisePlate(row.plate_number))
-      || (row.vin && normalisePlate(candidate.vin) === normalisePlate(row.vin))));
+  const linkableLookupIds = useMemo(() => {
+    const byPlate = new Map<string, string[]>();
+    const byVin = new Map<string, string[]>();
+    for (const candidate of rows ?? []) {
+      if (candidate.entry_kind !== 'lookup' || candidate.vehicle_identity_check_id) continue;
+      const plate = normalisePlate(candidate.plate_number);
+      if (plate) {
+        const list = byPlate.get(plate) ?? [];
+        list.push(candidate.entry_id);
+        byPlate.set(plate, list);
+      }
+      const vin = normalisePlate(candidate.vin);
+      if (vin) {
+        const list = byVin.get(vin) ?? [];
+        list.push(candidate.entry_id);
+        byVin.set(vin, list);
+      }
+    }
+    return { byPlate, byVin };
+  }, [rows]);
+
+  const linkCandidates = useCallback((row: LookupRow) => {
+    const plate = normalisePlate(row.plate_number);
+    const vin = normalisePlate(row.vin);
+    const plateIds = plate ? linkableLookupIds.byPlate.get(plate) ?? [] : [];
+    const vinIds = vin ? linkableLookupIds.byVin.get(vin) ?? [] : [];
+    const idSet = new Set([...plateIds, ...vinIds]);
+    return (rows ?? []).filter((candidate) => candidate.entry_kind === 'lookup'
+      && !candidate.vehicle_identity_check_id
+      && idSet.has(candidate.entry_id));
+  }, [linkableLookupIds, rows]);
 
   // ATLAS CALLS: link_nzta_register_lookup_check
   const saveLink = async () => {
@@ -372,12 +399,13 @@ const LookupRegister: React.FC<{ organizationId: string }> = ({ organizationId }
       {error ? <StateMessage kind="error" onRetry={() => void load()}>{error}</StateMessage>
         : rows === null ? <StateMessage kind="loading">Loading the lookup register…</StateMessage>
           : filtered.length === 0 ? <StateMessage kind="empty">{rows.length === 0 ? 'No lookups are recorded for this period. Use “Record a lookup” after each Motochek search.' : 'No lookups match these filters.'}</StateMessage>
-            : (
-              <div className="nzta-table-wrap">
-                <table className="nzta-table">
-                  <caption className="sr-only">Motochek lookups, newest first</caption>
-                  <thead><tr><th scope="col">When</th><th scope="col">Vehicle</th><th scope="col">Motochek user</th><th scope="col">Purpose and reason</th><th scope="col">Outcome</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
-                  <tbody>{filtered.map((row) => (
+            : truncated ? <StateMessage kind="empty">{filtered.length.toLocaleString('en-NZ')} entries fall in this period. Narrow the dates to view and work with every entry.</StateMessage>
+              : (
+                <div className="nzta-table-wrap">
+                  <table className="nzta-table">
+                    <caption className="sr-only">Motochek lookups, newest first</caption>
+                    <thead><tr><th scope="col">When</th><th scope="col">Vehicle</th><th scope="col">Motochek user</th><th scope="col">Purpose and reason</th><th scope="col">Outcome</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
+                    <tbody>{filtered.map((row) => (
                     <tr key={`${row.entry_kind}-${row.entry_id}`} className={row.entry_kind === 'historical_check' ? 'is-historical' : undefined}>
                       <td data-label="When">{formatNzDateTime(row.looked_up_at)}<small>{row.place_name ?? ''}</small></td>
                       <td data-label="Vehicle"><strong>{row.plate_number ?? '—'}</strong>{row.vin && <small>VIN {row.vin}</small>}</td>
