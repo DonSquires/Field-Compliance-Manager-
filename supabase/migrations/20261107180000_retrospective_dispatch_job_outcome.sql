@@ -63,8 +63,10 @@ DECLARE
   v_source_received timestamp without time zone;
   v_source_arrived timestamp without time zone;
   v_source_departed timestamp without time zone;
+  v_received_at timestamptz;
   v_arrived_at timestamptz;
   v_departed_at timestamptz;
+  v_prior_stamp_mode text;
   v_outcome text;
   v_previous jsonb;
   v_resulting jsonb;
@@ -163,6 +165,7 @@ BEGIN
   END IF;
 
   v_now := clock_timestamp();
+  v_received_at := v_source_received AT TIME ZONE 'Pacific/Auckland';
   v_arrived_at := v_source_arrived AT TIME ZONE 'Pacific/Auckland';
   v_departed_at := v_source_departed AT TIME ZONE 'Pacific/Auckland';
   IF v_departed_at > v_now THEN
@@ -177,12 +180,24 @@ BEGIN
     RAISE EXCEPTION 'A reason for the retrospective correction is required';
   END IF;
 
+  PERFORM 1 FROM public.sla_clocks c
+  WHERE c.organization_id = v_job.organization_id AND c.dispatch_job_id = p_job_id
+  FOR UPDATE;
+
   v_previous := jsonb_build_object(
     'status', v_job.status,
     'dispatched_at', v_job.dispatched_at,
     'on_scene_at', v_job.on_scene_at,
     'completed_at', v_job.completed_at,
-    'outcome_notes', v_job.outcome_notes
+    'outcome_notes', v_job.outcome_notes,
+    'sla_clocks', (
+      SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'id', c.id, 'started_at', c.started_at, 'arrived_at', c.arrived_at,
+        'elapsed_minutes', c.elapsed_minutes, 'target_minutes', c.target_minutes, 'status', c.status
+      ) ORDER BY c.id), '[]'::jsonb)
+      FROM public.sla_clocks c
+      WHERE c.organization_id = v_job.organization_id AND c.dispatch_job_id = p_job_id
+    )
   );
   v_outcome := format(
     'Retrospective source-register outcome. Reference %s; source-reported on-site %s and off-site %s (%s). FCM did not capture GPS for this historical record. Outcome: %s',
@@ -193,6 +208,12 @@ BEGIN
     btrim(p_outcome_notes)
   );
 
+  UPDATE public.sla_clocks
+  SET started_at = v_received_at, updated_at = v_now
+  WHERE organization_id = v_job.organization_id AND dispatch_job_id = p_job_id
+    AND status IN ('running', 'met', 'breached');
+
+  v_prior_stamp_mode := pg_catalog.current_setting('fcm.retrospective_register_completion', true);
   PERFORM pg_catalog.set_config('fcm.retrospective_register_completion', 'on', true);
   UPDATE public.dispatch_jobs
   SET status = 'completed',
@@ -201,6 +222,7 @@ BEGIN
       outcome_notes = v_outcome
   WHERE id = p_job_id
   RETURNING * INTO v_job;
+  PERFORM pg_catalog.set_config('fcm.retrospective_register_completion', coalesce(v_prior_stamp_mode, ''), true);
 
   IF v_job.shift_id IS NOT NULL
     AND v_job.insert_gps_lat IS NULL
@@ -247,7 +269,15 @@ BEGIN
     'dispatched_at', v_job.dispatched_at,
     'gps_captured', false,
     'shift_stop_created', false,
-    'finance', v_finance_result
+    'finance', v_finance_result,
+    'sla_clocks', (
+      SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'id', c.id, 'started_at', c.started_at, 'arrived_at', c.arrived_at,
+        'elapsed_minutes', c.elapsed_minutes, 'target_minutes', c.target_minutes, 'status', c.status
+      ) ORDER BY c.id), '[]'::jsonb)
+      FROM public.sla_clocks c
+      WHERE c.organization_id = v_job.organization_id AND c.dispatch_job_id = p_job_id
+    )
   );
 
   INSERT INTO public.audit_log (
