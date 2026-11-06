@@ -196,6 +196,7 @@ serve(async (req) => {
     if (profileError) console.error('[update-user-email] profile sync failed:', profileError.message);
 
     let invitationResent = false;
+    let invitationDelivery: string | null = null;
     {
       const { data: org } = await adminClient
         .from('organizations').select('name, logo_url').eq('id', target.organization_id).maybeSingle();
@@ -210,8 +211,20 @@ serve(async (req) => {
         },
         redirectTo: `${siteUrl}/auth/callback`,
       });
-      if (inviteError) console.error('[update-user-email] invite resend failed:', inviteError.message);
-      else invitationResent = true;
+      if (!inviteError) {
+        invitationResent = true;
+        invitationDelivery = 'invite';
+      } else if (inviteError.code === 'email_exists' || /already (been )?registered|already exists/i.test(inviteError.message ?? '')) {
+        // The corrected address is confirmed above, so Auth refuses a fresh invite; send the set-password link instead.
+        const { error: recoveryError } = await adminClient.auth.resetPasswordForEmail(requested, {
+          redirectTo: `${siteUrl}/auth/callback`,
+        });
+        if (recoveryError) console.error('[update-user-email] password setup link failed:', recoveryError.message);
+        else {
+          invitationResent = true;
+          invitationDelivery = 'password_setup_link';
+        }
+      } else console.error('[update-user-email] invite resend failed:', inviteError.message);
     }
 
     const { error: auditError } = await adminClient.rpc('log_user_management_action', {
@@ -221,11 +234,11 @@ serve(async (req) => {
       p_performed_by: callerProfile.id,
       p_old_value: { email: currentEmail || target.email },
       p_new_value: { email: requested },
-      p_metadata: { reason, display_name: target.display_name, role: target.role, invitation_resent: invitationResent },
+      p_metadata: { reason, display_name: target.display_name, role: target.role, invitation_resent: invitationResent, invitation_delivery: invitationDelivery },
     });
     if (auditError) console.error('[update-user-email] audit log failed:', auditError.message);
 
-    return json({ success: true, user_id: userId, email: requested, requires_confirmation: false, invitation_resent: invitationResent });
+    return json({ success: true, user_id: userId, email: requested, requires_confirmation: false, invitation_resent: invitationResent, invitation_delivery: invitationDelivery });
   } catch (err) {
     console.error('[update-user-email] unexpected error:', err);
     return json({ error: 'Internal server error' }, 500);

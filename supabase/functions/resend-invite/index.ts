@@ -130,17 +130,28 @@ serve(async (req)=>{
       },
       redirectTo: `${siteUrl}/auth/callback`
     });
-    if (inviteError) {
-      console.error('[resend-invite] invite error:', inviteError);
-      let errorMsg = inviteError.message;
-      if (inviteError.message?.includes('SMTP')) {
+    let sendError = inviteError;
+    let delivery = 'invite';
+    // Auth refuses a second invite once the login exists (e.g. confirmed by provisioning but never signed in);
+    // the person still needs a link, so send the set-password (recovery) email instead.
+    if (inviteError && (inviteError.code === 'email_exists' || /already (been )?registered|already exists/i.test(inviteError.message ?? ''))) {
+      const { error: recoveryError } = await adminClient.auth.resetPasswordForEmail(authUser.user.email, {
+        redirectTo: `${siteUrl}/auth/callback`
+      });
+      sendError = recoveryError;
+      delivery = 'password_setup_link';
+    }
+    if (sendError) {
+      console.error(`[resend-invite] ${delivery} error:`, sendError);
+      let errorMsg = sendError.message;
+      if (sendError.message?.includes('SMTP')) {
         errorMsg = 'Email service not configured. Contact your administrator to set up SMTP.';
-      } else if (inviteError.message?.includes('rate limit')) {
+      } else if (sendError.message?.includes('rate limit')) {
         errorMsg = 'Too many invite attempts. Please wait a few minutes and try again.';
       }
       return json({
         error: errorMsg,
-        details: inviteError.message
+        details: sendError.message
       }, 400);
     }
     const { error: auditError } = await adminClient.rpc('log_user_management_action', {
@@ -152,14 +163,16 @@ serve(async (req)=>{
       p_new_value: null,
       p_metadata: {
         display_name: displayName,
-        role: targetProfile.role
+        role: targetProfile.role,
+        delivery
       }
     });
     if (auditError) console.error('[resend-invite] audit log failed:', auditError.message);
-    console.log(`[resend-invite] resent invite to ${authUser.user.email}`);
+    console.log(`[resend-invite] sent ${delivery} to ${authUser.user.email}`);
     return json({
       success: true,
-      email: authUser.user.email
+      email: authUser.user.email,
+      delivery
     });
   } catch (err) {
     console.error('[resend-invite] unexpected error:', err);

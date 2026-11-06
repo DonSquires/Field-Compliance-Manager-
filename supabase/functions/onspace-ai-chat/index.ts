@@ -11618,7 +11618,7 @@ serve(async (req)=>{
     if (claimResult.success && taskLedger) {
       // Step successfully claimed as running; proceed with tool dispatch
       console.log(`[conductor][task-continuity] step claimed for tool ${chosenTool}`);
-    } else if (taskLedger) {
+    } else if (taskLedger && claimResult.step) {
       // Non-fatal: step claim failed but tool dispatch proceeds
       console.warn('[conductor][task-continuity] step claim failed (non-fatal), tool dispatch will proceed');
     }
@@ -11699,7 +11699,7 @@ serve(async (req)=>{
       if (finishResult.checkpoint) {
         console.log(`[conductor][task-continuity] step marked as ${finishResult.updatedStep?.status}, checkpoint updated`);
       }
-    } else if (taskLedger) {
+    } else if (taskLedger && finishResult.updatedStep) {
       // Non-fatal: step finish failed but loop proceeds with stale ledger
       console.warn('[conductor][task-continuity] step finish failed (non-fatal), loop will proceed with stale checkpoint');
     }
