@@ -138,13 +138,21 @@ proof that the draft itself passes.
 
 During: Vibe's diff is relative to the session's pinned base and includes
 current uncommitted changes. The model request is fitted to the gateway's
-context calculation, retaining the current request, relevant earlier owner
-constraints, selected attachment context and outstanding failures. If required
-context cannot fit, Vibe reports the blocker instead of truncating the request.
-Earlier attachment history stays out of cloud requests, including the
-compatibility `user_prompt` field. Failed command output retains a bounded
-head and tail, and chained checks record each executed step separately. A
-failed or unavailable check cannot be reported as a successful completion.
+context calculation, retaining the current request, selected attachment
+context and outstanding failures. Private-model continuations also retain
+every available earlier owner instruction. If required context cannot fit,
+Vibe reports the blocker instead of truncating it. Earlier attachment history
+stays out of automatically assembled cloud context, including the compatibility
+`user_prompt` field, earlier session titles, commit subjects, changed paths and
+automatic recovery diffs; outstanding checks are described by type without
+arguments or prior output. Cloud models cannot be assumed to know earlier
+owner constraints when that history is withheld. Fresh tool results can still
+contain current workspace material that has not been provenance-classified;
+use a private model if it may include sensitive attachment-derived content.
+Failed command
+output retains a bounded head and tail, and chained checks record each executed
+step separately. A failed or unavailable check cannot be reported as a
+successful completion.
 
 Vibe can call `browser_test` for one to six exact Playwright specs in the
 existing offline browser worker. It may compare the draft with a temporary,
@@ -155,8 +163,11 @@ infrastructure is reported as unverified, without repeating the same
 unavailable walk in the same turn. Complete evidence for unchanged UI files
 can be reused with an explicit receipt; a fresh walk remains available when
 requested, and incomplete or infrastructure-failure results are not cached.
-Publication still runs fresh full browser verification and includes any
-unresolved targeted specs.
+When earlier attachments exist, cloud models do not reuse private browser
+reports. Verification receipts are read across the session, not only the
+recent prompt window. Publication still runs fresh full browser verification
+and reruns every requested worktree spec, including previously passing ones.
+Missing or invalid targeted requests stay visible as blockers.
 
 After: the owner retains the same session and branch for Vibe to diagnose,
 repair and verify. No schema, protected-path policy, approval or release gate

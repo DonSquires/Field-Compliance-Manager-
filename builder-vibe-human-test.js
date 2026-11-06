@@ -42,11 +42,13 @@ function humanTestSpecs(workspacePath, changedFiles) {
   return [...new Set(specs)].filter(spec => SPEC_PATTERN.test(spec) && fs.existsSync(path.join(webDir, spec)));
 }
 
+const isBrowserSpecPath = spec => typeof spec === 'string' && SPEC_PATTERN.test(spec);
+
 function validateBrowserSpecs(workspacePath, specs) {
   if (!Array.isArray(specs) || !specs.length || specs.length > 6) throw new Error('Provide one to six exact Playwright spec paths under e2e/.');
   const webDir = path.join(workspacePath, 'apps/web');
   for (const spec of specs) {
-    if (typeof spec !== 'string' || !SPEC_PATTERN.test(spec)) throw new Error(`Invalid browser spec path: ${String(spec)}`);
+    if (!isBrowserSpecPath(spec)) throw new Error(`Invalid browser spec path: ${String(spec)}`);
     const file = path.join(webDir, spec);
     if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) throw new Error(`Browser spec is missing or not a regular file: ${spec}`);
     const relative = path.relative(fs.realpathSync(webDir), fs.realpathSync(file));
@@ -176,4 +178,4 @@ function runVibeHumanTest({ workspacePath, changedFiles = [], reason = '', specs
   return run;
 }
 
-module.exports = { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, validateBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
+module.exports = { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };

@@ -44,6 +44,7 @@ function memoryStore(session, ownerMessages = []) {
     async complete(id, status) { state.completed[id] = status; },
     async history() { return []; },
     async recentExecution() { return []; },
+    async verificationHistory(sessionId, beforeSeq) { return this.recentExecution(sessionId, beforeSeq); },
   };
 }
 
@@ -688,7 +689,7 @@ test('cloud packets withhold attachment history beyond the window, earlier searc
   checked.store.hasEarlierAttachments = async () => true;
   checked.store.recentExecution = async () => [{
     seq: 42, role: 'tool', kind: 'test', content: 'Running npm test',
-    payload: { tool: 'run', args: { command: 'npm test' }, ok: false, preview: 'exit 1: expected quokkaledger invoice 4417' },
+    payload: { tool: 'run', args: { command: 'npm test -- --testNamePattern quokkaledger' }, ok: false, preview: 'exit 1: expected quokkaledger invoice 4417' },
   }];
   const outcome = await vibe.processVibeMessage({ store: checked.store, message: ownerMessage('Is the greeting fixed now?'), deps: checked.deps });
   assert.equal(checked.model.calls.length, 2);
@@ -699,7 +700,34 @@ test('cloud packets withhold attachment history beyond the window, earlier searc
   assert.match(followUp, /earlier output withheld from external models/);
   assert.doesNotMatch(followUp, /quokkaledger|4417/);
   assert.equal(outcome.error, true);
-  assert.match(outcome.reply, /Changes are not verified: npm test failed/);
+  assert.match(outcome.reply, /Changes are not verified: npm test .* failed/);
+});
+
+for (const compact of [false, true]) test(`cloud ${compact ? 'compacted ' : ''}continuations withhold prior branch subjects and paths after attachments`, async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/private-branch-marker.js', content: 'export const value = 1;\n' } },
+    { tool: 'reply', args: { message: 'File updated.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('Update private-commit-marker.'), deps });
+  assert.equal(draft.error, undefined, draft.reply);
+  store.state.session.title = 'private-session-title-marker';
+  store.hasEarlierAttachments = async () => true;
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'run', args: { command: 'node --check private-check-marker.js' }, ok: false, preview: 'private-output-marker' },
+  }];
+  const cloudModel = scriptedModel([{ tool: 'reply', args: { blocked_reason: 'The check still needs repair.' } }]);
+  deps.callModel = cloudModel.callModel;
+  deps.allowCloud = true;
+  deps.fetchHealth = async () => ({
+    ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud', num_ctx: 24576, max_output_tokens: 8192 },
+  });
+  await vibe.processVibeMessage({
+    store, message: ownerMessage(compact ? `Continue ${'a'.repeat(37700)}` : 'Continue.'), deps,
+  });
+  assert.ok(cloudModel.calls.length);
+  assert.doesNotMatch(JSON.stringify(cloudModel.calls), /private-(?:branch|commit|session-title|check|output)-marker/);
+  if (compact) assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_compacted'));
 });
 
 test('the Vibe store detects attachment history across the whole session', async () => {
@@ -720,6 +748,41 @@ test('the Vibe store detects attachment history across the whole session', async
   ]);
   query.limit = () => Promise.resolve({ data: null, error: { message: 'permission denied' } });
   await assert.rejects(store.hasEarlierAttachments(SESSION_ID, 90), /attachment history read failed: permission denied/);
+});
+
+test('verification history is paginated across the entire session and fails explicitly on read errors', async () => {
+  const rows = Array.from({ length: 205 }, (_, index) => ({
+    seq: index + 1, kind: 'test', payload: { tool: 'run', ok: true },
+  }));
+  const pages = [];
+  let failPage = 0;
+  const store = vibe.createVibeStore({
+    from(table) {
+      assert.equal(table, 'builder_vibe_messages');
+      let cursor;
+      const filters = [];
+      return {
+        select() { return this; },
+        eq(column, value) { assert.deepEqual([column, value], ['session_id', SESSION_ID]); return this; },
+        lt(column, value) { assert.equal(column, 'seq'); cursor = value; return this; },
+        in(column, values) { filters.push([column, values]); return this; },
+        order(column, options) { assert.deepEqual([column, options], ['seq', { ascending: false }]); return this; },
+        limit(count) {
+          pages.push({ cursor, count, filters });
+          if (failPage && pages.length === failPage) return Promise.resolve({ data: null, error: { message: 'permission denied' } });
+          return Promise.resolve({ data: rows.filter(row => row.seq < cursor).reverse().slice(0, count), error: null });
+        },
+      };
+    },
+  });
+  const result = await store.verificationHistory(SESSION_ID, 206);
+  assert.equal(result.length, 205);
+  assert.deepEqual(result.map(row => row.seq), rows.map(row => row.seq));
+  assert.deepEqual(pages.map(page => page.cursor), [206, 6]);
+  assert.ok(pages.every(page => page.filters.some(([column]) => column === 'payload->>tool')));
+  pages.length = 0;
+  failPage = 2;
+  await assert.rejects(store.verificationHistory(SESSION_ID, 206), /verification history read failed: permission denied/);
 });
 
 test('current attachment context reaches Ollama Cloud only after per-message owner opt-in', async () => {
@@ -1177,6 +1240,20 @@ test('continuation receives prior answers, failures, successful edits and commit
   assert.match(task, /COMMITTED diff:.*files=apps\/web\/src\/hello.ts/);
 });
 
+test('continuation sees an unresolved verification beyond the recent execution window', async t => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'reply', args: { blocked_reason: 'The earlier check still needs repair.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.recentExecution = async () => [];
+  store.verificationHistory = async () => [{
+    kind: 'test', payload: { tool: 'run', args: { command: 'node --check missing.js' }, ok: false, preview: 'exit 1\nEarlier syntax failure' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Continue.'), deps });
+  assert.equal(result.error, true);
+  assert.match(model.calls[0].request.messages[1].content, /Earlier syntax failure/);
+});
+
 test('oversized continuation fits the real local context budget and retains the owner request and failed receipt', async t => {
   const { promptFitsProvider } = require('../builder-model-gateway');
   const health = { gpu_workstation: { configured: true, healthy: true, models: ['local'], installed: ['local'], ready_model: 'local', num_ctx: 24576, max_output_tokens: 8192 } };
@@ -1184,10 +1261,11 @@ test('oversized continuation fits the real local context budget and retains the 
     { tool: 'reply', args: { blocked_reason: 'The browser failure still needs repair.' } },
   ], { fetchHealth: async () => health });
   t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const detailedConstraint = `Only edit BuilderControlRoomPage.tsx. ${'detail '.repeat(500)}Keep all existing browser specs intact.`;
   store.history = async () => Array.from({ length: 30 }, (_, index) => ({
-    role: 'owner', content: index === 0 ? 'Original task: preserve the existing branch and do not ship.'
-      : index === 15 ? 'Do not alter the existing browser specs.'
-        : `Owner message ${index}: ${'detail '.repeat(500)}`,
+    role: [0, 15, 28, 29].includes(index) ? 'owner' : 'bob',
+    content: index === 0 ? 'Original task: preserve the existing branch and do not ship.'
+      : index === 15 ? detailedConstraint : `Earlier message ${index}: ${'detail '.repeat(500)}`,
   }));
   store.recentExecution = async () => [{
     seq: 5, kind: 'test', content: 'Browser failed',
@@ -1199,11 +1277,24 @@ test('oversized continuation fits the real local context budget and retains the 
   assert.equal(promptFitsProvider(request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
   const task = request.messages[1].content;
   assert.match(task, /Original task: preserve the existing branch and do not ship/);
-  assert.match(task, /Do not alter the existing browser specs/);
+  assert.ok(task.includes(detailedConstraint));
   assert.match(task, /timeout selecting Jobs & approvals/);
   assert.ok(task.includes(current));
   assert.match(task, /condensed to fit the model/);
   assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_compacted'));
+});
+
+test('continuation blocks instead of dropping owner instructions that exceed the context window', async t => {
+  const health = { gpu_workstation: { configured: true, healthy: true, models: ['local'], ready_model: 'local', num_ctx: 24576, max_output_tokens: 8192 } };
+  const { store, deps, repo, workspaceRoot, model } = setup([], { fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.history = async () => Array.from({ length: 20 }, (_, index) => ({
+    role: 'owner', content: `Earlier owner instruction ${index}: ${'required detail '.repeat(250)}`,
+  }));
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Continue.'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /context is too small/);
+  assert.equal(model.calls.length, 0);
 });
 
 test('compaction never sends earlier attachment history or its failure output to a cloud fallback', async t => {
@@ -1217,13 +1308,81 @@ test('compaction never sends earlier attachment history or its failure output to
     payload: { attachment_context: [{ context: 'private-attachment-marker' }] },
   }];
   store.recentExecution = async () => [{
-    seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'node --check missing.js' }, ok: false, preview: 'private-failure-marker' },
+    seq: 1, kind: 'test',     payload: { tool: 'run', args: { command: 'node --check private-command-marker.js' }, ok: false, preview: 'private-failure-marker' },
   }];
   await vibe.processVibeMessage({ store, message: ownerMessage('continue without attachments'), deps });
   assert.equal(model.calls[0].provider, 'ollama_cloud');
   const request = JSON.stringify(model.calls[0].request);
-  assert.doesNotMatch(request, /private-history-marker|private-attachment-marker|private-failure-marker/);
+  assert.doesNotMatch(request, /private-history-marker|private-attachment-marker|private-failure-marker|private-command-marker/);
   assert.match(request, /withheld from external models/);
+  assert.match(request, /node --check \(arguments withheld\)/);
+});
+
+test('a compacted cloud continuation retains failed check types without earlier attachment output', async t => {
+  const { promptFitsProvider } = require('../builder-model-gateway');
+  const health = { ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud', num_ctx: 24576, max_output_tokens: 8192 } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'reply', args: { blocked_reason: 'Need local evidence.' } },
+  ], { allowCloud: true, fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.history = async () => [{
+    role: 'owner', content: 'private-history-marker',
+    payload: { attachment_context: [{ context: 'private-attachment-marker' }] },
+  }];
+  store.recentExecution = async () => [
+    { seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'node --check private-command-marker.js' }, ok: false, preview: 'private-failure-marker' } },
+    { seq: 2, kind: 'test', payload: { tool: 'browser_test', ok: false, preview: 'private-browser-output', browser_test: { revision: 'worktree', specs: ['e2e/private-spec-marker.spec.ts'] } } },
+  ];
+  const current = `Continue ${'a'.repeat(37700)}`;
+  await vibe.processVibeMessage({ store, message: ownerMessage(current), deps });
+  const request = model.calls[0].request;
+  assert.equal(promptFitsProvider(request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
+  assert.ok(request.messages[1].content.includes(current));
+  assert.match(request.messages[1].content, /node --check \(arguments withheld\)/);
+  assert.match(request.messages[1].content, /browser_test \(spec paths withheld\)/);
+  assert.doesNotMatch(JSON.stringify(request), /private-history-marker|private-attachment-marker|private-failure-marker|private-command-marker|private-spec-marker|private-browser-output/);
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'context_compacted'));
+});
+
+test('a cloud repair extension withholds prior verification arguments', async t => {
+  const health = { ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud' } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'reply', args: { blocked_reason: 'The earlier check is still outstanding.' } },
+  ], { allowCloud: true, fetchHealth: async () => health });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.hasEarlierAttachments = async () => true;
+  store.recentExecution = async () => [{
+    seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'npm test -- --testNamePattern private-command-marker' }, ok: false, preview: 'private-failure-marker' },
+  }];
+  const limits = { ...vibe.VIBE_LIMITS, maxTurns: 1, repairTurns: 1 };
+  await vibe.processVibeMessage({ store, message: ownerMessage('Review the current work.'), deps, limits });
+  assert.equal(model.calls.length, 2);
+  const request = JSON.stringify(model.calls[1].request);
+  assert.match(request, /Step budget reached while npm test \(arguments withheld\)/);
+  assert.doesNotMatch(request, /private-command-marker|private-failure-marker/);
+});
+
+test('cloud loop recovery does not automatically send a previous attachment-derived branch diff', async t => {
+  const localHealth = { gpu_workstation: { configured: true, healthy: true, models: ['local'], ready_model: 'local' } };
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"private-diff-marker"' } },
+    { tool: 'reply', args: { message: 'Changed the greeting.' } },
+  ], { allowCloud: true, fetchHealth: async () => localHealth });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const first = await vibe.processVibeMessage({ store, message: ownerMessage('Change the greeting.'), deps });
+  assert.equal(first.error, undefined);
+  store.hasEarlierAttachments = async () => true;
+  const repeated = { tool: 'list_dir', args: { path: 'apps/web/src/' } };
+  const cloudModel = scriptedModel([repeated, repeated, repeated, repeated, { tool: 'reply', args: { blocked_reason: 'Need private history.' } }]);
+  deps.callModel = cloudModel.callModel;
+  deps.fetchHealth = async () => ({ ollama_cloud: { configured: true, healthy: true, models: ['cloud-one', 'cloud-two'], ready_model: 'cloud-one' } });
+  await vibe.processVibeMessage({ store, message: ownerMessage('Review the current work.'), deps });
+  const recovery = cloudModel.calls.find(call => JSON.stringify(call.request.messages).includes('previous model got stuck'));
+  assert.ok(recovery, 'the second cloud candidate receives the recovery packet');
+  const packet = JSON.stringify(recovery.request);
+  assert.match(packet, /branch diff may contain earlier attachment context/);
+  assert.doesNotMatch(packet, /private-diff-marker/);
 });
 
 test('a request that cannot fit mandatory context is not silently truncated or sent', async t => {
@@ -1249,7 +1408,9 @@ test('a gateway context limit discovered after health lookup is fitted before re
     },
   });
   t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
-  store.history = async () => Array.from({ length: 30 }, (_, i) => ({ role: 'owner', content: `Previous ${i}: ${'context '.repeat(500)}` }));
+  store.history = async () => Array.from({ length: 30 }, (_, i) => ({
+    role: i % 7 === 0 ? 'owner' : 'bob', content: `Previous ${i}: ${'context '.repeat(500)}`,
+  }));
   await vibe.processVibeMessage({ store, message: ownerMessage('continue safely'), deps });
   assert.equal(calls.length, 2);
   assert.equal(promptFitsProvider(calls[1].request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
@@ -1657,6 +1818,54 @@ test('a failing browser walk refuses the handoff once and then reports the chang
   assert.ok(model.calls.some(request => JSON.stringify(request).includes('Handoff refused: the latest verification failed')));
 });
 
+for (const reason of [
+  'The repair is not done because the fixture is missing.',
+  'Unit tests passed, but browser checks failed.',
+]) test(`an unverified handoff preserves the blocker: ${reason}`, async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'reply', args: { blocked_reason: reason } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'human_test', ok: false, preview: 'The browser check failed.' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status?'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified/);
+  assert.ok(result.reply.includes(reason));
+});
+
+test('an unverified mixed-result explanation is retained without claiming overall completion', async t => {
+  const reason = 'Unit tests passed, but browser checks failed.';
+  const { store, deps, repo, workspaceRoot } = setup([{ tool: 'reply', args: { message: reason } }]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'human_test', ok: false, preview: 'The browser check failed.' },
+  }];
+  const result = await vibe.processVibeMessage({
+    store, message: ownerMessage('What is the status?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 },
+  });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified/);
+  assert.ok(result.reply.includes(reason));
+});
+
+for (const reason of [
+  'Everything is fixed. The browser checks failed.',
+  'All tests passed, but browser checks failed.',
+]) test(`an unverified handoff suppresses a contradictory overall claim: ${reason}`, async t => {
+  const { store, deps, repo, workspaceRoot } = setup([{ tool: 'reply', args: { blocked_reason: reason } }]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.recentExecution = async () => [{
+    kind: 'test', payload: { tool: 'human_test', ok: false, preview: 'The browser check failed.' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status?'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /completion claim was withheld/);
+  assert.match(result.reply, /browser checks failed/i);
+  assert.doesNotMatch(result.reply, /Everything is fixed|All tests passed/);
+});
+
 test('browser walk infrastructure failures block verification without repeating the unchanged walk', async () => {
   const walk = fakeHumanTest([new Error('docker unavailable')]);
   const { store, deps } = setup([editHello, { thought: 'done', tool: 'reply', args: { message: 'Greeting updated.' } }], { humanTest: walk.humanTest });
@@ -1743,7 +1952,11 @@ test('publication includes unresolved targeted specs in its fresh full browser w
   const draft = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
   assert.equal(draft.error, true);
   const previous = store.state.rows.slice();
-  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
+  const later = Array.from({ length: 70 }, (_, index) => ({
+    seq: 1000 + index, kind: 'test', payload: { tool: 'run', args: { command: 'node --check package.json' }, ok: true, preview: 'exit 0' },
+  }));
+  store.recentExecution = async () => later.slice(-60);
+  store.verificationHistory = async () => [...previous.filter(row => row.kind === 'test'), ...later];
   const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
   assert.equal(shipped.error, undefined, shipped.reply);
   assert.equal(published.length, 1);
@@ -1751,26 +1964,73 @@ test('publication includes unresolved targeted specs in its fresh full browser w
   assert.equal(calls.at(-1).specs, undefined, 'publication still runs the complete human walk');
 });
 
+test('publication reruns previously passing targeted specs against the final draft', async t => {
+  verifiedFixtureIdentity(t);
+  const calls = [];
+  const passed = { ok: true, status: 'succeeded', complete: true, passed: 1, failed: 0, errors: [], warnings: [] };
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'check the first draft' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hello"', new_text: '"final"' } },
+    { tool: 'reply', args: { message: 'Draft updated.' } },
+  ], {
+    humanTest: async options => { calls.push(options); return passed; },
+    publish: async () => {},
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/12', number: 12 }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(draft.error, undefined, draft.reply);
+  const previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined, shipped.reply);
+  assert.ok(calls.at(-1).changedFiles.includes('apps/web/e2e/greeting.spec.ts'));
+  assert.equal(calls.at(-1).specs, undefined);
+});
+
 test('publication refuses when an unresolved targeted browser spec is missing', async t => {
   verifiedFixtureIdentity(t);
   let published = false;
   const { store, deps, repo, workspaceRoot } = setup([
     editHello,
-    { tool: 'reply', args: { message: 'Draft saved.' } },
+    { tool: 'browser_test', args: { specs: ['e2e/missing.spec.ts'], revision: 'worktree', reason: 'check the missing workflow' } },
+    { tool: 'reply', args: { blocked_reason: 'The requested browser spec is missing.' } },
   ], {
     humanTest: async () => walkPassed,
     publish: async () => { published = true; },
     openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/12', number: 12 }),
   });
   t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
-  await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
-  store.recentExecution = async () => [{
-    kind: 'test', payload: { tool: 'browser_test', ok: false, browser_test: { revision: 'worktree', specs: ['e2e/missing.spec.ts'] } },
-  }];
+  const draft = await vibe.processVibeMessage({ store, message: ownerMessage('change the greeting'), deps });
+  assert.equal(draft.error, true);
+  const receipt = store.state.rows.find(row => row.payload?.tool === 'browser_test');
+  assert.equal(receipt.payload.ok, false);
+  assert.deepEqual(receipt.payload.browser_test.specs, ['e2e/missing.spec.ts']);
+  assert.match(receipt.payload.preview, /missing or not a regular file/);
+  const previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
   const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
   assert.equal(shipped.error, true);
   assert.match(shipped.reply, /unresolved browser spec cannot be rerun/);
   assert.equal(published, false);
+});
+
+test('a corrected targeted request clears a malformed-request blocker', async t => {
+  const passed = { ok: true, status: 'succeeded', complete: true, passed: 1, failed: 0, errors: [], warnings: [] };
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'browser_test', args: { specs: ['bad-path'], revision: 'worktree', reason: 'invalid request' } },
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'corrected request' } },
+    { tool: 'reply', args: { message: 'The targeted check passed.' } },
+  ], { humanTest: async () => passed });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Check the browser.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  const receipts = store.state.rows.filter(row => row.payload?.tool === 'browser_test');
+  assert.deepEqual(receipts.map(row => row.payload.ok), [false, true]);
+  assert.equal(receipts[0].payload.browser_test.verification_key, 'browser_test:invalid-request');
 });
 
 test('Bob can request the walk as a tool and the handoff reuses it for unchanged files', async () => {
@@ -1820,6 +2080,62 @@ test('complete failed browser evidence is reused across turns unless a fresh wal
   assert.equal(third.error, undefined, third.reply);
   assert.equal(walk.calls.length, 2);
   assert.equal(store.state.rows.filter(row => row.payload?.tool === 'human_test').at(-1).payload.reused, false);
+});
+
+test('cloud reruns rather than reusing a historical browser report after attachment history', async t => {
+  const privateWalk = { ...walkFailed, complete: true, errors: [{ severity: 'error', message: 'private-browser-marker' }] };
+  const walk = fakeHumanTest([privateWalk, { ...walkPassed, complete: true }]);
+  const { store, deps, repo, workspaceRoot } = setup([
+    editHello,
+    { tool: 'human_test', args: { reason: 'initial check' } },
+    { tool: 'reply', args: { blocked_reason: 'The browser walk failed.' } },
+  ], {
+    humanTest: walk.humanTest, allowCloud: true,
+    fetchHealth: async () => ({ gpu_workstation: { configured: true, healthy: true, models: ['local'], ready_model: 'local' } }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('Change the greeting.'), deps });
+  const previous = store.state.rows.slice();
+  store.recentExecution = async () => previous.filter(row => row.kind === 'test');
+  store.hasEarlierAttachments = async () => true;
+  const cloudModel = scriptedModel([
+    { tool: 'human_test', args: { reason: 'check the browser again' } },
+    { tool: 'reply', args: { message: 'The fresh browser walk passed.' } },
+  ]);
+  deps.callModel = cloudModel.callModel;
+  deps.fetchHealth = async () => ({ ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud' } });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Check the browser again.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(walk.calls.length, 2);
+  assert.ok(cloudModel.calls.every(call => call.provider === 'ollama_cloud'));
+  assert.doesNotMatch(JSON.stringify(cloudModel.calls), /private-browser-marker/);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'human_test').at(-1).payload.reused, false);
+});
+
+test('cloud reruns browser evidence produced by a private model earlier in the same turn', async t => {
+  const privateWalk = { ...walkFailed, complete: true, errors: [{ severity: 'error', message: 'private-turn-browser-marker' }] };
+  const walk = fakeHumanTest([privateWalk, { ...walkPassed, complete: true }]);
+  const repeated = { tool: 'list_dir', args: { path: 'apps/web/src/' } };
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'human_test', args: { reason: 'private check' } },
+    repeated, repeated, repeated, repeated,
+    { tool: 'human_test', args: { reason: 'cloud check' } },
+    { tool: 'reply', args: { message: 'The fresh browser walk passed.' } },
+  ], {
+    humanTest: walk.humanTest, allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['local'], ready_model: 'local' },
+      ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud' },
+    }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  store.hasEarlierAttachments = async () => true;
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Check the browser.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.equal(walk.calls.length, 2);
+  const cloudCalls = model.calls.filter(call => call.provider === 'ollama_cloud');
+  assert.ok(cloudCalls.length);
+  assert.doesNotMatch(JSON.stringify(cloudCalls), /private-turn-browser-marker/);
 });
 
 test('an incomplete browser report is never cached as a completed walk', async t => {

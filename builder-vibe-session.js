@@ -14,7 +14,7 @@ const { lookup } = require('node:dns/promises');
 const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
-const { humanTestInputFiles, validateBrowserSpecs } = require('./builder-vibe-human-test');
+const { humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
@@ -38,6 +38,7 @@ const VIBE_LIMITS = Object.freeze({
 });
 const HISTORY_MESSAGES = 30;
 const HISTORY_EXECUTION = 60;
+const VERIFICATION_PAGE_SIZE = 200;
 const STREAM_PREVIEW_CHARS = 1500;
 const HUMAN_TEST_PREVIEW_CHARS = 4000;
 const MAX_VIBE_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -408,6 +409,22 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`execution history read failed: ${error.message}`);
       return (data || []).reverse();
     },
+    async verificationHistory(sessionId, beforeSeq) {
+      const entries = [];
+      let cursor = beforeSeq;
+      while (true) {
+        const { data, error } = await supabase.from('builder_vibe_messages').select('kind, payload, seq').eq('session_id', sessionId)
+          .lt('seq', cursor).in('kind', ['tool', 'test']).in('payload->>tool', ['run', 'human_test', 'browser_test'])
+          .order('seq', { ascending: false }).limit(VERIFICATION_PAGE_SIZE);
+        if (error) throw new Error(`verification history read failed: ${error.message}`);
+        const page = data || [];
+        entries.push(...page);
+        if (page.length < VERIFICATION_PAGE_SIZE) return entries.reverse();
+        const next = page.at(-1)?.seq;
+        if (next == null || String(next) === String(cursor)) throw new Error('verification history pagination did not advance');
+        cursor = next;
+      }
+    },
     // Session-wide, not the history window: replies and execution logs can paraphrase an attachment
     // long after its owner message has scrolled out of the last HISTORY_MESSAGES.
     async hasEarlierAttachments(sessionId, beforeSeq) {
@@ -713,6 +730,7 @@ async function withPinnedBaseWorkspace(workspacePath, baseSha, run) {
   }
 }
 
+const INVALID_BROWSER_KEY = 'browser_test:invalid-request';
 const browserVerificationKey = specs => `browser_test:${[...new Set(specs)].sort().join(',')}`;
 
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
@@ -731,7 +749,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
     };
   };
   if (deps.humanTest) {
-    tools.human_test = async args => (await runHumanTest({ reason: String(args?.reason || 'requested by Bob'), automatic: false, rerun: args?.rerun === true })).result;
+    tools.human_test = async args => (await runHumanTest({
+      reason: String(args?.reason || 'requested by Bob'), automatic: false, rerun: args?.rerun === true,
+      external: candidates[active]?.provider === 'ollama_cloud',
+    })).result;
     tools.browser_test = args => runBrowserTest(args);
   }
   if (deps.firewall) {
@@ -744,6 +765,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
   }
   const history = await store.history(session.id, message.seq);
   const execution = typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, message.seq) : [];
+  if (typeof store.verificationHistory !== 'function') throw new Error('Verification history is unavailable; the session cannot continue safely.');
+  const verificationHistory = await store.verificationHistory(session.id, message.seq);
   const attachmentContext = await prepareVibeAttachmentContext({ store, session, message, supabase, deps });
   const historyHasAttachments = history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length)
     || (typeof store.hasEarlierAttachments === 'function' && await store.hasEarlierAttachments(session.id, message.seq));
@@ -774,7 +797,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const pastAttachments = !Array.isArray(entry.payload?.attachment_context) || !entry.payload.attachment_context.length ? ''
       : `\n${entry.payload.attachment_context.map(item => clip(item.context, 4000)).join('\n')}`;
     const status = entry.status ? ` [${entry.status}]` : entry.kind === 'error' ? ' [failed]' : '';
-    return `${entry.role === 'owner' ? 'OWNER' : 'BOB'}${status}: ${clip(entry.content, 3000)}${pastAttachments}`;
+    const content = entry.role === 'owner' ? String(entry.content || '') : clip(entry.content, 3000);
+    return `${entry.role === 'owner' ? 'OWNER' : 'BOB'}${status}: ${content}${pastAttachments}`;
   }).join('\n\n');
   const executionSummary = execution
     .map((entry) => {
@@ -788,9 +812,16 @@ async function runConversation({ store, session, message, workspacePath, branch,
       return `#${entry.seq} ${status} ${payload.tool || entry.kind}: ${clip(String(entry.content || ''), 160)}${args}${files}${preview}`;
     })
     .join('\n');
-  const buildTask = (transcript, includeCurrentAttachmentContext = true, includeExecution = true, map = discovery) => [
-    `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
-    state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.',
+  const sessionHeading = withheld =>
+    `SESSION: ${withheld ? 'Vibe session' : session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`;
+  const branchSummary = (withheld, compact = false) => {
+    if (withheld) return `BRANCH SO FAR: ${state.commits.length} commit(s). Earlier commit subjects and changed paths are withheld from external models.`;
+    if (compact) return `BRANCH SO FAR: ${state.commits.length} commit(s). Files changed vs main: ${state.files.slice(0, 40).join(', ') || '(none)'}. Use git_diff for the current full diff.`;
+    return state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.';
+  };
+  const buildTask = (transcript, includeCurrentAttachmentContext = true, includeExecution = true, map = discovery, withheld = false) => [
+    sessionHeading(withheld),
+    branchSummary(withheld),
     `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...map.startingFiles, atlas: map.atlas, outlines: map.outlines })}`,
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (this is the first message)',
     executionSummary && includeExecution ? `RECENT EXECUTION LOGS (avoid repeating failed/refused steps):\n${executionSummary}` : null,
@@ -800,7 +831,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const task = buildTask(transcript);
   // Earlier replies and tool output can paraphrase private attachments, so do not forward them either.
   const cloudTask = historyHasAttachments
-    ? buildTask('[earlier attachment analysis withheld from external models, including prior conversation and execution logs; inspect the current branch before editing]', attachmentCloudConsent, false, cloudDiscovery)
+    ? buildTask('[earlier attachment analysis withheld from external models, including prior conversation and execution logs; use a private model when earlier context is needed]', attachmentCloudConsent, false, cloudDiscovery, true)
     : buildTask(transcript, attachmentCloudConsent);
   const messages = [{ role: 'system', content: vibeSystemPrompt(limits) }, { role: 'user', content: task }];
   const baseRequest = buildModelRunRequest({
@@ -845,7 +876,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const failedVerifications = new Map();
   let humanFingerprint = null;
   let cachedHumanTest = null;
-  for (const entry of execution) {
+  for (const entry of verificationHistory) {
     const payload = entry.payload || {};
     if (payload.tool === 'human_test') {
       const report = payload.human_test;
@@ -855,15 +886,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
         : reusableHumanTest(historicalResult);
       humanFingerprint = completed ? payload.source_fingerprint || null : null;
       cachedHumanTest = reusableHumanTest(historicalResult) && payload.source_fingerprint
-        ? { fingerprint: payload.source_fingerprint, result: historicalResult } : null;
+        ? { fingerprint: payload.source_fingerprint, result: historicalResult, externalSafe: false } : null;
       if (payload.ok === false) failedVerifications.set('human_test', { command: 'human_test', failed: true, preview: clip(payload.preview, 3000), historical: true });
       else if (payload.ok === true) failedVerifications.delete('human_test');
       continue;
     }
     if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
-      const key = browserVerificationKey(payload.browser_test.specs);
+      const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
       if (payload.ok === false) failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
-      else if (payload.ok === true) failedVerifications.delete(key);
+      else if (payload.ok === true) { failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); }
       continue;
     }
     if (payload.tool !== 'run') continue;
@@ -873,24 +904,31 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
   }
   lastVerification = [...failedVerifications.values()].at(-1) || null;
-  // Earlier output can quote a private attachment: external models get the failed command, not its output.
-  const cloudSafeVerification = verification => historyHasAttachments && verification?.historical
-    ? { command: verification.command, failed: verification.failed, historical: true, preview: '[earlier output withheld from external models; rerun this check to see its current result]' }
+  const cloudSafeCommand = command => {
+    if (command === 'human_test') return command;
+    if (String(command).startsWith('browser_test:')) return 'browser_test (spec paths withheld)';
+    const match = /^(?:node --(?:test|check)|npm (?:run (?:test|lint|build)|test))\b/.exec(String(command || ''));
+    return match ? `${match[0]} (arguments withheld)` : 'verification (details withheld)';
+  };
+  const cloudSafeVerification = verification => historyHasAttachments && verification
+    ? { command: cloudSafeCommand(verification.command), failed: verification.failed, historical: Boolean(verification.historical), preview: '[earlier output withheld from external models; rerun this check to see its current result]' }
     : verification;
+  const failureSummary = failures => failures.map((item, index) =>
+    `${item.command}: ${boundedPreview(item.preview, index >= failures.length - 4 ? 900 : 250)}`).join('\n');
   const compactOpening = (full, maxChars, external) => {
     if (full.length <= maxChars) return full;
     const withheld = external && historyHasAttachments;
     const ownerHistory = withheld ? [] : history.filter(entry => entry.role === 'owner');
-    const retainedOwner = ownerHistory.filter((entry, index) => index === 0 || index >= ownerHistory.length - 3
-      || /\b(?:do not|don't|never|must not|without changing|preserve|same branch|no (?:pull request|pr|shipping))\b/i.test(entry.content || ''));
-    const priorRequests = retainedOwner.map(entry => clip(entry.content, 3000));
-    const failures = withheld ? [] : [...failedVerifications.values()];
+    const priorRequests = ownerHistory.map(entry => String(entry.content || ''));
+    const failures = [...failedVerifications.values()].map(item => withheld
+      ? cloudSafeVerification(item)
+      : item);
     const required = [
-      `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
-      `BRANCH SO FAR: ${state.commits.length} commit(s). Files changed vs main: ${state.files.slice(0, 40).join(', ') || '(none)'}. Use git_diff for the current full diff.`,
+      sessionHeading(withheld),
+      branchSummary(withheld, true),
       withheld ? 'Earlier attachment analysis, conversation and execution logs are withheld from external models.'
         : priorRequests.length ? `RECENT OWNER REQUESTS:\n${priorRequests.join('\n\n')}` : null,
-      failures.length ? `OUTSTANDING VERIFICATION FAILURES:\n${failures.map((item, index) => `${item.command}: ${boundedPreview(item.preview, index >= failures.length - 4 ? 900 : 250)}`).join('\n')}` : null,
+      failures.length ? `OUTSTANDING VERIFICATION FAILURES:\n${failureSummary(failures)}` : null,
       'Earlier conversation and execution details were condensed to fit the model. Do not assume omitted checks passed.',
       `OWNER NOW SAYS:\n${message.content}`,
       attachmentContext.length && (!external || attachmentCloudConsent)
@@ -963,12 +1001,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     return hash.digest('hex');
   };
-  const runHumanTest = async ({ reason, automatic, rerun = false }) => {
+  const runHumanTest = async ({ reason, automatic, rerun = false, external = false }) => {
     const changedFiles = changedVsBase();
     const fingerprint = uiFingerprint(humanTestInputFiles(changedFiles));
     let result;
-    if (!automatic && !rerun && cachedHumanTest?.fingerprint === fingerprint) {
+    let reusedCache = false;
+    const mayReuse = !external || !historyHasAttachments || cachedHumanTest?.externalSafe === true;
+    if (!automatic && !rerun && mayReuse && cachedHumanTest?.fingerprint === fingerprint) {
       result = { ...cachedHumanTest.result, reused: true };
+      reusedCache = true;
     } else {
       await store.post(session.id, {
         role: 'system', kind: 'status',
@@ -994,7 +1035,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
       ? !result.infrastructure && (!result.status || ['succeeded', 'failed'].includes(result.status))
       : reusableHumanTest(result);
     humanFingerprint = completed ? fingerprint : null;
-    cachedHumanTest = reusableHumanTest(result) ? { fingerprint, result } : null;
+    cachedHumanTest = reusableHumanTest(result)
+      ? { fingerprint, result, externalSafe: reusedCache ? cachedHumanTest.externalSafe : external }
+      : null;
     humanTestRan = result;
     const preview = humanTestPreview(result);
     const verification = { command: 'human_test', failed: result.ok !== true, preview };
@@ -1005,46 +1048,57 @@ async function runConversation({ store, session, message, workspacePath, branch,
   };
   const runBrowserTest = async args => {
     const revision = args?.revision;
-    if (!['worktree', 'base'].includes(revision)) throw new Error('Choose browser_test revision "worktree" or "base".');
-    if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('Provide a reason for the targeted browser check.');
-    const changedFiles = changedVsBase();
-    const fingerprint = revision === 'base' ? baseSha : uiFingerprint(humanTestInputFiles(changedFiles));
-    const execute = async target => {
-      const specs = validateBrowserSpecs(target, args.specs);
-      await store.post(session.id, {
-        role: 'system', kind: 'status',
-        content: `Running ${specs.length} targeted browser spec(s) on the ${revision === 'base' ? 'pinned base' : 'current worktree'} using offline fixtures.`,
-        payload: { message_id: message.id, stage: 'browser_test', revision, specs },
-      });
-      const begun = Date.now();
-      let result;
-      try {
-        result = await deps.humanTest({
-          workspacePath: target, changedFiles: revision === 'base' ? [] : changedFiles, specs,
-          reason: args.reason, artifactLabel: revision === 'base' ? `${path.basename(workspacePath)}-base` : undefined,
+    const requestedSpecs = Array.isArray(args?.specs) ? args.specs : [];
+    const validRequest = requestedSpecs.length > 0 && requestedSpecs.length <= 6 && requestedSpecs.every(isBrowserSpecPath);
+    const key = validRequest ? browserVerificationKey(requestedSpecs) : INVALID_BROWSER_KEY;
+    let checked;
+    try {
+      if (!['worktree', 'base'].includes(revision)) throw new Error('Choose browser_test revision "worktree" or "base".');
+      if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('Provide a reason for the targeted browser check.');
+      const changedFiles = changedVsBase();
+      const fingerprint = revision === 'base' ? baseSha : uiFingerprint(humanTestInputFiles(changedFiles));
+      const execute = async target => {
+        const specs = validateBrowserSpecs(target, args.specs);
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `Running ${specs.length} targeted browser spec(s) on the ${revision === 'base' ? 'pinned base' : 'current worktree'} using offline fixtures.`,
+          payload: { message_id: message.id, stage: 'browser_test', revision, specs },
         });
-      } catch (error) {
-        result = { ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500) };
-      } finally {
-        pausedMs += Date.now() - begun;
-      }
-      if (!result || typeof result !== 'object') result = { ok: false, infrastructure: true, error: 'The browser worker returned an invalid result.' };
-      const ok = result?.ok === true && result.complete === true && result.status === 'succeeded'
-        && result.passed > 0 && result.failed === 0 && !(result.errors || []).length;
-      const checked = { ...result, ok, scope: 'targeted', revision, specs, source_fingerprint: fingerprint, base_sha: baseSha };
-      if (!ok && !checked.infrastructure && !checked.report_errors?.length && result?.ok === true) {
-        checked.report_errors = ['Targeted browser evidence was incomplete and cannot be accepted as a pass.'];
-      }
-      if (revision === 'worktree') {
-        const key = browserVerificationKey(specs);
-        const verification = { command: key, failed: !ok, preview: humanTestPreview(checked) };
-        if (verification.failed) failedVerifications.set(key, verification);
-        else failedVerifications.delete(key);
-        lastVerification = [...failedVerifications.values()].at(-1) || verification;
-      }
-      return checked;
-    };
-    return revision === 'base' ? withPinnedBaseWorkspace(workspacePath, baseSha, execute) : execute(workspacePath);
+        const begun = Date.now();
+        let result;
+        try {
+          result = await deps.humanTest({
+            workspacePath: target, changedFiles: revision === 'base' ? [] : changedFiles, specs,
+            reason: args.reason, artifactLabel: revision === 'base' ? `${path.basename(workspacePath)}-base` : undefined,
+          });
+        } catch (error) {
+          result = { ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500) };
+        } finally {
+          pausedMs += Date.now() - begun;
+        }
+        if (!result || typeof result !== 'object') result = { ok: false, infrastructure: true, error: 'The browser worker returned an invalid result.' };
+        const ok = result.ok === true && result.complete === true && result.status === 'succeeded'
+          && result.passed > 0 && result.failed === 0 && !(result.errors || []).length;
+        const value = { ...result, ok, scope: 'targeted', revision, specs, verification_key: key, source_fingerprint: fingerprint, base_sha: baseSha };
+        if (!ok && !value.infrastructure && !value.report_errors?.length && result.ok === true) {
+          value.report_errors = ['Targeted browser evidence was incomplete and cannot be accepted as a pass.'];
+        }
+        return value;
+      };
+      checked = revision === 'base' ? await withPinnedBaseWorkspace(workspacePath, baseSha, execute) : await execute(workspacePath);
+    } catch (error) {
+      checked = {
+        ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500),
+        scope: 'targeted', revision, specs: requestedSpecs, verification_key: key, base_sha: baseSha,
+      };
+    }
+    if (revision === 'worktree') {
+      const verification = { command: key, failed: !checked.ok, preview: humanTestPreview(checked) };
+      if (verification.failed) failedVerifications.set(key, verification);
+      else { failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); }
+      lastVerification = [...failedVerifications.values()].at(-1) || verification;
+    }
+    return checked;
   };
   const humanTestPayload = (result, fingerprint) => ({
     tool: 'human_test', ok: result.ok === true, infrastructure: Boolean(result.infrastructure), reused: Boolean(result.reused), source_fingerprint: fingerprint,
@@ -1082,9 +1136,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
     if (noChange) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk${humanTestRan.reused ? ' (earlier evidence reused; no new walk)' : ' (fixture data, desktop)'}: ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
-    const unverifiedReply = /\b(?:done|fixed|implemented|completed|resolved|passed|passing|successful(?:ly)?|ready)\b/i.test(reply)
-      ? `${failedEdits.size ? `These edits failed and were not applied: ${[...failedEdits.keys()].join(', ')}.\n` : ''}A completion claim was withheld because verification failed.`
-      : clip(reply, 8000);
+    const describesBlocker = /\b(?:not (?:yet )?(?:done|fixed|implemented|completed|resolved|ready|passed)|failed|missing|blocked|unverified|incomplete|unavailable|unable|cannot|can't|needs?|requires?|pending|waiting|awaiting|approval)\b/i.test(reply);
+    const globalClaim = /\b(?:everything|all (?:tests|checks|work)|(?:the )?(?:entire|whole) (?:task|job|repair|work))\s+(?:(?:is|are|was|were|has|have)\s+)?(?:(?:been|now|fully|completely)\s+)*(?:done|fixed|implemented|completed|resolved|passed|passing|successful(?:ly)?|ready)\b/gi;
+    let unverifiedReply = clip(reply, 8000);
+    if (globalClaim.test(unverifiedReply)) {
+      unverifiedReply = unverifiedReply.replace(globalClaim, 'A completion claim was withheld because verification failed');
+    } else if (!describesBlocker && /\b(?:done|fixed|implemented|completed|resolved|passed|passing|successful(?:ly)?|ready)\b/i.test(reply)) {
+      unverifiedReply = `${failedEdits.size ? `These edits failed and were not applied: ${[...failedEdits.keys()].join(', ')}.\n` : ''}A completion claim was withheld because verification failed.`;
+    }
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}`, error: true, tools, model }
       : { reply: `${clip(reply, 8000)}${walked}`, tools, model };
@@ -1108,12 +1167,13 @@ async function runConversation({ store, session, message, workspacePath, branch,
         content: `Bob reached this message's step budget with ${lastVerification.command} failing; continuing for up to ${repairTurns} more steps to repair it.`,
         payload: { message_id: message.id, reason: 'verification_repair_extension', command: lastVerification.command, repair_turns: repairTurns, repair_budget_ms: repairBudgetMs },
       });
+      const extensionMessage = command => `Step budget reached while ${command} is failing. You have ${repairTurns} more steps: read the exact failure, fix its cause in source, rerun the same check, then reply. If it cannot be fixed safely, reply with args.blocked_reason.`;
       const extension = {
-        error: `Step budget reached while ${lastVerification.command} is failing. You have ${repairTurns} more steps: read the exact failure, fix its cause in source, rerun the same check, then reply. If it cannot be fixed safely, reply with args.blocked_reason.`,
+        error: extensionMessage(lastVerification.command),
         verification: lastVerification,
       };
       const cloudExtension = cloudSafeVerification(lastVerification);
-      pushModelFeedback(extension, cloudExtension !== lastVerification ? { ...extension, verification: cloudExtension } : null);
+      pushModelFeedback(extension, cloudExtension !== lastVerification ? { ...extension, error: extensionMessage(cloudExtension.command), verification: cloudExtension } : null);
     }
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
@@ -1125,9 +1185,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const promptBudget = numCtx ? Math.floor((numCtx - maxOutput - 512) * 3.5) - toolChars - 16 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
     if (candidate.provider === 'ollama_cloud' && historyHasAttachments && cloudStartIndex === null) cloudStartIndex = messages.length;
-    const providerMessages = (candidate.provider !== 'ollama_cloud' ? messages
-      : cloudStartIndex !== null ? [messages[0], { role: 'user', content: cloudTask }, ...messages.slice(cloudStartIndex)]
-        : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudTask } : entry))
+    const failures = [...failedVerifications.values()];
+    const privateTask = failures.length ? `${task}\n\nOUTSTANDING VERIFICATION FAILURES:\n${failureSummary(failures)}` : task;
+    const cloudRequestTask = !failures.length ? cloudTask : historyHasAttachments
+      ? `${cloudTask}\n\nOUTSTANDING VERIFICATION TYPES (arguments and earlier output withheld from external models):\n${failures.map(item => cloudSafeCommand(item.command)).join('\n')}`
+      : `${cloudTask}\n\nOUTSTANDING VERIFICATION FAILURES:\n${failureSummary(failures)}`;
+    const providerMessages = (candidate.provider !== 'ollama_cloud'
+      ? messages.map((entry, index) => index === 1 ? { ...entry, content: privateTask } : entry)
+      : cloudStartIndex !== null ? [messages[0], { role: 'user', content: cloudRequestTask }, ...messages.slice(cloudStartIndex)]
+        : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudRequestTask } : entry))
       .map(({ cloudContent, ...entry }) => candidate.provider === 'ollama_cloud' && cloudContent !== undefined ? { ...entry, content: cloudContent } : entry);
     const availableTask = promptBudget - String(providerMessages[0].content || '').length;
     const reserve = Number.isFinite(availableTask) ? Math.min(4000, Math.max(0, Math.floor(availableTask * 0.1))) : 0;
@@ -1416,8 +1482,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
           next_candidates: sourceCandidates,
         };
         const cloudVerification = cloudSafeVerification(lastVerification);
-        pushModelFeedback(recovery, cloudVerification !== lastVerification || cloudDiscovery !== discovery
-          ? { ...recovery, verification: cloudVerification, next_candidates: cloudDiscovery.sourceCandidates }
+        pushModelFeedback(recovery, cloudVerification !== lastVerification || cloudDiscovery !== discovery || historyHasAttachments
+          ? {
+            ...recovery,
+            ...(historyHasAttachments ? {
+              last_result: { withheld: 'Earlier tool output is private.' },
+              current_diff: { withheld: 'The branch diff may contain earlier attachment context; use a private model to inspect it.' },
+            } : {}),
+            verification: cloudVerification, next_candidates: cloudDiscovery.sourceCandidates,
+          }
           : null);
         await store.post(session.id, {
           role: 'system', kind: 'status',
@@ -1458,17 +1531,20 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
   }
   const unresolved = new Map();
   const unresolvedBrowser = new Map();
+  const requestedBrowser = new Map();
   let requiresBrowser = humanTestInputFiles(state.files).length > 0;
-  for (const entry of typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, beforeSeq) : []) {
+  if (typeof store.verificationHistory !== 'function') return { error: true, reply: 'Publication refused: verification history is unavailable. The branch is preserved.' };
+  for (const entry of await store.verificationHistory(session.id, beforeSeq)) {
     const payload = entry.payload || {};
     if (payload.tool === 'human_test') {
       if (payload.ok === false) requiresBrowser = true;
       continue;
     }
     if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'worktree' && Array.isArray(payload.browser_test.specs)) {
-      const key = browserVerificationKey(payload.browser_test.specs);
+      const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
+      if (key !== INVALID_BROWSER_KEY) requestedBrowser.set(key, payload.browser_test.specs);
       if (payload.ok === false) unresolvedBrowser.set(key, payload.browser_test.specs);
-      else if (payload.ok === true) unresolvedBrowser.delete(key);
+      else if (payload.ok === true) { unresolvedBrowser.delete(key); unresolvedBrowser.delete(INVALID_BROWSER_KEY); }
       continue;
     }
     if (payload.tool !== 'run') continue;
@@ -1481,7 +1557,7 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
     if (key === 'human_test') requiresBrowser = true;
     else commands.add(command);
   }
-  if (unresolvedBrowser.size) requiresBrowser = true;
+  if (requestedBrowser.size || unresolvedBrowser.size) requiresBrowser = true;
   const verification = [];
   await store.post(session.id, {
     role: 'system', kind: 'status', content: 'Checking the current branch before publication. Failed or unavailable checks keep the work on this branch; nothing is pushed.',
@@ -1500,8 +1576,9 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
   }
   if (requiresBrowser) {
     if (!deps.humanTest) return { error: true, reply: 'Publication refused: browser verification is unavailable. Configure the Dr Bob worker and rerun Ship as PR. The branch is preserved.' };
-    const additionalSpecs = [...new Set([...unresolvedBrowser.values()].flat())];
-    try { for (const specs of unresolvedBrowser.values()) validateBrowserSpecs(workspacePath, specs); }
+    const browserSpecs = [...requestedBrowser.values(), ...unresolvedBrowser.values()];
+    const additionalSpecs = [...new Set(browserSpecs.flat())];
+    try { for (const specs of browserSpecs) validateBrowserSpecs(workspacePath, specs); }
     catch (error) { return { error: true, reply: `Publication refused: an unresolved browser spec cannot be rerun: ${redactGitError(error.message)}. The branch is preserved.` }; }
     const changedFiles = [...state.files, ...additionalSpecs.map(spec => `apps/web/${spec}`)];
     const result = await deps.humanTest({ workspacePath, changedFiles, reason: 'fresh browser verification before publication' })
