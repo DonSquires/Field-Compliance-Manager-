@@ -25583,7 +25583,11 @@ export type Database = {
       }
       person_interactions: {
         Row: {
+          client_request_id: string | null
           client_site_id: string | null
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
           evidence_id: string | null
           id: string
           interacted_at: string
@@ -25594,10 +25598,22 @@ export type Database = {
           officer_user_id: string | null
           organization_id: string
           person_id: string
+          person_record_id: string | null
+          proposal_review_reason: string | null
+          proposal_reviewed_at: string | null
+          proposal_reviewed_by: string | null
+          proposal_status: string | null
+          proposed_details: Json | null
+          shift_id: string | null
+          source: string
           zone_id: string | null
         }
         Insert: {
+          client_request_id?: string | null
           client_site_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
           evidence_id?: string | null
           id?: string
           interacted_at?: string
@@ -25608,10 +25624,22 @@ export type Database = {
           officer_user_id?: string | null
           organization_id: string
           person_id: string
+          person_record_id?: string | null
+          proposal_review_reason?: string | null
+          proposal_reviewed_at?: string | null
+          proposal_reviewed_by?: string | null
+          proposal_status?: string | null
+          proposed_details?: Json | null
+          shift_id?: string | null
+          source?: string
           zone_id?: string | null
         }
         Update: {
+          client_request_id?: string | null
           client_site_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
           evidence_id?: string | null
           id?: string
           interacted_at?: string
@@ -25622,6 +25650,14 @@ export type Database = {
           officer_user_id?: string | null
           organization_id?: string
           person_id?: string
+          person_record_id?: string | null
+          proposal_review_reason?: string | null
+          proposal_reviewed_at?: string | null
+          proposal_reviewed_by?: string | null
+          proposal_status?: string | null
+          proposed_details?: Json | null
+          shift_id?: string | null
+          source?: string
           zone_id?: string | null
         }
         Relationships: [
@@ -25630,6 +25666,20 @@ export type Database = {
             columns: ["client_site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
             referencedColumns: ["id"]
           },
           {
@@ -25672,6 +25722,27 @@ export type Database = {
             columns: ["person_id"]
             isOneToOne: false
             referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_proposal_reviewed_by_fkey"
+            columns: ["proposal_reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
           {
@@ -36584,6 +36655,10 @@ export type Database = {
           record_id: string
         }[]
       }
+      apply_person_interaction_details: {
+        Args: { p_interaction_id: string; p_reason: string }
+        Returns: undefined
+      }
       apply_site_brief_promotion_proposal: {
         Args: {
           p_cost_centre_id?: string
@@ -44212,6 +44287,10 @@ export type Database = {
         Args: { p_operating_organization_id: string }
         Returns: Json
       }
+      get_pending_person_detail_updates: {
+        Args: { p_limit?: number }
+        Returns: Json
+      }
       get_person_face_matches: {
         Args: { p_limit?: number; p_person_record_id: string }
         Returns: {
@@ -44226,6 +44305,10 @@ export type Database = {
       }
       get_person_identity_summary: {
         Args: { p_person_record_id: string }
+        Returns: Json
+      }
+      get_person_interactions: {
+        Args: { p_canonical_person_id: string; p_limit?: number }
         Returns: Json
       }
       get_person_search_access: { Args: { p_user_id: string }; Returns: Json }
@@ -49355,6 +49438,22 @@ export type Database = {
         }
         Returns: string
       }
+      record_person_interaction: {
+        Args: {
+          p_client_request_id: string
+          p_details?: Json
+          p_dispatch_job_id?: string
+          p_interacted_at?: string
+          p_interaction_type: string
+          p_new_person_name?: string
+          p_notes: string
+          p_organization_id: string
+          p_person_record_id?: string
+          p_shift_id?: string
+          p_source?: string
+        }
+        Returns: Json
+      }
       record_radio_transcript_segment: {
         Args: {
           p_confidence?: number
@@ -51309,6 +51408,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      review_person_detail_update: {
+        Args: { p_decision: string; p_interaction_id: string; p_reason: string }
+        Returns: Json
       }
       review_place_hazard: {
         Args: {
