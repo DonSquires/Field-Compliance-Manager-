@@ -44,7 +44,10 @@ test('complete_officer_shift keeps every rule, records the end position, and rep
 });
 
 test('the End shift dialog reads readiness, takes the missing debrief, then ends with the position', () => {
-  assert.match(dialog, /supabase\.rpc\('get_shift_end_readiness', \{ p_shift_id: shiftId \}\)/);
+  assert.match(dialog, /supabase\.rpc\('get_officer_attendance_readiness', \{ p_shift_id: shiftId \}\)/);
+  assert.doesNotMatch(dialog, /supabase\.rpc\('get_shift_end_readiness'/);
+  assert.match(dialog, /supabase\.rpc\('complete_officer_static_shift'/);
+  assert.match(dialog, /readiness\.open_break_count === 0/);
   assert.match(dialog, /if \(needsDebrief\) \{[\s\S]*supabase\.rpc\('submit_shift_debrief'/);
   assert.match(dialog, /supabase\.rpc\('complete_officer_shift', \{ p_shift_id: shiftId, p_expected_status: shiftStatus, p_gps_lat: coords\.lat, p_gps_lng: coords\.lng \}\)/);
   assert.match(dialog, /readiness\.can_end \|\| \(readiness\.can_end_after_debrief && debriefReady\)/);

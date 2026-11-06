@@ -8,6 +8,61 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Officer attendance, evidence and payroll recovery (local work, 2026-11-06):
+
+- **Before:** single-site shifts required disconnected attendance actions;
+  rostered break allowance had no shared officer control; ordinary report and
+  incident photos had no general attachment lane. Schedule-only recovery and
+  timesheet-specific pay corrections were absent.
+- **During:** one static start/end transaction records arrival/departure, with
+  explicitly explained and review-flagged GPS exceptions. Planned breaks remain
+  distinct from actual recorded unpaid deductions. A saved report or assigned
+  incident accepts original private photos through target-authorised storage and
+  registration. HR recovery previews scheduled source rows and requires audited
+  reasons and separate approval; pay corrections never alter employment rates.
+- **After:** focused units and disposable PostgreSQL cover receipts,
+  authorization, rollback, replay, roster-plan preservation and actual evidence.
+  Offline phone/desktop fixtures verify selected static-shift context and
+  explained combined completion; phone recovery fixtures cover uncertain debrief
+  and completion responses. These are synthetic acceptance checks, not proof of
+  live operation or real-phone camera/install/background behaviour.
+- **Release gates:** apply the migrations through the governed lane, regenerate
+  the live schema snapshot, refresh Atlas, and complete human-operated phone and
+  payroll acceptance. Existing raw static briefing access still requires Oracle
+  work; an attendance exception must not unlock that briefing.
+- **Local verification:** 115 focused web tests and 60 functional desktop/phone
+  browser cases pass, as do the attendance/photo/payroll PostgreSQL suites and
+  the service-evidence database check. Typecheck and production build pass.
+  Windows screenshot baselines are absent; visual-baseline acceptance remains
+  open. The broad root suite is not green in this environment (missing initial
+  root dependencies and POSIX process assumptions, plus unrelated control-plane
+  failures/timeouts); changed attendance source contracts were corrected and
+  pass separately. Do not treat the focused results as full-suite certification.
+- **GPS audit remains open:** the existing shell starts a location watch whenever
+  a profile exists, ignores watch failures and uses a breadcrumb queue without
+  actor partitioning. Browser suspension and background tracking are unproven.
+  The new PWA is network-only, does not cache private work and does not claim
+  these unresolved behaviours are fixed.
+
+Officer reports and accountability (local work, 2026-11-06):
+
+- **Before:** agreement activity did not source completed dispatch/static work
+  or officer reports. The Cost of service route actually showed recorded travel,
+  not financial cost.
+- **During:** a count-only **Officer service evidence** supplement attributes
+  reviewed officer incidents, completed dispatch jobs and completed static
+  attendances through agreement/client/place/module links, not provider custody
+  alone. **Recorded / Already in activity / Additional records** reconciles
+  overlapping provenance without altering the existing activity totals. Raw
+  officer prose, names and GPS are withheld; maintenance and staff H&S are not
+  client incidents.
+- **After:** isolated PostgreSQL covers authorization, attribution, privacy and
+  provenance; shared web/PDF/email sections use the same validated counts.
+  Regenerate monthly drafts after release to freeze the supplement; existing and
+  issued packs and custom reports remain unchanged. The travel screen now says
+  **Recorded travel**. Actual financial service costing remains a separate gap:
+  missing rates/postings must not be presented as zero cost.
+
 Officer overdue-shift recovery (local acceptance, 2026-11-06):
 
 - **Before:** an in-progress shift disappeared from the schedule when its

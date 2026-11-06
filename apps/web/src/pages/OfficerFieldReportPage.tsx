@@ -8,6 +8,9 @@ import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/l
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
+import { OfficerPhotoAttachments } from '../components/OfficerPhotoAttachments';
+import type { OfficerPhotoTarget } from '../lib/officerRecordPhotos';
+import { reportReceiptMatchesShift, resolveReportShift, validReportShiftId } from '../lib/officerReportShift';
 import './OfficerFieldReportPage.css';
 import './OfficerIncidentIdentity.css';
 
@@ -28,10 +31,12 @@ const OfficerFieldReportPage: React.FC = () => {
   const requestedReportId = new URLSearchParams(location.search).get('report');
   const investigationId = new URLSearchParams(location.search).get('investigation');
   const dispatchJobId = new URLSearchParams(location.search).get('job');
+  const requestedShiftId = new URLSearchParams(location.search).get('shift');
   const { profile } = useAuth();
   const { selectedSite, selectedZone, locationStatus } = useServiceRelationships();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
+  const [shiftContextError, setShiftContextError] = useState<string | null>(null);
   const [incidents, setIncidents] = useState<IncidentOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeOption[]>([]);
   const [form, setForm] = useState(initialForm);
@@ -42,6 +47,8 @@ const OfficerFieldReportPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ id: string; receivedAt: string; shiftId: string | null; shiftLabel: string | null } | null>(null);
+  const [photoTarget, setPhotoTarget] = useState<OfficerPhotoTarget | null>(null);
+  const [photoPending, setPhotoPending] = useState(false);
   const [identityForm, setIdentityForm] = useState(initialIdentityForm);
   const [identityFiles, setIdentityFiles] = useState<File[]>([]);
   const [identityInputKey, setIdentityInputKey] = useState(0);
@@ -49,6 +56,9 @@ const OfficerFieldReportPage: React.FC = () => {
   const [identityMessage, setIdentityMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
   const capturedAtRef = useRef(new Date().toISOString());
+  const shiftScope = JSON.stringify([profile?.id, profile?.organizationId, requestedShiftId]);
+  const shiftSelectionRef = useRef<{ scope: string; shiftId: string } | null>(null);
+  const loadRequestRef = useRef(0);
   useOfficerUnsavedWork(Boolean(
     submitting || identitySubmitting || form.reportType !== initialForm.reportType || form.severity !== initialForm.severity
     || form.title || form.description || form.locationName || form.address || form.immediateAction || form.followUp || form.followUpNotes
@@ -59,6 +69,7 @@ const OfficerFieldReportPage: React.FC = () => {
   ));
 
   const loadData = useCallback(async () => {
+    const request = ++loadRequestRef.current;
     if (!profile?.id || !profile.organizationId) {
       setReports([]);
       setShifts([]);
@@ -68,19 +79,30 @@ const OfficerFieldReportPage: React.FC = () => {
     }
     setLoading(true); setError(null);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const [reportResponse, shiftResponse, incidentResponse, documentTypeResponse] = await Promise.all([
+    const [reportResponse, shiftResponse, incidentResponse, documentTypeResponse, requestedShiftResponse] = await Promise.all([
       supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required, review_notes, reviewed_at').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
-      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
+      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
       supabase.from('incidents').select('id,incident_type,status,occurred_at').eq('officer_user_id', profile.id).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }).limit(50),
       supabase.rpc('get_identity_document_types'),
+      validReportShiftId(requestedShiftId)
+        ? supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('id', requestedShiftId).eq('officer_user_id', profile.id).eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress', 'completed']).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
+    if (request !== loadRequestRef.current) return;
+    const availableShifts = shiftResponse.error ? [] : [...((shiftResponse.data as ShiftOption[] | null) ?? [])];
+    const requestedShift = requestedShiftResponse.error ? null : requestedShiftResponse.data as ShiftOption | null;
+    if (requestedShift && requestedShift.id === requestedShiftId && !availableShifts.some((shift) => shift.id === requestedShift.id)) availableShifts.push(requestedShift);
+    setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts(availableShifts);
     setIncidents((incidentResponse.data as IncidentOption[]) ?? []);
     setDocumentTypes(((documentTypeResponse.data as DocumentTypeOption[]) ?? []).filter((definition) => definition.document_kind !== 'person_photo'));
-    setForm((current) => ({ ...current, shiftId: current.shiftId || (shiftResponse.data as ShiftOption[] | null)?.[0]?.id || '' }));
-    const failure = describeLoadFailures([['reports', reportResponse.error], ['shifts', shiftResponse.error], ['assigned incidents', incidentResponse.error], ['identity document types', documentTypeResponse.error]]);
+    const selection = resolveReportShift(availableShifts.map((shift) => shift.id), requestedShiftId,
+      shiftSelectionRef.current?.scope === shiftScope ? shiftSelectionRef.current.shiftId : null);
+    shiftSelectionRef.current = { scope: shiftScope, shiftId: selection.shiftId };
+    setForm((current) => ({ ...current, shiftId: selection.shiftId }));
+    setShiftContextError(selection.error);
+    const failure = describeLoadFailures([['reports', reportResponse.error], ['shifts', shiftResponse.error], ['requested shift', requestedShiftResponse.error], ['assigned incidents', incidentResponse.error], ['identity document types', documentTypeResponse.error]]);
     if (failure) setError(failure); setLoading(false);
-  }, [profile?.id, profile?.organizationId]);
+  }, [profile?.id, profile?.organizationId, requestedShiftId, shiftScope]);
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (requestedReportId) document.getElementById(`officer-report-${requestedReportId}`)?.scrollIntoView({ block: 'center' }); }, [reports, requestedReportId]);
 
@@ -188,10 +210,11 @@ const OfficerFieldReportPage: React.FC = () => {
     } finally { setIdentitySubmitting(false); }
   };
 
-  const canSubmit = form.title.trim().length >= 5 && form.description.trim().length >= 10 && (!form.followUp || form.followUpNotes.trim().length > 0) && !submitting;
+  const canSubmit = Boolean(profile?.id && profile.organizationId) && form.title.trim().length >= 5 && form.description.trim().length >= 10 && (!form.followUp || form.followUpNotes.trim().length > 0) && !submitting && !photoPending && !loading && !shiftContextError && (!form.shiftId || shifts.some((shift) => shift.id === form.shiftId));
   const submitReport = async (event: React.FormEvent) => {
     event.preventDefault(); if (!canSubmit) return;
     setSubmitting(true); setError(null); setReceipt(null);
+    const submittedShiftId = form.shiftId || null;
     const { data, error: submitError } = await supabase.rpc('submit_officer_field_report', {
       p_client_event_id: eventIdRef.current, p_reported_at: capturedAtRef.current, p_report_type: form.reportType, p_severity: form.severity,
       p_title: form.title.trim(), p_description: form.description.trim(), p_location_name: form.locationName.trim() || null,
@@ -203,7 +226,11 @@ const OfficerFieldReportPage: React.FC = () => {
       p_site_id: selectedSite?.id ?? null, p_zone_id: selectedZone?.id ?? null,
     });
     const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
-    if (submitError || !result) setError(describeLoadFailures([['report submission', submitError]]) ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
+    const receiptConfirmed = reportReceiptMatchesShift(result, submittedShiftId);
+    if (!submitError && receiptConfirmed && result && profile?.organizationId) {
+      setPhotoTarget({ kind: 'field_report', id: result.id, organizationId: profile.organizationId });
+    }
+    if (submitError || !result || !receiptConfirmed) setError(describeLoadFailures([['report submission', submitError]]) ?? (result ? 'Report receipt did not confirm the selected shift. The report may already be saved; your entries and submission identity remain available for retry. Do not start a new report.' : 'Report receipt was not confirmed. Your entries remain available for retry.'));
     else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id); if (investigationId) { const { error: linkError } = await supabase.rpc('link_investigation_entity', { p_investigation_id: investigationId, p_entity_type: 'field_report', p_entity_id: result.id, p_link_role: 'primary', p_link_reason: dispatchJobId ? `Follow-up report from investigation dispatch ${dispatchJobId}` : 'Officer report submitted from investigation context' }); if (linkError) { setError(`Report confirmed, but ${describeLoadFailures([['investigation link', linkError]]) ?? 'the investigation link could not be saved.'}`); } } setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
     setSubmitting(false);
   };
@@ -213,6 +240,28 @@ const OfficerFieldReportPage: React.FC = () => {
     <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>{investigationId ? 'Investigation follow-up report. This submission will be linked to the investigation.' : 'Submit operational, maintenance, or health and safety concerns.'}</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports" aria-label="Refresh field reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error"><X size={16} /></button></div>}
     {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {receipt.shiftId ? `linked to ${receipt.shiftLabel ?? `shift ${receipt.shiftId.slice(0, 8)}`}` : 'not linked to a shift'} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss" aria-label="Dismiss receipt"><X size={16} /></button></div>}
+    <section className="officer-incident-identity" aria-labelledby="officer-photos-title">
+      <h2 id="officer-photos-title">Report and incident photos</h2>
+      <p>Submit a new report first, then attach camera or gallery photos to its confirmed receipt here. You can also add photos to your existing reports and assigned incidents. Failed photo uploads do not require a new report.</p>
+      <label><span>Saved report or assigned incident</span><select
+        aria-label="Photo attachment target" disabled={photoPending || submitting}
+        value={photoTarget ? `${photoTarget.kind}:${photoTarget.id}` : ''}
+        onChange={(event) => {
+          const [kind, id] = event.target.value.split(':');
+          setPhotoTarget(id && profile?.organizationId ? { kind: kind as OfficerPhotoTarget['kind'], id, organizationId: profile.organizationId } : null);
+        }}>
+        <option value="">Select a saved record</option>
+        <optgroup label="My reports">
+          {receipt && !reports.some((report) => report.id === receipt.id) && <option value={`field_report:${receipt.id}`}>Just submitted · {receipt.id.slice(0, 8)}</option>}
+          {reports.map((report) => <option key={report.id} value={`field_report:${report.id}`}>{report.title} · {new Date(report.reported_at).toLocaleDateString('en-NZ')}</option>)}
+        </optgroup>
+        <optgroup label="Assigned incidents">
+          {incidents.map((incident) => <option key={incident.id} value={`incident:${incident.id}`}>{incident.incident_type.replaceAll('_', ' ')} · {new Date(incident.occurred_at).toLocaleDateString('en-NZ')}</option>)}
+        </optgroup>
+      </select></label>
+      {photoTarget && profile?.organizationId === photoTarget.organizationId && <OfficerPhotoAttachments key={`${photoTarget.organizationId}:${photoTarget.kind}:${photoTarget.id}`} target={photoTarget} onPendingChange={setPhotoPending} />}
+      {photoPending && <p role="status">Upload or remove the selected photos before switching records or submitting another report.</p>}
+    </section>
     <section className="officer-incident-identity" aria-labelledby="officer-incident-identity-title">
       <div className="officer-report-panel-heading"><div><span>Incident identity</span><h2 id="officer-incident-identity-title">Record a person and ID source</h2></div><IdCard size={20} /></div>
       <p>Use only for an active incident assigned to you. The person and source go to administrator review; this does not verify identity or grant staff authority.</p>
@@ -236,7 +285,12 @@ const OfficerFieldReportPage: React.FC = () => {
     <div className="officer-report-layout">
       <form className="officer-report-form" onSubmit={submitReport}><div className="officer-report-panel-heading"><div><span>New submission</span><h2>Report details</h2></div><ClipboardPlus size={20} /></div>
         <div className="officer-report-grid"><label><span>Type</span><select aria-label="Report type" value={form.reportType} onChange={(e) => setForm({ ...form, reportType: e.target.value as ReportType })}><option value="incident">Incident</option><option value="maintenance">Maintenance</option><option value="health_safety">Health & safety</option></select></label><label><span>Severity</span><select aria-label="Report severity" value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value as ReportSeverity })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div>
-        <label><span>Related shift</span><select aria-label="Related shift" value={form.shiftId} onChange={(e) => setForm({ ...form, shiftId: e.target.value })}><option value="">No related shift</option>{shifts.map((shift) => <option value={shift.id} key={shift.id}>{new Date(shift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}</option>)}</select></label>
+        <label><span>Related shift</span><select aria-label="Related shift" disabled={loading || submitting} value={form.shiftId} onChange={(e) => {
+          const selection = resolveReportShift(shifts.map((shift) => shift.id), requestedShiftId, e.target.value);
+          shiftSelectionRef.current = { scope: shiftScope, shiftId: selection.shiftId };
+          setForm({ ...form, shiftId: selection.shiftId }); setShiftContextError(selection.error);
+        }}><option value="">No related shift</option>{form.shiftId && !shifts.some((shift) => shift.id === form.shiftId) && <option value={form.shiftId} disabled>Requested / selected shift unavailable</option>}{shifts.map((shift) => <option value={shift.id} key={shift.id}>{new Date(shift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}</option>)}</select></label>
+        {shiftContextError && <p role="alert">{shiftContextError}</p>}
         <label><span>Title</span><input aria-label="Report title" required minLength={5} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Short operational summary" /></label>
         <label><span>Description</span><textarea aria-label="Report description" required minLength={10} maxLength={10000} rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What happened, who or what was affected, and current conditions" /></label>
         <div className="officer-report-grid"><label><span>Location name</span><input aria-label="Location name" value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address {addressResolution === 'resolving' ? '(resolving)' : addressResolution === 'resolved' ? '(resolved)' : ''}</span><input aria-label="Street address" value={form.address} onChange={(e) => { setForm({ ...form, address: e.target.value }); setAddressResolution('idle'); setAddressResolutionMessage(null); }} placeholder="Street address" /></label></div>

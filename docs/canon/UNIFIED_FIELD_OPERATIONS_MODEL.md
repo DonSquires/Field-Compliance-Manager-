@@ -77,6 +77,30 @@ checkpoint scans + GPS. Identical mechanism for static (one long stop) and patro
 serviced" reporting. Presence records carry `client_org_id` (same tenancy substrate
 as compliance observations).
 
+### Owner direction 2026-11-06: single-site attendance and actual breaks
+
+- For one static place, **Start shift** records shift start and arrival together;
+  **End shift** records departure and completion together after the debrief and
+  other required work. Do not demand separate on-site/off-site actions.
+- The owner permits an officer to proceed when GPS is missing, outside the
+  assigned boundary or the boundary is unverified, **with an explanation**.
+  Preserve the available position and the exception for operations review.
+  This is unverified attendance, never proof of presence or an Oracle entitlement
+  to read private site information.
+- A roster may specify optional break minutes and whether the break is unpaid.
+  Deduct only the actual recorded unpaid duration, not the planned allowance.
+  Missing, shorter and longer breaks require visible review evidence; a timer
+  reaching zero does not end a break or manufacture a payroll deduction.
+- Payroll-authorised administrators may recover scheduled details into a
+  separately reviewed manual timesheet and make reasoned, audited pay-code/rate
+  corrections for that timesheet only. Neither scheduled hours nor administrative
+  recovery prove physical attendance; ongoing employment rates remain unchanged.
+- Ordinary report/incident photos are private original evidence with target,
+  actor, organization, selection/upload time and hash provenance. Selection time
+  is not proof of when the image was taken. Recording a photo
+  is not permission to publish it to a client; existing disclosure/review gates
+  continue to apply.
+
 ### Owner direction 2026-10-25: roster placement and Workshop labour
 
 - Imported forestry assignments belong in the ordinary staff/work-unit roster

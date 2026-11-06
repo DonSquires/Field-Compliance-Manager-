@@ -1,4 +1,5 @@
 const test = require('node:test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./admin-timesheet-recovery-migration.test.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

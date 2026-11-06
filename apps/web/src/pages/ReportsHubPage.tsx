@@ -15,6 +15,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ActivityRecordBrowser } from '../components/ActivityRecordBrowser';
 import { RepeatSubjectsPanel } from '../components/RepeatSubjectsPanel';
 import { CustomReportBuilder } from '../components/CustomReportBuilder';
+import { ServiceDeliverySummary } from '../components/ServiceDeliverySummary';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
@@ -652,6 +653,11 @@ const ReportsHubPage: React.FC = () => {
         </div>}
       </div>
 
+      <ServiceDeliverySummary
+        agreementIds={(selectedAgreement ? [selectedAgreement] : providerAgreements).map((agreement) => agreement.id)}
+        start={dateRange.start}
+        end={dateRange.end}
+      />
       <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
 
       <section className="reports-section report-packs-section" aria-labelledby="report-production-heading">

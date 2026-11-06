@@ -25,10 +25,11 @@ describe('officer static guarding post', () => {
     expect(page).toContain('Static post data was incomplete');
     expect(page).not.toContain('p_zone_ids:');
     expect(page).not.toContain("p_module_key: 'site_guard'");
-    expect(page).toContain("supabase.rpc('manage_officer_static_post'");
+    expect(page).toContain('p_shift_id: requestedShiftId');
+    expect(page).toContain('EndShiftDialog');
     expect(page).not.toMatch(/from\('shift_stops'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
-    expect(page).toContain('p_gps_accuracy_metres: position.accuracy');
-    expect(page).toContain("p_action: 'depart'");
+    expect(page).not.toContain("supabase.rpc('manage_officer_static_post'");
+    expect(page).toContain('no separate on-site or off-site button');
     expect(page).not.toContain('GPS verified');
   });
 
@@ -66,8 +67,8 @@ describe('officer static guarding post', () => {
     expect(rehydrationMigration).toContain("'attendance_evidence',jsonb_build_object('arrival',v_arrival_receipt,'departure',v_departure_receipt)");
     expect(page).toContain('post.attendance_evidence.arrival.reference');
     expect(page).toContain('post.attendance_evidence.departure.reference');
-    expect(page).toContain("['pending','en_route'].includes(post.stop.status)");
-    expect(page).toContain("post.stop.status === 'on_scene'");
+    expect(page).toContain("post.shift.status === 'in_progress'");
+    expect(page).toContain('next.shift.id !== requestedShiftId');
   });
 
   it('rejects off-site transitions before state or evidence changes', () => {

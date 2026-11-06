@@ -90,7 +90,7 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
 };
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; patrol_route?: { primary_staff_id: string | null } | { primary_staff_id: string | null }[] | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
-interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; external_refs?: ImportedLabourRefs | null; }
+interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; planned_break_minutes: number; break_unpaid: boolean; external_refs?: ImportedLabourRefs | null; }
 interface SourceAssignment {
   id: string;
   officer_id: string;
@@ -196,7 +196,7 @@ const RosterOperationsPage: React.FC = () => {
   const [copyingSlot, setCopyingSlot] = useState<RosterSlot | null>(null);
   const [repeatDialog, setRepeatDialog] = useState<{ slot: RosterSlot; from: string; to: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ officerId: '', workUnitId: '', start: '', end: '', notes: '', publish: true });
+  const [form, setForm] = useState({ officerId: '', workUnitId: '', start: '', end: '', notes: '', publish: true, breakMinutes: '0', breakUnpaid: false });
   const [unitCoverage, setUnitCoverage] = useState<CoveragePreview | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentPreview | null>(null);
 
@@ -258,7 +258,7 @@ const RosterOperationsPage: React.FC = () => {
         : Promise.resolve({ data: [], error: null }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs,patrol_route:patrol_routes!roster_work_units_patrol_route_id_fkey(primary_staff_id)').eq('organization_id', org).eq('active', true).order('name'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
       supabase.from('staff_availability').select('id,staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes,created_at').eq('organization_id', org).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
@@ -289,7 +289,7 @@ const RosterOperationsPage: React.FC = () => {
     if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (version !== loadVersion.current) return;
     if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
@@ -369,7 +369,7 @@ const RosterOperationsPage: React.FC = () => {
       return;
     }
     setEditingSlot(null);
-    setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', publish: true }); setShowCreate(true);
+    setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', publish: true, breakMinutes: '0', breakUnpaid: false }); setShowCreate(true);
   };
 
   const openEdit = (slot: RosterSlot) => {
@@ -383,6 +383,8 @@ const RosterOperationsPage: React.FC = () => {
       end: localInput(new Date(slot.scheduled_end)),
       notes: slot.notes ?? '',
       publish: false,
+      breakMinutes: String(slot.planned_break_minutes ?? 0),
+      breakUnpaid: slot.break_unpaid ?? false,
     });
     setSelectedSlotId(null);
     setShowCreate(true);
@@ -396,7 +398,7 @@ const RosterOperationsPage: React.FC = () => {
     end.setDate(end.getDate() + 7);
     setCopyingSlot(slot);
     setEditingSlot(null);
-    setForm({ officerId: staffMember?.id ?? '', workUnitId: slot.work_unit_id, start: localInput(start), end: localInput(end), notes: slot.notes ?? '', publish: false });
+    setForm({ officerId: staffMember?.id ?? '', workUnitId: slot.work_unit_id, start: localInput(start), end: localInput(end), notes: slot.notes ?? '', publish: false, breakMinutes: String(slot.planned_break_minutes ?? 0), breakUnpaid: slot.break_unpaid ?? false });
     setSelectedSlotId(null);
     setShowCreate(true);
   };
@@ -419,13 +421,15 @@ const RosterOperationsPage: React.FC = () => {
     const person = staff.find((candidate) => candidate.id === form.officerId);
     if (!person) { setError('A work-ready staff member is required.'); setSaving(false); return; }
     const blocker = credentialBlocker(person, form.end); if (blocker) { setError(blocker); setSaving(false); return; }
-    const { error: updateError } = await supabase.rpc('update_roster_slot', {
+    const { error: updateError } = await supabase.rpc('update_roster_slot_with_break', {
       p_slot_id: editingSlot.id,
       p_expected_status: editingSlot.status,
       p_staff_id: person.staffId,
       p_scheduled_start: new Date(form.start).toISOString(),
       p_scheduled_end: new Date(form.end).toISOString(),
       p_notes: form.notes.trim() || null,
+      p_planned_break_minutes: Number(form.breakMinutes),
+      p_break_unpaid: form.breakUnpaid,
     });
     if (updateError) setError(updateError.message);
     else { setNotice('Draft roster slot updated. Review it before publishing.'); setEditingSlot(null); setShowCreate(false); await load(); }
@@ -441,13 +445,8 @@ const RosterOperationsPage: React.FC = () => {
     const person = staff.find((candidate) => candidate.id === form.officerId); const unit = workUnits.find((candidate) => candidate.id === form.workUnitId);
     const blocker = person ? credentialBlocker(person, form.end) : null; if (blocker) { setError(blocker); setSaving(false); return; }
     if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
-    const slotResponse = await supabase.rpc('create_roster_slot', { p_client_request_id: crypto.randomUUID(),     p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId ?? null, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null });
+    const slotResponse = await supabase.rpc('create_roster_slot_with_break', { p_client_request_id: crypto.randomUUID(), p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId ?? null, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null, p_planned_break_minutes: Number(form.breakMinutes), p_break_unpaid: form.breakUnpaid });
     if (slotResponse.error || !slotResponse.data) { setError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
-    const slot = slotResponse.data as { id: string };
-    if (form.publish && person && (unit?.work_unit_type === 'patrol' || unit?.work_unit_type === 'static')) {
-      const materialized = await supabase.rpc('materialize_roster_slot', { p_slot_id: slot.id, p_expected_status: 'published' });
-      if (materialized.error || !materialized.data) { setError(materialized.error?.message ?? 'The roster slot was saved, but the field shift could not be created from it.'); setSaving(false); await load(); return; }
-    }
     const receipt = person
       ? `${copyingSlot ? 'Shift copied as a draft' : `Shift ${form.publish ? 'published' : 'saved as a draft'}`} for ${person.name}.${form.publish && !copyingSlot ? ' They will see it on their schedule and can accept or decline.' : ''}`
       : `Open shift ${form.publish ? 'published' : 'saved as a draft'} for ${unit?.name ?? 'the selected work unit'}.${form.publish ? ' Open it on the roster and offer it to available staff.' : ' Publish it when it is ready to advertise.'}`;
@@ -808,6 +807,9 @@ const RosterOperationsPage: React.FC = () => {
       <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={Boolean(editingSlot)} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">{editingSlot ? 'Select work-ready staff' : 'Open shift — advertise to available staff'}</option>{staff.filter((person) => person.workReady).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
       <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value })}><option value="">Select the work this shift covers</option>{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
       <div><label><span>Start</span><input type="datetime-local" required value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
+      <label><span>Planned break (minutes, optional)</span><input type="number" min="0" max="240" step="1" required value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></label>
+      <label><input type="checkbox" checked={form.breakUnpaid} disabled={Number(form.breakMinutes) === 0} onChange={(event) => setForm({ ...form, breakUnpaid: event.target.checked })} /><span>Unpaid break</span></label>
+      <p>Zero means no planned allowance. Only actual recorded unpaid break time is deducted. Statutory rest and meal entitlements still apply.</p>
       {unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
       {assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}
       <label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>

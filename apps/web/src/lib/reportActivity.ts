@@ -3,6 +3,8 @@
 // patrol fold and the site-log grouping mirror supabase/functions/_shared/report-activity-sections.mjs
 // so the provider review shows exactly what the client receives in the PDF.
 
+import { readServiceDelivery, type ServiceDeliveryCount } from './reportServiceDelivery';
+
 export const ACTIVITY_REPORT_VERSION = 2;
 export const ACTIVITY_ACCOUNTING_VERSION = 1;
 export const NO_PLACE_LABEL = 'Not location-specific';
@@ -38,6 +40,7 @@ export interface ActivityReport {
   incidents: { total: number; investigations: number; withMedia: number; bySeverity: ActivityCode[]; byStatus: ActivityCode[] };
   /** Base44 RAMS hunter kill/nil returns; null when the client has no hunter-return programme. */
   hunterReturns: HunterReturns | null;
+  serviceDelivery?: ServiceDeliveryCount[] | null;
   accountedFor: {
     eventsInScope: number; mirrorEventsExcluded: number; activityEvents: number; observationsInScope: number;
     workOrdersInScope: number; incidentsInScope: number; entries: number; reported: number; operationalWithheld: number;
@@ -342,6 +345,7 @@ export function readActivityReport(data: unknown): ActivityReport | null {
       bySeverity: list(incidents.bySeverity).map(code), byStatus: list(incidents.byStatus).map(code),
     },
     hunterReturns: readHunterReturns(report.hunterReturns),
+    serviceDelivery: readServiceDelivery(report.serviceDelivery),
     accountedFor: {
       eventsInScope: num(accounted.eventsInScope), mirrorEventsExcluded: num(accounted.mirrorEventsExcluded), activityEvents: num(accounted.activityEvents),
       observationsInScope: num(accounted.observationsInScope), workOrdersInScope: num(accounted.workOrdersInScope), incidentsInScope: num(accounted.incidentsInScope),

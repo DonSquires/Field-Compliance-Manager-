@@ -51,7 +51,7 @@ describe('governed HR administration', () => {
   it('shows corporate payroll every branch\'s timesheets at organisation level, and the branch queue only in a branch', () => {
     expect(page).toContain("const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);");
     expect(page).toContain("workingInBranch\n            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })");
-    expect(page).toContain(".from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at').eq('organization_id', orgId)");
+    expect(page).toContain(".from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at, revision, pay_code_override, hourly_rate_override, pay_override_reason').eq('organization_id', orgId)");
     expect(page).toContain("{workingInBranch ? 'Branch timesheets' : 'Timesheets across branches'}");
   });
 

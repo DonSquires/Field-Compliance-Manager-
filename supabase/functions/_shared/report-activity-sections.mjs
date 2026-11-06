@@ -731,6 +731,25 @@ export function executiveSummaryBlocks(summary, highlights) {
  * @param {{ summary?: unknown, highlights?: unknown }} [options] the reviewer's executive summary and highlights, shown first
  * @returns {ReportBlock[] | null}
  */
+export function serviceDeliveryRows(value) {
+  const summary = obj(value);
+  const counts = obj(summary?.counts);
+  if (summary?.version !== 1 || !counts) return null;
+  const labels = {
+    reviewedReports: 'Reviewed officer incident reports',
+    completedDispatch: 'Completed dispatch jobs',
+    completedStatic: 'Completed static attendances',
+  };
+  const result = [];
+  for (const [kind, label] of Object.entries(labels)) {
+    const row = obj(counts[kind]);
+    if (!row || ![row.recorded, row.alreadyInActivity, row.additional].every((n) => Number.isSafeInteger(n) && n >= 0)
+      || row.recorded !== row.alreadyInActivity + row.additional) return null;
+    result.push([label, fmt(row.recorded), fmt(row.alreadyInActivity), fmt(row.additional)]);
+  }
+  return result;
+}
+
 export function monthlyActivityBlocks(data, activityLines, options = {}) {
   const { report, lines } = clientActivitySnapshot(data, activityLines);
   if (!report) return null;
@@ -828,6 +847,15 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     }
   }
 
+  const serviceRows = serviceDeliveryRows(report.serviceDelivery);
+  if (serviceRows) {
+    blocks.push(section('Officer Service Evidence'));
+    blocks.push(note('Agreement-attributed records. Provenance overlaps are already in the activity ledger; do not add these counts to activity totals. Private officer notes and identities are not included.'));
+    blocks.push(table(
+      [['Evidence', 217], ['Recorded', 75, 'right'], ['Already in activity', 95, 'right'], ['Additional records', 100, 'right']],
+      serviceRows,
+    ));
+  }
   if (hunters && num(hunters.returns) <= 0) {
     // A client with a permit-return feed is told when nobody returned, so silence is not mistaken for a gap.
     blocks.push(section('Hunter Kill Returns'));

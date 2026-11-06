@@ -46,4 +46,13 @@ describe('officer field report capture UI', () => {
     expect(source).toContain('Supervisor review');
     expect(source).toContain('is-context-focus');
   });
+  it('attaches source photos to saved receipts and assigned incidents without resubmitting records', () => {
+    expect(source).toContain('setPhotoTarget({ kind: \'field_report\', id: result.id, organizationId: profile.organizationId })');
+    expect(source).toContain('Photo attachment target');
+    expect(source).toContain('value={`incident:${incident.id}`}');
+    expect(source).toContain('<OfficerPhotoAttachments');
+    expect(source).toContain('disabled={photoPending || submitting}');
+    expect(source).toContain('!submitting && !photoPending');
+    expect(source).not.toContain('photo_urls:');
+  });
 });

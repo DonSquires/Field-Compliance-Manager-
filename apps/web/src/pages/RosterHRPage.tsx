@@ -133,12 +133,44 @@ interface TimesheetRow {
   overtime_hours: number;
   work_derived_hours: number | null;
   adjustment_hours: number;
-  work_summary: { source_count?: number } | null;
+  work_summary: { source_count?: number; evidence_kind?: string; manual_sources?: { source_type: string; source_id: string; shift_id: string | null; reason: string }[] } | null;
+  revision?: number;
+  pay_code_override?: string | null;
+  hourly_rate_override?: number | null;
+  pay_override_reason?: string | null;
   status: string;
   branch_review_notes?: string | null;
   branch_reviewed_by?: string | null;
   submitted_at?: string | null;
 }
+
+interface ScheduledTimesheetSource {
+  source_type: 'roster_slot' | 'shift';
+  source_id: string;
+  shift_id: string | null;
+  scheduled_start: string;
+  scheduled_end: string;
+  source_version: string;
+  planned_break_minutes: number;
+  break_unpaid: boolean;
+}
+interface ScheduledTimesheetDraft extends ScheduledTimesheetSource {
+  selected: boolean;
+  reviewedStart: string;
+  reviewedEnd: string;
+  unpaidBreak: string;
+}
+interface TimesheetBreakEvidence {
+  shift_id: string;
+  planned_minutes: number;
+  taken_minutes: number;
+  unpaid: boolean;
+  review_status: string;
+}
+const localDateTimeInput = (iso: string) => {
+  const date = new Date(iso);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 
 interface DispatchPayLineRow {
   id: string;
@@ -361,20 +393,24 @@ interface TimesheetRowsProps {
   actorId?: string;
   onReview: (item: TimesheetRow, decision: TimesheetDecision) => void;
   onCorrect?: (item: TimesheetRow) => void;
+  onPayCorrect?: (item: TimesheetRow) => void;
+  onBreakReview?: (item: TimesheetRow) => void;
 }
 
-const TimesheetRows: React.FC<TimesheetRowsProps> = ({ rows, staffNames, corporateReviewer, actorId, onReview, onCorrect }) => (
+const TimesheetRows: React.FC<TimesheetRowsProps> = ({ rows, staffNames, corporateReviewer, actorId, onReview, onCorrect, onPayCorrect, onBreakReview }) => (
   <div className="reports-table-wrapper hr-timesheet-table">
     <table className="reports-table">
       <caption className="sr-only">Timesheet reconciliation: rostered, worked, adjusted and submitted hours</caption>
       <thead><tr><th scope="col">Staff</th><th scope="col">Period</th><th scope="col">Rostered h</th><th scope="col">Worked h</th><th scope="col">Adjustment h</th><th scope="col">To pay h</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead>
       <tbody>{rows.length === 0 ? <tr><td colSpan={8}>No timesheets in this scope.</td></tr> : rows.map((item) => <tr key={item.id}>
         <td>{staffNames[item.staff_id] || 'Staff identity unavailable'}</td>
-        <td>{item.period_start} – {item.period_end}</td>
+        <td>{item.period_start} – {item.period_end}{item.work_summary?.evidence_kind === 'manual_admin' && <details><summary>Manual admin evidence — not actual attendance</summary>{item.work_summary.manual_sources?.map((source) => <p key={`${source.source_type}:${source.source_id}`}>{source.source_type}: {source.source_id}{source.shift_id && <> · Shift: {source.shift_id}</>} · {source.reason}</p>)}</details>}</td>
         <td>{item.scheduled_hours ?? '—'}</td><td>{item.work_derived_hours ?? '—'}{item.work_summary?.source_count !== undefined && <small> · {item.work_summary.source_count} work records</small>}</td><td>{item.adjustment_hours ?? '—'}</td><td>{item.actual_hours ?? '—'}</td>
-        <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span>{item.submitted_at && <small className="hr-timesheet-submitted">{submittedWords(item.submitted_at)}</small>}</td>
+        <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span>{item.submitted_at && <small className="hr-timesheet-submitted">{submittedWords(item.submitted_at)}</small>}{item.pay_override_reason && <small>This timesheet only: {item.pay_code_override ?? 'standard pay code'} · {item.hourly_rate_override == null ? 'standard hourly rate' : `$${Number(item.hourly_rate_override).toFixed(4)}/h`} · {item.pay_override_reason}</small>}</td>
         <td><div className="hr-timesheet-actions">
           {onCorrect && ['submitted', 'branch_checked'].includes(item.status) && <button className="btn btn-sm btn-secondary" onClick={() => onCorrect(item)}>Edit hours</button>}
+          {onPayCorrect && ['submitted', 'branch_checked'].includes(item.status) && <button className="btn btn-sm btn-secondary" onClick={() => onPayCorrect(item)}>Pay code / rate</button>}
+          {onBreakReview && <button className="btn btn-sm btn-secondary" onClick={() => onBreakReview(item)}>Review breaks</button>}
           {item.status === 'submitted' && <><button className="btn btn-sm btn-secondary" onClick={() => onReview(item, 'branch_checked')}>Branch check</button><button className="btn btn-sm btn-danger" onClick={() => onReview(item, 'rejected')}>Return for correction</button></>}
           {item.status === 'branch_checked' && corporateReviewer && <>{item.branch_reviewed_by !== actorId && <button className="btn btn-sm btn-secondary" onClick={() => onReview(item, 'approved')}>Final approve</button>}<button className="btn btn-sm btn-danger" onClick={() => onReview(item, 'rejected')}>Return for correction</button></>}
           {item.status === 'branch_checked' && (!corporateReviewer || item.branch_reviewed_by === actorId) && <small>A different corporate payroll reviewer must approve.</small>}
@@ -536,6 +572,11 @@ const RosterHRPage: React.FC = () => {
   const [reviewNotes, setReviewNotes] = useState('');
   const [swapReview, setSwapReview] = useState<{ item: ShiftSwapRow; decision: 'approved' | 'declined' } | null>(null);
   const [timesheetCorrection, setTimesheetCorrection] = useState<{ item: TimesheetRow; actualHours: string; overtimeHours: string; reason: string } | null>(null);
+  const [payCorrection, setPayCorrection] = useState<{ item: TimesheetRow; code: string; rate: string; reason: string; requestId: string } | null>(null);
+  const [scheduleRecovery, setScheduleRecovery] = useState<{ staffId: string; from: string; to: string; rows: ScheduledTimesheetDraft[] | null; reason: string; overtime: string; requestId: string } | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [breakReview, setBreakReview] = useState<{ item: TimesheetRow; rows: TimesheetBreakEvidence[] | null } | null>(null);
+  const [exportedBatchId, setExportedBatchId] = useState<string | null>(null);
   const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
   const [credentialRenewal, setCredentialRenewal] = useState<{ source: CredentialRow; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; evidenceNotes: string } | null>(null);
   const [readinessNotes, setReadinessNotes] = useState('');
@@ -606,6 +647,26 @@ const RosterHRPage: React.FC = () => {
     setTabGroup(tabGroupFor(fallback));
   }, [profile?.role]);
 
+  const activePayrollDialog = scheduleRecovery ? 'schedule-recovery-title' : payCorrection ? 'timesheet-pay-title' : breakReview ? 'timesheet-break-title' : null;
+  useEffect(() => {
+    if (!activePayrollDialog) return;
+    const dialog = document.getElementById(activePayrollDialog)?.closest<HTMLElement>('[role="dialog"]');
+    if (!dialog) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]'));
+    focusable()[0]?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); dialog.querySelector<HTMLButtonElement>('header button:not(:disabled)')?.click(); }
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      const first = elements[0]; const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog.addEventListener('keydown', onKey);
+    return () => { dialog.removeEventListener('keydown', onKey); previous?.focus(); };
+  }, [activePayrollDialog]);
+
   // ATLAS READS: user_profiles, staff_profiles, staff_credentials,
   // shift_templates, leave_requests, timesheets, shift_coverage_requests
   const loadAll = useCallback(async () => {
@@ -670,7 +731,7 @@ const RosterHRPage: React.FC = () => {
           workingInBranch
             ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })
             // ATLAS READS: timesheets — at organisation level the corporate payroll reviewer sees every branch's sheets (RLS: is_admin_for_org)
-            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
+            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at, revision, pay_code_override, hourly_rate_override, pay_override_reason').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
@@ -1174,6 +1235,85 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const previewScheduleRecovery = async () => {
+    if (!scheduleRecovery || !corporatePayrollReviewer) return;
+    setRecoveryLoading(true); setError(null);
+    const request = scheduleRecovery;
+    const { data, error: previewError } = await supabase.rpc('preview_scheduled_timesheet', {
+      p_staff_id: request.staffId, p_period_start: request.from, p_period_end: request.to,
+    });
+    if (previewError) setError(previewError.message);
+    else setScheduleRecovery((current) => current && current.staffId === request.staffId && current.from === request.from && current.to === request.to
+      ? { ...current, rows: ((data ?? []) as ScheduledTimesheetSource[]).map((row) => ({
+        ...row, selected: false, reviewedStart: localDateTimeInput(row.scheduled_start),
+        reviewedEnd: localDateTimeInput(row.scheduled_end), unpaidBreak: '0',
+      })) } : current);
+    setRecoveryLoading(false);
+  };
+
+  const recoverSchedule = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!scheduleRecovery || !corporatePayrollReviewer) return;
+    const rows = scheduleRecovery.rows?.filter((row) => row.selected) ?? [];
+    if (!rows.length) { setError('Select at least one scheduled row to review.'); return; }
+    if (rows.some((row) => !row.reviewedStart || !row.reviewedEnd || !Number.isFinite(new Date(row.reviewedStart).getTime()) || !Number.isFinite(new Date(row.reviewedEnd).getTime()))) {
+      setError('Review the start and end of every selected row.'); return;
+    }
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: recoveryError } = await supabase.rpc('recover_scheduled_timesheet', {
+      p_client_request_id: scheduleRecovery.requestId, p_staff_id: scheduleRecovery.staffId,
+      p_period_start: scheduleRecovery.from, p_period_end: scheduleRecovery.to,
+      p_rows: rows.map((row) => ({ source_type: row.source_type, source_id: row.source_id,
+        source_version: row.source_version, reviewed_start: new Date(row.reviewedStart).toISOString(),
+        reviewed_end: new Date(row.reviewedEnd).toISOString(), unpaid_break_minutes: Number(row.unpaidBreak) })),
+      p_overtime_hours: Number(scheduleRecovery.overtime), p_reason: scheduleRecovery.reason.trim(),
+    });
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (recoveryError || !receipt?.id) setError(recoveryError?.message ?? 'Recovery was not confirmed. Retry with the same details.');
+    else {
+      setNotice(`Manual admin timesheet ${receipt.id} saved for branch check and a different corporate final reviewer. No attendance or GPS was created.`);
+      setScheduleRecovery(null); await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const correctTimesheetPay = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!payCorrection || !corporatePayrollReviewer) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: payError } = await supabase.rpc('correct_timesheet_pay', {
+      p_client_request_id: payCorrection.requestId, p_timesheet_id: payCorrection.item.id,
+      p_expected_revision: payCorrection.item.revision, p_pay_code: payCorrection.code.trim() || null,
+      p_hourly_rate: payCorrection.rate === '' ? null : Number(payCorrection.rate), p_reason: payCorrection.reason.trim(),
+    });
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (payError || receipt?.id !== payCorrection.item.id) setError(payError?.message ?? 'Pay correction was not confirmed. Retry with the same details.');
+    else { setNotice('Pay code/rate saved for THIS TIMESHEET ONLY. Employment rates unchanged. Branch check and a different corporate final reviewer are required again.'); setPayCorrection(null); await loadAll(); }
+    setSaving(false);
+  };
+
+  const reviewTimesheetBreaks = async (item: TimesheetRow) => {
+    setBreakReview({ item, rows: null }); setError(null);
+    const { data, error: breakError } = await supabase.rpc('get_timesheet_break_review', { p_timesheet_id: item.id });
+    if (breakError) setError(breakError.message);
+    else setBreakReview((current) => current?.item.id === item.id ? { item, rows: (data ?? []) as TimesheetBreakEvidence[] } : current);
+  };
+
+  const downloadPayrollBatch = async (batchId: string) => {
+    const { data, error: downloadError } = await supabase.rpc('get_timesheet_payroll_export', { p_batch_id: batchId });
+    if (downloadError) { setError(`Batch ${batchId} was saved, but download failed: ${downloadError.message}. Use Download last payroll batch to retry; do not create another batch.`); return; }
+    const csvCell = (value: unknown) => {
+      const text = String(value ?? '');
+      return `"${(/^[=+\-@\t\r]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`;
+    };
+    const header = ['timesheet_id', 'staff_id', 'period_start', 'period_end', 'pay_code', 'hours', 'overtime_hours', 'hourly_rate', 'gross_amount', 'evidence_kind'];
+    const csv = [header, ...(data ?? []).map((row: any) => [row.timesheet_id, row.staff_id, row.period_start, row.period_end,
+      ...header.slice(4).map((key) => row.payroll_snapshot?.[key])])].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `payroll-${batchId}.csv`; link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handlePayrollExport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payrollExport || !profile?.organizationId) return;
@@ -1189,6 +1329,8 @@ const RosterHRPage: React.FC = () => {
     if (exportError || !receipt) setError(exportError?.message ?? 'Payroll export was not confirmed.');
     else {
       setNotice(`Payroll batch created: ${receipt.timesheet_count} timesheets, ${Number(receipt.total_hours).toFixed(2)} hours.`);
+      setExportedBatchId(receipt.batch_id);
+      await downloadPayrollBatch(receipt.batch_id);
       setPayrollExport(null);
       await loadAll();
     }
@@ -2448,15 +2590,68 @@ const RosterHRPage: React.FC = () => {
         </section>
       )}
 
+      {scheduleRecovery && <div className="hr-review-backdrop"><form className="hr-review-dialog hr-schedule-recovery" role="dialog" aria-modal="true" aria-labelledby="schedule-recovery-title" onSubmit={recoverSchedule}>
+        <header><h2 id="schedule-recovery-title">Recover scheduled shift into timesheet</h2><button type="button" disabled={saving} onClick={() => setScheduleRecovery(null)} aria-label="Close scheduled timesheet recovery">×</button></header>
+        <p>For an officer who forgot to log in or start. Select and review scheduled rows, amend the times and confirm an unpaid break only when supported by evidence. This creates manual admin payroll evidence, not actual attendance, GPS or completed work.</p>
+        <p>Period boundaries use New Zealand dates. Editable times use your device time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Planned breaks are reference only and are never automatically deducted.</p>
+        <fieldset disabled={saving || recoveryLoading}><legend>Find scheduled work</legend>
+          <label><span>Staff member</span><select required value={scheduleRecovery.staffId} onChange={(event) => setScheduleRecovery({ ...scheduleRecovery, staffId: event.target.value, rows: null })}><option value="">Choose staff</option>{staff.filter((person) => person.staff_id).map((person) => <option key={person.id} value={person.staff_id!}>{person.display_name || person.email || 'Unnamed staff member'}</option>)}</select></label>
+          <div className="form-row"><label><span>Period from</span><input type="date" required value={scheduleRecovery.from} onChange={(event) => setScheduleRecovery({ ...scheduleRecovery, from: event.target.value, rows: null })} /></label><label><span>Period to (include overnight end date)</span><input type="date" required min={scheduleRecovery.from} value={scheduleRecovery.to} onChange={(event) => setScheduleRecovery({ ...scheduleRecovery, to: event.target.value, rows: null })} /></label></div>
+          <button type="button" className="btn btn-secondary" disabled={!scheduleRecovery.staffId || !scheduleRecovery.from || !scheduleRecovery.to} onClick={() => { void previewScheduleRecovery(); }}>Preview scheduled rows</button>
+        </fieldset>
+        {recoveryLoading && <p role="status">Loading scheduled sources…</p>}
+        {scheduleRecovery.rows?.length === 0 && <p>No eligible completed-time scheduled rows. Check the staff member and dates; draft, declined, cancelled and future rows cannot be recovered.</p>}
+        {scheduleRecovery.rows?.map((row, index) => {
+          const update = (patch: Partial<ScheduledTimesheetDraft>) => setScheduleRecovery({ ...scheduleRecovery, rows: scheduleRecovery.rows!.map((item, rowIndex) => rowIndex === index ? { ...item, ...patch } : item) });
+          return <fieldset key={`${row.source_type}:${row.source_id}`} disabled={saving}><legend><label><input type="checkbox" checked={row.selected} onChange={(event) => update({ selected: event.target.checked })} /> Include {new Date(row.scheduled_start).toLocaleString()} – {new Date(row.scheduled_end).toLocaleString()}</label></legend>
+            <p className="hr-source-provenance">{row.source_type}: {row.source_id}{row.shift_id && <> · Shift: {row.shift_id}</>}</p>
+            <p>Planned break: {row.planned_break_minutes} minutes ({row.break_unpaid ? 'unpaid' : 'paid'}). No deduction copied from plan.</p>
+            {row.selected && <><div className="form-row"><label><span>Reviewed start</span><input type="datetime-local" required value={row.reviewedStart} onChange={(event) => update({ reviewedStart: event.target.value })} /></label><label><span>Reviewed end</span><input type="datetime-local" required value={row.reviewedEnd} onChange={(event) => update({ reviewedEnd: event.target.value })} /></label></div><label><span>Evidence-confirmed unpaid break (minutes)</span><input type="number" min="0" max="1440" step="1" required value={row.unpaidBreak} onChange={(event) => update({ unpaidBreak: event.target.value })} /></label></>}
+          </fieldset>;
+        })}
+        {scheduleRecovery.rows?.some((row) => row.selected) && <p role="status">Reviewed hours to submit: {scheduleRecovery.rows.filter((row) => row.selected).reduce((total, row) => total + (new Date(row.reviewedEnd).getTime() - new Date(row.reviewedStart).getTime()) / 3600000 - Number(row.unpaidBreak) / 60, 0).toFixed(2)}. Invalid or overlapping times must be corrected before saving.</p>}
+        <label><span>Overtime hours (included in reviewed hours, not added)</span><input type="number" min="0" max="744" step="0.01" required disabled={saving} value={scheduleRecovery.overtime} onChange={(event) => setScheduleRecovery({ ...scheduleRecovery, overtime: event.target.value })} /></label>
+        <label><span>Recovery / amendment reason and evidence</span><textarea rows={3} maxLength={2000} required disabled={saving} value={scheduleRecovery.reason} onChange={(event) => setScheduleRecovery({ ...scheduleRecovery, reason: event.target.value })} /></label>
+        <p>Saving submits for branch check, then final approval by a different corporate payroll reviewer. Existing or overlapping timesheets are rejected; edit the existing sheet instead.</p>
+        {error && <p role="alert" className="hr-review-error">{error}</p>}
+        <footer><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setScheduleRecovery(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || recoveryLoading || !scheduleRecovery.reason.trim() || !scheduleRecovery.rows?.some((row) => row.selected)}>{saving ? 'Saving recovery' : 'Save manual timesheet for review'}</button></footer>
+      </form></div>}
+
+      {payCorrection && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-pay-title" onSubmit={correctTimesheetPay}>
+        <header><h2 id="timesheet-pay-title">Pay code / rate — THIS TIMESHEET ONLY</h2><button type="button" disabled={saving} onClick={() => setPayCorrection(null)} aria-label="Close timesheet pay correction">×</button></header>
+        <p>{staffNames[payCorrection.item.staff_id] || 'Staff member'} · {payCorrection.item.period_start} – {payCorrection.item.period_end}</p>
+        <p>Employment rates and rate rules are not changed. The hourly rate applies to every payable hour on this sheet; overtime hours are classified within those hours, not multiplied or added. Clear an override to restore the normal hourly rule.</p>
+        <label><span>Timesheet pay code override (blank = normal rule)</span><input maxLength={32} pattern="[A-Z0-9][A-Z0-9_-]*" disabled={saving} value={payCorrection.code} onChange={(event) => setPayCorrection({ ...payCorrection, code: event.target.value.toUpperCase() })} /></label>
+        <label><span>Timesheet hourly rate override (blank = normal rule)</span><input type="number" min="0" max="100000" step="0.0001" disabled={saving} value={payCorrection.rate} onChange={(event) => setPayCorrection({ ...payCorrection, rate: event.target.value })} /></label>
+        <label><span>Audited reason</span><textarea required maxLength={2000} rows={3} disabled={saving} value={payCorrection.reason} onChange={(event) => setPayCorrection({ ...payCorrection, reason: event.target.value })} /></label>
+        <p>Saving resets branch review. A new branch check and different corporate final reviewer are required. Approved or paid sheets cannot be changed here.</p>
+        {error && <p role="alert" className="hr-review-error">{error}</p>}
+        <footer><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setPayCorrection(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !payCorrection.reason.trim()}>{saving ? 'Saving' : 'Save timesheet-only pay correction'}</button></footer>
+      </form></div>}
+
+      {breakReview && <div className="hr-review-backdrop"><section className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-break-title">
+        <header><h2 id="timesheet-break-title">Timesheet break evidence</h2><button type="button" onClick={() => setBreakReview(null)} aria-label="Close break evidence">×</button></header>
+        <p>Missed, short and long breaks are review evidence, not automatic planned deductions. Existing worked-hour calculations deduct only recorded unpaid breaks. Manual recovery uses explicitly reviewed unpaid minutes instead.</p>
+        {breakReview.rows === null && !error && <p role="status">Loading break evidence…</p>}
+        {breakReview.rows?.length === 0 && <p>No linked scheduled shift break evidence for this period.</p>}
+        {breakReview.rows?.map((row) => <p key={row.shift_id} className="hr-source-provenance">Shift {row.shift_id}: planned {row.planned_minutes} min ({row.unpaid ? 'unpaid' : 'paid'}), recorded {Number(row.taken_minutes).toFixed(1)} min — {row.review_status === 'not_recorded' ? 'missed / not recorded' : plainWords(row.review_status)}.</p>)}
+        {error && <p role="alert" className="hr-review-error">{error}</p>}
+        <footer><button className="btn btn-secondary" type="button" onClick={() => setBreakReview(null)}>Close</button></footer>
+      </section></div>}
+
       {tab === 'timesheets' && (
         <section className="reports-section">
           <h2>{workingInBranch ? 'Branch timesheets' : 'Timesheets across branches'} ({timesheets.length})</h2>
           <p className="subtitle">{workingInBranch ? 'Branch review confirms local time and operational evidence. Corporate payroll gives final approval and exports paid time.' : 'Corporate payroll sees every branch’s sheets here. Branch check happens while working in the branch; final approval must come from a different reviewer than the branch check.'}</p>
+          {corporatePayrollReviewer && <button className="btn btn-secondary btn-sm" onClick={() => { setError(null); const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); setScheduleRecovery({ staffId: '', from: today, to: today, rows: null, reason: '', overtime: '0', requestId: crypto.randomUUID() }); }}>Recover scheduled shift into timesheet</button>}
+          {corporatePayrollReviewer && exportedBatchId && <button className="btn btn-secondary btn-sm" onClick={() => { setError(null); void downloadPayrollBatch(exportedBatchId); }}>Download last payroll batch</button>}
           {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
             Export approved to payroll
           </button>}
           <TimesheetRows rows={timesheets} staffNames={staffNames} corporateReviewer={corporatePayrollReviewer} actorId={profile?.id}
             onCorrect={(item) => setTimesheetCorrection({ item, actualHours: String(item.actual_hours ?? ''), overtimeHours: String(item.overtime_hours ?? 0), reason: '' })}
+            onPayCorrect={corporatePayrollReviewer ? (item) => { setError(null); setPayCorrection({ item, code: item.pay_code_override ?? '', rate: item.hourly_rate_override == null ? '' : String(item.hourly_rate_override), reason: '', requestId: crypto.randomUUID() }); } : undefined}
+            onBreakReview={(item) => { void reviewTimesheetBreaks(item); }}
             onReview={(item, decision) => { setReviewNotes(''); setReview({ kind: 'timesheet', id: item.id, decision }); }} />
         </section>
       )}

@@ -25,13 +25,13 @@ async function installOverdueShift(page: Page, openStops: boolean, openDispatch 
     };
     await route.fulfill({ json: query.get('scheduled_end')?.startsWith('lt.') && active ? [projectedShift] : [] });
   });
-  await page.route('**/rest/v1/rpc/get_officer_recovery_readiness', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => {
     expect(route.request().postDataJSON().p_shift_id).toBe(shift.id);
     await route.fulfill({ json: {
       shift_id: shift.id, status: shift.status,
       scheduled_end: shift.scheduled_end, actual_start: shift.scheduled_start,
       open_stops: [],
-      open_stop_count: openStops ? 1 : 0, open_required_task_count: openTasks,
+      open_stop_count: openStops ? 1 : 0, open_required_task_count: openTasks, open_break_count: 0, single_site_attendance: false,
       open_dispatch_job_count: openDispatch ? 1 : 0, active_welfare_alert_count: 0, debrief_submitted: false,
       blockers: [],
       can_end: false, can_end_after_debrief: !openStops && !openDispatch && openTasks === 0,
@@ -85,11 +85,11 @@ test('a saved overdue debrief stays recorded when ending the shift fails and is 
     debriefs += 1;
     await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
   });
-  await page.route('**/rest/v1/rpc/get_officer_recovery_readiness', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => {
     await route.fulfill({ json: {
       shift_id: fixture.shift.id, status: 'in_progress',
       scheduled_end: fixture.shift.scheduled_end, actual_start: fixture.shift.scheduled_start,
-      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, open_break_count: 0, single_site_attendance: false,
       active_welfare_alert_count: 0, debrief_submitted: debriefs > 0, blockers: [],
       can_end: debriefs > 0, can_end_after_debrief: true,
     } });
@@ -123,12 +123,12 @@ test('an overdue shift status refresh failure offers a retry without hiding the 
     debriefSubmitted = true;
     await route.fulfill({ json: [{ id: 'debrief-receipt', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }] });
   });
-  await page.route('**/rest/v1/rpc/get_officer_recovery_readiness', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => {
     if (!statusAvailable) return route.fulfill({ status: 503, json: { message: 'Status temporarily unavailable' } });
     await route.fulfill({ json: {
       shift_id: fixture.shift.id, status: 'in_progress',
       scheduled_end: fixture.shift.scheduled_end, actual_start: fixture.shift.scheduled_start,
-      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, open_break_count: 0, single_site_attendance: false,
       active_welfare_alert_count: 0, debrief_submitted: debriefSubmitted, blockers: [],
       can_end: debriefSubmitted, can_end_after_debrief: true,
     } });
@@ -232,12 +232,12 @@ test('a completion receipt for another shift is not shown as a successful end', 
 test('wrong-shift and malformed readiness responses cannot enable ending an overdue shift', async ({ page }) => {
   const fixture = await installOverdueShift(page, false);
   let responseKind: 'wrong-shift' | 'malformed' | 'valid' = 'wrong-shift';
-  await page.route('**/rest/v1/rpc/get_officer_recovery_readiness', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => {
     await route.fulfill({ json: {
       shift_id: responseKind === 'wrong-shift' ? 'a-different-shift' : fixture.shift.id,
       status: 'in_progress', scheduled_end: fixture.shift.scheduled_end,
       actual_start: fixture.shift.scheduled_start, open_stops: responseKind === 'malformed' ? null : [],
-      open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0,
+      open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, open_break_count: 0, single_site_attendance: false,
       active_welfare_alert_count: 0, debrief_submitted: false, blockers: [],
       can_end: false, can_end_after_debrief: true,
     } });
@@ -305,7 +305,7 @@ test('an overdue shift with open dispatch work directs the officer to operations
 
 test('an unavailable count-only recovery check never falls back to raw readiness', async ({ page }) => {
   const fixture = await installOverdueShift(page, false);
-  await page.route('**/rest/v1/rpc/get_officer_recovery_readiness', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => {
     await route.fulfill({ status: 404, json: { code: 'PGRST202', message: 'Recovery check unavailable' } });
   });
   await signInAsOfficer(page, '/officer/schedule');
@@ -454,17 +454,17 @@ test('active shift records and closes a governed rest break', async ({ page }) =
     await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
   });
   await page.route('**/rest/v1/rpc/start_shift_break', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', started_at: '2026-08-30T10:00:00.000Z' }) });
+    expect(route.request().postDataJSON().p_break_type).toBe('rest');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', is_paid: true, started_at: '2026-08-30T10:00:00.000Z', ended_at: null }) });
   });
   await page.route('**/rest/v1/rpc/end_shift_break', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', started_at: '2026-08-30T10:00:00.000Z', ended_at: '2026-08-30T10:10:00.000Z' }) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', is_paid: true, started_at: '2026-08-30T10:00:00.000Z', ended_at: '2026-08-30T10:10:00.000Z' }) });
   });
   await signInAsOfficer(page, '/officer/schedule');
-  await expect(page.getByRole('button', { name: 'Start rest break' })).toBeVisible();
-  await page.getByRole('button', { name: 'Start rest break' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Rest break started and recorded.' })).toBeVisible();
-  await page.getByRole('button', { name: 'End rest break' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Break ended and duration recorded.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start break', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Break started and recorded.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Finish break' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Break finished. Actual duration recorded.' })).toBeVisible();
 });
 
 test('officer submits an open shift-swap request with a reason', async ({ page }) => {
@@ -551,12 +551,12 @@ test('starting a shift away from its place is advised, not blocked, and the reas
   });
   await signInAsOfficer(page, '/officer/schedule');
   await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
-  const dialog = page.getByRole('dialog', { name: "You're not at Civic Centre" });
-  await expect(dialog.getByText(/You are about 3\.8 km from Civic Centre/)).toBeVisible();
-  await expect(dialog.getByText(/You can still start; the start is recorded as away from site/)).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Attendance needs review' });
+  await expect(dialog.getByText(/GPS does not confirm you are at the assigned place/)).toBeVisible();
+  await expect(dialog.getByText(/not as verified attendance/)).toBeVisible();
   expect(startPayload).toBeNull();
-  await dialog.getByLabel('Reason (optional)').fill('Starting from the depot, driving to site now.');
-  await dialog.getByRole('button', { name: 'Start anyway' }).click();
+  await dialog.getByLabel('Attendance explanation (optional)').fill('Starting from the depot, driving to site now.');
+  await dialog.getByRole('button', { name: 'Start shift', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'recorded as away from Civic Centre (about 3.8 km)' })).toBeVisible();
   expect(startPayload).toMatchObject({ p_off_site_reason: 'Starting from the depot, driving to site now.', p_gps_lat: -41.274 });
 });
@@ -578,27 +578,28 @@ test('one shift at a time: starting the next shift while still on one is confirm
   await signInAsOfficer(page, '/officer/schedule');
   await page.getByRole('button', { name: 'Start shift' }).click();
   const dialog = page.getByRole('dialog', { name: "You're still on another shift" });
-  await expect(dialog.getByText(/Your patrol shift .* is still in progress\. You can only be on one shift at a time, so starting this one ends it now\./)).toBeVisible();
+  await expect(dialog.getByText(/Starting this shift ends your previous in-progress shift/)).toBeVisible();
   expect(startPayload).toBeNull();
-  await dialog.getByRole('button', { name: 'End it and start this one' }).click();
+  await dialog.getByRole('button', { name: 'Start shift and end previous shift' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Shift started at' })).toContainText('Your earlier patrol shift was ended at');
   expect(startPayload).toMatchObject({ p_shift_id: next.id, p_expected_status: 'accepted' });
   await expect(page.locator('.officer-assigned-shift').filter({ hasText: 'ended when your next shift started' })).toHaveCount(1);
 });
 
 const ACTIVE_SHIFT = { id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', shift_type: 'patrol', scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', notes: 'Active patrol', shift_health: 'on_track', total_stops: 2, completed_stops: 1, organization_id: '33333333-3333-4333-8333-333333333333', officer_user_id: '22222222-2222-4222-8222-222222222222' };
-const readinessBase = { shift_id: ACTIVE_SHIFT.id, status: 'in_progress', service_type: 'patrol', scheduled_end: ACTIVE_SHIFT.scheduled_end, actual_start: null, open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, active_welfare_alert_count: 0, debrief_submitted: false, blockers: ['The debrief has not been recorded'], can_end: false, can_end_after_debrief: true };
+const readinessBase = { shift_id: ACTIVE_SHIFT.id, status: 'in_progress', scheduled_end: ACTIVE_SHIFT.scheduled_end, actual_start: null, open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, active_welfare_alert_count: 0, open_break_count: 0, single_site_attendance: false, debrief_submitted: false, blockers: [], can_end: false, can_end_after_debrief: true };
 
 test('End shift says what is still open and will not end the shift until it is closed', async ({ page }) => {
   await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([ACTIVE_SHIFT]) }));
-  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...readinessBase, open_stops: [{ stop_id: 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1', place: 'Tahunanui Beach Reserve', status: 'pending', module_key: null }], open_stop_count: 1, open_required_task_count: 1, open_dispatch_job_count: 1, blockers: ['1 stop is still open', '1 required stop task is not done', '1 dispatch job is still open', 'The debrief has not been recorded'], can_end_after_debrief: false }) }));
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...readinessBase, open_stop_count: 1, open_required_task_count: 1, open_dispatch_job_count: 1, can_end_after_debrief: false }) }));
   let completeCalled = false;
   await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => { completeCalled = true; await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }); });
   await signInAsOfficer(page, '/officer/schedule');
   await page.getByRole('button', { name: 'End shift' }).click();
   const dialog = page.getByRole('dialog', { name: 'End patrol shift' });
   await expect(dialog.getByText('1 stop still open')).toBeVisible();
-  await expect(dialog.getByText('Tahunanui Beach Reserve')).toBeVisible();
+  await expect(dialog.getByText('Tahunanui Beach Reserve')).toHaveCount(0);
+  await expect(dialog.getByText('1 required task not done')).toBeVisible();
   await expect(dialog.getByText('1 dispatch job still open')).toBeVisible();
   await expect(dialog.getByText('No welfare alerts active')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
@@ -612,7 +613,7 @@ test('when everything is closed, End shift takes the debrief and ends the shift 
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.29038, longitude: 173.24687 });
   await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([ACTIVE_SHIFT]) }));
-  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(readinessBase) }));
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(readinessBase) }));
   let debriefPayload: Record<string, unknown> | null = null;
   let completePayload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/submit_shift_debrief', async (route) => { debriefPayload = JSON.parse(route.request().postData() ?? '{}'); await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '99999999-9999-4999-8999-999999999999', created: true, submitted_at: '2026-08-29T21:30:00.000Z' }]) }); });
@@ -634,7 +635,7 @@ test('when everything is closed, End shift takes the debrief and ends the shift 
 
 test('End shift is one tap from the officer home page while on shift', async ({ page }) => {
   await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([ACTIVE_SHIFT]) }));
-  await page.route('**/rest/v1/rpc/get_shift_end_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...readinessBase, debrief_submitted: true, blockers: [], can_end: true }) }));
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...readinessBase, debrief_submitted: true, blockers: [], can_end: true }) }));
   await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: ACTIVE_SHIFT.id, shift_status: 'completed', completed_at: '2026-08-29T21:35:00.000Z' }]) }));
   await signInAsOfficer(page, '/officer');
   await expect(page.getByRole('heading', { name: /^On shift/ })).toBeVisible();

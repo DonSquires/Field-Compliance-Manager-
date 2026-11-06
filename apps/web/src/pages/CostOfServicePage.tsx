@@ -1,10 +1,5 @@
 /**
- * CostOfServicePage — organisation-level recorded travel, for cost of service.
- *
- * Answers: "what did it cost us, in travel, to serve this client/place/officer
- * over this window?" — using distance officers actually recorded, not an
- * estimate. The figures are operational evidence. Pricing and invoicing stay
- * on the finance pipeline; nothing on this page writes.
+ * Recorded travel only. This reader does not calculate financial cost.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Gauge } from 'lucide-react';
@@ -68,10 +63,10 @@ const CostOfServicePage: React.FC = () => {
 
   if (!organizationId) {
     return <div className="cost-of-service">
-      <header className="cost-of-service-header"><div><span>Reports &amp; analytics</span><h1>Cost of service</h1></div></header>
+      <header className="cost-of-service-header"><div><span>Reports &amp; analytics</span><h1>Recorded travel</h1></div></header>
       <p className="cost-of-service-message" role="status">
         <AlertTriangle size={17} aria-hidden="true" />
-        No organisation is in context, so cost of service cannot be reported. Choose an organisation and try again.
+        No organisation is in context, so recorded travel is unavailable. Choose an organisation and try again.
       </p>
     </div>;
   }
@@ -80,14 +75,15 @@ const CostOfServicePage: React.FC = () => {
     <header className="cost-of-service-header">
       <div>
         <span>Reports &amp; analytics</span>
-        <h1><Gauge size={20} aria-hidden="true" />Cost of service</h1>
-        <p>Travel officers recorded serving {scopeLabel}, over the last {monthsBack} months. Operational evidence for cost of service — not an invoice.</p>
+        <h1><Gauge size={20} aria-hidden="true" />Recorded travel</h1>
+        <p>Travel officers recorded serving {scopeLabel}, over the last {monthsBack} months. Distance evidence only — not financial cost or an invoice.</p>
       </div>
     </header>
 
     {scopeError && <p className="cost-of-service-message" role="alert"><AlertTriangle size={17} aria-hidden="true" />{scopeError}</p>}
 
-    <div className="cost-of-service-filters" role="group" aria-label="Cost of service scope">
+    <p className="cost-of-service-message" role="note">Financial cost of service is not calculated on this page. Officer logs, static attendance and dispatch jobs do not imply recorded travel. Missing distance, wages or rates are not zero cost.</p>
+    <div className="cost-of-service-filters" role="group" aria-label="Recorded travel scope">
       <label>
         <span>Window</span>
         <select value={monthsBack} onChange={(event) => setMonthsBack(Number(event.target.value))}>
