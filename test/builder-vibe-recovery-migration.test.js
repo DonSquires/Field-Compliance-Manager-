@@ -7,9 +7,12 @@ const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
-const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261107170000_vibe_governed_turn_recovery.sql'), 'utf8');
+const migrationsDir = path.join(__dirname, '../supabase/migrations');
+const migration = fs.readFileSync(path.join(migrationsDir, '20261107190000_vibe_governed_turn_recovery.sql'), 'utf8');
 
 test('governed Vibe recovery is service-only, branch-bound, idempotent and audited', () => {
+  assert.deepEqual(fs.readdirSync(migrationsDir).filter(file => file.startsWith('20261107190000_')),
+    ['20261107190000_vibe_governed_turn_recovery.sql']);
   assert.match(migration, /SECURITY DEFINER\s+SET search_path = ''/);
   assert.match(migration, /FROM PUBLIC, anon, authenticated/);
   assert.match(migration, /TO service_role/);

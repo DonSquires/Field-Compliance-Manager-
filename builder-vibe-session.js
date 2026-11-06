@@ -189,6 +189,7 @@ function toolCallKey(tool, args) {
 
 const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'find_files', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
 const EDIT_VIBE_TOOLS = new Set(['write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'generate_visual_baselines']);
+const UNKNOWN_PATCH_TARGET = 'apply_patch (no file paths in diff)';
 // Files an edit call targets, so a failure on one file is cleared only by a later success on that file.
 function editTargets(tool, args = {}) {
   if (tool === 'apply_patch') {
@@ -197,7 +198,7 @@ function editTargets(tool, args = {}) {
       const match = /^(?:\+\+\+|---) (?:[ab]\/)?(\S+)/.exec(line) || /^\*\*\* (?:Update|Add|Delete) File: (.+?)\s*$/.exec(line) || /^\*\*\* Move to: (.+?)\s*$/.exec(line);
       if (match && match[1] !== '/dev/null') paths.add(match[1]);
     }
-    return paths.size ? [...paths] : ['apply_patch (no file paths in diff)'];
+    return paths.size ? [...paths] : [UNKNOWN_PATCH_TARGET];
   }
   if (tool === 'generate_visual_baselines') {
     const paths = Array.isArray(args.paths) ? args.paths.map(String).filter(Boolean) : [];
@@ -928,7 +929,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const payload = entry.payload || {};
     if (!EDIT_VIBE_TOOLS.has(payload.tool)) continue;
     const targets = Array.isArray(payload.edit_targets) ? payload.edit_targets : editTargets(payload.tool, payload.args);
-    if (!targets.length && payload.ok === false && !/^no-op edit refused/.test(String(payload.preview || ''))) {
+    if ((!targets.length || targets.includes(UNKNOWN_PATCH_TARGET))
+      && payload.ok === false && !/^no-op edit refused/.test(String(payload.preview || ''))) {
       throw new Error('Interrupted edit targets are unavailable; review the saved edit evidence before resuming.');
     }
     for (const target of targets) {
@@ -1053,12 +1055,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
     try { result = await tools.run({ command }); } catch (error) { result = { error: clip(redactGitError(error.message), 1500) }; }
     checkedFingerprint = revision;
     toolCache.clear();
-    recordVerification(command, result);
+    const verificationSteps = recordVerification(command, result);
+    const progressMarkers = markVerificationSteps(verificationSteps);
     await store.post(session.id, {
       role: 'tool', kind: 'test', content: toolHeadline('run', { command }),
       payload: {
         message_id: message.id, tool: 'run', args: { command }, ok: !failedVerifications.has(verificationKey(command)),
         preview: resultPreview(result), automatic: true, reason: 'web_typescript_handoff', source_fingerprint: revision,
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}),
       },
     });
   };
@@ -1079,6 +1083,21 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     return hash.digest('hex');
   };
+  const verificationProgress = new Set(interruptedExecution.flatMap(entry =>
+    Array.isArray(entry.payload?.verification_progress)
+      ? entry.payload.verification_progress.filter(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value))
+      : []));
+  const markVerificationProgress = (command, ok) => {
+    const marker = crypto.createHash('sha256')
+      .update(uiFingerprint(changedVsBase())).update('\0')
+      .update(verificationKey(command)).update('\0')
+      .update(ok ? 'passed' : 'failed').digest('hex');
+    verificationProgress.add(marker);
+    return marker;
+  };
+  const markVerificationSteps = steps => steps
+    .filter(step => /^exit \d+\b/.test(String(step.preview || '')))
+    .map(step => markVerificationProgress(step.command, step.ok));
   const runHumanTest = async ({ reason, automatic, rerun = false, external = false }) => {
     const changedFiles = changedVsBase();
     const fingerprint = uiFingerprint(humanTestInputFiles(changedFiles));
@@ -1195,9 +1214,12 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const uiFiles = humanTestInputFiles(changedVsBase());
     if (!uiFiles.length || uiFingerprint(uiFiles) === humanFingerprint || uiFingerprint(uiFiles) === humanTestAttemptedFingerprint) return;
     const { result, preview, fingerprint } = await runHumanTest({ reason: 'automatic pre-handoff check of the changed web files', automatic: true });
+    const progressMarkers = !result.reused && reusableHumanTest(result)
+      ? [markVerificationProgress('human_test', result.ok)] : [];
     await store.post(session.id, {
       role: 'tool', kind: 'test', content: toolHeadline('human_test', {}),
-      payload: { message_id: message.id, args: { automatic: true }, preview, automatic: true, reason: 'web_ui_handoff', ...humanTestPayload(result, fingerprint) },
+      payload: { message_id: message.id, args: { automatic: true }, preview, automatic: true, reason: 'web_ui_handoff', ...humanTestPayload(result, fingerprint),
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}) },
     });
   };
   const repairRounds = limits.repairRounds ?? VIBE_LIMITS.repairRounds;
@@ -1233,15 +1255,29 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const autoRoundLimit = Math.min(VIBE_LIMITS.autoContinuationRounds, Math.max(0, Number.isInteger(limits.autoContinuationRounds) ? limits.autoContinuationRounds : VIBE_LIMITS.autoContinuationRounds));
   const autoWallLimit = Math.min(VIBE_LIMITS.autoContinuationWallMs, Math.max(0, Number.isFinite(limits.autoContinuationWallMs) ? limits.autoContinuationWallMs : VIBE_LIMITS.autoContinuationWallMs));
   let autoRounds = priorContinuations.length;
-  const autoStarted = priorContinuations.length ? Date.parse(priorContinuations[0].payload?.started_at) : started;
-  if (!Number.isFinite(autoStarted)) throw new Error('Automatic continuation timing evidence is invalid.');
+  const startReceipt = interruptedExecution.find(entry => entry.payload?.reason === 'vibe_execution_started');
+  const autoStarted = startReceipt ? Date.parse(startReceipt.payload?.started_at)
+    : priorContinuations.length ? Date.parse(priorContinuations[0].payload?.started_at) : started;
+  if (!Number.isFinite(autoStarted) || autoStarted > started + 60_000
+    || priorContinuations.some(entry => Date.parse(entry.payload?.started_at) !== autoStarted)) {
+    throw new Error('Automatic continuation timing evidence is invalid.');
+  }
+  if (!startReceipt) {
+    await store.post(session.id, {
+      role: 'system', kind: 'status',
+      content: 'Bob started this coding turn; its time limit is preserved if the worker restarts.',
+      payload: { message_id: message.id, reason: 'vibe_execution_started', started_at: new Date(autoStarted).toISOString(),
+        timing_source: priorContinuations.length ? 'continuation_receipt' : resuming ? 'legacy_recovery' : 'new_turn' },
+    });
+  }
   const investigated = new Set(interruptedExecution
     .filter(entry => CACHEABLE_VIBE_TOOLS.has(entry.payload?.tool) && entry.payload?.ok === true)
     .map(entry => toolCallKey(entry.payload.tool, entry.payload.args || {})));
   const progressFingerprint = () => crypto.createHash('sha256')
     .update(uiFingerprint(changedVsBase())).update('\0')
     .update([...failedVerifications.keys()].sort().join('\0')).update('\0')
-    .update([...investigated].sort().join('\0')).digest('hex');
+    .update([...investigated].sort().join('\0')).update('\0')
+    .update([...verificationProgress].sort().join('\0')).digest('hex');
   const seenProgress = new Set(priorContinuations.map(entry => entry.payload?.state_fingerprint).filter(Boolean));
   seenProgress.add(progressFingerprint());
   let budgetReason = 'The execution budget was reached before this request was finished.';
@@ -1290,7 +1326,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const contextOverrides = new Map();
   const reportedCompaction = new Set();
   for (let turn = 1; ; turn++) {
-    if (autoRounds > 0 && Date.now() - autoStarted >= autoWallLimit) {
+    if ((resuming || autoRounds > 0) && Date.now() - autoStarted >= autoWallLimit) {
       budgetReason = 'The automatic continuation reached its safety limit before the request was finished.';
       break;
     }
@@ -1392,7 +1428,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       const reason = await interruption();
       if (reason) return { reply: reason, error: true, tools };
     }
-    if (autoRounds > 0 && Date.now() - autoStarted >= autoWallLimit) {
+    if ((resuming || autoRounds > 0) && Date.now() - autoStarted >= autoWallLimit) {
       budgetReason = 'The automatic continuation reached its safety limit before the request was finished.';
       break;
     }
@@ -1529,10 +1565,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
       if (failedEdits.size && !args.blocked_reason && !failedEditReplyCorrected) {
         // One file changed is not the whole request; failed edits elsewhere must be fixed or reported, never claimed.
         failedEditReplyCorrected = true;
-        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) });
+        const correction = {
           error: 'Reply refused: these edits failed and were never applied, so that part of the owner\'s request is not done. read_file the exact current lines and retry with old_text copied verbatim, or reply with args.blocked_reason naming what remains undone. Do not claim changes to these files.',
           failed_edits: Object.fromEntries(failedEdits),
-        }) });
+        };
+        pushModelFeedback(correction, historyHasAttachments
+          ? { ...correction, failed_edits: '[Earlier failed edit paths and output withheld from external models; use a private model to inspect them.]' }
+          : null);
         const next = nextCandidate();
         if (next > 0) {
           const previous = candidates[active];
@@ -1625,6 +1665,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (CACHEABLE_VIBE_TOOLS.has(call.tool) && !result?.error && !result?.reused) investigated.add(callKey);
     const humanTestCall = call.tool === 'human_test' && result && !result.error?.startsWith?.('identical tool call');
     const browserTestCall = call.tool === 'browser_test' && result && !result.error?.startsWith?.('identical tool call');
+    const progressMarkers = call.tool === 'run' ? markVerificationSteps(verificationSteps)
+      : humanTestCall && !result.reused && reusableHumanTest(result) ? [markVerificationProgress('human_test', result.ok)]
+        : browserTestCall && result.scope === 'targeted' && reusableHumanTest(result)
+          ? [markVerificationProgress(`${result.verification_key}@${result.revision}`, result.ok)] : [];
     await store.post(session.id, {
       role: 'tool', kind: call.tool === 'run' || humanTestCall || browserTestCall ? 'test' : 'tool', content: toolHeadline(call.tool, args),
       payload: {
@@ -1633,6 +1677,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         preview: humanTestCall || browserTestCall ? humanTestPreview(browserTestCall ? { ...result, scope: 'targeted', revision: args.revision } : result) : resultPreview(result), turn,
         ...(EDIT_VIBE_TOOLS.has(call.tool) ? { edit_targets: editTargets(call.tool, args) } : {}),
         ...(verificationSteps.length ? { verification_steps: verificationSteps } : {}),
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}),
         ...(humanTestCall ? humanTestPayload(result, humanFingerprint) : {}),
         ...(browserTestCall && result.scope === 'targeted' ? { browser_test: result } : {}),
       },
