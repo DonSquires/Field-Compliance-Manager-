@@ -97,7 +97,8 @@ test('every organisation-scoped policy evaluates reach once per statement', () =
   assert.deepEqual(unguarded, [], `accessible_org_ids() needs the grand-master arm and COALESCE in: ${unguarded.join(', ')}`);
 
   const rewritten = shaped.filter(({ using, check }) => using.templates + check.templates > 0);
-  assert.ok(rewritten.length >= 357, `expected at least 357 initPlan reach policies, found ${rewritten.length}`);
+  assert.ok(rewritten.length >= 356,
+    `expected at least 356 initPlan reach policies after narrowing staff document access, found ${rewritten.length}`);
 });
 
 test('the reach template is recognised in migration and pg_dump form and nowhere else', () => {
