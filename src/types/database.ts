@@ -40684,6 +40684,17 @@ export type Database = {
           transmission_id: string
         }[]
       }
+      close_unfinished_officer_shift: {
+        Args: {
+          p_actual_end: string
+          p_client_request_id: string
+          p_expected_status: string
+          p_expected_updated_at: string
+          p_reason: string
+          p_shift_id: string
+        }
+        Returns: Json
+      }
       coalesce_cctv_stationary_vehicle_observations: {
         Args: { p_job_id: string }
         Returns: number
@@ -49507,6 +49518,23 @@ export type Database = {
           p_pdf_path: string
           p_pdf_sha256: string
           p_renderer_version: string
+        }
+        Returns: Json
+      }
+      record_retrospective_noise_job_outcome: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_job_id: string
+          p_outcome_notes: string
+          p_reason: string
+          p_source_arrived_local: string
+          p_source_departed_local: string
+          p_source_name: string
+          p_source_received_local: string
+          p_source_reference: string
+          p_source_sha256: string
+          p_source_time_zone: string
         }
         Returns: Json
       }
