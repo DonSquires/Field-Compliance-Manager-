@@ -100,11 +100,11 @@ function normalizeRunCommand(command, workspacePath = null) {
 
 const PRESERVE_TESTS = 'Existing tests are the repository\'s evidence and must keep passing: keep every existing test and its title, and add new tests alongside them (replace_in_file to insert; never write_file over an existing test file). If the approved behavior changes what an existing test asserts, edit that assertion in place under the same title. run {"command":"git show HEAD:<file>"} shows the pinned version.';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
-const PRIVATE_SEARCH_PATH = /(?:^|\/)(?:[^/]*secret[^/]*|[^/]*credential[^/]*|[^/]*env(?:\..*)?|id_rsa[^/]*|id_ed25519[^/]*)(?:\/|$)|\.(?:pem|key|pfx|p12|crt|keystore)$/i;
+const PRIVATE_SEARCH_PATH = /(?:^|\/)(?:[^/]*secret[^/]*|[^/]*credential[^/]*|[^/]*env(?:\.[^/]*)?|id_rsa[^/]*|id_ed25519[^/]*|[^/]*\.(?:pem|key|pfx|p12|crt|keystore))(?:\/|$)/i;
 const SEARCH_EXCLUDES = [
   ...[...SKIP_DIRS].map(dir => `:(glob,exclude)**/${dir}/**`),
-  ...['.env', '.env.*', '*secret*', '*secret*/**', '*credential*', '*credential*/**', 'id_rsa*', 'id_ed25519*', '*.pem', '*.key', '*.pfx', '*.p12', '*.crt', '*.keystore']
-    .map(pattern => `:(glob,exclude,icase)**/${pattern}`),
+  ...['*env', '*env.*', '*secret*', '*credential*', 'id_rsa*', 'id_ed25519*', '*.pem', '*.key', '*.pfx', '*.p12', '*.crt', '*.keystore']
+    .flatMap(pattern => [`:(glob,exclude,icase)**/${pattern}`, `:(glob,exclude,icase)**/${pattern}/**`]),
 ];
 
 function git(cwd, args, options = {}) {
@@ -322,7 +322,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     `- read_file {path, start_line?, end_line?}   read a text file (max ${limits.readCapChars} chars per call). An oversized range returns the real head AND tail with the omitted line range named; never invent the omitted body — search it or request that range.`,
     '- outline {path, pattern?}              declaration index of one file: every function/const/class/type/case/SQL object with its line number (pattern narrows it). USE THIS FIRST on any file over ~800 lines, then read_file only the ranges you need — never walk a big file window by window.',
     '- find_files {name, limit?}               discover filenames by a case-insensitive path fragment (2-100 characters), including new draft files. This is not content or semantic search. Ignored/generated files and secret paths are excluded.',
-    '- search {query, path?, regex?, context?}   literal case-sensitive text across tracked and new draft files, excluding ignored/generated files and secret paths. path = repository-relative file/directory/glob or array; use an array for multiple paths containing spaces. regex defaults to false; context = lines around each hit (0-8). This is not semantic search; discover filenames with find_files, then read the owning source.',
+    '- search {query, path?, regex?, context?}   literal case-sensitive text across tracked and new draft files, excluding ignored/generated files and secret paths. path = one repository-relative file/directory/glob; every string is one pathspec, including spaces. Use an array for multiple pathspecs. regex defaults to false; context = lines around each hit (0-8). This is not semantic search; discover filenames with find_files, then read the owning source.',
     '- git_log {path?, limit?}               recent commits (optionally for a path)',
     '- git_diff {}                            your uncommitted changes so far',
     '- write_file {path, content}             create or overwrite a file (full content)',
@@ -896,10 +896,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (pathspec !== undefined && typeof pathspec !== 'string' && !Array.isArray(pathspec)) {
         return { error: 'search path must be a repository-relative string or array' };
       }
-      // Models pass several pathspecs at once ("services/fcm-api/src/bob test"); honour each one.
-      const requested = Array.isArray(pathspec) ? pathspec
-        : typeof pathspec === 'string' && fs.existsSync(path.join(workspacePath, pathspec)) ? [pathspec]
-        : String(pathspec ?? '').split(/[\s,]+/).filter(Boolean);
+      const requested = Array.isArray(pathspec) ? pathspec : pathspec === undefined ? [] : [pathspec];
       const pathspecs = requested.map(value => value === './' ? '.' : typeof value === 'string' ? value.replace(/^\.\//, '').replace(/\/+$/, '') : value);
       if (pathspecs.some(value => typeof value !== 'string' || !value.trim() || /^(?:\/|[A-Za-z]:|:)|\\|[\0\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(value)
         || (value !== '.' && !normalizeRepoPath(value)))) {

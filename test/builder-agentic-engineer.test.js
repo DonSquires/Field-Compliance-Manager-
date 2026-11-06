@@ -1109,6 +1109,14 @@ test('draft discovery finds new files and excludes ignored, generated and secret
   assert.ok(!tools.write_file({ path: 'lib/draft.js', content: 'const greeting = "Bob Test draft discovery";\n' }).error);
   fs.writeFileSync(path.join(repo.source, 'lib/draft.test.js'), '// Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, '.env.draft'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'production.env'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'lib/draft.env.local'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'lib/DRAFT.ENV.PRODUCTION'), 'Bob Test draft discovery\n');
+  execFileSync('git', ['add', '--', 'lib/DRAFT.ENV.PRODUCTION'], { cwd: repo.source });
+  fs.mkdirSync(path.join(repo.source, 'config.env.local'));
+  fs.writeFileSync(path.join(repo.source, 'config.env.local/draft.txt'), 'Bob Test draft discovery\n');
+  fs.mkdirSync(path.join(repo.source, 'keys.pem'));
+  fs.writeFileSync(path.join(repo.source, 'keys.pem/draft.txt'), 'Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, 'draft.pem'), 'Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, 'credentials.json'), 'Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, 'draft-secret.txt'), 'Bob Test draft discovery\n');
@@ -1132,6 +1140,11 @@ test('draft discovery finds new files and excludes ignored, generated and secret
   assert.equal(found.matches, 2, JSON.stringify(found));
   assert.ok(found.results.every(line => line.startsWith('lib/draft')));
   assert.equal(tools.search({ query: 'Bob Test draft discovery', path: '.env.draft' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'production.env' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'lib/draft.env.local' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'lib/DRAFT.ENV.PRODUCTION' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'config.env.local' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'keys.pem' }).matches, 0);
   assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'credentials.json' }).matches, 0);
   assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'draft-secret.txt' }).matches, 0);
   assert.equal(tools.search({ query: 'Bob Test draft discovery', path: '.secrets' }).matches, 0);
@@ -1142,9 +1155,15 @@ test('draft search preserves space-containing paths and rejects invalid scopes i
   t.after(() => fs.rmSync(repo.root, { recursive: true, force: true }));
   const tools = createTools({ workspacePath: repo.source, repoRoot: repo.source, lane: 'backend', limits: DEFAULT_LIMITS, log() {} });
   tools.write_file({ path: 'lib/new source.js', content: 'const greeting = "Bob Test scoped search";\n' });
+  fs.mkdirSync(path.join(repo.source, 'lib/sample sources'));
+  fs.writeFileSync(path.join(repo.source, 'lib/sample sources/one.js'), 'const match = "Bob Test space glob";\n');
   const found = tools.search({ query: 'Bob Test scoped search', path: 'lib/new source.js' });
   assert.deepEqual(found.paths, ['lib/new source.js']);
   assert.equal(found.matches, 1, JSON.stringify(found));
+  const spaceGlob = tools.search({ query: 'Bob Test space glob', path: 'lib/sample sources/*.js' });
+  assert.deepEqual(spaceGlob.paths, ['lib/sample sources/*.js']);
+  assert.equal(spaceGlob.matches, 1, JSON.stringify(spaceGlob));
+  assert.match(spaceGlob.results[0], /^lib\/sample sources\/one\.js:/);
   assert.equal(tools.search({ query: 'Bob Test scoped search', path: ['lib/*.js'] }).matches, 1);
   assert.equal(tools.search({ query: 'sum', path: '.' }).error, undefined);
   for (const scope of [null, '', [], '../lib', '/', '/lib', [''], ['lib', '../test'], ['C:/Windows'], [42]]) {
@@ -1161,7 +1180,7 @@ test('search honours several pathspecs and treats no matches as a result; apply_
   const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'cafebabecafebabecafebabe', targetSha: repo.sha });
   const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
 
-  const multi = tools.search({ query: 'sum', path: 'lib test' });
+  const multi = tools.search({ query: 'sum', path: ['lib', 'test'] });
   assert.deepEqual(multi.paths, ['lib', 'test']);
   assert.equal(multi.matches, 3, JSON.stringify(multi)); // 1 in lib/sum.js + 2 in test/sum.test.js
   const none = tools.search({ query: 'definitely-not-present', path: 'lib' });
