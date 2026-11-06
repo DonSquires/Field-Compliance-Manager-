@@ -202,8 +202,9 @@ audited recovery of the original completed failed coding message. It requires
 the exact unpublished branch head and an eligible verification/budget failure;
 closed/busy sessions, newer/pending owner instructions, reused requests and
 exhausted restart counts refuse recovery. Request replay is idempotent and audit
-failure rolls back the queue change. This is an operator recovery path, not a
-model tool or permission to impersonate an owner.
+failure rolls back the queue change. The worker also rechecks the saved session
+and actual workspace head before changing anything. This is an operator
+recovery path, not a model tool or permission to impersonate an owner.
 
 After: focused runtime tests cover multi-round repair, fresh checks, honest
 budget exhaustion, interruption, restart evidence, private-context handling and

@@ -1854,11 +1854,19 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
   }
   let outcome;
   try {
+    const recoveryHead = message.payload?.governed_recovery_expected_head;
+    if (recoveryHead !== undefined && (!/^[0-9a-f]{40}$/.test(String(recoveryHead))
+      || !session.base_sha || session.head_sha !== recoveryHead || !(Number(message.payload?.restart_retries) >= 1))) {
+      throw new Error('The governed recovery branch head no longer matches the saved session and workspace. Recovery stopped without changing the branch.');
+    }
     if (Number(message.payload?.restart_retries) > 0 && session.base_sha
       && !fs.existsSync(path.join(vibeWorkspacePath(deps.workspaceRoot, session.id), '.git'))) {
       throw new Error('The interrupted Vibe workspace is missing. Recovery stopped without recreating or resetting the branch; restore the workspace before retrying.');
     }
     const ws = ensureVibeWorkspace({ workspaceRoot: deps.workspaceRoot, session, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead });
+    if (recoveryHead !== undefined && git(ws.workspacePath, ['rev-parse', 'HEAD']) !== recoveryHead) {
+      throw new Error('The governed recovery branch head no longer matches the saved session and workspace. Recovery stopped without changing the branch.');
+    }
     if (deps.prepareWorkspace) await deps.prepareWorkspace(ws.workspacePath);
     revertEphemeralWorkspaceChanges(ws.workspacePath);
     if (ws.created) {
