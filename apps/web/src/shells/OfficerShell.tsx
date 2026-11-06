@@ -608,7 +608,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
       </main>
       <BobPanel
         open={bobOpen && activeModule !== 'bob'}
-        presentation="docked"
+        presentation="fullscreen"
         onClose={() => setBobOpen(false)}
         context={bobContext}
       />

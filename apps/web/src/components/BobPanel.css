@@ -114,6 +114,122 @@
   margin-inline: 10px;
 }
 
+/* Field-portal Bob: a full-screen, single-purpose chat with large, readable controls. */
+.bob-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 17px;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+
+.bob-panel.is-fullscreen .bob-panel-header {
+  min-height: 60px;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.bob-panel.is-fullscreen .bob-panel-identity strong {
+  font-size: 18px;
+}
+
+.bob-panel.is-fullscreen .bob-panel-identity small {
+  font-size: 13px;
+}
+
+.bob-fullscreen-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 12px 0 6px;
+  border: 1px solid #31485b;
+  border-radius: 8px;
+  color: #f3f8fb;
+  background: #10202d;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bob-fullscreen-back:focus-visible,
+.bob-panel.is-fullscreen .bob-panel-header-actions button:focus-visible {
+  outline: 3px solid #7dd3c7;
+  outline-offset: 2px;
+}
+
+.bob-panel.is-fullscreen .bob-panel-header-actions button {
+  min-height: 48px;
+  padding: 0 14px;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.bob-panel.is-fullscreen .bob-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bob-panel.is-fullscreen .bob-main-pane {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.bob-panel.is-fullscreen .bob-message-stream {
+  padding-inline: 14px;
+}
+
+.bob-panel.is-fullscreen .bob-message-content {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.bob-panel.is-fullscreen .bob-empty-state {
+  margin-inline: 14px;
+}
+
+.bob-panel.is-fullscreen .bob-empty-state strong {
+  font-size: 20px;
+}
+
+.bob-panel.is-fullscreen .bob-empty-state p {
+  font-size: 16px;
+}
+
+.bob-panel.is-fullscreen .bob-quick-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.bob-panel.is-fullscreen .bob-quick-actions button {
+  min-height: 52px;
+  font-size: 16px;
+  text-align: left;
+}
+
+.bob-panel.is-fullscreen .bob-composer {
+  padding: 12px 14px;
+}
+
+.bob-panel.is-fullscreen .bob-composer textarea {
+  font-size: 17px;
+}
+
+.bob-panel.is-fullscreen .bob-composer button {
+  min-width: 48px;
+  min-height: 48px;
+}
+
 .bob-panel.is-expanded {
   inset: 0;
   width: auto;

@@ -19,10 +19,14 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Car, RefreshCw, Search, ShieldAlert } from 'lucide-react';
+import { Car, History, RefreshCw, Search, ShieldAlert, UserPen } from 'lucide-react';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { PermitAccessCard } from '../components/PermitAccessCard';
 import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from '../components/NztaRevealDialog';
+import { IdentityRecordsWorkspace } from '../components/IdentityRecordsWorkspace';
+import { INTERACTION_TYPES } from '../components/PersonInteractionForm';
+import { useAuth } from '../context/AuthContext';
+import { isAdminTierRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
 import { useNztaRevealExpiry } from '../lib/useNztaRevealExpiry';
 import { permitIsCurrent, permitValidity } from '../lib/permits';
@@ -53,9 +57,75 @@ const PERSON_FILTERS: Array<{ id: PersonFilter; label: string }> = [
 const currentPermitCount = (match: PersonMatch) =>
   (match.permits ?? []).filter((permit) => permitIsCurrent(permitValidity(permit))).length;
 
+interface PersonInteraction {
+  id: string;
+  organization_name: string;
+  interaction_type: string;
+  notes: string | null;
+  interacted_at: string;
+  source: string;
+  job_type: string | null;
+  place_name: string | null;
+  officer_name: string | null;
+}
+
+const interactionLabel = (type: string) => INTERACTION_TYPES.find((option) => option.value === type)?.label ?? type.replace(/_/g, ' ');
+
+// ATLAS CALLS: rpc get_person_interactions (reads person_interactions)
+const PersonInteractionHistory: React.FC<{ canonicalPersonId: string }> = ({ canonicalPersonId }) => {
+  const [rows, setRows] = useState<PersonInteraction[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(async () => {
+    setRows(null);
+    setFailed(false);
+    const { data, error } = await supabase.rpc('get_person_interactions', { p_canonical_person_id: canonicalPersonId, p_limit: 50 });
+    if (error) { setFailed(true); return; }
+    setRows((Array.isArray(data) ? data : []).filter((row): row is PersonInteraction =>
+      Boolean(row) && typeof row.id === 'string' && typeof row.interaction_type === 'string'));
+  }, [canonicalPersonId]);
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <section className="person-search-profile-section" aria-labelledby="person-interactions-title">
+      <header className="person-search-section-head">
+        <div><p className="eyebrow">Field record</p><h3 id="person-interactions-title"><History size={16} aria-hidden="true" /> Interactions</h3></div>
+        <span className="person-search-count">{rows?.length ?? '—'}</span>
+      </header>
+      {rows === null && !failed && <p className="person-search-state" role="status"><RefreshCw size={16} className="is-spinning" aria-hidden="true" /> Loading interactions…</p>}
+      {failed && (
+        <div className="person-search-register-error" role="alert">
+          <span>Interactions could not be loaded.</span>
+          <button type="button" className="btn btn-secondary" onClick={() => void load()}>Retry</button>
+        </div>
+      )}
+      {rows?.length === 0 && <p className="person-search-section-empty">No officer interactions are recorded in organisations you can review. Officers add them from a dispatch job under People involved.</p>}
+      {rows && rows.length > 0 && (
+        <ul className="person-notice-list">
+          {rows.map((row) => (
+            <li key={row.id} className="person-notice">
+              <div className="person-notice__head">
+                <div>
+                  <strong>{interactionLabel(row.interaction_type)}</strong>
+                  <p>{[row.organization_name, row.place_name, row.officer_name ? `by ${row.officer_name}` : null].filter(Boolean).join(' · ')}</p>
+                </div>
+                <span className="person-notice-badge">{formatNzDate(row.interacted_at)}</span>
+              </div>
+              {row.notes && <p>{row.notes}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
 const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { profile, operatingOrganizationId } = useAuth();
+  const identityOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const canManagePeople = !officer && isAdminTierRole(profile?.role) && Boolean(profile?.id && identityOrganizationId);
+  const [identityEditorFor, setIdentityEditorFor] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
   const routedPersonId = searchParams.get('person');
   const routedState = location.state as { personQuery?: unknown } | null;
@@ -190,6 +260,11 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
           <span>Search scope</span>
           <strong>Authorised organisations</strong>
           <small>{officer ? 'Read-only notice and permit checks. Personal addresses and contact details require administrator authority in either portal.' : 'Results and restricted identity details follow your organisation access.'}</small>
+          {canManagePeople && (
+            <button type="button" className="btn btn-primary" onClick={() => setIdentityEditorFor('')}>
+              <UserPen size={16} aria-hidden="true" /> Add person
+            </button>
+          )}
         </aside>
       </header>
 
@@ -350,9 +425,16 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
                 <span className={`person-search-identity-state${selected.review_state === 'verified' ? ' is-verified' : ' is-review'}`}>
                   {selected.review_state === 'verified' ? 'Identity verified' : selected.review_state ? `Review required · ${selected.review_state.replace(/_/g, ' ')}` : 'Identity status not recorded'}
                 </span>
+                {canManagePeople && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIdentityEditorFor(selected.display_name)}>
+                    <UserPen size={14} aria-hidden="true" /> Edit details
+                  </button>
+                )}
               </header>
 
               <SafetyWarningsPanel entityType="person" entityId={selected.canonical_person_id} entityLabel="this person" />
+
+              {!officer && <PersonInteractionHistory canonicalPersonId={selected.canonical_person_id} />}
 
               <section className="person-search-profile-section" aria-labelledby="person-notices-title">
                 <header className="person-search-section-head">
@@ -552,6 +634,17 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
           </div>
         )}
       </section>}
+      {canManagePeople && identityEditorFor !== null && (
+        <IdentityRecordsWorkspace
+          organizationId={identityOrganizationId as string}
+          userId={profile?.id as string}
+          initialSearch={identityEditorFor}
+          onClose={() => {
+            setIdentityEditorFor(null);
+            if (personSearchQueryIsValid(query)) void runSearch(query, selectedId, true);
+          }}
+        />
+      )}
     </main>
   );
 };

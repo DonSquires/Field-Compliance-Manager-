@@ -65,20 +65,29 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
-test('an officer can open and dismiss Bob from a standalone specialty module', async ({ page }) => {
+test('an officer opens Bob full screen from a standalone specialty module and returns with Back', async ({ page }) => {
   await installSupabaseFixtures(page, { officerModules: ['freedom_camping'] });
   await signInAsOfficer(page, '/modules/freedom_camping');
   await expect(page.getByText('Freedom Camping', { exact: true })).toBeVisible();
 
   const opener = page.getByRole('button', { name: 'Open Bob assistant' });
   await opener.click();
-  const panel = page.getByLabel('Bob agent workspace');
-  await expect(page.getByRole('complementary', { name: 'Bob agent workspace' })).toBeVisible();
-  await expect(panel).not.toHaveAttribute('aria-modal', 'true');
-  await panel.getByRole('button', { name: 'Close Bob' }).focus();
-  await page.keyboard.press('Escape');
+  const panel = page.getByRole('dialog', { name: 'Bob assistant' });
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute('aria-modal', 'true');
+  await expect(panel).toHaveClass(/is-fullscreen/);
+  await expect(panel.getByLabel('Bob sessions')).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Show context panel' })).toHaveCount(0);
+  const back = panel.getByRole('button', { name: 'Back to the field portal' });
+  await expect(back).toBeFocused();
+  await back.click();
   await expect(panel).toBeHidden();
   await expect(opener).toBeFocused();
+
+  await opener.click();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
 });
 
 test('guidance buttons send explicit direction with fresh page context and allow text overrides', async ({ page }) => {

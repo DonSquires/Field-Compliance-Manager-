@@ -118,7 +118,7 @@ export function ModuleShell() {
           {renderModule(canonicalKey, adminView)}
         </React.Suspense>
       </main>
-      <BobPanel open={bobOpen} presentation="docked" onClose={() => setBobOpen(false)} context={bobContext} />
+      <BobPanel open={bobOpen} presentation={adminView ? 'docked' : 'fullscreen'} onClose={() => setBobOpen(false)} context={bobContext} />
       </div>
     </div>
   );

@@ -263,6 +263,32 @@ describe('BobPanel', () => {
     await waitFor(() => expect(stream.scrollTop).toBe(stream.scrollHeight));
   });
 
+  it('opens the field-portal Bob as a simple full-screen dialog', async () => {
+    const onClose = vi.fn();
+    messageHistory = [{
+      id: 'fs-reply', role: 'assistant', content: 'Field answer', confidence: 0.9,
+      flagged: false, created_at: '2026-11-06T09:00:00.000Z',
+      metadata: { planned_tool: 'repo_search', suggested_action: 'Check the site instruction.' },
+    }];
+    render(<BobPanel open presentation="fullscreen" onClose={onClose} context={{ shift_id: 'shift-1' }} />);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Bob assistant' });
+    expect(dialog.className).toContain('is-fullscreen');
+    expect(dialog.parentElement).toBe(document.body);
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(await screen.findByText('Field answer')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /sessions/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /context panel/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /document studio/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /full workspace/i })).toBeNull();
+    expect(screen.queryByLabelText('Active context')).toBeNull();
+    expect(screen.queryByText('Was this useful?')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the field portal' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('renders safe agent plan metadata from the server-persisted conversation', async () => {
     messageHistory = [{
       id: 'message-1', role: 'assistant', content: 'I found a safe next step.', confidence: 0.8,

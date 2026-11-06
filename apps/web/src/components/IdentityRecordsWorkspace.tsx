@@ -522,10 +522,13 @@ export function IdentityRecordsWorkspace({
   organizationId,
   userId,
   onClose,
+  initialSearch = "",
 }: {
   organizationId: string;
   userId: string;
   onClose: () => void;
+  /** Opens filtered to this name and selects the record when it is the only match. */
+  initialSearch?: string;
 }) {
   const [mode, setMode] = useState<Mode>("people");
   const [registry, setRegistry] = useState<Registry>({
@@ -534,7 +537,7 @@ export function IdentityRecordsWorkspace({
     documents: [],
     vehicle_total: 0,
   });
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
     null,
@@ -638,8 +641,14 @@ export function IdentityRecordsWorkspace({
     [organizationId],
   );
 
+  const initialSearchRef = useRef(initialSearch);
   useEffect(() => {
-    void load("");
+    const term = initialSearchRef.current;
+    void load(term).then((next) => {
+      if (term.trim() && next?.people.length === 1) selectPerson(next.people[0]);
+    });
+    // selectPerson only resets local form state; reloading must follow the organisation, not it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   const loadIncidentPeople = useCallback(async (selectedIncidentId: string) => {

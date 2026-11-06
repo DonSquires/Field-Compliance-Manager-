@@ -45,9 +45,15 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Confirmed person steps go through one audited database operation: create is serialised per organisation and
 // name (returning a person recorded meanwhile), update changes details only and never the name.
 const PERSON_DETAILS_RPC = 'record_identity_person_details';
-const STEP_KINDS = ['create_person', 'update_person_details', 'register_vehicle', 'update_vehicle_details', 'vehicle_person_link', 'person_alias', 'safety_warning', 'record_note'];
+const STEP_KINDS = ['create_person', 'update_person_details', 'register_vehicle', 'update_vehicle_details', 'vehicle_person_link', 'person_alias', 'safety_warning', 'record_note', 'person_interaction'];
 // Person-creating links resolve before facts about that person, whatever order they were given in.
-const RESOLVE_ORDER = { person_details: 0, vehicle_details: 1, vehicle_person_link: 2, person_alias: 3, safety_warning: 4, record_note: 5 };
+const RESOLVE_ORDER = { person_details: 0, vehicle_details: 1, vehicle_person_link: 2, person_alias: 3, safety_warning: 4, record_note: 5, person_interaction: 6 };
+// Mirrors the person_interactions_type_check constraint; record_person_interaction anchors each one to a job or shift.
+export const INTERACTION_TYPES = Object.freeze(['spoken_to', 'warning_given', 'trespass_notice_served', 'moved_on', 'welfare_check', 'observed', 'report_attached', 'other']);
+const INTERACTION_LABELS = {
+  spoken_to: 'spoken to', warning_given: 'warning given', trespass_notice_served: 'trespass notice served', moved_on: 'moved on',
+  welfare_check: 'welfare check', observed: 'observed', report_attached: 'report attached', other: 'other interaction',
+};
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EXACT_MATCH_BASES = new Set(['name_exact', 'alias_exact']);
 
@@ -228,6 +234,25 @@ function normaliseOperationBody(raw, index, sourceSummary, hold) {
       if (!body || body.length > 4000) return hold('The note must be between 1 and 4000 characters.');
       return { op: { index, kind, record_kind: recordKind, record_id: raw.record_id.toLowerCase(), entry_kind: entryKind, body } };
     }
+    case 'person_interaction': {
+      const person = normalisePerson(raw.person);
+      if (!person?.name) return hold('Give the person\'s name as given (or a short description such as "unknown male") for the interaction.');
+      if (person.name.length < 2) return hold('The person\'s name must be at least 2 characters.');
+      const interactionType = raw.interaction_type ? text(raw.interaction_type, 40) : 'other';
+      if (!INTERACTION_TYPES.includes(interactionType)) return hold(`Choose what happened: ${INTERACTION_TYPES.map((t) => INTERACTION_LABELS[t]).join(', ')}.`);
+      const notes = String(raw.notes ?? '').replace(/\s+/g, ' ').trim();
+      if (notes.length < 3 || notes.length > 4000) return hold(`Describe what happened with ${quote(person.name, 60)} (3 to 4000 characters).`);
+      const jobId = isUuid(raw.dispatch_job_id) ? raw.dispatch_job_id.toLowerCase() : null;
+      const shiftId = isUuid(raw.shift_id) ? raw.shift_id.toLowerCase() : null;
+      if (!jobId && !shiftId) return hold(`Tell me which dispatch job or shift the interaction with ${quote(person.name, 60)} happened on (its record id), so it is anchored to the place.`);
+      let interactedAt = null;
+      if (raw.interacted_at) {
+        const parsed = Date.parse(String(raw.interacted_at));
+        if (!Number.isFinite(parsed) || parsed > Date.now() + 5 * 60 * 1000) return hold('The interaction time must be a valid time that is not in the future.');
+        interactedAt = new Date(parsed).toISOString();
+      }
+      return { op: { index, kind, person, interaction_type: interactionType, notes, dispatch_job_id: jobId, shift_id: shiftId, interacted_at: interactedAt } };
+    }
     case 'unsupported':
       return { held: { index, statement: text(raw.statement, 200) || 'update', reason: text(raw.reason, 300) || 'There is no governed way to record this yet.' } };
     default:
@@ -281,6 +306,10 @@ function sourceShape(op) {
       return { kind: op.kind, target, hazard_class: op.hazard_class, alert_level: op.alert_level, note: op.note };
     }
     case 'record_note': return { kind: op.kind, record_kind: op.record_kind, record_id: op.record_id, entry_kind: op.entry_kind, body: op.body };
+    case 'person_interaction': return compact({
+      kind: op.kind, person: personSource(op.person), interaction_type: op.interaction_type, notes: op.notes,
+      dispatch_job_id: op.dispatch_job_id, shift_id: op.shift_id, interacted_at: op.interacted_at,
+    });
     default: return null;
   }
 }
@@ -344,6 +373,7 @@ function operationKey(op) {
       return `warning:${target}:${op.hazard_class}`;
     }
     case 'record_note': return `note:${op.record_id}:${op.entry_kind}:${personKey(op.body)}`;
+    case 'person_interaction': return `interaction:${op.person.ref}:${op.dispatch_job_id ?? op.shift_id}:${op.interaction_type}:${personKey(op.notes)}`;
     default: return `other:${op.index}`;
   }
 }
@@ -847,6 +877,28 @@ export async function resolveRecordUpdatePlan({ rpc, organizationId, plan }) {
       } else {
         steps.push({ ...base, entity_type: op.target.type, entity_id: op.target.id, label: `Raise a ${warning} on the ${op.target.type}${op.target.name ? ` ${op.target.name}` : ' you named'}: ${quote(op.note, 1000)} (${visibility})` });
       }
+    } else if (op.kind === 'person_interaction') {
+      let state = people.get(op.person.ref);
+      // Officers cannot search people; record_person_interaction matches the name privately, so a refused lookup
+      // still lets them record what happened by name (never by a planner-supplied record id).
+      if (state?.state === 'error' && !op.person.person_record_id) state = { state: 'new', unsearched: true };
+      const problem = personProblem(state, op.person);
+      if (problem) { holdOp(problem); continue; }
+      const fromCreate = personSteps.get(op.person.ref)?.kind === 'create_person' || (state.state === 'new' && personCreated.has(op.person.ref));
+      if (state.state === 'new' && !fromCreate && state.close?.length) { holdOp(similarPersonReason(state, op.person)); continue; }
+      const anchor = op.dispatch_job_id ? 'the dispatch job you named' : 'the shift you named';
+      const who = state.state === 'bound' ? personLabel(state, op.person)
+        : fromCreate ? `${op.person.name} (created above)`
+          : state.unsearched ? `${op.person.name} (matched privately, or a draft person record for administrator review)`
+            : `${op.person.name} (new draft person record for administrator review)`;
+      steps.push(compact({
+        kind: 'person_interaction', op_index: op.index, person_ref: op.person.ref,
+        person_record_id: state.state === 'bound' ? state.person_record_id : null,
+        new_person_name: state.state === 'bound' ? null : op.person.name,
+        person_from_create: fromCreate || null,
+        interaction_type: op.interaction_type, notes: op.notes, dispatch_job_id: op.dispatch_job_id, shift_id: op.shift_id, interacted_at: op.interacted_at,
+        label: `Record ${INTERACTION_LABELS[op.interaction_type]} for ${who} on ${anchor}: ${quote(op.notes, 1000)} (shows on their person history and the place)`,
+      }));
     } else if (op.kind === 'record_note') {
       steps.push({
         kind: 'record_note', op_index: op.index, record_kind: op.record_kind, record_id: op.record_id, entry_kind: op.entry_kind, body: op.body,
@@ -1126,6 +1178,21 @@ export async function applyRecordUpdatePlan({ rpc, organizationId, pending, dead
           ? `Your organisation already had ${levels ? `a ${levels}` : 'a'} warning of this kind here; this one was added alongside it, and the earlier one stays active until someone resolves it.`
           : undefined);
       }
+    } else if (step.kind === 'person_interaction') {
+      const created = people.get(step.person_ref)?.person_record_id ?? null;
+      if (step.person_from_create && !created) { receipt(step, 'skipped_dependency', 'The person record was not created.'); continue; }
+      const personRecordId = step.person_record_id ?? created;
+      const { data, error } = await call(rpc, 'record_person_interaction', {
+        p_client_request_id: await deterministicUuid(`${pending.plan_id}:${i}`),
+        p_organization_id: organizationId, p_interaction_type: step.interaction_type, p_notes: step.notes,
+        p_person_record_id: personRecordId, p_new_person_name: personRecordId ? null : step.new_person_name,
+        p_dispatch_job_id: step.dispatch_job_id ?? null, p_shift_id: step.shift_id ?? null,
+        p_interacted_at: step.interacted_at ?? null, p_source: 'bob',
+      });
+      if (error) { receipt(step, 'failed', errorMessage(error)); continue; }
+      if (isUuid(data?.person_record_id) && !people.has(step.person_ref)) people.set(step.person_ref, { person_record_id: data.person_record_id, canonical_person_id: isUuid(data?.canonical_person_id) ? data.canonical_person_id : null });
+      receipt(step, data?.outcome === 'already_recorded' ? 'already_present' : 'applied',
+        data?.person_created ? 'A draft person record was created for administrator review.' : undefined);
     } else if (step.kind === 'record_note') {
       const existing = await call(rpc, 'list_record_updates', { p_record_kind: step.record_kind, p_record_id: step.record_id });
       if (!existing.error && isRepeatRecordUpdate(Array.isArray(existing.data) ? existing.data : [], step)) {
