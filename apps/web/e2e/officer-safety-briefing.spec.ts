@@ -41,7 +41,7 @@ test('shift start waits for the exact safety acknowledgement, including a stale-
   });
   await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
     starts++;
-    await route.fulfill({ json: [{ shift_id: shiftId, started_at: '2026-08-31T05:30:00Z', position_status: 'on_site', place_name: 'Civic Centre' }] });
+    await route.fulfill({ json: [{ shift_id: shiftId, shift_status: 'in_progress', started_at: '2026-08-31T05:30:00Z', position_status: 'on_site', place_name: 'Civic Centre' }] });
   });
   await signInAsOfficer(page);
   await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
@@ -87,7 +87,7 @@ test('unscheduled work is prepared, briefed and only then started', async ({ pag
   await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
     expect(acknowledged).toBe(true);
     starts++;
-    await route.fulfill({ json: [{ shift_id: shiftId, started_at: '2026-08-31T05:30:00Z' }] });
+    await route.fulfill({ json: [{ shift_id: shiftId, shift_status: 'in_progress', started_at: '2026-08-31T05:30:00Z' }] });
   });
   await signInAsOfficer(page);
   await page.getByText('Start an unscheduled shift', { exact: true }).click();

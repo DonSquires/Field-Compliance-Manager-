@@ -159,12 +159,12 @@ test('ending a shift protects unfinished debrief text when closing or opening st
     created_at: '2026-08-29T19:00:00Z', updated_at: '2026-08-29T20:00:00Z',
   };
   await page.route('**/rest/v1/shifts**', (route) => route.fulfill({ json: [active] }));
-  await page.route('**/rest/v1/rpc/get_shift_end_readiness', (route) => route.fulfill({ json: {
+  await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', (route) => route.fulfill({ json: {
     shift_id: active.id, status: 'in_progress', service_type: 'patrol', scheduled_end: active.scheduled_end, actual_start: null,
     open_stops: [{ stop_id: 'stop-1', place: 'Test place', status: 'pending', module_key: null }],
-    open_stop_count: 1, open_required_task_count: 0, open_dispatch_job_count: 0,
+    open_stop_count: 1, open_required_task_count: 0, open_dispatch_job_count: 0, open_break_count: 0,
     active_welfare_alert_count: 0, debrief_submitted: false, blockers: ['One stop remains open'],
-    can_end: false, can_end_after_debrief: false,
+    single_site_attendance: false, can_end: false, can_end_after_debrief: false,
   } }));
   await signInAsOfficer(page, '/officer/schedule');
   await page.getByRole('button', { name: 'End shift' }).click();
