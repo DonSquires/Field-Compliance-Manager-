@@ -30,7 +30,7 @@ interface OpenJobRow extends Omit<OpenJob, 'site'> {
 }
 interface ZoneShape { id: string; name: string; boundary: GeoJSON.GeoJsonObject | null }
 
-const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'dispatched', 'acknowledged', 'en_route', 'on_scene'];
+const ACTIVE_JOB_STATUSES = ['pending', 'pending_approval', 'dispatched', 'acknowledged', 'en_route', 'on_scene'];
 /** Worst first: alerts, overdue and due check-ins, then people on shift, then everyone else seen recently. */
 const rank = (officer: { alert: LiveAlert | null; safety_status: SafetyStatus | null; shift: LiveShift | null }): number =>
   officer.alert ? 0 : officer.safety_status === 'overdue' ? 1 : officer.safety_status === 'due' ? 2 : officer.shift ? 3 : 4;
@@ -62,9 +62,11 @@ const LiveMapPage: React.FC = () => {
     setLoading(true); setError(null);
     const zoneIds = selectedAgreementZones.length ? selectedAgreementZones.map((zone) => zone.id) : null;
     // ATLAS READS: get_live_officer_positions (officer_gps_log, shifts, welfare_alerts, officer_welfare_settings for the branch reach)
+    let jobsQuery = supabase.from('dispatch_jobs').select('id, job_type, priority, status, site:client_site_id(name, gps_lat, gps_lng), zone:zone_id(name, center_point)').eq('organization_id', branchId).in('status', ACTIVE_JOB_STATUSES);
+    if (zoneIds) jobsQuery = jobsQuery.in('zone_id', zoneIds);
     const [positionsResponse, jobsResponse, zonesResponse] = await Promise.all([
       supabase.rpc('get_live_officer_positions', { p_organization_id: branchId, p_since_minutes: 240, p_zone_ids: zoneIds }),
-      supabase.from('dispatch_jobs').select('id, job_type, priority, status, site:client_site_id(name, gps_lat, gps_lng), zone:zone_id(name, center_point)').eq('organization_id', branchId).in('status', ACTIVE_JOB_STATUSES),
+      jobsQuery,
       zoneIds ? supabase.from('location_zones').select('id, name, boundary').in('id', zoneIds) : Promise.resolve({ data: [] as ZoneShape[], error: null }),
     ]);
     if (positionsResponse.error) setError(positionsResponse.error.message);
