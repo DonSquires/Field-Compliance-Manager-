@@ -12,6 +12,7 @@ export interface ShiftStop {
   shift_id: string;
   zone_id?: string;
   client_site_id?: string;
+  site_name?: string;
   seq: number;
   arrival_time?: string;
   departure_time?: string;
@@ -72,6 +73,7 @@ export function useActiveShift(userId: string, organizationId: string) {
             shift_id,
             zone_id,
             site_id,
+            site:site_id ( name ),
             stop_order,
             actual_arrived_at,
             actual_departed_at
@@ -110,6 +112,7 @@ export function useActiveShift(userId: string, organizationId: string) {
             shift_id: stop.shift_id,
             zone_id: stop.zone_id,
             client_site_id: stop.site_id,
+            site_name: stop.site?.name ?? undefined,
             seq: stop.stop_order,
             arrival_time: stop.actual_arrived_at,
             departure_time: stop.actual_departed_at,

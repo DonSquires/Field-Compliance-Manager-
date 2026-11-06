@@ -55,6 +55,7 @@ import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { canUseModule, officerRouteModuleKey } from '../lib/moduleAccess';
 import { isAdminTierRole } from '../lib/roles';
+import { serviceTypeLabel } from '../lib/officerServiceLabels';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { OfficerUnsavedWorkContext } from '../context/OfficerUnsavedWorkContext';
@@ -552,7 +553,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
             alt="Iron Eagle Security"
             className="officer-brand-logo"
           />
-          <div><strong>Field Compliance Manager</strong><small>{activeShift ? `${activeShift.shift_type} shift` : 'Officer operations'}</small></div>
+          <div><strong>Field Compliance Manager</strong><small>{activeShift ? `${serviceTypeLabel(activeShift.shift_type).label} shift` : 'Officer operations'}</small></div>
         </button>
 
         <div className="officer-shell-tools">

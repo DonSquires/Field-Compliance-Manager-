@@ -9,6 +9,7 @@ import {
   ClipboardPlus,
   Clock3,
   Map,
+  MapPin,
   Navigation,
   Radio,
   RefreshCw,
@@ -25,6 +26,7 @@ import type { ActiveShift } from '../hooks/useActiveShift';
 import type { UseOfficerSafetyApi } from '../hooks/useOfficerSafety';
 import { getDetectionStatusMessage } from '../lib/safetyStatusMessage';
 import { claimShiftCoverage } from '../lib/shiftCoverage';
+import { serviceTypeLabel } from '../lib/officerServiceLabels';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -72,21 +74,6 @@ function localDateIso(): string {
 
 function formatShiftTime(value: string): string {
   return new Date(value).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
-}
-
-function serviceTypeLabel(value: string): { label: string; detail: string } {
-  const labels: Record<string, { label: string; detail: string }> = {
-    freedom_camping: { label: 'Freedom Camping Patrol', detail: 'Vehicle scans, breaches, and evidence' },
-    static: { label: 'Site Guarding', detail: 'Site security and checkpoints' },
-    static_guarding: { label: 'Site Guarding', detail: 'Site security and checkpoints' },
-    mobile: { label: 'Mobile Compliance Patrol', detail: 'Field assignments and evidence' },
-    rostered: { label: 'Rostered Field Work', detail: 'Assignment and evidence' },
-    parking: { label: 'Parking Enforcement', detail: 'Vehicle compliance and enforcement' },
-    noise_control: { label: 'Noise Control', detail: 'Assessment and response' },
-    biosecurity_inspection: { label: 'Biosecurity Inspection', detail: 'Inspection evidence and notices' },
-    smoke_complaint_ooh: { label: 'Smoke Complaint', detail: 'Out-of-hours complaint response' },
-  };
-  return labels[value] ?? { label: value.replaceAll('_', ' '), detail: 'Field assignment and evidence' };
 }
 
 function shiftLaunch(value: string): { destination: HomeDestination; label: string } {
@@ -249,6 +236,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
   const nextRostered = useNextRosteredShift(profile?.id, Boolean(shift) || shiftLoading);
   const firstName = profile?.displayName?.split(' ')[0] || 'Officer';
   const activeShiftLaunch = shift ? shiftLaunch(shift.shift_type) : null;
+  const started = shift?.status === 'in_progress';
   const [endingShift, setEndingShift] = useState(false);
   const [endedNotice, setEndedNotice] = useState<string | null>(null);
   const endShiftDestination = (destination: EndShiftDestination) => {
@@ -265,17 +253,19 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
     return { total, completed, percent: total ? Math.round((completed / total) * 100) : 0 };
   }, [shift]);
 
+  const sentence = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+  const shiftSiteNames = [...new Set((shift?.stops ?? []).map((stop) => stop.site_name).filter((name): name is string => Boolean(name)))];
   const safetyLabel = safety.activeAlert
-    ? safety.activeAlert.kind === 'sos' ? 'SOS active' : `${safety.activeAlert.kind.replace('_', ' ')} alert`
-    : safety.status === 'ok' ? `Check-in in ${safety.minutesRemaining} min` : safety.status.replace('_', ' ');
+    ? safety.activeAlert.kind === 'sos' ? 'SOS active' : sentence(`${safety.activeAlert.kind.replaceAll('_', ' ')} alert`)
+    : safety.status === 'ok' ? `Check-in in ${safety.minutesRemaining} min` : sentence(safety.status.replaceAll('_', ' '));
 
   return (
     <div className="officer-home">
       <header className="officer-home-heading">
         <div>
           <span className="officer-kicker">Field operations</span>
-          <h1>{shift ? `On shift, ${firstName}` : `Ready when needed, ${firstName}`}</h1>
-          <p>{shift ? 'Your assignment, safety state, and next actions.' : 'No active shift. Safety controls and open coverage remain available.'}</p>
+          <h1>{started ? `On shift, ${firstName}` : shift ? `Shift today, ${firstName}` : `Ready when needed, ${firstName}`}</h1>
+          <p>{started ? 'Your assignment, safety state, and next actions.' : shift ? `Your shift starts at ${formatShiftTime(shift.start_time)}. Start it from your schedule when you arrive.` : 'No active shift. Safety controls and open coverage remain available.'}</p>
         </div>
         <div className={`officer-connectivity ${online ? 'is-online' : 'is-offline'}`}>
           {online ? <Signal size={16} aria-hidden="true" /> : <SignalZero size={16} aria-hidden="true" />}
@@ -314,14 +304,26 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
                 <Clock3 size={20} aria-hidden="true" />
                 <strong>{formatShiftTime(shift.start_time)} - {formatShiftTime(shift.end_time)}</strong>
               </div>
-              <div className="officer-progress-row">
-                <div><span>Route progress</span><strong>{shiftProgress.completed} of {shiftProgress.total} stops</strong></div>
-                <span>{shiftProgress.percent}%</span>
-              </div>
-              <div className="officer-progress-track"><span style={{ width: `${shiftProgress.percent}%` }} /></div>
-              <button type="button" className="officer-primary-action" onClick={() => activeShiftLaunch && onNavigate(activeShiftLaunch.destination)}>
-                <Navigation size={18} aria-hidden="true" /> {activeShiftLaunch?.label ?? 'Open assignment'} <ArrowRight size={17} aria-hidden="true" />
-              </button>
+              {shiftSiteNames.length > 0 && <div className="officer-shift-time">
+                <MapPin size={20} aria-hidden="true" />
+                <strong>{shiftSiteNames.join(' · ')}</strong>
+              </div>}
+              {shiftProgress.total > 1 && <>
+                <div className="officer-progress-row">
+                  <div><span>Route progress</span><strong>{shiftProgress.completed} of {shiftProgress.total} stops</strong></div>
+                  <span>{shiftProgress.percent}%</span>
+                </div>
+                <div className="officer-progress-track"><span style={{ width: `${shiftProgress.percent}%` }} /></div>
+              </>}
+              {started ? (
+                <button type="button" className="officer-primary-action" onClick={() => activeShiftLaunch && onNavigate(activeShiftLaunch.destination)}>
+                  <Navigation size={18} aria-hidden="true" /> {activeShiftLaunch?.label ?? 'Open assignment'} <ArrowRight size={17} aria-hidden="true" />
+                </button>
+              ) : (
+                <button type="button" className="officer-primary-action" onClick={() => onNavigate('schedule')}>
+                  <CalendarDays size={18} aria-hidden="true" /> Open schedule to start <ArrowRight size={17} aria-hidden="true" />
+                </button>
+              )}
               {shift.status === 'in_progress' && <button type="button" className="officer-end-shift" onClick={() => setEndingShift(true)}>End shift</button>}
             </>
           ) : nextRostered ? (
