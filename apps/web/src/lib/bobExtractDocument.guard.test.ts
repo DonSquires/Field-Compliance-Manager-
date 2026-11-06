@@ -6,7 +6,7 @@ const edge = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-e
 
 describe('Bob PDF extraction', () => {
   it('uses a real PDF text extractor before marking a document as OCR-required', () => {
-    expect(edge).toContain("unpdf@0.12.1?target=deno");
+    expect(edge).toContain("from 'npm:unpdf@0.12.1'");
     expect(edge).toContain('getDocumentProxy(bytes)');
     expect(edge).toContain('extractPdfTextContent(document');
     expect(edge).toContain('text = await extractPdfText(bytes)');
