@@ -18,7 +18,8 @@
  */
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, ThumbsDown, ThumbsUp, Volume2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, ChevronLeft, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, ThumbsDown, ThumbsUp, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { captureBobPageContext } from '../lib/bobPageContext';
@@ -53,7 +54,8 @@ interface BobMessageFeedback {
 }
 
 type BobMode = 'operations' | 'builder';
-type BobPanelPresentation = 'floating' | 'docked';
+// fullscreen: the phone field portal. Bob takes the whole screen with only the conversation, composer, Back and New chat.
+type BobPanelPresentation = 'floating' | 'docked' | 'fullscreen';
 
 interface BobPanelProps {
   open: boolean;
@@ -222,7 +224,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [renameValue, setRenameValue] = useState('');
   // Compact mode is a conversation surface. Side panes open on demand as
   // drawers; users can expose both when they deliberately expand the workspace.
-  const [sidebarOpen, setSidebarOpen] = useState(() => presentation !== 'docked' && typeof window !== 'undefined' && window.innerWidth >= 1100);
+  const [sidebarOpen, setSidebarOpen] = useState(() => presentation === 'floating' && typeof window !== 'undefined' && window.innerWidth >= 1100);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [contextPanelWidth, setContextPanelWidth] = useState(320);
@@ -608,7 +610,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   }, [onClose, open, presentation]);
 
   useEffect(() => {
-    if (!open || !workspaceExpanded || presentation === 'docked') return;
+    if (!open || presentation !== 'fullscreen') return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [open, presentation]);
+
+  useEffect(() => {
+    if (!open || presentation === 'docked' || (!workspaceExpanded && presentation !== 'fullscreen')) return;
     const panel = panelRef.current;
     if (!panel) return;
     const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -1192,7 +1201,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   if (!open) return null;
   const docked = presentation === 'docked';
-
+  const fullscreen = presentation === 'fullscreen';
   const modeConfig: Record<BobMode, { label: string; badge: string; headline: string; subhead: string; placeholder: string; quickActions: Array<{ label: string; prompt: string }> }> = {
     operations: {
       label: 'Bob Operations',
@@ -1222,36 +1231,51 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       ],
     },
   };
-  const currentModeConfig = modeConfig[mode] ?? modeConfig.operations;
+  const currentModeConfig = fullscreen && mode === 'operations'
+    ? {
+        ...modeConfig.operations,
+        label: 'Bob',
+        badge: 'Field assistant',
+        headline: 'How can I help?',
+        subhead: 'Ask a question, describe what happened, or attach a photo.',
+        placeholder: 'Ask Bob or describe what happened',
+        quickActions: [
+          { label: 'What should I do next?', prompt: 'Based on my current shift and job, what should I do next?' },
+          { label: 'Help me write a report', prompt: 'Help me write a field report for what just happened. Ask me the questions you need.' },
+          { label: 'Record a person involved', prompt: 'Help me record a person involved in my current job. Ask me for their name and what happened.' },
+        ],
+      }
+    : modeConfig[mode] ?? modeConfig.operations;
   const studio = <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); if (docked) setStudioOpen(false); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />;
 
-  return (
+  const panel = (
     <div
       ref={panelRef}
-      className={`bob-panel ${mode === 'builder' ? 'is-builder-mode' : ''} ${docked ? 'is-docked' : ''} ${workspaceExpanded && !docked ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
-      aria-label={docked && mode === 'builder' ? 'Bob Builder coding agent' : 'Bob agent workspace'}
-      role={docked ? 'complementary' : workspaceExpanded ? 'dialog' : undefined}
-      aria-modal={!docked && workspaceExpanded ? true : undefined}
-      tabIndex={!docked && workspaceExpanded ? -1 : undefined}
+      className={`bob-panel ${mode === 'builder' ? 'is-builder-mode' : ''} ${docked ? 'is-docked' : ''} ${fullscreen ? 'is-fullscreen' : ''} ${workspaceExpanded && !docked && !fullscreen ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
+      aria-label={docked && mode === 'builder' ? 'Bob Builder coding agent' : fullscreen ? 'Bob assistant' : 'Bob agent workspace'}
+      role={docked ? 'complementary' : workspaceExpanded || fullscreen ? 'dialog' : undefined}
+      aria-modal={!docked && (workspaceExpanded || fullscreen) ? true : undefined}
+      tabIndex={!docked && (workspaceExpanded || fullscreen) ? -1 : undefined}
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
       onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}
     >
       <header className="bob-panel-header">
+        {fullscreen && <button ref={closeButtonRef} type="button" className="bob-fullscreen-back" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} aria-label="Back to the field portal"><ChevronLeft size={22} aria-hidden="true" /><span>Back</span></button>}
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{currentModeConfig.label}</strong><small><ShieldCheck size={12} /> {currentModeConfig.badge}</small></div></div>
         <div className="bob-panel-header-actions">
-          {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
-          <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
-          <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
-          {(!docked || mode === 'operations') && <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>}
-          {!docked && <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>}
-          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'} aria-label={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'}><X size={16} /><span>{docked ? 'Hide' : 'Close'}</span></button>
+          {(fullscreen || !sidebarOpen) && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} />{fullscreen && <span>New chat</span>}</button>}
+          {!fullscreen && <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>}
+          {!fullscreen && <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>}
+          {!fullscreen && (!docked || mode === 'operations') && <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>}
+          {!docked && !fullscreen && <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>}
+          {!fullscreen && <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'} aria-label={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'}><X size={16} /><span>{docked ? 'Hide' : 'Close'}</span></button>}
         </div>
       </header>
 
       <div className={`bob-workspace ${studioOpen ? 'is-studio' : ''}`}>
-        {sidebarOpen && (
+        {!fullscreen && sidebarOpen && (
           <SessionSidebar
             sessions={sessions}
             activeId={conversationId}
@@ -1282,7 +1306,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         {workspaceExpanded && !docked && sidebarOpen && <div className="bob-pane-divider is-left" role="separator" aria-orientation="vertical" aria-label="Resize sessions pane" onPointerDown={(event) => beginPaneResize('left', event)} />}
 
         <div className="bob-main-pane">
-          {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value], index) => <span key={`${key}-${index}`}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
+          {!fullscreen && contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value], index) => <span key={`${key}-${index}`}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
 
           {/* Idle stays a screen-reader status only; a visible pill appears when Bob is actually working, waiting, or paused. */}
           <div className={`bob-work-state state-${workState.tone} ${workState.tone === 'idle' ? 'sr-only' : ''}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
@@ -1335,12 +1359,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   {currentModeConfig.quickActions.map(action => (
                     <button key={action.label} type="button" onClick={() => { setInput(action.prompt); focusComposer(); }} disabled={sending}>{action.label}</button>
                   ))}
-                  {mode === 'operations' && <>
+                  {mode === 'operations' && !fullscreen && <>
                     <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.', { artifactType: 'document', documentKind: 'custom_document' })} disabled={sending}>Document studio</button>
                     <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.', { artifactType: 'diagram' })} disabled={sending}>Diagram studio</button>
                   </>}
                 </div>
-                <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
+                <p className="bob-composer-hint">{fullscreen ? 'Tap the paperclip to add a photo or file, or the microphone to talk.' : `${ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.`}</p>
               </div>
             ) : (
               messages.map((m) => {
@@ -1350,12 +1374,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                 <article key={m.id} className={`bob-message role-${m.role}${supersededBy ? ' is-superseded' : ''}${correctionOf ? ' is-correction' : ''}`}>
                   {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
                   <div className="bob-message-body">
-                    {m.role === 'assistant' && <AgentMetadata message={m} />}
+                    {m.role === 'assistant' && !fullscreen && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
                     {m.role === 'assistant' && <WorkflowProgress message={m} />}
                     {m.role === 'assistant' && !supersededBy && <AnswerChoices message={m} disabled={loading || sending || m.id !== messages[messages.length - 1]?.id || Boolean(activeTurn && BLOCKING_TURN_STATUSES.includes(activeTurn.status))} hasDraft={Boolean(input.trim() || voiceTranscript.trim() || pendingFiles.length)} onCustomAnswer={focusComposer} onAnswer={(answer) => void handleSend(null, answer)} />}
                     {m.role === 'assistant' && <NavigationActions message={m} />}
-                    {m.role === 'assistant' && (
+                    {m.role === 'assistant' && !fullscreen && (
                       <div className="bob-message-feedback" aria-label="Rate Bob reply">
                         <span>Was this useful?</span>
                         <button
@@ -1408,7 +1432,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             )}
           </div>}
 
-          {attachments.length > 0 && !(docked && studioOpen) && (
+          {attachments.length > 0 && fullscreen && (
+            <div className="bob-attachment-strip" aria-label="Evidence processing summary">
+              <Paperclip size={13} />
+              <span>{attachments.length} file{attachments.length === 1 ? '' : 's'} shared with Bob in this chat</span>
+            </div>
+          )}
+          {attachments.length > 0 && !fullscreen && !(docked && studioOpen) && (
             <>
               <ConversationMediaGallery attachments={attachments} onOpenStudio={() => {
                 setWorkspaceExpanded(true);
@@ -1480,10 +1510,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && !docked && studioOpen && studio}
+        {workspaceExpanded && !docked && !fullscreen && studioOpen && studio}
 
-        {workspaceExpanded && !docked && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
-        {contextPanelOpen && (
+        {workspaceExpanded && !docked && !fullscreen && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
+        {!fullscreen && contextPanelOpen && (
           <ContextPanel
             tab={contextTab}
             onTab={setContextTab}
@@ -1499,6 +1529,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       </div>
     </div>
   );
+  return fullscreen && typeof document !== 'undefined' ? createPortal(panel, document.body) : panel;
 };
 
 function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[]; attachments: BobAttachmentRecord[]; activeTurn: ActiveBobTurn | null }): WorkState {

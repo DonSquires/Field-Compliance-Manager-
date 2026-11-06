@@ -13,12 +13,14 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { OfficerRouteGuidance } from '../components/OfficerRouteGuidance';
+import { PersonInteractionForm } from '../components/PersonInteractionForm';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './OfficerDispatchPage.css';
 
 interface DispatchJob {
   id: string;
+  organization_id: string;
   job_type: string;
   priority: string;
   status: string;
@@ -38,6 +40,7 @@ interface DispatchJobRow extends Omit<DispatchJob, 'site'> {
 
 interface CompletionReceipt {
   id: string;
+  organizationId: string;
   shiftId: string | null;
   jobType: string;
   completedAt: string;
@@ -147,7 +150,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
       const jobQuery = supabase
         .from('dispatch_jobs')
-        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type)')
+        .select('id, organization_id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type)')
         .or(`${shiftIds.length ? `shift_id.in.(${shiftIds.join(',')}),` : ''}assigned_officer_id.eq.${profile.id}`)
         .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]);
       const scopedJobQuery = activeZoneIds && activeZoneIds.length > 0
@@ -208,7 +211,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
       if (!result || result.id !== job.id || result.status !== nextStatus) throw new Error('The dispatch status change was not confirmed.');
 
       if (nextStatus === 'completed') {
-        setCompletionReceipt({ id: result.id, shiftId: result.shift_id, jobType: job.job_type, completedAt: result.completed_at ?? new Date().toISOString(), investigationId: job.investigation_id });
+        setCompletionReceipt({ id: result.id, organizationId: job.organization_id, shiftId: result.shift_id, jobType: job.job_type, completedAt: result.completed_at ?? new Date().toISOString(), investigationId: job.investigation_id });
         setJobs((current) => current.filter((item) => item.id !== job.id));
         setOutcomeNotes((current) => {
           const next = { ...current };
@@ -270,6 +273,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
             <button type="button" className="btn btn-secondary" onClick={() => completionReceipt.investigationId ? window.location.assign(`/officer/report?job=${completionReceipt.id}&investigation=${completionReceipt.investigationId}`) : onNavigate?.('report')}><FileText size={16} />{completionReceipt.investigationId ? 'Submit investigation report' : 'Field report'}</button>
             <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('debrief')}><ShieldCheck size={16} />Debrief</button>
           </div>
+          <PersonInteractionForm organizationId={completionReceipt.organizationId} dispatchJobId={completionReceipt.id} />
         </section>
       )}
 
@@ -332,6 +336,12 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
                     />
                     <small>Say what you found, what you did, and who you told. This goes on the client record.</small>
                   </div>
+                )}
+                {job.status === 'on_scene' && (
+                  <section className="officer-dispatch-people" aria-label="People involved">
+                    <h4>People involved</h4>
+                    <PersonInteractionForm organizationId={job.organization_id} dispatchJobId={job.id} />
+                  </section>
                 )}
                 {NEXT_STATUS[job.status] && (
                   <button

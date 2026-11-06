@@ -67,6 +67,13 @@ describe('officer dispatch lifecycle boundary', () => {
     expect(source).not.toContain('<h3>{job.job_type}</h3>');
   });
 
+  it('lets the officer record people involved on the job and after completing it', () => {
+    expect(source).toContain('<section className="officer-dispatch-people" aria-label="People involved">');
+    expect(source).toContain('<PersonInteractionForm organizationId={job.organization_id} dispatchJobId={job.id} />');
+    expect(source).toContain('<PersonInteractionForm organizationId={completionReceipt.organizationId} dispatchJobId={completionReceipt.id} />');
+    expect(source).toContain("select('id, organization_id, job_type");
+  });
+
   it('returns the locked job context without widening RPC access', () => {
     expect(migration).toContain('returns table (id uuid, status text, shift_id uuid, completed_at timestamptz)');
     expect(migration).toContain('select updated.id, updated.status, updated.shift_id, updated.completed_at');

@@ -4,8 +4,17 @@ import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'rea
 import PersonSearchPage from './PersonSearchPage';
 import { describeDaysRemaining, noticeStillBarsEntry, noticeTypeLabel, personSearchQueryIsValid } from '../lib/personSearch';
 
-const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
+const { rpc, auth } = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  auth: { profile: null as null | { id: string; role: string; organizationId: string }, operatingOrganizationId: null as string | null },
+}));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc } }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
+vi.mock('../components/IdentityRecordsWorkspace', () => ({
+  IdentityRecordsWorkspace: ({ initialSearch, onClose }: { initialSearch?: string; onClose: () => void }) => (
+    <div role="dialog" aria-label="Identity records">Editing {initialSearch || 'new person'}<button type="button" onClick={onClose}>Close identity records</button></div>
+  ),
+}));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: ({ entityId }: { entityId: string }) => <div data-testid="safety">{entityId}</div> }));
 
 const LocationProbe = () => {
@@ -45,7 +54,9 @@ const person = (overrides: Record<string, unknown> = {}) => ({
 describe('person search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    auth.profile = null;
     rpc.mockImplementation(async (name: string) => {
+      if (name === 'get_person_interactions') return { data: [], error: null };
       if (name === 'get_notice_expiry_register') return { data: [{
         notice_id: 'notice-2', organization_id: 'org', organization_name: 'Client Forest', notice_type: 'warning', notice_number: null,
         issued_at: '2024-11-01T00:00:00Z', expires_at: '2026-11-01T00:00:00Z', expiry_state: 'expiring_soon', days_remaining: 6,
@@ -55,6 +66,38 @@ describe('person search', () => {
     });
   });
   afterEach(cleanup);
+
+  it('lets administrators add or edit a person and review recorded interactions', async () => {
+    auth.profile = { id: 'admin-1', role: 'admin', organizationId: 'org' };
+    const defaultRpc = rpc.getMockImplementation();
+    rpc.mockImplementation(async (name: string, args?: unknown) => name === 'get_person_interactions'
+      ? { data: [{ id: 'pi-1', organization_name: 'R&M', interaction_type: 'trespass_notice_served', notes: 'Served at the covered area.',
+        interacted_at: '2026-11-04T09:30:00Z', source: 'field', job_type: 'callout', place_name: 'Burger N Beast Richmond', officer_name: 'Officer One' }], error: null }
+      : defaultRpc?.(name, args));
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
+    expect(screen.getByRole('dialog', { name: 'Identity records' }).textContent).toContain('new person');
+    fireEvent.click(screen.getByRole('button', { name: 'Close identity records' }));
+
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'Test Person' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByText('Trespass notice served')).toBeTruthy();
+    expect(screen.getByText(/Burger N Beast Richmond · by Officer One/)).toBeTruthy();
+    expect(rpc).toHaveBeenCalledWith('get_person_interactions', { p_canonical_person_id: 'person-1', p_limit: 50 });
+    fireEvent.click(screen.getByRole('button', { name: /Edit details/ }));
+    expect(screen.getByRole('dialog', { name: 'Identity records' }).textContent).toContain('Test Person');
+  });
+
+  it('keeps identity editing out of the officer lookup', async () => {
+    auth.profile = { id: 'officer-1', role: 'admin', organizationId: 'org' };
+    render(<MemoryRouter><PersonSearchPage officer /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /Add person/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Name, alias or permit number'), { target: { value: 'Test Person' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByRole('heading', { name: 'Test Person' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Edit details/ })).toBeNull();
+    expect(rpc).not.toHaveBeenCalledWith('get_person_interactions', expect.anything());
+  });
 
   it('shows the expiry register and opens the person behind an alert', async () => {
     renderPage();

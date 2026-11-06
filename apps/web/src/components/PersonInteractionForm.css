@@ -1,0 +1,66 @@
+.person-interaction {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.person-interaction.is-open {
+  padding: 0.875rem;
+  border: 1px solid var(--color-border, #2b3d4f);
+  border-radius: 10px;
+  background: var(--color-bg-primary, #0b1723);
+}
+
+.person-interaction .form-group {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.person-interaction input,
+.person-interaction select,
+.person-interaction textarea {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+.person-interaction-open {
+  justify-self: start;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.person-interaction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.person-interaction-actions .btn {
+  min-height: 44px;
+}
+
+.person-interaction-receipt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  color: var(--color-success, #4ade80);
+  font-weight: 600;
+}
+
+.person-interaction-error {
+  margin: 0;
+  color: var(--color-danger, #f87171);
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .person-interaction-open,
+  .person-interaction-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

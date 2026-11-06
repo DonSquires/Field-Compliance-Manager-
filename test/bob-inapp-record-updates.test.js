@@ -1414,3 +1414,51 @@ test('the tool catalogue and doctrine describe person records and amendments', (
   assert.match(doctrine, /Editing a person changes details only, under\s+the row lock: the name is never sent/);
   assert.match(doctrine, /the waiting preview is retired in\s+its one transcript row while it is still unanswered/);
 });
+
+test('a person interaction on a job is previewed, anchored and applied idempotently as the caller', async () => {
+  const mod = await load();
+  const JOB = '11000000-0000-4000-8000-000000000008';
+  const { plan } = mod.validateRecordUpdatePlan({
+    source_summary: 'Gibbons callout outcome',
+    operations: [
+      { kind: 'person_interaction', person: 'Unknown male', interaction_type: 'trespass_notice_served', notes: 'Trespass notice served under the covered area.', dispatch_job_id: JOB },
+      { kind: 'person_interaction', person: 'Alex Example', interaction_type: 'trespass_notice_served', notes: 'No job given.' },
+      { kind: 'person_interaction', person: 'Alex Example', interaction_type: 'arrested', notes: 'Wrong type.', dispatch_job_id: JOB },
+    ],
+  });
+  assert.deepEqual(plan.operations.map((op) => op.index), [0]);
+  assert.match(plan.held[0].reason, /which dispatch job or shift/);
+  assert.match(plan.held[1].reason, /Choose what happened/);
+
+  // An officer cannot search people: the name still goes to the RPC, which matches it privately.
+  const officer = fakeRpc({ find_person_matches: fail('permission denied (42501)') });
+  const { steps, held } = await mod.resolveRecordUpdatePlan({ rpc: officer.rpc, organizationId: ORG, plan });
+  assert.deepEqual(held.map((h) => h.index), [1, 2]);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].new_person_name, 'Unknown male');
+  assert.equal(steps[0].person_record_id, undefined);
+  assert.match(steps[0].label, /trespass notice served for Unknown male \(matched privately/);
+  assert.doesNotMatch(steps[0].label, UUID_RE);
+
+  const pending = { plan_id: PLAN, source_summary: 'Gibbons callout outcome', steps };
+  const db = fakeRpc({ record_person_interaction: ok({ interaction_id: OBS, person_record_id: PERSON, outcome: 'recorded' }) });
+  const first = await mod.applyRecordUpdatePlan({ rpc: db.rpc, organizationId: ORG, pending });
+  assert.equal(first.outcome, 'applied');
+  assert.deepEqual(db.calls[0].args, {
+    p_client_request_id: await mod.deterministicUuid(`${PLAN}:0`), p_organization_id: ORG,
+    p_interaction_type: 'trespass_notice_served', p_notes: 'Trespass notice served under the covered area.',
+    p_person_record_id: null, p_new_person_name: 'Unknown male', p_dispatch_job_id: JOB, p_shift_id: null,
+    p_interacted_at: null, p_source: 'bob',
+  });
+  const retry = fakeRpc({ record_person_interaction: ok({ interaction_id: OBS, person_record_id: PERSON, outcome: 'already_recorded' }) });
+  assert.equal((await mod.applyRecordUpdatePlan({ rpc: retry.rpc, organizationId: ORG, pending })).receipts[0].status, 'already_present');
+  assert.equal(mod.isTrustedPendingRecordUpdates({ ...pending, user_id: 'u', conversation_id: 'c', organization_id: ORG, created_at: new Date().toISOString() },
+    { userId: 'u', conversationId: 'c', organizationId: ORG }), true);
+
+  // An administrator who can search binds the existing person by id.
+  const admin = fakeRpc({ find_person_matches: ok([exactMatch(PERSON, 'Unknown male')]) });
+  const bound = await mod.resolveRecordUpdatePlan({ rpc: admin.rpc, organizationId: ORG, plan });
+  assert.equal(bound.steps[0].person_record_id, PERSON);
+  assert.equal(bound.steps[0].new_person_name, undefined);
+  assert.match(caddie, /kind: \\"person_interaction\\"/);
+});
