@@ -1110,6 +1110,10 @@ test('draft discovery finds new files and excludes ignored, generated and secret
   fs.writeFileSync(path.join(repo.source, 'lib/draft.test.js'), '// Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, '.env.draft'), 'Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, 'draft.pem'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'credentials.json'), 'Bob Test draft discovery\n');
+  fs.writeFileSync(path.join(repo.source, 'draft-secret.txt'), 'Bob Test draft discovery\n');
+  fs.mkdirSync(path.join(repo.source, '.secrets'));
+  fs.writeFileSync(path.join(repo.source, '.secrets/draft.txt'), 'Bob Test draft discovery\n');
   fs.writeFileSync(path.join(repo.source, '.gitignore'), 'ignored-draft.js\n');
   fs.writeFileSync(path.join(repo.source, 'ignored-draft.js'), 'Bob Test draft discovery\n');
   fs.mkdirSync(path.join(repo.source, 'dist'));
@@ -1121,11 +1125,16 @@ test('draft discovery finds new files and excludes ignored, generated and secret
     name: 'draft', matches: 2, paths: ['lib/draft.js'], truncated: true,
   });
   assert.deepEqual(tools.find_files({ name: 'absent' }).paths, []);
+  assert.deepEqual(tools.find_files({ name: 'secret' }).paths, []);
+  assert.deepEqual(tools.find_files({ name: 'credential' }).paths, []);
   assert.match(tools.find_files({}).error, /name must be/);
   const found = tools.search({ query: 'Bob Test draft discovery' });
   assert.equal(found.matches, 2, JSON.stringify(found));
   assert.ok(found.results.every(line => line.startsWith('lib/draft')));
   assert.equal(tools.search({ query: 'Bob Test draft discovery', path: '.env.draft' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'credentials.json' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: 'draft-secret.txt' }).matches, 0);
+  assert.equal(tools.search({ query: 'Bob Test draft discovery', path: '.secrets' }).matches, 0);
 });
 
 test('draft search preserves space-containing paths and rejects invalid scopes instead of searching everything', t => {
@@ -1138,7 +1147,7 @@ test('draft search preserves space-containing paths and rejects invalid scopes i
   assert.equal(found.matches, 1, JSON.stringify(found));
   assert.equal(tools.search({ query: 'Bob Test scoped search', path: ['lib/*.js'] }).matches, 1);
   assert.equal(tools.search({ query: 'sum', path: '.' }).error, undefined);
-  for (const scope of [null, '../lib', '/', '/lib', [''], ['lib', '../test'], ['C:/Windows'], [42]]) {
+  for (const scope of [null, '', [], '../lib', '/', '/lib', [''], ['lib', '../test'], ['C:/Windows'], [42]]) {
     assert.match(tools.search({ query: 'sum', path: scope }).error, /repository-relative/);
   }
   assert.match(tools.search({ query: 'sum', paths: ['lib'] }).error, /path, not paths/);

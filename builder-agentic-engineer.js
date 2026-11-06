@@ -100,10 +100,10 @@ function normalizeRunCommand(command, workspacePath = null) {
 
 const PRESERVE_TESTS = 'Existing tests are the repository\'s evidence and must keep passing: keep every existing test and its title, and add new tests alongside them (replace_in_file to insert; never write_file over an existing test file). If the approved behavior changes what an existing test asserts, edit that assertion in place under the same title. run {"command":"git show HEAD:<file>"} shows the pinned version.';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
-const PRIVATE_SEARCH_PATH = /(?:^|\/)(?:\.env(?:\.|$)|id_rsa[^/]*$|id_ed25519[^/]*$)|\.(?:pem|key|pfx|p12|crt|keystore)$/i;
+const PRIVATE_SEARCH_PATH = /(?:^|\/)(?:[^/]*secret[^/]*|[^/]*credential[^/]*|[^/]*env(?:\..*)?|id_rsa[^/]*|id_ed25519[^/]*)(?:\/|$)|\.(?:pem|key|pfx|p12|crt|keystore)$/i;
 const SEARCH_EXCLUDES = [
   ...[...SKIP_DIRS].map(dir => `:(glob,exclude)**/${dir}/**`),
-  ...['.env', '.env.*', 'id_rsa*', 'id_ed25519*', '*.pem', '*.key', '*.pfx', '*.p12', '*.crt', '*.keystore']
+  ...['.env', '.env.*', '*secret*', '*secret*/**', '*credential*', '*credential*/**', 'id_rsa*', 'id_ed25519*', '*.pem', '*.key', '*.pfx', '*.p12', '*.crt', '*.keystore']
     .map(pattern => `:(glob,exclude,icase)**/${pattern}`),
 ];
 
@@ -890,6 +890,9 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       const { query, path: pathspec, regex, context } = args;
       if (!query || typeof query !== 'string') return { error: 'query is required' };
       if (Object.hasOwn(args, 'paths')) return { error: 'search accepts path, not paths; use a repository-relative string or array' };
+      if (pathspec !== undefined && (pathspec === '' || Array.isArray(pathspec) && pathspec.length === 0)) {
+        return { error: 'search path cannot be empty; provide a non-empty repository-relative scope or omit it to search the allowed repository files' };
+      }
       if (pathspec !== undefined && typeof pathspec !== 'string' && !Array.isArray(pathspec)) {
         return { error: 'search path must be a repository-relative string or array' };
       }
