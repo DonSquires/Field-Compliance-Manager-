@@ -170,6 +170,43 @@ the exact required author identity with the GitHub profile identity. Its merged
 tree must not be described as deployed; subsequent release commits must retain
 the verified author through the PR path (rebase merge, not squash).
 
+### Vibe automatic task continuation (2026-11-07)
+
+Before: the Builder chat-dock task remained on its intended branch, but its
+targeted browser check failed. A finite coding turn could stop even while
+repair work advanced, requiring another owner "continue". A successful diff
+inspection was not a passing application check.
+
+During: `vibe-v22` continues the original coding turn across step budgets and
+verification-correction limits while code, investigation or verification state
+advances. It permits at most five automatic rounds and 90 minutes from the
+original execution start, preserving the existing per-round budgets and loop
+guards. Each round has an append-only status receipt. Repeated state, exhausted
+limits, a genuine blocker, a closed session or newer owner instruction stops
+the turn with work preserved, explicitly failed rather than marked complete.
+No synthetic owner message, automatic PR, merge or release is introduced.
+
+Restarted turns restore same-message tool and verification receipts, failed edit
+targets and continuation limits, and use restart-specific model request keys.
+A missing original workspace fails closed instead of rebuilding from main.
+Live firewall/ACL mutations are not replayed after interruption. Historical
+attachment-derived output remains withheld from external models.
+
+The service-only `builder_vibe_recover_failed_turn` RPC permits one explicit,
+audited recovery of the original completed failed coding message. It requires
+the exact unpublished branch head and an eligible verification/budget failure;
+closed/busy sessions, newer/pending owner instructions, reused requests and
+exhausted restart counts refuse recovery. Request replay is idempotent and audit
+failure rolls back the queue change. This is an operator recovery path, not a
+model tool or permission to impersonate an owner.
+
+After: focused runtime tests cover multi-round repair, fresh checks, honest
+budget exhaustion, interruption, restart evidence, private-context handling and
+unchanged publication gates. Disposable PostgreSQL tests cover ACLs, replay,
+head binding, competing recoveries, owner/closure races and audit rollback.
+Production readiness still requires the governed migration, runtime deployment
+and an actual passing task receipt. Merged is not deployed or glass-proven.
+
 ### Vibe continuation and browser diagnosis
 
 Before: a Vibe draft can span several committed turns. Its old `git_diff`
