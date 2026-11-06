@@ -339,10 +339,8 @@ interface CourtRow {
 const TABS: { id: RosterTab; label: string }[] = [
   { id: 'staff', label: 'Staff' },
   { id: 'recruitment', label: 'Recruitment' },
-  { id: 'onboarding', label: 'Onboarding' },
   { id: 'performance', label: 'Performance' },
   { id: 'cases', label: 'HR Cases' },
-  { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
   { id: 'roster-rules', label: 'Rest & hours rules' },
   { id: 'coverage', label: 'Open Shifts' },
@@ -355,7 +353,7 @@ const TABS: { id: RosterTab; label: string }[] = [
 ];
 
 const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
-  { id: 'workforce', label: 'Staff', tabs: ['staff', 'onboarding', 'credentials'] },
+  { id: 'workforce', label: 'Staff', tabs: ['staff'] },
   { id: 'people', label: 'HR', tabs: ['recruitment', 'performance', 'cases', 'leave'] },
   { id: 'rostering', label: 'Rostering', tabs: [...ROSTERING_HR_TABS] },
   { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
@@ -970,12 +968,8 @@ const RosterHRPage: React.FC = () => {
 
   const openStaffProfile = (person: StaffRow, profileTab = 'overview') => {
     if (!person.staff_id) return;
-    const url = new URL(staffProfileHref, window.location.origin);
-    url.searchParams.set('profile', person.staff_id);
-    url.searchParams.set('profileTab', profileTab);
-    url.searchParams.set('popout', '1');
-    const profileWindow = window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`, 'popup=yes,width=1440,height=960,left=80,top=40');
-    if (profileWindow) profileWindow.opener = null;
+    const params = new URLSearchParams({ profile: person.staff_id, profileTab });
+    navigate({ pathname: staffProfileHref, search: params.toString() });
   };
 
   const createPayRoleCode = async (event: React.FormEvent) => {
@@ -1623,7 +1617,7 @@ const RosterHRPage: React.FC = () => {
     if (ledger.current_stage === 'evidence') {
       if (ledger.evidence_status === 'complete') advance();
       else if (ledger.next_action === 'Verify credential') openEvidence(person.staff_id!, name, 'record_credential');
-      else if (ledger.next_action === 'Upload evidence') openEvidence(person.staff_id!, name, 'record_document');
+      else if (ledger.next_action === 'Upload evidence') openStaffProfile(person, 'onboarding');
       else openEvidence(person.staff_id!, name, 'add_skill');
       return;
     }
@@ -1784,8 +1778,13 @@ const RosterHRPage: React.FC = () => {
         if (!provisioned?.user_id || !provisioned?.staff_id) throw new Error('Identity provisioning receipt was not confirmed.');
         const { error: convertError } = await supabase.rpc('convert_recruitment_candidate_to_staff', { p_candidate_id: candidate.id, p_user_id: provisioned.user_id, p_staff_id: provisioned.staff_id, p_note: offerAction.note.trim() });
         if (convertError) throw convertError;
-        setNotice(`${candidate.first_name} ${candidate.last_name} hired. Their login and staff record are created for this branch and onboarding has started \u2013 see the Staff tab.`);
-        setOfferAction(null); await loadAll();
+        const params = new URLSearchParams({ profile: provisioned.staff_id, profileTab: 'onboarding' });
+        setOfferAction(null);
+        setSaving(false);
+        navigate({ pathname: staffProfileHref, search: params.toString() }, {
+          state: { notice: `${candidate.first_name} ${candidate.last_name} hired. Their login and staff record are ready for profile-based onboarding.` },
+        });
+        return;
       } catch (conversionError) {
         // Keep the dialog open so the reason is visible next to the action that failed.
         setOfferError(`Offer is recorded, but hiring did not finish: ${conversionError instanceof Error ? conversionError.message : 'staff provisioning could not be confirmed.'}`);

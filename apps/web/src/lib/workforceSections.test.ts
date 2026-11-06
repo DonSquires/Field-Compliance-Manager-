@@ -19,8 +19,8 @@ describe('workforce sections', () => {
     expect(workforceSectionFor('users', '')).toBe('people-access');
   });
 
-  it('leaves staff profiles and unrelated pages without a section strip', () => {
-    expect(workforceSectionFor('people-hr', '?profile=s1&tab=coverage')).toBeNull();
+  it('keeps staff profiles in People while excluding profile links from Rosters', () => {
+    expect(workforceSectionFor('people-hr', '?profile=s1&tab=coverage')).toBe('people-hr');
     expect(isRosteringHrView('?profile=s1&section=rostering')).toBe(false);
     expect(workforceSectionFor('crm', '')).toBeNull();
   });

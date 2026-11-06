@@ -31,11 +31,13 @@ test('replay-safe on client_request_id and audited as staff_credential_recorded'
 test('the HR page offers Record credential wherever the readiness gate bites and submits through the RPC', () => {
   assert.match(hrPage, /supabase\.rpc\('record_staff_credential', \{/);
   assert.match(hrPage, /p_verified: evidenceAction\.credentialVerified/);
-  // Since the onboarding table (#118) and staff profile workspace, the gate is met by: the onboarding
-  // row's primary action, the Credentials tab form, and the profile Readiness panel link.
+  // The profile is now the primary home for onboarding and credential actions.
   assert.match(hrPage, /else if \(ledger\.next_action === 'Verify credential'\) openEvidence\(person\.staff_id!, name, 'record_credential'\);/);
   assert.match(hrPage, /if \(person\?\.staff_id\) openEvidence\(person\.staff_id, person\.display_name \|\| person\.email \|\| 'Staff member', 'record_credential'\);/);
-  assert.match(profilePage, /<a className="btn btn-secondary" href="\/admin\/people-hr\?tab=credentials"[^>]*>Open credential actions<\/a>/);
+  assert.match(profilePage, /supabase\.rpc\('record_staff_credential', \{/);
+  assert.match(profilePage, /supabase\.rpc\('renew_staff_credential', \{/);
+  assert.match(profilePage, /activeTab === 'credentials'/);
+  assert.doesNotMatch(profilePage, /href="\/admin\/people-hr\?tab=credentials"/);
   assert.match(hrPage, /aria-label="Staff member for new credential"/);
   assert.match(hrPage, /A verified, current credential is what makes an officer work ready\./);
   assert.match(hrPage, /evidenceAction\.credentialVerified && \(!evidenceAction\.credentialNumber\.trim\(\) \|\| !evidenceAction\.issuingAuthority\.trim\(\) \|\| evidenceAction\.note\.trim\(\)\.length < 10\)/);
