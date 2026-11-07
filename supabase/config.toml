@@ -413,12 +413,15 @@ enabled = true
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-# Public intake for the R&M website. No user JWT: the function checks the origin,
-# validates the body, rate-limits by salted IP hash and writes only through the
-# service-role RPC submit_website_enquiry.
+# Officer post briefing. The function validates the caller JWT itself (auth.getUser)
+# and reads only through the caller-scoped get_officer_static_post before any
+# service-role lookup.
 [functions.officer-shift-briefing]
 verify_jwt = false
 
+# Public intake for the R&M website. No user JWT: the function checks the origin,
+# validates the body, rate-limits by salted IP hash and writes only through the
+# service-role RPC submit_website_enquiry.
 [functions.website-enquiry]
 verify_jwt = false
 

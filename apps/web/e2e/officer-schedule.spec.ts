@@ -574,9 +574,9 @@ test('one shift at a time: starting the next shift while still on one is confirm
     post: { shift: { id: next.id } }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [], privacy: { status: 'checked' },
     safety: { shift_id: next.id, stop_id: null, places: [], hazards: [], warnings: [], item_count: 0, briefing_hash: 'private-v1', acknowledgement_required: false, acknowledged: false, is_assigned_officer: true },
   } }));
-  await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
+  await page.route('**/rest/v1/rpc/evaluate_static_shift_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
   let startPayload: Record<string, unknown> | null = null;
-  await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
+  await page.route('**/rest/v1/rpc/start_officer_static_shift', async (route) => {
     startPayload = JSON.parse(route.request().postData() ?? '{}');
     started = true;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: next.id, shift_status: 'in_progress', started_at: '2026-08-29T22:05:00.000Z', created: true, position_status: 'on_site', place_name: 'Civic Centre', distance_m: 0, superseded_shift_id: stillOn.id, superseded_service_type: 'patrol', superseded_started_at: '2026-08-29T20:02:00.000Z' }]) });
@@ -611,7 +611,7 @@ test('End shift says what is still open and will not end the shift until it is c
   await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
   await expect(dialog).toHaveScreenshot('officer-end-shift-dialog.png', { maxDiffPixelRatio: 0.03 });
   await dialog.getByRole('button', { name: 'Open stops' }).click();
-  await expect(page).toHaveURL(new RegExp(`/officer/patrol\\?shift=${ACTIVE_SHIFT.id}$`));
+  await expect(page).toHaveURL(/\/officer\/patrol$/);
   expect(completeCalled).toBe(false);
 });
 

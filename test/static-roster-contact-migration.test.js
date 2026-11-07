@@ -8,7 +8,7 @@ const { execFile, execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { promisify } = require('node:util');
 
-const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261105150755_static_roster_operational_contact.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261107213500_static_roster_operational_contact.sql'), 'utf8');
 const schema = fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf8');
 const liveFunction = (name) => {
   const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${name}"`);
@@ -60,7 +60,8 @@ test('contacts, authorization, retries and atomicity against disposable PostgreS
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid NOT NULL, work_unit_id uuid NOT NULL,
         staff_id uuid, scheduled_start timestamptz NOT NULL, scheduled_end timestamptz NOT NULL,
         status text NOT NULL DEFAULT 'draft', linked_shift_id uuid, client_request_id uuid NOT NULL,
-        notes text, created_by uuid, UNIQUE(organization_id, client_request_id)
+        notes text, created_by uuid, planned_break_minutes integer NOT NULL DEFAULT 0,
+        break_unpaid boolean NOT NULL DEFAULT false, updated_at timestamptz, UNIQUE(organization_id, client_request_id)
       );
       CREATE TABLE staff_branch_authorisations(user_id uuid, branch_org_id uuid, status text);
       CREATE TABLE leave_requests(staff_id uuid, status text, starts_on date, ends_on date);
@@ -76,6 +77,9 @@ test('contacts, authorization, retries and atomicity against disposable PostgreS
         LANGUAGE sql AS $fn$ SELECT NULL::text $fn$;
       ${liveFunction('create_roster_slot')}
       ${liveFunction('update_roster_slot')}
+      ${liveFunction('set_roster_slot_break')}
+      ${liveFunction('create_roster_slot_with_break')}
+      ${liveFunction('update_roster_slot_with_break')}
       GRANT SELECT ON user_profiles, staff_profiles, roster_work_units, roster_slots TO authenticated;
       ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
       ALTER TABLE staff_profiles ENABLE ROW LEVEL SECURITY;
@@ -130,7 +134,7 @@ test('contacts, authorization, retries and atomicity against disposable PostgreS
       SELECT pg_temp.check(NOT has_table_privilege('anon','public.roster_slot_contacts','SELECT'),'anonymous cannot read');
       SELECT pg_temp.check(NOT has_table_privilege('authenticated','public.roster_slot_contacts','INSERT'),'authenticated cannot write directly');
       SELECT pg_temp.check(NOT has_function_privilege('anon','public.set_roster_slot_contact(uuid,text,text,text,uuid)','EXECUTE'),'anonymous cannot call setter');
-      SELECT pg_temp.check(NOT has_function_privilege('anon','public.create_static_roster_slot_with_contact(uuid,uuid,uuid,timestamptz,timestamptz,boolean,text,text,text)','EXECUTE'),'anonymous cannot create');
+      SELECT pg_temp.check(NOT has_function_privilege('anon','public.create_static_roster_slot_with_contact(uuid,uuid,uuid,timestamptz,timestamptz,boolean,text,integer,boolean,text,text)','EXECUTE'),'anonymous cannot create');
       SET ROLE authenticated;
       SELECT set_config('request.jwt.claim.sub','${id(2)}',false);
       SELECT pg_temp.check((SELECT count(*)=2 FROM roster_slot_contacts),'assigned active officer sees published/accepted static slots only');
@@ -162,16 +166,18 @@ test('contacts, authorization, retries and atomicity against disposable PostgreS
       SELECT pg_temp.check((SELECT contact_name='Replacement' FROM roster_slot_contacts WHERE roster_slot_id='${id(302)}'),'stale contact edit leaves winner intact');
       SELECT pg_temp.check((public.set_roster_slot_contact('${id(302)}','published',NULL,NULL,(SELECT version FROM roster_slot_contacts WHERE roster_slot_id='${id(302)}'))->>'changed')::boolean,'contact can be cleared');
       SELECT pg_temp.check(NOT EXISTS(SELECT 1 FROM roster_slot_contacts WHERE roster_slot_id='${id(302)}'),'cleared designation is removed');
-      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(500)}','${id(10)}',NULL,'2099-02-01 08:00Z','2099-02-01 16:00Z',false,'Atomic','Synthetic name','bad phone') $sql$,'valid contact phone');
+      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(500)}','${id(10)}',NULL,'2099-02-01 08:00Z','2099-02-01 16:00Z',false,'Atomic',0,false,'Synthetic name','bad phone') $sql$,'valid contact phone');
       SELECT pg_temp.check(NOT EXISTS(SELECT 1 FROM roster_slots WHERE client_request_id='${id(500)}'),'invalid contact rolls back slot creation');
-      SELECT pg_temp.check((public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same','Synthetic name','03 555 1234')).client_request_id='${id(501)}','valid atomic slot creation');
-      SELECT pg_temp.check((public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same','Synthetic name','03 555 1234')).client_request_id='${id(501)}','same request can be retried');
-      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same','Different','03 555 1234') $sql$,'different roster assignment');
-      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',true,'Same','Synthetic name','03 555 1234') $sql$,'different roster assignment');
-      SELECT pg_temp.denied($sql$ SELECT public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 09:00Z','2099-01-01 17:00Z','Changed','Name','bad phone','${id(700)}') $sql$,'valid contact phone');
+      SELECT pg_temp.check((public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same',0,false,'Synthetic name','03 555 1234')).client_request_id='${id(501)}','valid atomic slot creation');
+      SELECT pg_temp.check((public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same',0,false,'Synthetic name','03 555 1234')).client_request_id='${id(501)}','same request can be retried');
+      SELECT pg_temp.check((SELECT s.planned_break_minutes=30 AND s.break_unpaid FROM public.create_static_roster_slot_with_contact('${id(502)}','${id(10)}',NULL,'2099-02-04 08:00Z','2099-02-04 16:00Z',false,'Break',30,true,'Synthetic name','03 555 1234') s),'static contact creation keeps the rostered break plan');
+      SELECT pg_temp.check((SELECT s.planned_break_minutes=15 AND NOT s.break_unpaid FROM public.update_static_roster_slot_with_contact((SELECT id FROM roster_slots WHERE client_request_id='${id(502)}'),'draft','${id(21)}','2099-02-04 08:00Z','2099-02-04 15:00Z','Break',15,false,'Synthetic name','03 555 1234',(SELECT c.version FROM roster_slot_contacts c JOIN roster_slots r ON r.id=c.roster_slot_id WHERE r.client_request_id='${id(502)}')) s),'static contact edit keeps the rostered break plan');
+      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',false,'Same',0,false,'Different','03 555 1234') $sql$,'different roster assignment');
+      SELECT pg_temp.denied($sql$ SELECT public.create_static_roster_slot_with_contact('${id(501)}','${id(10)}',NULL,'2099-02-02 08:00Z','2099-02-02 16:00Z',true,'Same',0,false,'Synthetic name','03 555 1234') $sql$,'different roster assignment');
+      SELECT pg_temp.denied($sql$ SELECT public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 09:00Z','2099-01-01 17:00Z','Changed',0,false,'Name','bad phone','${id(700)}') $sql$,'valid contact phone');
       SELECT pg_temp.check((SELECT scheduled_start='2099-01-01 08:00Z' AND notes IS NULL FROM roster_slots WHERE id='${id(301)}'),'invalid contact rolls back draft edit');
-      SELECT pg_temp.check((public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 09:00Z','2099-01-01 17:00Z','Changed','Draft contact','03 555 1234','${id(700)}')).id='${id(301)}','draft and contact update together');
-      SELECT pg_temp.denied($sql$ SELECT public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 10:00Z','2099-01-01 18:00Z','Lost change','Old contact',NULL,'${id(700)}') $sql$,'Shift contact changed');
+      SELECT pg_temp.check((public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 09:00Z','2099-01-01 17:00Z','Changed',0,false,'Draft contact','03 555 1234','${id(700)}')).id='${id(301)}','draft and contact update together');
+      SELECT pg_temp.denied($sql$ SELECT public.update_static_roster_slot_with_contact('${id(301)}','draft','${id(21)}','2099-01-01 10:00Z','2099-01-01 18:00Z','Lost change',0,false,'Old contact',NULL,'${id(700)}') $sql$,'Shift contact changed');
       SELECT pg_temp.check((SELECT scheduled_start='2099-01-01 09:00Z' AND notes='Changed' FROM roster_slots WHERE id='${id(301)}'),'stale draft contact rolls back whole edit');
       RESET ROLE;
       SELECT pg_temp.check((SELECT count(*)=1 FROM roster_slots WHERE client_request_id='${id(501)}'),'retry created one slot');
@@ -185,7 +191,7 @@ test('contacts, authorization, retries and atomicity against disposable PostgreS
 
     const concurrently = async (request, firstContact, secondContact) => {
       const call = (contact) => {
-        const command = `SET "request.jwt.claim.sub"='${id(1)}'; SET ROLE authenticated; SELECT (public.create_static_roster_slot_with_contact('${request}','${id(10)}',NULL,'2099-03-01 08:00Z','2099-03-01 16:00Z',false,'concurrency','${contact}','03 555 1234')).id;`;
+        const command = `SET "request.jwt.claim.sub"='${id(1)}'; SET ROLE authenticated; SELECT (public.create_static_roster_slot_with_contact('${request}','${id(10)}',NULL,'2099-03-01 08:00Z','2099-03-01 16:00Z',false,'concurrency',0,false,'${contact}','03 555 1234')).id;`;
         return execDocker('docker', ['exec', container, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', command], { encoding: 'utf8' });
       };
       return Promise.allSettled([call(firstContact), call(secondContact)]);

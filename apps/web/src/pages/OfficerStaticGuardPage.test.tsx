@@ -1,11 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocked = vi.hoisted(() => ({ fetch: vi.fn(), fetchSafety: vi.fn(), rpc: vi.fn() }));
+const mocked = vi.hoisted(() => ({ fetch: vi.fn(), rpc: vi.fn() }));
 vi.mock('../context/ServiceRelationshipContext', () => ({ useServiceRelationships: () => ({ selectedAgreementZones: [] }) }));
 vi.mock('../hooks/useActiveModuleContext', () => ({ useActiveModuleContext: () => ({ governingJurisdictionName: null }) }));
-vi.mock('../lib/officerStaticBriefing', () => ({ fetchOfficerStaticBriefing: mocked.fetch, fetchStaticShiftSafety: mocked.fetchSafety }));
+vi.mock('../lib/officerStaticBriefing', () => ({ fetchOfficerStaticBriefing: mocked.fetch }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc: mocked.rpc } }));
+vi.mock('../components/OfficerShiftBreakControl', () => ({ OfficerShiftBreakControl: () => null }));
+vi.mock('../components/EndShiftDialog', () => ({ EndShiftDialog: () => <div role="dialog" aria-label="End shift" /> }));
 import OfficerStaticGuardPage from './OfficerStaticGuardPage';
 
 function data(status = 'accepted') {
@@ -22,26 +24,8 @@ function data(status = 'accepted') {
   };
 }
 beforeEach(() => { vi.resetAllMocks(); mocked.fetch.mockResolvedValue(data()); });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); });
 const open = () => render(<MemoryRouter initialEntries={['/officer/site_guard?shift=chosen']}><OfficerStaticGuardPage /></MemoryRouter>);
-
-function stopSafety(hash = 'version-1') {
-  return {
-    shift_id: 'chosen', stop_id: 'stop', shift_status: 'in_progress',
-    places: [{ kind: 'site', id: 'place', location_id: 'location', name: 'Synthetic Hospital' }],
-    hazards: [{ id: 'hazard', title: 'Slippery entrance', hazard_class: 'slips_trips_falls', risk_level: 'medium', controls: ['Use the handrail'], details: null, status: 'active', origin: 'manual', version: 1, place_name: 'Synthetic Hospital', place_kind: 'site', source_name: null, source_locator: null, source_as_of: null, has_source_document: false, recorded_by: 'Your organisation', updated_at: '2026-11-06T00:00:00Z' }],
-    warnings: [], item_count: 1, briefing_hash: hash, acknowledgement_required: true,
-    acknowledged: false, acknowledged_at: null, changed_since_acknowledgement: false, is_assigned_officer: true,
-  };
-}
-
-function allowLocation() {
-  vi.stubGlobal('navigator', {
-    geolocation: { getCurrentPosition: (success: (position: { coords: { latitude: number; longitude: number; accuracy: number } }) => void) => success({ coords: { latitude: -41, longitude: 173, accuracy: 5 } }) },
-  });
-}
-
-const arrivalReceipt = { reference: 'SG-12345678', action: 'arrive', occurred_at: '2026-11-06T00:00:00Z', gps_result: 'verified_boundary', timing_status: 'on_time', dwell_minutes: null, handover_recorded: false };
 
 it('shows exact shift details, navigation, contact and requirements before start without starting work', async () => {
   open();
@@ -53,8 +37,9 @@ it('shows exact shift details, navigation, contact and requirements before start
   expect(screen.getByText('Check the badge.')).toBeTruthy();
   expect(screen.getByText('Cover reception.')).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Navigate to site' }).getAttribute('target')).toBe('_blank');
-  expect(screen.getByRole('link', { name: 'Start shift from schedule' }).getAttribute('href')).toBe('/officer/schedule?shift=chosen');
-  expect((screen.getByRole('button', { name: 'Confirm arrival' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Open this shift in my schedule' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'End shift and debrief' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Confirm arrival' })).toBeNull();
   expect(mocked.rpc).not.toHaveBeenCalled();
 });
 
@@ -102,81 +87,20 @@ it('does not describe an unconfirmed selected shift as an empty assignment', asy
 
 it('offers in-shift reporting and end flow with the same shift context', async () => {
   mocked.fetch.mockResolvedValue(data('in_progress')); open();
-  expect((await screen.findByRole('link', { name: 'Record incident or report' })).getAttribute('href')).toBe('/officer/report?shift=chosen');
-  expect(screen.getByRole('link', { name: 'Breaks or end shift' }).getAttribute('href')).toBe('/officer/schedule?shift=chosen');
-  expect((screen.getByRole('button', { name: 'Confirm arrival' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(await screen.findByRole('button', { name: 'Report an observation or incident' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'End shift and debrief' }));
+  expect(await screen.findByRole('dialog', { name: 'End shift' })).toBeTruthy();
+  expect(mocked.rpc).not.toHaveBeenCalled();
 });
 
-it('makes unverified boundaries and withheld briefings explicit and blocks attendance', async () => {
-  const next = data('in_progress'); next.post.place.boundary_verified = false; next.privacy.status = 'unavailable';
+it('makes withheld briefings explicit instead of describing them as empty', async () => {
+  const next = data('in_progress'); next.privacy.status = 'unavailable';
   next.post.place.site_brief = ''; next.post.shift.notes = ''; next.post.place.access_instructions = ''; next.post.place.hs_notes = ''; next.roster_notes = '';
   mocked.fetch.mockResolvedValue(next); open();
-  await screen.findByText(/Operations must verify this site boundary/);
-  expect(screen.getByText(/Some briefing content is withheld/)).toBeTruthy();
+  await screen.findByText(/Some briefing content is withheld/);
   expect(screen.getAllByText(/Unavailable or withheld pending private review/)).toHaveLength(5);
   expect(screen.queryByText('No specific safety notes supplied.')).toBeNull();
-  expect((screen.getByRole('button', { name: 'Confirm arrival' }) as HTMLButtonElement).disabled).toBe(true);
-});
-
-it('requires a private stop-specific safety acknowledgement before arrival', async () => {
-  allowLocation();
-  mocked.fetch.mockResolvedValue(data('in_progress'));
-  mocked.fetchSafety.mockResolvedValue(stopSafety());
-  mocked.rpc.mockImplementation(async (name: string) => {
-    if (name === 'acknowledge_safety_briefing') return { data: { acknowledged_at: '2026-11-06T00:00:00Z', briefing_hash: 'version-1' }, error: null };
-    if (name === 'manage_officer_static_post') return { data: arrivalReceipt, error: null };
-    throw new Error(`Unexpected RPC ${name}`);
-  });
-  open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirm arrival' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Risks at this post' });
-  expect(dialog.textContent).toContain('Slippery entrance');
-  expect(mocked.fetchSafety).toHaveBeenCalledWith('chosen', 'stop');
-  expect(mocked.rpc).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: /I've read these risks/ }));
-  await waitFor(() => expect(mocked.rpc).toHaveBeenCalledWith('manage_officer_static_post', expect.objectContaining({ p_stop_id: 'stop', p_action: 'arrive' })));
-  expect(mocked.rpc).toHaveBeenCalledWith('acknowledge_safety_briefing', expect.objectContaining({ p_shift_id: 'chosen', p_stop_id: 'stop', p_briefing_hash: 'version-1' }));
-  await screen.findByText('Arrival recorded');
-});
-
-it('reloads a changed stop briefing privately and requires confirmation again', async () => {
-  allowLocation();
-  mocked.fetch.mockResolvedValue(data('in_progress'));
-  mocked.fetchSafety.mockResolvedValueOnce(stopSafety()).mockResolvedValueOnce(stopSafety('version-2'));
-  mocked.rpc.mockImplementation(async (name: string, args: { p_briefing_hash?: string }) => {
-    if (name === 'acknowledge_safety_briefing' && args.p_briefing_hash === 'version-1') return { data: null, error: { hint: 'briefing_changed', message: 'Briefing changed' } };
-    if (name === 'acknowledge_safety_briefing') return { data: { acknowledged_at: '2026-11-06T00:00:00Z', briefing_hash: 'version-2' }, error: null };
-    if (name === 'manage_officer_static_post') return { data: arrivalReceipt, error: null };
-    throw new Error(`Unexpected RPC ${name}`);
-  });
-  open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirm arrival' }));
-  await screen.findByRole('dialog', { name: 'Risks at this post' });
-  fireEvent.click(screen.getByRole('button', { name: /I've read these risks/ }));
-  await screen.findByText(/updated while you were reading/);
-  expect(mocked.fetchSafety).toHaveBeenCalledTimes(2);
-  expect(mocked.fetchSafety).toHaveBeenLastCalledWith('chosen', 'stop');
-  expect(mocked.rpc.mock.calls.some(([name]) => name === 'manage_officer_static_post')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: /I've read these risks/ }));
-  await waitFor(() => expect(mocked.rpc).toHaveBeenCalledWith('manage_officer_static_post', expect.objectContaining({ p_stop_id: 'stop' })));
-});
-
-it('blocks arrival when the private stop briefing is unavailable', async () => {
-  mocked.fetch.mockResolvedValue(data('in_progress'));
-  mocked.fetchSafety.mockRejectedValue(new Error('Private stop briefing unavailable. Contact operations.'));
-  open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirm arrival' }));
-  await screen.findByText('Private stop briefing unavailable. Contact operations.');
-  expect(mocked.rpc).not.toHaveBeenCalled();
-});
-
-it('preserves unsaved handover text across a briefing refresh', async () => {
-  const next = data('in_progress'); next.post.stop.status = 'on_scene';
-  mocked.fetch.mockResolvedValue(next); open();
-  const notes = await screen.findByRole('textbox', { name: 'Departure handover notes' });
-  fireEvent.change(notes, { target: { value: 'Exit checked; keys handed over.' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh static post' }));
-  await waitFor(() => expect((screen.getByRole('textbox', { name: 'Departure handover notes' }) as HTMLTextAreaElement).value).toBe('Exit checked; keys handed over.'));
+  expect(screen.getByText(/Safety details are withheld pending private review/)).toBeTruthy();
 });
 
 it('rejects a response for a different assignment', async () => {

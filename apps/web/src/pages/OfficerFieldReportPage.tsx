@@ -6,7 +6,6 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
-import { defaultFieldReportShift } from '../lib/fieldReportShift';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import { OfficerPhotoAttachments } from '../components/OfficerPhotoAttachments';
@@ -97,10 +96,9 @@ const OfficerFieldReportPage: React.FC = () => {
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts(availableShifts);
     setIncidents((incidentResponse.data as IncidentOption[]) ?? []);
     setDocumentTypes(((documentTypeResponse.data as DocumentTypeOption[]) ?? []).filter((definition) => definition.document_kind !== 'person_photo'));
-    const rememberedShiftId = shiftSelectionRef.current?.scope === shiftScope ? shiftSelectionRef.current.shiftId : null;
-    const selection = requestedShiftId === null && rememberedShiftId === null
-      ? { shiftId: defaultFieldReportShift(availableShifts), error: null }
-      : resolveReportShift(availableShifts.map((shift) => shift.id), requestedShiftId, rememberedShiftId);
+    // The query lists the in-progress shift first, then started shifts newest first, so the default is never a future shift.
+    const selection = resolveReportShift(availableShifts.map((shift) => shift.id), requestedShiftId,
+      shiftSelectionRef.current?.scope === shiftScope ? shiftSelectionRef.current.shiftId : null);
     shiftSelectionRef.current = { scope: shiftScope, shiftId: selection.shiftId };
     setForm((current) => ({ ...current, shiftId: selection.shiftId }));
     setShiftContextError(selection.error);

@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
-const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261104214253_static_arrival_requires_started_shift.sql'), 'utf8').replace(/\r\n/g, '\n');
+const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261107213000_static_arrival_requires_started_shift.sql'), 'utf8').replace(/\r\n/g, '\n');
 const guard = "  if v_shift.status<>'in_progress' or v_shift.actual_start is null then raise exception 'Start this shift from My schedule and complete its safety briefing before recording attendance';end if;\n";
 const autoStart = "    update public.shifts set status='in_progress',actual_start=coalesce(actual_start,v_at) where id=v_shift.id and status='accepted';\n";
 const preFix = migration.replace(guard, '').replace('  else\n', `${autoStart}  else\n`);
@@ -14,7 +14,9 @@ test('static arrival keeps the existing task, boundary and retry logic but canno
   assert.doesNotMatch(migration, /update public\.shifts set status=/);
   assert.match(migration, /boundary_verification='verified'/);
   assert.ok(migration.indexOf('if found then return v_receipt') < migration.indexOf(guard));
-  assert.doesNotMatch(migration, /\b(?:GRANT|REVOKE|DROP)\b/);
+  assert.doesNotMatch(migration, /\bDROP\b/i);
+  assert.match(migration, /revoke all on function public\.manage_officer_static_post\([^)]*\) from public, anon;/);
+  assert.match(migration, /revoke all on function public\.get_officer_static_post\(uuid\) from public, anon;/);
 });
 
 test('accepted shifts cannot bypass canonical start, against disposable PostgreSQL', { skip: process.env.BOB_TEST_POSTGRES !== '1' }, async () => {
@@ -34,6 +36,9 @@ test('accepted shifts cannot bypass canonical start, against disposable PostgreS
     const call = (action, status, request, notes = 'Synthetic handover') => `public.manage_officer_static_post('${id(3)}','${status}','${action}','${id(request)}','${notes}',0,0,5)`;
     const sql = `
       CREATE EXTENSION IF NOT EXISTS postgis;
+      CREATE ROLE anon;
+      CREATE ROLE authenticated;
+      CREATE ROLE service_role;
       CREATE SCHEMA auth;
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $fn$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $fn$;
       CREATE TABLE shifts(id uuid PRIMARY KEY, officer_user_id uuid, organization_id uuid, service_type text, status text, actual_start timestamptz, completed_stops integer, scheduled_start timestamptz, scheduled_end timestamptz, notes text);
