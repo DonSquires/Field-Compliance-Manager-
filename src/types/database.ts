@@ -39815,6 +39815,42 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_requeue_failed_routine_repairs: {
+        Args: { _limit?: number; _release_sha: string; _released_at: string }
+        Returns: {
+          automation_attempt_count: number
+          automation_error_redacted: string | null
+          automation_status: string
+          automation_updated_at: string
+          basis: Json
+          builder_job_id: string | null
+          client_packet_key: string
+          confidence: number | null
+          covered_by_job_id: string | null
+          created_at: string
+          disposition: string
+          envelope: Json
+          id: string
+          organization_id: string
+          redaction: Json
+          repair_risk: string
+          retention_cutoff: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          route: string | null
+          stop_line_hit: string | null
+          triage: string | null
+          truth_state: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bob_friction_packets"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       builder_require_implementation_acceptance: {
         Args: { _job_id: string; _require_passed?: boolean }
         Returns: undefined
