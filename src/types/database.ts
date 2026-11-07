@@ -40332,6 +40332,15 @@ export type Database = {
         Args: { p_session_id: string }
         Returns: string
       }
+      builder_vibe_recover_failed_turn: {
+        Args: {
+          p_expected_head: string
+          p_message_id: string
+          p_request_id: string
+          p_session_id: string
+        }
+        Returns: Json
+      }
       builder_vibe_redeem_preview_ticket: {
         Args: { p_session_id: string; p_ticket: string }
         Returns: string
