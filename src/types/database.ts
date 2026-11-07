@@ -28730,6 +28730,48 @@ export type Database = {
           },
         ]
       }
+      roster_slot_contacts: {
+        Row: {
+          contact_name: string | null
+          contact_phone: string | null
+          roster_slot_id: string
+          updated_at: string
+          updated_by: string
+          version: string
+        }
+        Insert: {
+          contact_name?: string | null
+          contact_phone?: string | null
+          roster_slot_id: string
+          updated_at?: string
+          updated_by: string
+          version?: string
+        }
+        Update: {
+          contact_name?: string | null
+          contact_phone?: string | null
+          roster_slot_id?: string
+          updated_at?: string
+          updated_by?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_slot_contacts_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: true
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slot_contacts_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       roster_slots: {
         Row: {
           break_unpaid: boolean
@@ -42431,6 +42473,45 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_static_roster_slot_with_contact: {
+        Args: {
+          p_break_unpaid: boolean
+          p_client_request_id: string
+          p_contact_name: string
+          p_contact_phone: string
+          p_notes: string
+          p_planned_break_minutes: number
+          p_publish: boolean
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+          p_work_unit_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_workshop_work_order:
         | {
             Args: {
@@ -52476,6 +52557,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_roster_slot_contact: {
+        Args: {
+          p_contact_name: string
+          p_contact_phone: string
+          p_expected_status: string
+          p_expected_version: string
+          p_slot_id: string
+        }
+        Returns: Json
+      }
       set_site_geometry: {
         Args: {
           p_boundary?: Json
@@ -54314,6 +54405,45 @@ export type Database = {
           p_expected_status: string
           p_notes?: string
           p_planned_break_minutes?: number
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_slot_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_static_roster_slot_with_contact: {
+        Args: {
+          p_break_unpaid: boolean
+          p_contact_name: string
+          p_contact_phone: string
+          p_expected_contact_version: string
+          p_expected_status: string
+          p_notes: string
+          p_planned_break_minutes: number
           p_scheduled_end: string
           p_scheduled_start: string
           p_slot_id: string
