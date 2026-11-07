@@ -314,10 +314,10 @@ const StaffProfilePage: React.FC = () => {
     setNotice(null);
     const { error: saveError } = await supabase.rpc('set_staff_employment_setup', {
       p_staff_id: staffProfile.id,
-      p_expected_employment_type: staffProfile.employment_type,
-      p_expected_start_date: staffProfile.start_date,
-      p_expected_end_date: staffProfile.end_date,
-      p_expected_role_code: staffProfile.role_code,
+      p_expected_employment_type: staffProfile.employment_type ?? null,
+      p_expected_start_date: staffProfile.start_date ?? null,
+      p_expected_end_date: staffProfile.end_date ?? null,
+      p_expected_role_code: staffProfile.role_code ?? null,
       p_employment_type: employmentDraft.employmentType,
       p_start_date: employmentDraft.startDate,
       p_end_date: employmentDraft.endDate || null,

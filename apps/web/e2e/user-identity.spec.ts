@@ -13,6 +13,16 @@ test.beforeEach(async ({ page }) => {
     contentType: 'application/json',
     body: JSON.stringify([{ organization_id: '41414141-4141-4141-8141-414141414141', organization_name: 'Northern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['people_hr', 'access_control'], can_be_rostered: false, is_default: true }, { organization_id: '45454545-4545-4545-8545-454545454545', organization_name: 'Southern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['people_hr', 'access_control'], can_be_rostered: false, is_default: false }]),
   }));
+  // The branch access panel lists active delivery branches from organizations, so Southern Branch must exist there too.
+  await page.route('**/rest/v1/organizations?*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('organization_type') !== 'eq.branch' || url.searchParams.get('select') !== 'id,name') { await route.fallback(); return; }
+    const ids = url.searchParams.get('id') ?? '';
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      { id: '41414141-4141-4141-8141-414141414141', name: 'Northern Branch' },
+      { id: '45454545-4545-4545-8545-454545454545', name: 'Southern Branch' },
+    ].filter((branch) => ids.includes(branch.id))) });
+  });
 });
 
 test('administrator manages identity and access preset', async ({ page }) => {
