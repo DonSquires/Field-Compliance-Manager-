@@ -3,6 +3,7 @@ import { AlertTriangle, BadgeCheck, BriefcaseBusiness, Car, CheckCircle2, KeyRou
 import type { AppRole, OperatingOrganization } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 import { StaffBranchAccessPanel } from './StaffBranchAccessPanel';
 import './UserIdentityWorkspace.css';
 
@@ -20,14 +21,14 @@ export interface UserAccessPreset { id: string; key: string; name: string; role:
 export interface UserPresetAssignment { id: string; user_id: string; preset_id: string; status: string; }
 export interface UserSpineReadiness { user_id: string; identity_status: string; employment_status: string; access_status: string; credential_status: string; work_status: string; blockers: string[]; next_action: string; }
 
-export function UserIdentityWorkspace({ user, callerRole, presets, assignment, readiness, branches, onClose, onChanged }: { user: ManagedUserIdentity; callerRole: AppRole; presets: UserAccessPreset[]; assignment: UserPresetAssignment | null; readiness: UserSpineReadiness | null; branches: OperatingOrganization[]; onClose: () => void; onChanged: () => Promise<void> }) {
+export function UserIdentityWorkspace({ user, callerRole, presets, assignment, readiness, branches, signInState, onClose, onChanged }: { user: ManagedUserIdentity; callerRole: AppRole; presets: UserAccessPreset[]; assignment: UserPresetAssignment | null; readiness: UserSpineReadiness | null; branches: OperatingOrganization[]; signInState?: 'no_login' | 'invited' | 'signed_in'; onClose: () => void; onChanged: () => Promise<void> }) {
   const [form, setForm] = useState({ displayName: user.display_name ?? '', phone: user.phone ?? '', role: user.role });
   const [presetId, setPresetId] = useState(assignment?.preset_id ?? '');
   const [identityReason, setIdentityReason] = useState('');
   const [accessReason, setAccessReason] = useState('');
   const [email, setEmail] = useState(user.email ?? '');
   const [emailReason, setEmailReason] = useState('');
-  const [provisionExistingStaff, setProvisionExistingStaff] = useState(false);
+  const [provisionExistingStaff, setProvisionExistingStaff] = useState(signInState === 'no_login' && user.role === 'officer');
   const [saving, setSaving] = useState<'identity' | 'access' | 'email' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
     event.preventDefault(); setSaving('email'); setError(null); setNotice(null);
     const { data, error: saveError } = await supabase.functions.invoke('update-user-email', { body: { user_id: user.id, email: email.trim(), reason: emailReason.trim(), provision_existing_staff: provisionExistingStaff } });
     const receipt = data as { error?: string; email?: string; pending_email?: string; requires_confirmation?: boolean; invitation_resent?: boolean; existing_staff_preserved?: boolean } | null;
-    if (saveError || receipt?.error) setError(receipt?.error ?? (saveError instanceof Error ? saveError.message : 'The email address could not be changed.'));
+    if (saveError || receipt?.error) setError(receipt?.error ?? (saveError ? await edgeFunctionErrorMessage(saveError, 'The email address could not be changed.') : 'The email address could not be changed.'));
     else if (receipt?.existing_staff_preserved) { setNotice(`Invitation sent to ${receipt.email}. The existing staff record, credentials, skills and history were preserved. Work readiness still needs confirmation in HR.`); setEmailReason(''); setProvisionExistingStaff(false); await onChanged(); }
     else if (receipt?.requires_confirmation) { setNotice(`${user.display_name ?? 'This person'} has signed in before, so ${receipt.pending_email} has to be confirmed before it becomes their sign-in address. Until then they keep signing in with ${receipt.email}. Their profile, role and history are unchanged.`); setEmailReason(''); await onChanged(); }
     else { setNotice(receipt?.invitation_resent ? `Email corrected to ${receipt.email}. Their unclaimed invitation was re-sent to the new address.` : `Email corrected to ${receipt?.email ?? email.trim()}. They sign in with it from now on.`); setEmailReason(''); await onChanged(); }

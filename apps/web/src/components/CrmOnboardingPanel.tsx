@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Clock3, MailPlus, RefreshCw, Rocket, UserRound, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 
 interface ReadinessDimension {
   key: string;
@@ -40,6 +41,16 @@ interface Assignee {
   role: string;
 }
 
+interface PortalAccess {
+  client_user_count: number;
+  signed_in_user_count: number;
+  pending_user_count: number;
+  contact_email: string | null;
+  place_count: number;
+  can_invite: boolean;
+  invite_blocker: string | null;
+}
+
 const stages = ['qualify', 'configure', 'review'] as const;
 
 export function CrmOnboardingPanel({
@@ -65,6 +76,14 @@ export function CrmOnboardingPanel({
   const [activated, setActivated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [portal, setPortal] = useState<PortalAccess | null>(null);
+
+  const loadPortal = useCallback(async () => {
+    // ATLAS CALLS: get_client_portal_access
+    const { data, error: portalError } = await supabase.rpc('get_client_portal_access', { p_account_organization_id: accountId });
+    if (portalError) setError(portalError.message);
+    setPortal((data as PortalAccess | null) ?? null);
+  }, [accountId]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -137,34 +156,57 @@ export function CrmOnboardingPanel({
   };
 
   const inviteClient = async () => {
-    if (!row) return;
     setInviting(true); setError(null); setNotice(null);
-    const { data: prepared, error: prepareError } = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: row.account_organization_id });
-    if (prepareError || !prepared) {
-      setError(prepareError?.message ?? 'The client invitation could not be prepared.');
+    try {
+      const { data: prepared, error: prepareError } = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: accountId });
+      if (prepareError || !prepared) throw new Error(prepareError?.message ?? 'The client invitation could not be prepared.');
+      const invitation = prepared as { email: string; display_name?: string };
+      const { data, error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: accountId, email: invitation.email, display_name: invitation.display_name?.trim() || row?.account_name } });
+      if (inviteError) throw new Error(await edgeFunctionErrorMessage(inviteError, 'The client login could not be sent.'));
+      if ((data as { error?: string } | null)?.error) throw new Error((data as { error: string }).error);
+      setConfirmingInvite(false);
+      setNotice(`Client login sent to ${invitation.email}. They will be the client's administrator in the client portal; when they set their password, 'Client logged in' ticks here. Service can start either way.`);
+      await load(); await loadPortal(); await onChanged?.();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The client login could not be sent.');
+    } finally {
       setInviting(false);
-      return;
     }
-    const invitation = prepared as { email: string; display_name?: string };
-    const { error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: row.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || row.account_name } });
-    if (inviteError) setError(inviteError.message);
-    else { setConfirmingInvite(false); setNotice(`Client login sent to ${invitation.email}. They will be the client's administrator in the client portal; when they set their password, 'Client logged in' ticks here. Service can start either way.`); await load(); await onChanged?.(); }
-    setInviting(false);
   };
 
   const resendInvitation = async () => {
-    if (!row) return;
     setResending(true); setError(null); setNotice(null);
-    // resend-invite finds the one person at the client who has never signed in
-    const { data, error: resendError } = await supabase.functions.invoke('resend-invite', { body: { organization_id: row.account_organization_id } });
-    if (resendError) setError(resendError.message);
-    else setNotice(`Invitation sent again to ${(data as { email?: string } | null)?.email ?? 'the client contact'}.`);
-    setResending(false);
+    try {
+      // resend-invite finds the one person at the client who has never signed in
+      const { data, error: resendError } = await supabase.functions.invoke('resend-invite', { body: { organization_id: accountId } });
+      if (resendError) throw new Error(await edgeFunctionErrorMessage(resendError, 'The invitation could not be resent.'));
+      setNotice(`Invitation sent again to ${(data as { email?: string } | null)?.email ?? 'the client contact'}.`);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The invitation could not be resent.');
+    } finally {
+      setResending(false);
+    }
   };
+
+  const accountActive = activated || accountStatus === 'active';
+  useEffect(() => { if (!loading && !row && accountActive) void loadPortal(); }, [accountActive, loadPortal, loading, row]);
 
   if (loading) return <section className="crm-onboarding-panel"><p className="crm-workspace-subtle"><Clock3 size={14} /> Loading activation evidence…</p></section>;
 
-  if (!row) return <section className="crm-onboarding-panel is-ready"><div><CheckCircle2 size={17} /><div><strong>{activated || accountStatus === 'active' ? 'Account active' : 'No onboarding ledger open'}</strong><span>{activated || accountStatus === 'active' ? 'Activation is complete and this portfolio is operational.' : 'A prospect ledger will appear here when onboarding is required.'}</span></div></div>{notice && <p role="status">{notice}</p>}</section>;
+  if (!row) return <section className="crm-onboarding-panel is-ready" aria-label="Client portal access">
+    <div><CheckCircle2 size={17} /><div><strong>{accountActive ? 'Account active' : 'No onboarding ledger open'}</strong><span>{accountActive ? 'Activation is complete and this portfolio is operational.' : 'A prospect ledger will appear here when onboarding is required.'}</span></div></div>
+    {error && <p className="is-error" role="alert"><AlertTriangle size={14} />{error}</p>}
+    {notice && <p className="is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
+    {accountActive && portal && <div className="crm-portal-access" data-testid="crm-portal-access">
+      <p className="crm-workspace-subtle">{portal.client_user_count === 0
+        ? 'Client portal: no one at the client can sign in yet. Optional — service runs either way.'
+        : `Client portal: ${portal.signed_in_user_count} signed in${portal.pending_user_count ? ` · ${portal.pending_user_count} invitation${portal.pending_user_count === 1 ? '' : 's'} not yet accepted` : ''}.`}</p>
+      {portal.client_user_count === 0 && (portal.can_invite
+        ? <button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}><MailPlus size={14} /> {inviting ? 'Sending…' : `Send client login to ${portal.contact_email}`}</button>
+        : <p className="crm-workspace-subtle"><AlertTriangle size={14} /> {portal.invite_blocker}</p>)}
+      {portal.pending_user_count > 0 && <button type="button" className="btn btn-sm btn-secondary" disabled={resending} onClick={() => void resendInvitation()}><RefreshCw size={14} /> {resending ? 'Sending…' : 'Resend client login'}</button>}
+    </div>}
+  </section>;
 
   const blocked = row.readiness?.dimensions.filter((dimension) => dimension.status === 'blocked') ?? [];
   const invitationStatus = row.invitation_status ?? 'not_invited';

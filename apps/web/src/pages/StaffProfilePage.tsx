@@ -8,6 +8,7 @@ import { StaffBranchAccessPanel } from '../components/StaffBranchAccessPanel';
 import { credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { plainWords } from '../lib/rosterWords';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 import './PageStyles.css';
 import './StaffProfilePage.css';
 
@@ -45,6 +46,7 @@ interface ManagerOption {
   role: string;
 }
 
+interface SignInState { sign_in_state: 'no_login' | 'invited' | 'signed_in'; last_sign_in_at: string | null; invited_at: string | null; }
 interface RoleCode { code: string; name: string; }
 interface SkillCatalogRow { id: string; skill_name: string; skill_category: string | null; }
 interface RecordRow { id: string; [key: string]: unknown; }
@@ -111,6 +113,8 @@ const StaffProfilePage: React.FC = () => {
   const [identityReason, setIdentityReason] = useState('');
   const [emailDraft, setEmailDraft] = useState('');
   const [emailReason, setEmailReason] = useState('');
+  const [signIn, setSignIn] = useState<SignInState | null>(null);
+  const [signInError, setSignInError] = useState<string | null>(null);
   const [onboardingNote, setOnboardingNote] = useState('');
   const [managerId, setManagerId] = useState('');
   const [credentialDraft, setCredentialDraft] = useState({ mode: 'new' as 'new' | 'renew', sourceId: '', credentialType: 'security_licence', credentialNumber: '', issuingAuthority: '', issuedDate: '', expiryDate: '', verified: true, notes: '' });
@@ -226,6 +230,20 @@ const StaffProfilePage: React.FC = () => {
   }, [actor?.organizationId, staffId]);
 
   useEffect(() => { void loadProfile(); }, [loadProfile]);
+
+  const loadSignIn = useCallback(async (userId: string) => {
+    setSignInError(null);
+    const { data, error: stateError } = await supabase.rpc('get_user_sign_in_states', { p_user_ids: [userId] });
+    const row = ((data ?? []) as Array<SignInState & { user_id: string }>).find((item) => item.user_id === userId) ?? null;
+    if (stateError) setSignInError(stateError.message);
+    else if (!row) setSignInError('You cannot manage sign-in for this person.');
+    setSignIn(row);
+  }, []);
+
+  useEffect(() => {
+    if (userProfile?.id && canManagePay) void loadSignIn(userProfile.id);
+    else setSignIn(null);
+  }, [canManagePay, loadSignIn, userProfile?.id, userProfile?.updated_at]);
   useEffect(() => { if (isProfileTab(requestedTab)) setActiveTab(requestedTab); }, [requestedTab]);
   useEffect(() => {
     const state = location.state as { notice?: unknown } | null;
@@ -273,28 +291,53 @@ const StaffProfilePage: React.FC = () => {
   const saveEmail = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!userProfile || !emailDraft.trim() || !emailReason.trim()) return;
+    const provisioning = signIn?.sign_in_state === 'no_login';
     setSaving(true);
     setError(null);
     setNotice(null);
-    const { data, error: emailError } = await supabase.functions.invoke('update-user-email', {
-      body: { user_id: userProfile.id, email: emailDraft.trim(), reason: emailReason.trim(), provision_existing_staff: false },
-    });
-    const receipt = data as { error?: string; email?: string; pending_email?: string; requires_confirmation?: boolean; invitation_resent?: boolean } | null;
-    if (emailError) setError(`Email update failed: ${emailError.message}`);
-    else if (!receipt) setError('Email update did not return a confirmation receipt.');
-    else if (receipt.error) setError(receipt.error);
-    else if (receipt.requires_confirmation) {
-      setNotice(`Email change is pending confirmation at ${receipt.pending_email ?? emailDraft.trim()}. The current sign-in address remains active until confirmation.`);
+    try {
+      const { data, error: emailError } = await supabase.functions.invoke('update-user-email', {
+        body: { user_id: userProfile.id, email: emailDraft.trim(), reason: emailReason.trim(), provision_existing_staff: provisioning },
+      });
+      if (emailError) throw new Error(await edgeFunctionErrorMessage(emailError, provisioning ? 'The sign-in invitation could not be sent.' : 'The email update failed.'));
+      const receipt = data as { error?: string; success?: boolean; email?: string; pending_email?: string; requires_confirmation?: boolean; invitation_resent?: boolean } | null;
+      if (!receipt?.success) throw new Error(receipt?.error ?? 'The server did not confirm this change. Refresh before trying again.');
+      if (receipt.requires_confirmation) {
+        setNotice(`Email change is pending confirmation at ${receipt.pending_email ?? emailDraft.trim()}. The current sign-in address remains active until confirmation.`);
+      } else if (provisioning) {
+        setNotice(`Sign-in invitation sent to ${receipt.email ?? emailDraft.trim()}. ${userProfile.display_name ?? 'They'} choose their own password from the email.`);
+      } else {
+        setNotice(receipt.invitation_resent
+          ? `Email corrected to ${receipt.email ?? emailDraft.trim()}; the unclaimed invitation was re-sent.`
+          : `Sign-in email updated to ${receipt.email ?? emailDraft.trim()}.`);
+      }
       setEmailReason('');
       await loadProfile();
-    } else {
-      setNotice(receipt.invitation_resent
-        ? `Email corrected to ${receipt.email ?? emailDraft.trim()}; the unclaimed invitation was re-sent.`
-        : `Sign-in email updated to ${receipt.email ?? emailDraft.trim()}.`);
-      setEmailReason('');
-      await loadProfile();
+      await loadSignIn(userProfile.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The email update failed.');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
+  };
+
+  const resendInvitation = async () => {
+    if (!userProfile) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { data, error: resendError } = await supabase.functions.invoke('resend-invite', { body: { user_id: userProfile.id } });
+      if (resendError) throw new Error(await edgeFunctionErrorMessage(resendError, 'The invitation could not be resent.'));
+      const receipt = data as { success?: boolean; email?: string; error?: string } | null;
+      if (!receipt?.success) throw new Error(receipt?.error ?? 'The server did not confirm the invitation.');
+      setNotice(`Invitation sent again to ${receipt.email ?? userProfile.email ?? 'their email'}.`);
+      await loadSignIn(userProfile.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The invitation could not be resent.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openRecord = (kind: RecordKind, id: string, tab: ProfileTab) => {
@@ -680,13 +723,28 @@ const StaffProfilePage: React.FC = () => {
                   <label className="staff-profile-form-wide"><span>Reason for identity or role change</span><textarea required rows={2} value={identityReason} onChange={(event) => setIdentityReason(event.target.value)} /></label>
                   <div className="staff-profile-form-wide"><button type="submit" className="btn btn-primary" disabled={saving || !identityDraft.displayName.trim() || !identityReason.trim()}>{saving ? 'Saving…' : 'Save identity'}</button></div>
                 </form> : <p>You do not have permission to change identity or role details.</p>}
-                {canManagePay && <form className="staff-profile-action-form staff-profile-form-grid" onSubmit={saveEmail}>
-                  <h3 className="staff-profile-form-wide">Sign-in email</h3>
-                  <label><span>Email address</span><input type="email" required value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} /></label>
-                  <label><span>Reason for email change</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} /></label>
-                  <p className="staff-profile-form-wide">A claimed account must confirm a new address before it replaces the current sign-in. Unclaimed invitations are re-sent to the corrected address.</p>
-                  <div className="staff-profile-form-wide"><button type="submit" className="btn btn-secondary" disabled={saving || !emailDraft.trim() || !emailReason.trim() || emailDraft.trim().toLowerCase() === (userProfile.email ?? '').toLowerCase()}>{saving ? 'Saving…' : 'Update sign-in email'}</button></div>
-                </form>}
+                {canManagePay && (() => {
+                  const state = signIn?.sign_in_state;
+                  const provisioning = state === 'no_login';
+                  const blockedProvision = provisioning && userProfile.role !== 'officer';
+                  const sameEmail = emailDraft.trim().toLowerCase() === (userProfile.email ?? '').toLowerCase();
+                  return <form className="staff-profile-action-form staff-profile-form-grid" onSubmit={saveEmail} aria-label="App sign-in">
+                    <h3 className="staff-profile-form-wide">App sign-in</h3>
+                    <p className="staff-profile-form-wide" data-testid="staff-sign-in-state">
+                      {state === 'signed_in' && <><span className="staff-profile-chip is-ok">Signed in</span> Last sign-in {signIn?.last_sign_in_at ? new Date(signIn.last_sign_in_at).toLocaleString('en-NZ') : 'not recorded'}.</>}
+                      {state === 'invited' && <><span className="staff-profile-chip is-warn">Invitation pending</span> Invited {signIn?.invited_at ? dateWords(signIn.invited_at) : ''} — they have not signed in yet.</>}
+                      {provisioning && <><span className="staff-profile-chip is-warn">No app login</span> {blockedProvision ? 'Only officers can be given a login from their profile. Use User management for other roles.' : 'Enter their email to send a sign-in invitation. They choose their own password.'}</>}
+                      {!state && (signInError ? <span className="staff-profile-warning">{signInError}</span> : 'Checking sign-in…')}
+                    </p>
+                    <label><span>Email address</span><input type="email" required value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} disabled={!state || blockedProvision} /></label>
+                    <label><span>{provisioning ? 'Reason for giving access' : 'Reason for email change'}</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} disabled={!state || blockedProvision} /></label>
+                    {!provisioning && <p className="staff-profile-form-wide">A claimed account must confirm a new address before it replaces the current sign-in. Unclaimed invitations are re-sent to the corrected address.</p>}
+                    <div className="staff-profile-form-wide staff-profile-panel-actions">
+                      <button type="submit" className={`btn ${provisioning ? 'btn-primary' : 'btn-secondary'}`} disabled={saving || !state || blockedProvision || !emailDraft.trim() || !emailReason.trim() || (!provisioning && sameEmail)}>{saving ? 'Saving…' : provisioning ? 'Send sign-in invitation' : 'Update sign-in email'}</button>
+                      {state === 'invited' && <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => void resendInvitation()}>Resend invitation</button>}
+                    </div>
+                  </form>;
+                })()}
               </> : <div className="staff-profile-empty">No user account is linked to this staff record. Identity and invitation actions are not available here.</div>}
             </section>
             <section className="staff-profile-panel"><h2>Readiness</h2>{readiness ? <dl className="staff-profile-facts"><div><dt>Identity</dt><dd>{plainWords(String(readiness.identity_status ?? 'unknown'))}</dd></div><div><dt>Employment</dt><dd>{plainWords(String(readiness.employment_status ?? 'unknown'))}</dd></div><div><dt>Credentials</dt><dd>{plainWords(String(readiness.credential_status ?? 'unknown'))}</dd></div><div><dt>Training</dt><dd>{plainWords(String(readiness.training_status ?? 'unknown'))}</dd></div></dl> : <p>No readiness assessment is available.</p>}{Array.isArray(readiness?.blockers) && readiness.blockers.length > 0 && <p className="staff-profile-warning">Holding this person back: {(readiness.blockers as string[]).join(' · ')}</p>}<div className="staff-profile-panel-actions"><button type="button" className={`btn ${staffProfile.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => setReadinessReview({ next: !staffProfile.work_ready, note: '' })}>{staffProfile.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button><button type="button" className="btn btn-secondary" onClick={() => setTab('credentials')}>Manage credentials</button></div></section>

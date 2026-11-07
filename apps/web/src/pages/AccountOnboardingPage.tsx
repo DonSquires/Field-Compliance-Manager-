@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { edgeFunctionErrorMessage } from "../lib/edgeFunctionError";
 import { readWorkflowContext, type NavigateWithContext, type WorkflowContext } from "../lib/workflowNavigation";
 import { CrmOrganizationDialog } from "../components/CrmOrganizationDialog";
 import { ShellLayout } from "../layouts/ShellLayout";
@@ -169,7 +170,7 @@ export default function AccountOnboardingPage({
     setError(null);
     // resend-invite finds the one person at the client who has never signed in
     const { data, error: resendError } = await supabase.functions.invoke("resend-invite", { body: { organization_id: selected.account_organization_id } });
-    if (resendError) setError(resendError.message);
+    if (resendError) setError(await edgeFunctionErrorMessage(resendError, "The invitation could not be resent."));
     else setNotice(`Invitation sent again to ${(data as { email?: string } | null)?.email ?? "the client contact"}.`);
     setInviting(false);
   };
@@ -187,7 +188,7 @@ export default function AccountOnboardingPage({
     const { error: inviteError } = await supabase.functions.invoke("invite-org", {
       body: { target_organization_id: selected.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || selected.account_name },
     });
-    if (inviteError) setError(inviteError.message);
+    if (inviteError) setError(await edgeFunctionErrorMessage(inviteError, "The client invitation could not be sent."));
     else {
       setNotice(`Client invitation sent to ${invitation.email}. They become the client's administrator in the client portal; the account stays provider-managed until they set their password and accept.`);
       setConfirmingInvite(false);

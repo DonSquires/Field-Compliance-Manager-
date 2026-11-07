@@ -15,3 +15,4 @@
 .staff-profile-document-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
 .staff-profile-document-row .staff-profile-record-row{min-width:0}
 @media(max-width:620px){.staff-profile-form-grid{grid-template-columns:1fr}.staff-profile-form-wide{grid-column:auto}.staff-profile-document-row{grid-template-columns:1fr}}
+.staff-profile-chip{display:inline-block;margin-right:6px;padding:1px 8px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:800}.staff-profile-chip.is-ok{color:#79cda8}.staff-profile-chip.is-warn{color:#e2c172}

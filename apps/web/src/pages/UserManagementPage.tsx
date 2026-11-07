@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, ContactRound, Filter, History, MailPlus, M
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 import { UserIdentityWorkspace, type ManagedUserIdentity, type UserAccessPreset, type UserPresetAssignment, type UserSpineReadiness } from '../components/UserIdentityWorkspace';
 import { IdentityRecordsWorkspace } from '../components/IdentityRecordsWorkspace';
 import './UserManagementPage.css';
@@ -27,6 +28,10 @@ interface AuditRow {
   metadata: Record<string, unknown> | null;
   created_at: string;
 }
+
+interface SignInState { user_id: string; sign_in_state: 'no_login' | 'invited' | 'signed_in'; last_sign_in_at: string | null; invited_at: string | null; }
+
+const SIGN_IN_LABEL: Record<SignInState['sign_in_state'], string> = { no_login: 'No login', invited: 'Invite pending', signed_in: 'Signed in' };
 
 type StatusFilter = 'all' | 'active' | 'deactivated';
 type LifecycleAction = 'deactivate' | 'reactivate';
@@ -57,7 +62,13 @@ const UserManagementPage: React.FC = () => {
   const [showIdentityRecords, setShowIdentityRecords] = useState(false);
 
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
-  const directInviteRoles = assignableRoles;
+  // Mirrors create-user: client users are seated by their own client administrator (or grand master).
+  const directInviteRoles = useMemo(() => assignableRoles.filter((role) => {
+    const clientRole = role.startsWith('client_');
+    if (profile?.role === 'client_admin') return clientRole;
+    return !clientRole || profile?.role === 'grand_master';
+  }), [assignableRoles, profile?.role]);
+  const [signInStates, setSignInStates] = useState<Record<string, SignInState>>({});
   const isFieldInvite = ['officer', 'admin_officer'].includes(inviteForm.role);
   const canManageIdentityRecords = isAdminTierRole(profile?.role);
   const canPreauthenticate = canManageIdentityRecords;
@@ -106,7 +117,15 @@ const UserManagementPage: React.FC = () => {
       if (presetResponse.error) throw presetResponse.error;
       if (assignmentResponse.error) throw assignmentResponse.error;
       if (readinessResponse.error) throw readinessResponse.error;
-      setUsers((usersResponse.data as UserRow[]) ?? []);
+      const loadedUsers = (usersResponse.data as UserRow[]) ?? [];
+      setUsers(loadedUsers);
+      const states: Record<string, SignInState> = {};
+      for (let index = 0; index < loadedUsers.length; index += 500) {
+        const { data: stateRows, error: stateError } = await supabase.rpc('get_user_sign_in_states', { p_user_ids: loadedUsers.slice(index, index + 500).map((user) => user.id) });
+        if (stateError) throw stateError;
+        for (const row of (stateRows ?? []) as SignInState[]) states[row.user_id] = row;
+      }
+      setSignInStates(states);
       setAuditRows((auditResponse.data as AuditRow[]) ?? []);
       setPresets((presetResponse.data as UserAccessPreset[]) ?? []);
       setAssignments((assignmentResponse.data as UserPresetAssignment[]) ?? []);
@@ -176,10 +195,7 @@ const UserManagementPage: React.FC = () => {
           access_preset_key: ['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) ? inviteForm.presetKey || undefined : undefined,
         },
       });
-      if (invokeError) {
-        const response = 'context' in invokeError && invokeError.context instanceof Response ? await invokeError.context.json().catch(() => null) : null;
-        throw new Error(response?.error ?? invokeError.message);
-      }
+      if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError, 'The invitation could not be sent.'));
       if (!data?.success || (manualProvisioning && (data.preauthenticated !== true || data.invitation_sent !== false)) || (!manualProvisioning && data.invitation_sent === false)) {
         throw new Error(data?.error ?? (manualProvisioning ? 'The account was not created without an invitation.' : 'No invitation was sent. Open the existing user profile and resend its invitation.'));
       }
@@ -204,10 +220,7 @@ const UserManagementPage: React.FC = () => {
     setNotice(null);
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('resend-invite', { body: { user_id: user.id } });
-      if (invokeError) {
-        const response = 'context' in invokeError && invokeError.context instanceof Response ? await invokeError.context.json().catch(() => null) : null;
-        throw new Error(response?.error ?? invokeError.message);
-      }
+      if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError, 'The invitation could not be resent.'));
       if (!data?.success) throw new Error(data?.error ?? 'The invitation could not be resent.');
       setNotice(`Invitation resent to ${user.email ?? user.display_name ?? 'the selected user'}.`);
       await loadIdentity();
@@ -232,7 +245,7 @@ const UserManagementPage: React.FC = () => {
       const { error: invokeError } = await supabase.functions.invoke('deactivate-user', {
         body: { user_id: lifecycle.user.id, action: lifecycle.action, reason: reason.trim() || undefined },
       });
-      if (invokeError) throw invokeError;
+      if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError, `The account could not be ${lifecycle.action}d.`));
       setNotice(`${lifecycle.user.display_name ?? lifecycle.user.email ?? 'User'} ${lifecycle.action === 'deactivate' ? 'deactivated' : 'reactivated'}.`);
       setLifecycle(null);
       setReason('');
@@ -306,14 +319,16 @@ const UserManagementPage: React.FC = () => {
             <div className="identity-user-list">
               {filteredUsers.map((user) => {
                 const self = user.id === profile?.id;
+                const signInState = signInStates[user.id];
                 return (
                   <article key={user.id} className={user.deactivated_at ? 'is-deactivated' : ''}>
                     <span className="identity-avatar">{(user.display_name ?? user.email ?? '?').slice(0, 2).toUpperCase()}</span>
-                    <div className="identity-user-primary"><strong>{user.display_name ?? 'Unnamed user'}{self && <em>You</em>}</strong><small>{user.email ?? 'No email recorded'}</small></div>
+                    <div className="identity-user-primary"><strong>{user.display_name ?? 'Unnamed user'}{self && <em>You</em>}</strong><small>{user.email ?? 'No email recorded'}{signInState && <span className={`identity-sign-in is-${signInState.sign_in_state}`} title={signInState.last_sign_in_at ? `Last sign-in ${new Date(signInState.last_sign_in_at).toLocaleString('en-NZ')}` : undefined}>{SIGN_IN_LABEL[signInState.sign_in_state]}</span>}</small></div>
                     <span className="identity-role">{IDENTITY_ROLE_LABEL[user.role] ?? user.role}</span>
                     <span className={`identity-status ${user.deactivated_at ? 'is-off' : 'is-on'}`}>{user.deactivated_at ? 'Deactivated' : 'Active'}</span>
                     <div className="identity-actions">
-                      <button type="button" disabled={busyId === user.id} onClick={() => void resendInvite(user)} title="Resend invitation"><MailPlus size={16} /><span>Resend</span></button>
+                      {signInState?.sign_in_state === 'invited' && !user.deactivated_at && <button type="button" disabled={busyId === user.id} onClick={() => void resendInvite(user)} title="Resend invitation"><MailPlus size={16} /><span>Resend</span></button>}
+                      {signInState?.sign_in_state === 'no_login' && !user.deactivated_at && <button type="button" onClick={() => setSelectedUser(user)} title="Add an email and send a sign-in invitation"><MailPlus size={16} /><span>Give access</span></button>}
                       <button type="button" disabled={self || busyId === user.id} onClick={() => { setLifecycle({ user, action: user.deactivated_at ? 'reactivate' : 'deactivate' }); setReason(''); }} title={self ? 'You cannot change your own lifecycle state' : user.deactivated_at ? 'Reactivate account' : 'Deactivate account'}>{user.deactivated_at ? <UserCheck size={16} /> : <UserMinus size={16} />}<span>{user.deactivated_at?'Reactivate':'Deactivate'}</span></button>
                       <button type="button" onClick={() => setSelectedUser(user)} title="Edit name, email, role and access"><MoreHorizontal size={16} /><span>Edit user</span></button>
                     </div>
@@ -343,7 +358,7 @@ const UserManagementPage: React.FC = () => {
           </form>
         </div>
       )}
-      {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} branches={operatingOrganizations} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
+      {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} branches={operatingOrganizations} signInState={signInStates[selectedUser.id]?.sign_in_state} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
       {canManageIdentityRecords && showIdentityRecords && profile?.id && (operatingOrganizationId ?? profile.organizationId) && <IdentityRecordsWorkspace organizationId={(operatingOrganizationId ?? profile.organizationId) as string} userId={profile.id} onClose={() => setShowIdentityRecords(false)} />}
     </div>
   );
