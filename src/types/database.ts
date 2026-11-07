@@ -24852,6 +24852,7 @@ export type Database = {
       }
       payroll_export_batches: {
         Row: {
+          client_request_id: string | null
           exported_at: string
           exported_by: string | null
           format: string
@@ -24864,6 +24865,7 @@ export type Database = {
           total_hours: number
         }
         Insert: {
+          client_request_id?: string | null
           exported_at?: string
           exported_by?: string | null
           format?: string
@@ -24876,6 +24878,7 @@ export type Database = {
           total_hours?: number
         }
         Update: {
+          client_request_id?: string | null
           exported_at?: string
           exported_by?: string | null
           format?: string
