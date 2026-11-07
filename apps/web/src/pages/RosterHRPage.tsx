@@ -348,7 +348,7 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'court', label: 'Court' },
   { id: 'assets', label: 'Assets' },
   { id: 'leave', label: 'Leave' },
-  { id: 'timesheets', label: 'Timesheets' },
+  { id: 'timesheets', label: 'Timesheet queue' },
   { id: 'pay-review', label: 'Pay Review' },
 ];
 

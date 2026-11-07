@@ -229,7 +229,7 @@ test('admin officer has the same People and Rosters work as an administrator', a
   await expect(page.getByRole('button', { name: 'Leave', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Recruitment', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Timesheets', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Timesheet queue', exact: true })).toBeVisible();
   await page.goto('/admin/people-hr?section=rostering');
   await expect(page.getByRole('heading', { name: 'Shift setup & open shifts' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Court', exact: true })).toBeVisible();
@@ -376,7 +376,7 @@ test('administrator corrects submitted timesheet hours before review', async ({ 
   });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
-  await page.getByRole('button', { name: 'Timesheets' }).click();
+  await page.getByRole('button', { name: 'Timesheet queue' }).click();
   // 21:30 UTC on 23 Aug is 09:30 on 24 Aug in New Zealand standard time.
   await expect(page.locator('.hr-timesheet-submitted')).toContainText(/Submitted 24 Aug.*9:30/);
   await page.getByRole('button', { name: 'Edit hours' }).click();
@@ -405,7 +405,7 @@ test('administrator returns branch-checked time for correction and reapproves it
   await page.route('**/rest/v1/rpc/review_branch_timesheet', async (route) => { status = 'branch_checked'; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-383838383838', status }]) }); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
-  await page.getByRole('button', { name: 'Timesheets' }).click();
+  await page.getByRole('button', { name: 'Timesheet queue' }).click();
   await page.getByRole('button', { name: 'Return for correction' }).click();
   const returnDialog = page.getByRole('dialog', { name: 'Return for correction timesheet?' });
   await returnDialog.getByLabel('Review notes').fill('Please reconcile the signed attendance record.');
