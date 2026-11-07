@@ -308,6 +308,40 @@ Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
   settings unchanged. These checks do not replace a human walkthrough or live
   payroll verification.
 
+Payroll batch receipt recovery, 2026-11-02, reconciled 2026-11-07 (pre-release acceptance record):
+
+- **Before:** 20261106120100_admin_scheduled_timesheet_recovery already
+  restricts create_payroll_export_batch to active employer payroll
+  administrators, serialises exports per organisation, locks eligible sheets,
+  enforces dispatch-pay blockers, snapshots pay and downloads the batch CSV.
+  Its replay key lived only in audit metadata, replay was not bound to the
+  actor or notes, and the UI generated a new request ID on every click, so a
+  lost response could not be recovered by retrying. Local-month defaults also
+  lost a day when converted through UTC in New Zealand.
+- **During:** migration 20261107211000_payroll_export_receipt_recovery is
+  rebuilt from that current definition (same authority, empty search path,
+  lock key, blocker, messages and grants). It adds a tenant-unique
+  payroll_export_batches.client_request_id, backfills it from existing
+  audit receipts, binds replay to actor, dates, format and normalised notes,
+  totals exactly the locked sheets and requires the updated row count to
+  match before committing. Anonymous and public execution remain revoked.
+- **After:** unchanged UI retries reuse their actor/organisation/date-scoped
+  request ID; malformed receipts cannot claim success; a confirmed receipt
+  still downloads its CSV and survives a queue refresh failure; stale
+  responses cannot cross account context. The action is labelled "Create
+  payroll batch" and states that payment and IRD submission are not available
+  here. Month defaults use local calendar dates.
+- Local evidence: 12 desktop/mobile fixture browser checks (UTC and
+  Pacific/Auckland month boundaries, lost-response retry with CSV download,
+  changed inputs, malformed totals, failed refresh after confirmation), the
+  RosterHR guard contracts and 	sc -b pass. Disposable network-free
+  PostgreSQL checks cover replay/input binding, audit-receipt backfill,
+  employer-admin denial, pay blockers, concurrent overlapping exports, atomic
+  rollback on a skipped row update, legacy rows and grants. These are
+  synthetic checks, not a real payroll export or payment.
+- After governed deployment, regenerate schema/types from the live catalog
+  and refresh Atlas; do not hand-edit generated catalog or map rows.
+
 Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
 
 - Before: any attachment on the current message excludes cloud fallback;

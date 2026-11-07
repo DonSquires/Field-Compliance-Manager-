@@ -11,6 +11,15 @@ const staffProfilePage = read('src/pages/StaffProfilePage.tsx');
 const credentialSql = read('../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql');
 
 describe('governed HR administration', () => {
+  it('retries payroll receipts with the same scoped request and describes the actual batch-only action', () => {
+    expect(page).toContain('JSON.stringify([profile.id, organizationId, payrollExport.from, payrollExport.to, \'csv\'])');
+    expect(page).toContain('p_client_request_id: payrollExportAttempt.current.id');
+    expect(page).toContain('payrollScope.current !== scope');
+    expect(page).toContain('Number.isInteger(receipt.timesheet_count)');
+    expect(page).toContain('Number.isFinite(Number(receipt.total_hours))');
+    expect(page).toContain('Retry the same dates to recover any saved batch receipt.');
+    expect(page).toContain('This records the batch and downloads its CSV. Payment and IRD submission are not available here.');
+  });
   it('shares inline reconciliation without granting payroll authority or inventing receipts', () => {
     expect(page).toContain('export const RosterTimesheetPanel');
     expect(page).toContain('const TimesheetRows');
