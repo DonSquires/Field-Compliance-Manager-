@@ -121,6 +121,7 @@ const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 const BobDocumentStudioPage = React.lazy(() => import('../pages/BobDocumentStudioPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
 const CostOfServicePage = React.lazy(() => import('../pages/CostOfServicePage'));
+const TimesheetsPage = React.lazy(() => import('../pages/TimesheetsPage'));
 const FileSystemPage = React.lazy(() => import('../pages/FileSystemPage'));
 const PatrolOversightPage = React.lazy(() => import('../pages/PatrolOversightPage'));
 const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePage'));
@@ -148,7 +149,7 @@ const CCTVQualityPage = React.lazy(() => import('../pages/CCTVQualityPage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
-  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'timesheets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'nzta-register' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop' | 'website' | 'website-statistics' | 'website-enquiries' | 'website-posts';
@@ -307,6 +308,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   ],
   Workforce: [
     { id: 'roster', label: 'Rosters', icon: Route, also: ['roster-targets'] },
+    { id: 'timesheets', label: 'Timesheets & approvals', icon: ClipboardCheck },
     { id: 'people-hr', label: 'People', icon: Users, also: ['users'] },
   ],
   'Clients & Delivery': [
@@ -926,6 +928,8 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
         return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'people-hr':
         return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage key={isRosteringHrView(location.search) ? 'rostering' : 'people'} />;
+      case 'timesheets':
+        return <TimesheetsPage />;
       case 'roster-targets':
         return <RosterTargetsPage />;
       default:
