@@ -36,3 +36,4 @@
 
 .crm-account-readiness-panel .crm-guided-setup{margin-top:8px;padding:7px 11px;border:1px solid #2fc4a7;border-radius:6px;background:transparent;color:#2fc4a7;font-size:12px;font-weight:600;cursor:pointer}
 .crm-account-readiness-panel .crm-guided-setup:hover{background:rgba(47,196,167,.12)}
+.crm-onboarding-panel.is-ready>.crm-portal-access{flex-wrap:wrap;padding-top:10px;border-top:1px solid #244654}.crm-portal-access p{display:flex;align-items:center;gap:6px;flex:1 1 260px;margin:0}@media(max-width:700px){.crm-portal-access button{width:100%}}

@@ -18,13 +18,15 @@ test('officer home-screen manifest uses actual square Iron Eagle PNG icons', () 
   assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512']);
 });
 test('worker does not cache data, intercept APIs or report offline work as saved', async () => {
-  let handler;
+  const handlers = {};
   const source = readFileSync(join(publicDir, 'officer-sw.js'), 'utf8');
   assert.doesNotMatch(source, /\bcaches\b|indexedDB|localStorage|access_token/);
   runInNewContext(source, {
-    self: { location: { origin: 'https://fixture.invalid' }, addEventListener: (type, callback) => { assert.equal(type, 'fetch'); handler = callback; } },
+    self: { location: { origin: 'https://fixture.invalid' }, addEventListener: (type, callback) => { handlers[type] = callback; } },
     URL, Response, fetch: async () => { throw new Error('Synthetic offline'); },
   });
+  assert.deepEqual(Object.keys(handlers).sort(), ['fetch', 'notificationclick']);
+  const handler = handlers.fetch;
   let response;
   handler({ request: { url: 'https://fixture.invalid/rest/v1/private', mode: 'cors' }, respondWith: () => { throw new Error('Must not intercept API'); } });
   handler({ request: { url: 'https://fixture.invalid/officer', mode: 'navigate' }, respondWith: promise => { response = promise; } });
@@ -32,4 +34,19 @@ test('worker does not cache data, intercept APIs or report offline work as saved
   assert.equal(offline.status, 503);
   assert.equal(offline.headers.get('Cache-Control'), 'no-store');
   assert.match(await offline.text(), /does not confirm that any work was saved/);
+});
+test('job notification click only opens officer portal paths', async () => {
+  const handlers = {};
+  const opened = [];
+  const source = readFileSync(join(publicDir, 'officer-sw.js'), 'utf8');
+  runInNewContext(source, {
+    self: { location: { origin: 'https://fixture.invalid' }, addEventListener: (type, callback) => { handlers[type] = callback; }, clients: { matchAll: async () => [], openWindow: async (url) => { opened.push(url); } } },
+    URL, Response, Promise, fetch: async () => { throw new Error('unused'); },
+  });
+  for (const url of ['/officer/dispatch?job=abc', 'https://evil.invalid/phish']) {
+    let pending;
+    handlers.notificationclick({ notification: { close() {}, data: { url } }, waitUntil: (promise) => { pending = promise; } });
+    await pending;
+  }
+  assert.deepEqual(opened, ['/officer/dispatch?job=abc', '/officer']);
 });

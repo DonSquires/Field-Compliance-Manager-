@@ -88,7 +88,17 @@ function packetPage(packet) {
   return plain(packetFailure(packet).envelope.before?.page || 'unknown', 500);
 }
 
-function routineRepairBrief(packet, { alsoReported = [] } = {}) {
+/** One line per earlier stopped attempt, so a retry starts from what already failed instead of repeating it. */
+function previousAttemptLines(previousAttempts) {
+  const attempts = (Array.isArray(previousAttempts) ? previousAttempts : [])
+    .filter((attempt) => attempt?.jobId)
+    .slice(0, 5)
+    .map((attempt) => `job ${plain(attempt.jobId, 36).slice(0, 8)} stopped${attempt.error ? `: ${plain(attempt.error, 400)}` : ' without a recorded reason'}`);
+  if (!attempts.length) return [];
+  return [`Previous attempts: ${attempts.join('; ')}. Read those jobs' reviews and verification before planning; do not repeat a stopped approach — address the reason it stopped, or escalate when that reason is outside the routine boundary.`];
+}
+
+function routineRepairBrief(packet, { alsoReported = [], previousAttempts = [] } = {}) {
   const { envelope, error, failed } = packetFailure(packet);
   const before = envelope.before && typeof envelope.before === 'object' ? envelope.before : {};
   const expected = envelope.expected && typeof envelope.expected === 'object' ? envelope.expected : {};
@@ -104,6 +114,7 @@ function routineRepairBrief(packet, { alsoReported = [] } = {}) {
       `Known signature: ${known.cause}.`,
       `Root-cause guidance: ${known.guidance}${known.files.length ? ` Likely shared files: ${known.files.join(', ')}.` : ''}`,
     ] : []),
+    ...previousAttemptLines(previousAttempts),
     'Required investigation: read canon, query Atlas capability/direct edges/blast radius, cross-check supabase/schema.sql, search the repository for the failing symbol, relation, or message (the page named above is where it surfaced, not necessarily where it lives), and identify the smallest root-cause fix. When the root cause is in a shared file outside a requirement\'s page scope, repair the shared file and record a scope_amendment with the reason.',
     'Required verification: targeted tests, independent review, before/during/after data-path evidence, Atlas refresh, schema/data-path check, and human-glass acceptance for any web change.',
     'Routine boundary: make the smallest corrective patch that removes the root cause. Do not redesign, add a feature/module/workflow, change architecture, change dependencies/environment/secrets/authentication, or touch legal, safety, identity, enforcement, finance, payroll, or evidential truth. A database root cause may be repaired with one new additive migration; any migration holds at the release gate for Grandmaster approval. If the fix needs anything else outside this boundary, stop and escalate for Grandmaster review.',
@@ -127,6 +138,23 @@ function routineRepairStillDriven(job) {
 
 // Covered packets start where the owning packet is (e.g. awaiting_grandmaster), not at builder_started.
 const COVERABLE_STATUSES = new Set(['builder_started', 'awaiting_grandmaster', 'published']);
+
+/**
+ * Packet automation status for a routine repair's recorded autopilot state. A job that handed its work to a
+ * continuation, or that waits on a repair of main, is still being driven: the packet must not read as
+ * completed or failed (a failed packet is eligible for a retry after the next release).
+ */
+function routinePacketAutomationStatus(state, report) {
+  const resumedAs = report && typeof report === 'object' ? report.resumed_as_job_id : null;
+  if (state === 'published') return 'published';
+  if (state === 'done') return resumedAs ? 'builder_started' : 'completed';
+  if (state === 'awaiting_human') return 'awaiting_grandmaster';
+  if (state === 'blocked') {
+    const waitingOnMain = Boolean(report?.repair_job_id) && !resumedAs && !report?.repair_outcome;
+    return waitingOnMain ? 'builder_started' : 'failed';
+  }
+  return 'builder_started';
+}
 
 function planRoutineIntake(packets, openRepairs = []) {
   const open = new Map();
@@ -155,6 +183,8 @@ module.exports = {
   knownSignatureFor,
   normalizeFailureText,
   planRoutineIntake,
+  previousAttemptLines,
+  routinePacketAutomationStatus,
   routineRepairBrief,
   routineRepairStillDriven,
   routineSignature,

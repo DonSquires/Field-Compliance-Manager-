@@ -37,11 +37,11 @@ export function reportMonthLabel(value) {
  * @typedef {{ line_key?: unknown, bob_flagged?: unknown, bob_incident_type?: unknown, bob_reason?: unknown, decision?: unknown, incident_type?: unknown }} TriageRow
  */
 
-/** Confirmed incidents, then Bob's open flags, then observations, CCTV, other written entries; cleared entries last. */
+/** Confirmed incidents, then Bob's open flags and attended call-outs, then observations, CCTV, other written entries; cleared entries last. */
 function briefRank(line, triage) {
   if (text(line.k) === 'incident' || triage?.decision === 'incident') return 0;
   if (triage?.decision === 'not_incident') return 5;
-  if (triage?.bob_flagged === true) return 1;
+  if (triage?.bob_flagged === true || text(line.c) === 'call_out') return 1;
   if (text(line.k) === 'observation') return 2;
   if (text(line.c) === 'camera_activation') return 3;
   return 4;

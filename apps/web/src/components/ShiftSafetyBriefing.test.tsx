@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SafetyBriefing } from '../lib/safetyBriefing';
 
 const { mockRpc, mockInvoke } = vi.hoisted(() => ({ mockRpc: vi.fn(), mockInvoke: vi.fn() }));
@@ -33,6 +33,11 @@ describe('ShiftSafetyBriefing', () => {
     expect(screen.getByText('Reported — not yet reviewed')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Open source — Section 4.2/ })).toBeTruthy();
     expect(screen.getAllByText('Stay in pairs').length).toBeGreaterThan(0);
+  });
+
+  it('does not mistake an empty hazard list for safety clearance', () => {
+    render(<SafetyBriefingList briefing={briefing({ hazards: [], warnings: [], item_count: 0 })} />);
+    expect(screen.getByText(/This is not safety clearance/)).toBeTruthy();
   });
 
   it('only asks the assigned officer to acknowledge an unacknowledged briefing', () => {
@@ -79,11 +84,50 @@ describe('ShiftSafetyBriefing', () => {
 
   it('shows a recoverable error instead of hiding an unavailable mid-shift briefing', async () => {
     mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'Network unavailable' } });
-    render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress' }} />);
+    render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress', shift_type: 'patrol' }} />);
     await screen.findByText(/Safety briefing unavailable: Network unavailable/);
     mockRpc.mockResolvedValueOnce({ data: briefing({ shift_status: 'in_progress' }), error: null });
     fireEvent.click(screen.getByRole('button', { name: 'Retry safety briefing' }));
     await screen.findByRole('button', { name: 'Read now' });
+  });
+
+  it.each(['static_guarding', 'site_guard', 'static'])('uses the private briefing for %s on initial load and refresh', async (shiftType) => {
+    const privateResult = {
+      post: {}, safety: briefing({ shift_status: 'in_progress' }),
+      privacy: { status: 'checked' }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [],
+    };
+    mockInvoke.mockResolvedValue({ data: privateResult, error: null });
+    render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress', shift_type: shiftType }} />);
+    await screen.findByRole('button', { name: 'Read now' });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh safety briefing' }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2));
+    expect(mockInvoke).toHaveBeenCalledWith('officer-shift-briefing', { body: { shift_id: 's1' } });
+    expect(mockRpc).not.toHaveBeenCalledWith('get_shift_safety_briefing', expect.anything());
+  });
+
+  it('does not fall back to raw static safety when private review is unavailable', async () => {
+    mockInvoke.mockResolvedValue({
+      data: { post: {}, safety: null, privacy: { status: 'unavailable', message: 'Private review unavailable' }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [] },
+      error: null,
+    });
+    render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress', shift_type: 'static_guarding' }} />);
+    await screen.findByText(/Safety briefing unavailable: Private review unavailable/);
+    expect(mockRpc).not.toHaveBeenCalledWith('get_shift_safety_briefing', expect.anything());
+  });
+
+  it('discards an old raw request when the same shift becomes a static assignment', async () => {
+    let resolveRaw: ((value: { data: SafetyBriefing; error: null }) => void) | undefined;
+    mockRpc.mockImplementationOnce(() => new Promise((resolve) => { resolveRaw = resolve; }));
+    const safe = briefing({ shift_status: 'in_progress', hazards: [hazard({ title: 'Privately reviewed risk' })], item_count: 1 });
+    mockInvoke.mockResolvedValue({ data: { post: {}, safety: safe, privacy: { status: 'checked' }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [] }, error: null });
+    const { rerender } = render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress', shift_type: 'patrol' }} />);
+    await waitFor(() => expect(resolveRaw).toBeDefined());
+    rerender(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress', shift_type: 'static_guarding' }} />);
+    await screen.findByRole('button', { name: 'Read now' });
+    await act(async () => resolveRaw?.({ data: briefing({ hazards: [hazard({ title: 'Unreviewed narrative' })], item_count: 1 }), error: null }));
+    fireEvent.click(screen.getByRole('button', { name: 'Read now' }));
+    expect(screen.getByText('Privately reviewed risk')).toBeTruthy();
+    expect(screen.queryByText('Unreviewed narrative')).toBeNull();
   });
 
   it('never continues on a missing acknowledgement receipt', async () => {

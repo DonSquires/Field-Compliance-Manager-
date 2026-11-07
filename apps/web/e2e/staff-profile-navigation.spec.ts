@@ -50,3 +50,14 @@ test('unavailable staff stays an explicit permission/data state rather than a se
   await expect(page.getByRole('alert')).toContainText('The staff profile is unavailable or you do not have permission to view it.');
   expect(new URL(page.url()).pathname).toBe(profilePath);
 });
+
+test('staff profile shows the app sign-in state and keeps email actions on the profile', async ({ page }) => {
+  await installSupabaseFixtures(page);
+  await signInAsAdmin(page, `${profilePath}?profile=${staffId}`);
+  await expect(page.getByRole('heading', { name: 'Ana Ngata', exact: true })).toBeVisible();
+  const signIn = page.getByRole('form', { name: 'App sign-in' });
+  await expect(signIn.getByTestId('staff-sign-in-state')).toContainText('Signed in');
+  await expect(signIn.getByRole('button', { name: 'Update sign-in email' })).toBeDisabled();
+  await expect(signIn.getByRole('button', { name: 'Resend invitation' })).toHaveCount(0);
+  if (process.env.E2E_VISUAL_DIR) { await signIn.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.E2E_VISUAL_DIR}/staff-sign-in-${test.info().project.name}.png` }); }
+});

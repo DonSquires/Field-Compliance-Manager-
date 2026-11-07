@@ -371,9 +371,11 @@ test('an assigned urgent dispatch job is the officer’s first next action from 
   const nextJob = page.locator('.officer-next-job');
   await expect(nextJob).toContainText('Alarm response');
   await expect(nextJob).toContainText('Civic Operations Centre');
-  await expect(nextJob.getByRole('button', { name: 'Open and acknowledge job' })).toBeVisible();
-  await nextJob.getByRole('button', { name: 'Open and acknowledge job' }).click();
-  await expect(page).toHaveURL(/\/officer\/dispatch$/);
+  // The fixture job is already on scene, so home offers to resume it rather than acknowledge it again.
+  await expect(nextJob).toContainText('Job in progress');
+  await expect(nextJob.getByRole('button', { name: 'Resume job' })).toBeVisible();
+  await nextJob.getByRole('button', { name: 'Resume job' }).click();
+  await expect(page).toHaveURL(/\/officer\/dispatch\?job=cccccccc-cccc-4ccc-8ccc-cccccccccccc$/);
   await expect(page.getByRole('heading', { name: 'Dispatch' })).toBeVisible();
   await expect(page.locator('#officer-dispatch-cccccccc-cccc-4ccc-8ccc-cccccccccccc')).toContainText('Civic Operations Centre');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
@@ -565,12 +567,16 @@ test('one shift at a time: starting the next shift while still on one is confirm
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
   const stillOn = { id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', notes: 'Night patrol', shift_health: 'on_track', total_stops: 2, ended_reason: null };
-  const next = { id: '77777777-7777-4777-8777-777777777777', service_type: 'site_guard', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: null, shift_health: null, total_stops: 1, ended_reason: null };
+  const next = { id: '77777777-7777-4777-8777-777777777777', service_type: 'static_guarding', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: null, shift_health: null, total_stops: 1, ended_reason: null };
   let started = false;
   await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(started ? [{ ...stillOn, status: 'completed', ended_reason: 'superseded_by_next_shift' }, { ...next, status: 'in_progress' }] : [stillOn, next]) }));
-  await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
+  await page.route('**/functions/v1/officer-shift-briefing', async (route) => await route.fulfill({ json: {
+    post: { shift: { id: next.id } }, requirements: [], roster_notes: null, work_unit_name: null, contacts: [], privacy: { status: 'checked' },
+    safety: { shift_id: next.id, stop_id: null, places: [], hazards: [], warnings: [], item_count: 0, briefing_hash: 'private-v1', acknowledgement_required: false, acknowledged: false, is_assigned_officer: true },
+  } }));
+  await page.route('**/rest/v1/rpc/evaluate_static_shift_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
   let startPayload: Record<string, unknown> | null = null;
-  await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
+  await page.route('**/rest/v1/rpc/start_officer_static_shift', async (route) => {
     startPayload = JSON.parse(route.request().postData() ?? '{}');
     started = true;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: next.id, shift_status: 'in_progress', started_at: '2026-08-29T22:05:00.000Z', created: true, position_status: 'on_site', place_name: 'Civic Centre', distance_m: 0, superseded_shift_id: stillOn.id, superseded_service_type: 'patrol', superseded_started_at: '2026-08-29T20:02:00.000Z' }]) });

@@ -619,6 +619,13 @@ const RosterHRPage: React.FC = () => {
   const courtRequestId = useRef(crypto.randomUUID());
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
+  const payrollExportAttempt = useRef<{ key: string; id: string } | null>(null);
+  const payrollScope = useRef(`${profile?.id}:${profile?.organizationId}`);
+  payrollScope.current = `${profile?.id}:${profile?.organizationId}`;
+  useEffect(() => {
+    payrollExportAttempt.current = null;
+    setPayrollExport(null);
+  }, [profile?.id, profile?.organizationId]);
   const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
   const [employmentAction, setEmploymentAction] = useState<{
     staffId: string;
@@ -1326,25 +1333,47 @@ const RosterHRPage: React.FC = () => {
 
   const handlePayrollExport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!payrollExport || !profile?.organizationId) return;
-    setSaving(true); setError(null); setNotice(null);
-    const { data, error: exportError } = await supabase.rpc('create_payroll_export_batch', {
-      p_client_request_id: crypto.randomUUID(),
-      p_organization_id: profile.organizationId,
-      p_period_from: payrollExport.from,
-      p_period_to: payrollExport.to,
-      p_format: 'csv',
-    });
-    const receipt = Array.isArray(data) ? data[0] : data;
-    if (exportError || !receipt) setError(exportError?.message ?? 'Payroll export was not confirmed.');
-    else {
-      setNotice(`Payroll batch created: ${receipt.timesheet_count} timesheets, ${Number(receipt.total_hours).toFixed(2)} hours.`);
-      setExportedBatchId(receipt.batch_id);
-      await downloadPayrollBatch(receipt.batch_id);
-      setPayrollExport(null);
-      await loadAll();
+    if (saving || !payrollExport || !profile?.organizationId) return;
+    const organizationId = profile.organizationId;
+    const scope = `${profile.id}:${organizationId}`;
+    const key = JSON.stringify([profile.id, organizationId, payrollExport.from, payrollExport.to, 'csv']);
+    if (payrollExportAttempt.current?.key !== key) {
+      payrollExportAttempt.current = { key, id: crypto.randomUUID() };
     }
-    setSaving(false);
+    setSaving(true); setError(null); setNotice(null);
+    try {
+      const { data, error: exportError } = await supabase.rpc('create_payroll_export_batch', {
+        p_client_request_id: payrollExportAttempt.current.id,
+        p_organization_id: organizationId,
+        p_period_from: payrollExport.from,
+        p_period_to: payrollExport.to,
+        p_format: 'csv',
+      });
+      if (payrollScope.current !== scope) return;
+      if (exportError) throw new Error(exportError.message);
+      const receipt = Array.isArray(data) ? data.length === 1 ? data[0] : null : data;
+      if (!receipt || typeof receipt.batch_id !== 'string'
+        || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(receipt.batch_id)
+        || !Number.isInteger(receipt.timesheet_count) || receipt.timesheet_count <= 0
+        || (typeof receipt.total_hours !== 'number' && typeof receipt.total_hours !== 'string')
+        || String(receipt.total_hours).trim() === ''
+        || !Number.isFinite(Number(receipt.total_hours)) || Number(receipt.total_hours) < 0) {
+        throw new Error('Payroll batch receipt was not confirmed.');
+      }
+      setNotice(`Payroll batch recorded: ${receipt.timesheet_count} timesheets, ${Number(receipt.total_hours).toFixed(2)} hours · receipt ${receipt.batch_id.slice(0, 8)}.`);
+      payrollExportAttempt.current = null;
+      setExportedBatchId(receipt.batch_id);
+      setPayrollExport(null);
+      await downloadPayrollBatch(receipt.batch_id);
+      await loadAll();
+    } catch (failure) {
+      if (payrollScope.current === scope) {
+        const detail = failure instanceof Error ? failure.message : 'Payroll batch receipt was not confirmed.';
+        setError(`${detail} Retry the same dates to recover any saved batch receipt.`);
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggleTemplate = async (templateId: string) => {
@@ -2670,8 +2699,13 @@ const RosterHRPage: React.FC = () => {
           <p className="subtitle">{workingInBranch ? 'Branch review confirms local time and operational evidence. Corporate payroll gives final approval and exports paid time.' : 'Corporate payroll sees every branch’s sheets here. Branch check happens while working in the branch; final approval must come from a different reviewer than the branch check.'}</p>
           {corporatePayrollReviewer && <button className="btn btn-secondary btn-sm" onClick={() => { setError(null); const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); setScheduleRecovery({ staffId: '', from: today, to: today, rows: null, reason: '', overtime: '0', requestId: crypto.randomUUID() }); }}>Recover scheduled shift into timesheet</button>}
           {corporatePayrollReviewer && exportedBatchId && <button className="btn btn-secondary btn-sm" onClick={() => { setError(null); void downloadPayrollBatch(exportedBatchId); }}>Download last payroll batch</button>}
-          {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
-            Export approved to payroll
+          {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => {
+            const now = new Date();
+            const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            setError(null);
+            setPayrollExport({ from: `${month}-01`, to: `${month}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}` });
+          }}>
+            Create payroll batch
           </button>}
           <TimesheetRows rows={timesheets} staffNames={staffNames} corporateReviewer={corporatePayrollReviewer} actorId={profile?.id}
             onCorrect={(item) => setTimesheetCorrection({ item, actualHours: String(item.actual_hours ?? ''), overtimeHours: String(item.overtime_hours ?? 0), reason: '' })}
@@ -2868,7 +2902,19 @@ const RosterHRPage: React.FC = () => {
 
       {assetCheck && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-check-title" onSubmit={handleAssetCheck}><header><div><span>Fleet evidence</span><h2 id="asset-check-title">Record check</h2></div><button type="button" onClick={() => setAssetCheck(null)} aria-label="Close asset check">×</button></header><p>{assetCheck.asset.name}{assetCheck.asset.registration ? ` · ${assetCheck.asset.registration}` : ''}. Major issues move the asset to maintenance and alert administrators.</p><label><span>Condition</span><select value={assetCheck.condition} onChange={(e) => setAssetCheck({ ...assetCheck, condition: e.target.value })}><option value="good">Good</option><option value="minor_issue">Minor issue</option><option value="major_issue">Major issue</option><option value="unserviceable">Unserviceable</option></select></label>{assetCheck.asset.asset_type === 'vehicle' && <div className="form-row"><label><span>Odometer</span><input type="number" min={0} value={assetCheck.odometer} onChange={(e) => setAssetCheck({ ...assetCheck, odometer: e.target.value })} /></label><label><span>Fuel level</span><select value={assetCheck.fuel} onChange={(e) => setAssetCheck({ ...assetCheck, fuel: e.target.value })}><option value="">Not recorded</option><option value="full">Full</option><option value="three_quarter">Three quarter</option><option value="half">Half</option><option value="quarter">Quarter</option><option value="empty">Empty</option></select></label></div>}<label><span>Defects noted</span><textarea rows={3} value={assetCheck.defects} onChange={(e) => setAssetCheck({ ...assetCheck, defects: e.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setAssetCheck(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : 'Record check'}</button></footer></form></div>}
 
-      {payrollExport && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-export-title" onSubmit={handlePayrollExport}><header><div><span>Payroll</span><h2 id="payroll-export-title">Export approved timesheets</h2></div><button type="button" onClick={() => setPayrollExport(null)} aria-label="Close payroll export">×</button></header><p>Every approved, unexported timesheet whose period falls inside this range is batched and marked paid. This cannot be undone from this screen.</p><div className="form-row"><label><span>Period from</span><input type="date" required value={payrollExport.from} onChange={(e) => setPayrollExport({ ...payrollExport, from: e.target.value })} /></label><label><span>Period to</span><input type="date" required value={payrollExport.to} onChange={(e) => setPayrollExport({ ...payrollExport, to: e.target.value })} /></label></div><footer><button type="button" className="btn btn-secondary" onClick={() => setPayrollExport(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Exporting' : 'Create payroll batch'}</button></footer></form></div>}
+      {payrollExport && <div className="hr-review-backdrop">
+        <form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-export-title" onSubmit={handlePayrollExport}>
+          <header><div><span>Payroll</span><h2 id="payroll-export-title">Create payroll batch</h2></div><button type="button" disabled={saving} onClick={() => setPayrollExport(null)} aria-label="Close payroll export">×</button></header>
+          <p>Every approved, unexported timesheet whose period falls inside this range is batched and marked paid. This cannot be undone from this screen.</p>
+          <p>This records the batch and downloads its CSV. Payment and IRD submission are not available here.</p>
+          <div className="form-row">
+            <label><span>Period from</span><input type="date" required disabled={saving} value={payrollExport.from} onChange={(e) => setPayrollExport({ ...payrollExport, from: e.target.value })} /></label>
+            <label><span>Period to</span><input type="date" required min={payrollExport.from} disabled={saving} value={payrollExport.to} onChange={(e) => setPayrollExport({ ...payrollExport, to: e.target.value })} /></label>
+          </div>
+          {error && <p className="hr-review-error" role="alert">{error}</p>}
+          <footer><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setPayrollExport(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Recording' : 'Create payroll batch'}</button></footer>
+        </form>
+      </div>}
 
       {reviewAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="performance-review-title" onSubmit={completeReview}><header><div><span>Performance review</span><h2 id="performance-review-title">Complete review</h2></div><button type="button" onClick={() => setReviewAction(null)} aria-label="Close performance review">×</button></header><p>{staffNames[reviewAction.staff_id] ?? 'Staff member'}. The review record and rating are retained once completed.</p><label><span>Rating</span><select value={reviewCompletion.rating} onChange={(event) => setReviewCompletion({ ...reviewCompletion, rating: event.target.value })}>{[1,2,3,4,5].map((rating) => <option value={rating} key={rating}>{rating} / 5</option>)}</select></label><label><span>Strengths</span><textarea rows={3} value={reviewCompletion.strengths} onChange={(event) => setReviewCompletion({ ...reviewCompletion, strengths: event.target.value })} /></label><label><span>Development goals</span><textarea rows={3} value={reviewCompletion.goals} onChange={(event) => setReviewCompletion({ ...reviewCompletion, goals: event.target.value })} /></label><label><span>Employee comments</span><textarea rows={3} value={reviewCompletion.comments} onChange={(event) => setReviewCompletion({ ...reviewCompletion, comments: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReviewAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : 'Complete review'}</button></footer></form></div>}
 

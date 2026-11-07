@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, MailPlus, RefreshCw, UserMinus, UserPlus, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 import './ClientPeoplePanel.css';
 
 interface ClientPerson { id: string; display_name: string | null; email: string | null; role: string; deactivated_at: string | null; created_at: string | null; }
@@ -20,13 +21,20 @@ export function ClientPeoplePanel({ organizationId, currentUserId }: { organizat
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', email: '', role: 'client_viewer' as ClientRole });
+  const [signIn, setSignIn] = useState<Record<string, 'no_login' | 'invited' | 'signed_in'>>({});
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     // ATLAS READS: user_profiles (own organisation only; RLS)
     const { data, error: readError } = await supabase.from('user_profiles').select('id, display_name, email, role, deactivated_at, created_at').eq('organization_id', organizationId).like('role', 'client_%').order('created_at', { ascending: true });
     if (readError) setError(readError.message);
-    setPeople((data as ClientPerson[] | null) ?? []);
+    const rows = (data as ClientPerson[] | null) ?? [];
+    setPeople(rows);
+    if (rows.length) {
+      // ATLAS CALLS: get_user_sign_in_states
+      const { data: states } = await supabase.rpc('get_user_sign_in_states', { p_user_ids: rows.map((person) => person.id) });
+      setSignIn(Object.fromEntries(((states ?? []) as Array<{ user_id: string; sign_in_state: 'no_login' | 'invited' | 'signed_in' }>).map((row) => [row.user_id, row.sign_in_state])));
+    } else setSignIn({});
     setLoading(false);
   }, [organizationId]);
   useEffect(() => { void load(); }, [load]);
@@ -34,29 +42,50 @@ export function ClientPeoplePanel({ organizationId, currentUserId }: { organizat
   const addPerson = async (event: FormEvent) => {
     event.preventDefault();
     setBusy('add'); setError(null); setNotice(null);
-    // ATLAS WRITES: create-user (a client administrator adds client users to their own organisation)
-    const { error: inviteError } = await supabase.functions.invoke('create-user', { body: { email: form.email.trim(), display_name: form.name.trim(), role: form.role, organization_id: organizationId } });
-    if (inviteError) setError(inviteError.message);
-    else { setNotice(`${form.name.trim() || form.email.trim()} has been sent an invitation. They choose their own password from the email.`); setForm({ name: '', email: '', role: 'client_viewer' }); await load(); }
-    setBusy(null);
+    try {
+      // ATLAS WRITES: create-user (a client administrator adds client users to their own organisation)
+      const { data, error: inviteError } = await supabase.functions.invoke('create-user', { body: { email: form.email.trim(), display_name: form.name.trim(), role: form.role, organization_id: organizationId } });
+      if (inviteError) throw new Error(await edgeFunctionErrorMessage(inviteError, 'The invitation could not be sent.'));
+      const receipt = data as { success?: boolean; invitation_sent?: boolean; error?: string } | null;
+      if (!receipt?.success || receipt.invitation_sent === false) throw new Error(receipt?.error ?? 'No invitation was sent. If this person already has an account, resend their invitation from the list.');
+      setNotice(`${form.name.trim() || form.email.trim()} has been sent an invitation. They choose their own password from the email.`);
+      setForm({ name: '', email: '', role: 'client_viewer' });
+      await load();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The invitation could not be sent.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const resend = async (person: ClientPerson) => {
     setBusy(person.id); setError(null); setNotice(null);
-    const { error: resendError } = await supabase.functions.invoke('resend-invite', { body: { user_id: person.id } });
-    if (resendError) setError(resendError.message);
-    else setNotice(`Invitation sent again to ${person.email ?? person.display_name ?? 'them'}.`);
-    setBusy(null);
+    try {
+      const { data, error: resendError } = await supabase.functions.invoke('resend-invite', { body: { user_id: person.id } });
+      if (resendError) throw new Error(await edgeFunctionErrorMessage(resendError, 'The invitation could not be resent.'));
+      if (!(data as { success?: boolean } | null)?.success) throw new Error('The server did not confirm the invitation.');
+      setNotice(`Invitation sent again to ${person.email ?? person.display_name ?? 'them'}.`);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The invitation could not be resent.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const toggleAccess = async (person: ClientPerson) => {
     const action = person.deactivated_at ? 'reactivate' : 'deactivate';
     setBusy(person.id); setError(null); setNotice(null);
-    // ATLAS WRITES: deactivate-user (client_admin, own organisation, client roles only)
-    const { error: toggleError } = await supabase.functions.invoke('deactivate-user', { body: { user_id: person.id, action } });
-    if (toggleError) setError(toggleError.message);
-    else { setNotice(action === 'deactivate' ? `${person.display_name ?? person.email} can no longer sign in.` : `${person.display_name ?? person.email} can sign in again.`); await load(); }
-    setBusy(null);
+    try {
+      // ATLAS WRITES: deactivate-user (client_admin, own organisation, client roles only)
+      const { error: toggleError } = await supabase.functions.invoke('deactivate-user', { body: { user_id: person.id, action } });
+      if (toggleError) throw new Error(await edgeFunctionErrorMessage(toggleError, 'Access could not be changed.'));
+      setNotice(action === 'deactivate' ? `${person.display_name ?? person.email} can no longer sign in.` : `${person.display_name ?? person.email} can sign in again.`);
+      await load();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Access could not be changed.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -82,11 +111,11 @@ export function ClientPeoplePanel({ organizationId, currentUserId }: { organizat
               <li key={person.id} className={person.deactivated_at ? 'is-off' : ''}>
                 <div>
                   <strong>{person.display_name ?? person.email ?? 'Unnamed'}{me ? ' (you)' : ''}</strong>
-                  <small>{person.email}{role ? ` · ${role.label}` : ''}{person.deactivated_at ? ' · access removed' : ''}</small>
+                  <small>{person.email}{role ? ` · ${role.label}` : ''}{person.deactivated_at ? ' · access removed' : signIn[person.id] === 'invited' ? ' · invitation not yet accepted' : signIn[person.id] === 'signed_in' ? ' · signed in' : ''}</small>
                 </div>
                 {!me && (
                   <div className="client-people-actions">
-                    {!person.deactivated_at && <button type="button" disabled={busy === person.id} onClick={() => void resend(person)} title="Send the invitation email again (only while they have not signed in)"><MailPlus size={15} aria-hidden="true" /> Resend invitation</button>}
+                    {!person.deactivated_at && signIn[person.id] === 'invited' && <button type="button" disabled={busy === person.id} onClick={() => void resend(person)} title="Send the invitation email again (only while they have not signed in)"><MailPlus size={15} aria-hidden="true" /> Resend invitation</button>}
                     <button type="button" className={person.deactivated_at ? 'is-restore' : 'is-remove'} disabled={busy === person.id} onClick={() => void toggleAccess(person)}>{person.deactivated_at ? <><RefreshCw size={15} aria-hidden="true" /> Restore access</> : <><UserMinus size={15} aria-hidden="true" /> Remove access</>}</button>
                   </div>
                 )}

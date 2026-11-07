@@ -5,6 +5,7 @@ import { useAuth, type AppRole } from '../context/AuthContext';
 import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, type RosterHorizon } from '../lib/rosterCalendar';
 import { commercialIssueAreas, commercialStatusLabel, contractedDaysWords, contractedHoursWords, plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
 import { credentialTypeLabel } from '../lib/credentialWords';
+import { validateRosterContact } from '../lib/rosterContact';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
 import { RosterTimesheetPanel } from './RosterHRPage';
@@ -90,7 +91,10 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
 };
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; patrol_route?: { primary_staff_id: string | null } | { primary_staff_id: string | null }[] | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
-interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; planned_break_minutes: number; break_unpaid: boolean; external_refs?: ImportedLabourRefs | null; }
+interface RosterContact { contact_name: string | null; contact_phone: string | null; version: string; }
+interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; planned_break_minutes: number; break_unpaid: boolean; contact?: RosterContact | RosterContact[] | null; external_refs?: ImportedLabourRefs | null; }
+const slotContact = (slot: RosterSlot): RosterContact | null =>
+  Array.isArray(slot.contact) ? slot.contact[0] ?? null : slot.contact ?? null;
 interface SourceAssignment {
   id: string;
   officer_id: string;
@@ -195,8 +199,11 @@ const RosterOperationsPage: React.FC = () => {
   const [editingSlot, setEditingSlot] = useState<RosterSlot | null>(null);
   const [copyingSlot, setCopyingSlot] = useState<RosterSlot | null>(null);
   const [repeatDialog, setRepeatDialog] = useState<{ slot: RosterSlot; from: string; to: string } | null>(null);
+  const [contactDialog, setContactDialog] = useState<{ slot: RosterSlot; name: string; phone: string; version: string | null } | null>(null);
+  const [contactError, setContactError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ officerId: '', workUnitId: '', start: '', end: '', notes: '', publish: true, breakMinutes: '0', breakUnpaid: false });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [form, setForm] = useState<{ officerId: string; workUnitId: string; start: string; end: string; notes: string; contactName: string; contactPhone: string; contactVersion: string | null; contactReviewed: boolean; clientRequestId: string; publish: boolean; breakMinutes: string; breakUnpaid: boolean }>({ officerId: '', workUnitId: '', start: '', end: '', notes: '', contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false, clientRequestId: '', publish: true, breakMinutes: '0', breakUnpaid: false });
   const [unitCoverage, setUnitCoverage] = useState<CoveragePreview | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentPreview | null>(null);
 
@@ -258,7 +265,7 @@ const RosterOperationsPage: React.FC = () => {
         : Promise.resolve({ data: [], error: null }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs,patrol_route:patrol_routes!roster_work_units_patrol_route_id_fkey(primary_staff_id)').eq('organization_id', org).eq('active', true).order('name'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
       supabase.from('staff_availability').select('id,staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes,created_at').eq('organization_id', org).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
@@ -289,7 +296,7 @@ const RosterOperationsPage: React.FC = () => {
     if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (version !== loadVersion.current) return;
     if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
@@ -320,7 +327,7 @@ const RosterOperationsPage: React.FC = () => {
   useEffect(() => {
     setSelectedStaffId(null); setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
     setSelectedSourceAssignment(null);
-    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setAttendanceAction(null);
+    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setContactDialog(null); setAttendanceAction(null);
     setNotice(null);
   }, [operatingOrganizationId]);
   const periodLabel = `${weekStart.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} – ${addDays(weekEnd, -1).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -357,10 +364,7 @@ const RosterOperationsPage: React.FC = () => {
 
   const openCreate = (person?: Staff, day?: Date, workUnitOverride?: string) => {
     setCopyingSlot(null);
-    if (!workUnitOverride && selectedSlot?.status === 'draft') {
-      openEdit(selectedSlot);
-      return;
-    }
+    setFormError(null);
     const start = day ? new Date(day) : new Date(); start.setHours(8, 0, 0, 0); const end = new Date(start); end.setHours(16, 0, 0, 0);
     // Default path: workUnitId: requestedWorkUnit?.id ??
     const preferredWorkUnitId = workUnitOverride ?? requestedWorkUnit?.id ?? workUnits[0]?.id ?? '';
@@ -369,19 +373,26 @@ const RosterOperationsPage: React.FC = () => {
       return;
     }
     setEditingSlot(null);
-    setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', publish: true, breakMinutes: '0', breakUnpaid: false }); setShowCreate(true);
+    setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false, clientRequestId: crypto.randomUUID(), publish: true, breakMinutes: '0', breakUnpaid: false }); setShowCreate(true);
   };
 
   const openEdit = (slot: RosterSlot) => {
     setCopyingSlot(null);
+    setFormError(null);
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
-      setEditingSlot(slot);
+    const contact = slotContact(slot);
+    setEditingSlot(slot);
     setForm({
       officerId: staffMember?.id ?? '',
       workUnitId: slot.work_unit_id,
       start: localInput(new Date(slot.scheduled_start)),
       end: localInput(new Date(slot.scheduled_end)),
       notes: slot.notes ?? '',
+      contactName: contact?.contact_name ?? '',
+      contactPhone: contact?.contact_phone ?? '',
+      contactVersion: contact?.version ?? null,
+      contactReviewed: false,
+      clientRequestId: crypto.randomUUID(),
       publish: false,
       breakMinutes: String(slot.planned_break_minutes ?? 0),
       breakUnpaid: slot.break_unpaid ?? false,
@@ -391,14 +402,16 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const openCopy = (slot: RosterSlot) => {
+    setFormError(null);
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
+    const contact = slotContact(slot);
     const start = new Date(slot.scheduled_start);
     const end = new Date(slot.scheduled_end);
     start.setDate(start.getDate() + 7);
     end.setDate(end.getDate() + 7);
     setCopyingSlot(slot);
     setEditingSlot(null);
-    setForm({ officerId: staffMember?.id ?? '', workUnitId: slot.work_unit_id, start: localInput(start), end: localInput(end), notes: slot.notes ?? '', publish: false, breakMinutes: String(slot.planned_break_minutes ?? 0), breakUnpaid: slot.break_unpaid ?? false });
+    setForm({ officerId: staffMember?.id ?? '', workUnitId: slot.work_unit_id, start: localInput(start), end: localInput(end), notes: slot.notes ?? '', contactName: contact?.contact_name ?? '', contactPhone: contact?.contact_phone ?? '', contactVersion: null, contactReviewed: false, clientRequestId: crypto.randomUUID(), publish: false, breakMinutes: String(slot.planned_break_minutes ?? 0), breakUnpaid: slot.break_unpaid ?? false });
     setSelectedSlotId(null);
     setShowCreate(true);
   };
@@ -414,14 +427,37 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(false);
   };
 
+  const saveSlotContact = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!contactDialog) return;
+    const validation = validateRosterContact(contactDialog.name, contactDialog.phone);
+    if (validation) { setContactError(validation); return; }
+    setSaving(true); setContactError(null); setNotice(null);
+    const { data, error: saveError } = await supabase.rpc('set_roster_slot_contact', {
+      p_slot_id: contactDialog.slot.id, p_expected_status: contactDialog.slot.status,
+      p_contact_name: contactDialog.name.trim() || null, p_contact_phone: contactDialog.phone.trim() || null,
+      p_expected_version: contactDialog.version,
+    });
+    if (saveError || !data || data.roster_slot_id !== contactDialog.slot.id || typeof data.changed !== 'boolean') {
+      setContactError(saveError?.message ?? 'The shift contact could not be confirmed. Refresh and retry.');
+    }
+    else { setNotice('Shift contact saved. It is available to the assigned officer once the shift is published.'); setContactDialog(null); await load(); }
+    setSaving(false);
+  };
+
   const updateDraft = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingSlot) return;
-    setSaving(true); setError(null); setNotice(null);
+    setSaving(true); setError(null); setFormError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId);
-    if (!person) { setError('A work-ready staff member is required.'); setSaving(false); return; }
-    const blocker = credentialBlocker(person, form.end); if (blocker) { setError(blocker); setSaving(false); return; }
-    const { error: updateError } = await supabase.rpc('update_roster_slot_with_break', {
+    if (!person) { setFormError('A work-ready staff member is required.'); setSaving(false); return; }
+    const blocker = credentialBlocker(person, form.end); if (blocker) { setFormError(blocker); setSaving(false); return; }
+    const unit = workUnits.find((candidate) => candidate.id === editingSlot.work_unit_id);
+    if (!unit) { setFormError('The work unit could not be confirmed. Refresh the roster.'); setSaving(false); return; }
+    const isStatic = unit.work_unit_type === 'static';
+    const validation = isStatic ? validateRosterContact(form.contactName, form.contactPhone) : null;
+    if (validation) { setFormError(validation); setSaving(false); return; }
+    const args = {
       p_slot_id: editingSlot.id,
       p_expected_status: editingSlot.status,
       p_staff_id: person.staffId,
@@ -430,8 +466,14 @@ const RosterOperationsPage: React.FC = () => {
       p_notes: form.notes.trim() || null,
       p_planned_break_minutes: Number(form.breakMinutes),
       p_break_unpaid: form.breakUnpaid,
-    });
-    if (updateError) setError(updateError.message);
+    };
+    const { data: updated, error: updateError } = await supabase.rpc(
+      isStatic ? 'update_static_roster_slot_with_contact' : 'update_roster_slot_with_break',
+      isStatic ? { ...args, p_contact_name: form.contactName.trim() || null, p_contact_phone: form.contactPhone.trim() || null, p_expected_contact_version: form.contactVersion } : args,
+    );
+    if (updateError || !updated || updated.id !== editingSlot.id || updated.status !== 'draft') {
+      setFormError(updateError?.message ?? 'The draft update could not be confirmed. Refresh the roster.');
+    }
     else { setNotice('Draft roster slot updated. Review it before publishing.'); setEditingSlot(null); setShowCreate(false); await load(); }
     setSaving(false);
   };
@@ -441,12 +483,28 @@ const RosterOperationsPage: React.FC = () => {
       await updateDraft(event);
       return;
     }
-    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    event.preventDefault(); setSaving(true); setError(null); setFormError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId); const unit = workUnits.find((candidate) => candidate.id === form.workUnitId);
-    const blocker = person ? credentialBlocker(person, form.end) : null; if (blocker) { setError(blocker); setSaving(false); return; }
-    if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
-    const slotResponse = await supabase.rpc('create_roster_slot_with_break', { p_client_request_id: crypto.randomUUID(), p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId ?? null, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null, p_planned_break_minutes: Number(form.breakMinutes), p_break_unpaid: form.breakUnpaid });
-    if (slotResponse.error || !slotResponse.data) { setError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
+    if (!unit) { setFormError('The work unit could not be confirmed. Refresh the roster.'); setSaving(false); return; }
+    const blocker = person ? credentialBlocker(person, form.end) : null; if (blocker) { setFormError(blocker); setSaving(false); return; }
+    if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setFormError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
+    const isStatic = unit.work_unit_type === 'static';
+    const validation = isStatic ? validateRosterContact(form.contactName, form.contactPhone) : null;
+    if (validation) { setFormError(validation); setSaving(false); return; }
+    if (isStatic && copyingSlot && (form.contactName.trim() || form.contactPhone.trim()) && !form.contactReviewed) {
+      setFormError('Confirm the copied contact is correct for this shift.'); setSaving(false); return;
+    }
+    const args = { p_client_request_id: form.clientRequestId, p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId ?? null, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null, p_planned_break_minutes: Number(form.breakMinutes), p_break_unpaid: form.breakUnpaid };
+    const slotResponse = await supabase.rpc(
+      isStatic ? 'create_static_roster_slot_with_contact' : 'create_roster_slot_with_break',
+      isStatic ? { ...args, p_contact_name: form.contactName.trim() || null, p_contact_phone: form.contactPhone.trim() || null } : args,
+    );
+    if (slotResponse.error || !slotResponse.data) { setFormError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
+    const slot = slotResponse.data as { id: string; status: string };
+    if (slot.status !== (form.publish ? 'published' : 'draft')) {
+      setFormError('This roster slot changed after it was saved. Close this form and refresh the roster before continuing.');
+      setSaving(false); await load(); return;
+    }
     const receipt = person
       ? `${copyingSlot ? 'Shift copied as a draft' : `Shift ${form.publish ? 'published' : 'saved as a draft'}`} for ${person.name}.${form.publish && !copyingSlot ? ' They will see it on their schedule and can accept or decline.' : ''}`
       : `Open shift ${form.publish ? 'published' : 'saved as a draft'} for ${unit?.name ?? 'the selected work unit'}.${form.publish ? ' Open it on the roster and offer it to available staff.' : ' Publish it when it is ready to advertise.'}`;
@@ -680,7 +738,7 @@ const RosterOperationsPage: React.FC = () => {
     {workflowContext.workUnitId&&<section className="roster-context-banner" role="status"><div><span>{workflowContext.handoffId?'Mobilisation handoff · roster evidence':'Account flow · roster action'}</span><strong>{requestedWorkUnit?.name??'Loading requested work unit'}</strong><p>{requestedWorkUnit?'Schedule the next officer assignment against the work unit selected during mobilisation.':'The requested work unit is not active in this provider roster.'}</p></div><div><button onClick={()=>navigate('/admin/roster')}>Clear focus</button>{workflowContext.handoffId&&<button onClick={()=>navigate(`/admin/handoffs${workflowContextQuery(workflowContext)}`)}>Return to handoff</button>}<button onClick={()=>navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Open work unit</button><button className="is-primary" onClick={()=>openCreate()} disabled={!requestedWorkUnit}><Plus size={15}/>Create shift for this work unit</button></div></section>}
     {workUnits.length > 0 && <div className="roster-quick-actions"><button type="button" onClick={() => void openTemplateDialog()} disabled={saving || loading}>Fill from templates</button><button type="button" onClick={() => openAvailabilityDialog()} disabled={saving || loading || staff.length === 0}>Staff availability</button><button type="button" onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button><button type="button" aria-controls="roster-timesheet-dock" aria-expanded={timesheetsOpen} onClick={() => setTimesheetsOpen(true)}>Timesheets &amp; approvals</button><button type="button" onClick={() => navigate('/admin/people-hr?tab=timesheets')}>Open HR workspace</button></div>}
     {availabilityDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog roster-availability-dialog" onSubmit={saveAvailability} role="dialog" aria-modal="true" aria-labelledby="staff-availability-title"><header><div><span>Workforce readiness</span><h2 id="staff-availability-title">Staff availability</h2></div><button type="button" onClick={() => setAvailabilityDialog(null)} aria-label="Close staff availability"><X /></button></header><p className="roster-dialog-note">Configure when a staff member can or cannot be rostered. Approved leave remains governed in People.</p><label><span>Staff member</span><select value={availabilityDialog.staffId} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, staffId: event.target.value, deleteTarget: null, deleteReason: '' })}>{staff.map((person) => <option value={person.staffId} key={person.staffId}>{person.name}</option>)}</select></label><div className="roster-availability-grid"><label><span>Schedule</span><select value={availabilityDialog.scheduleKind} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, scheduleKind: event.target.value as AvailabilityDialog['scheduleKind'] })}><option value="date">One date</option><option value="weekday">Every weekday</option></select></label>{availabilityDialog.scheduleKind === 'date' ? <label><span>Date</span><input type="date" required value={availabilityDialog.specificDate} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, specificDate: event.target.value })} /></label> : <label><span>Weekday</span><select value={availabilityDialog.dayOfWeek} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, dayOfWeek: Number(event.target.value) })}>{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</select></label>}<label><span>Availability</span><select value={availabilityDialog.availabilityType} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availabilityType: event.target.value as AvailabilityDialog['availabilityType'] })}><option value="unavailable">Unavailable</option><option value="preferred">Preferred</option><option value="available">Available</option></select></label></div><label className="roster-availability-all-day"><input type="checkbox" checked={availabilityDialog.allDay} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, allDay: event.target.checked })} /><span>Applies all day</span></label>{!availabilityDialog.allDay && <div className="roster-availability-grid"><label><span>From</span><input type="time" required value={availabilityDialog.availableFrom} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availableFrom: event.target.value })} /></label><label><span>To</span><input type="time" required value={availabilityDialog.availableTo} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availableTo: event.target.value })} /></label></div>}<label><span>{availabilityDialog.availabilityType === 'unavailable' ? 'Reason' : 'Notes'}</span><textarea rows={2} required={availabilityDialog.availabilityType === 'unavailable'} value={availabilityDialog.notes} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, notes: event.target.value })} placeholder={availabilityDialog.availabilityType === 'unavailable' ? 'Why can this staff member not work?' : 'Optional roster planning context'} /></label><section className="roster-availability-current" aria-labelledby="current-availability-title"><header><div><span>Current period</span><h3 id="current-availability-title">Recorded availability</h3></div><strong>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).length}</strong></header>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).length === 0 ? <p>No availability records for this staff member in the displayed period.</p> : <div>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).map((record) => <article key={record.id}><div><strong>{record.specific_date ? new Date(`${record.specific_date}T12:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }) : `Every ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][(record.day_of_week ?? 1) - 1]}`}</strong><span>{record.all_day ? 'All day' : `${record.available_from?.slice(0, 5)}–${record.available_to?.slice(0, 5)}`} · {record.availability_type}</span>{record.notes && <small>{record.notes}</small>}</div><button type="button" disabled={saving} onClick={() => setAvailabilityDialog({ ...availabilityDialog, deleteTarget: record, deleteReason: '', deleteRequestId: crypto.randomUUID() })}>Remove</button></article>)}</div>}{availabilityDialog.deleteTarget && <div className="roster-availability-remove" role="group" aria-label="Confirm availability removal"><p>Remove this availability record? Existing roster decisions remain in history, but future conflict checks will stop using it.</p><label><span>Removal reason</span><textarea rows={2} required value={availabilityDialog.deleteReason} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, deleteReason: event.target.value })} /></label><div><button type="button" onClick={() => setAvailabilityDialog({ ...availabilityDialog, deleteTarget: null, deleteReason: '' })}>Keep record</button><button type="button" className="is-danger" disabled={saving || !availabilityDialog.deleteReason.trim()} onClick={() => void deleteAvailability()}>Confirm removal</button></div></div>}</section><footer><button type="button" onClick={() => setAvailabilityDialog(null)}>Close</button><button type="submit" disabled={saving || !availabilityDialog.staffId || (availabilityDialog.availabilityType === 'unavailable' && !availabilityDialog.notes.trim())}>Save availability</button></footer></form></div>}
-    {repeatDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={repeatSelected} role="dialog" aria-modal="true" aria-labelledby="repeat-roster-title"><header><div><span>Roster planning</span><h2 id="repeat-roster-title">Repeat assignment</h2></div><button type="button" onClick={() => setRepeatDialog(null)}><X /></button></header><p>Creates draft assignments and skips overlapping or leave-conflicted days.</p><label><span>From date</span><input type="date" required value={repeatDialog.from} onChange={(event) => setRepeatDialog({ ...repeatDialog, from: event.target.value })} /></label><label><span>To date</span><input type="date" required value={repeatDialog.to} onChange={(event) => setRepeatDialog({ ...repeatDialog, to: event.target.value })} /></label><footer><button type="button" onClick={() => setRepeatDialog(null)}>Cancel</button><button type="submit" disabled={saving}>Create draft repeats</button></footer></form></div>}
+    {repeatDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={repeatSelected} role="dialog" aria-modal="true" aria-labelledby="repeat-roster-title"><header><div><span>Roster planning</span><h2 id="repeat-roster-title">Repeat assignment</h2></div><button type="button" onClick={() => setRepeatDialog(null)}><X /></button></header><p>Creates draft assignments and skips overlapping or leave-conflicted days.</p>{workUnits.find((unit) => unit.id === repeatDialog.slot.work_unit_id)?.work_unit_type === 'static' && <p>Shift contacts are not copied to repeated drafts. Add the right contact to each shift before publishing.</p>}<label><span>From date</span><input type="date" required value={repeatDialog.from} onChange={(event) => setRepeatDialog({ ...repeatDialog, from: event.target.value })} /></label><label><span>To date</span><input type="date" required value={repeatDialog.to} onChange={(event) => setRepeatDialog({ ...repeatDialog, to: event.target.value })} /></label><footer><button type="button" onClick={() => setRepeatDialog(null)}>Cancel</button><button type="submit" disabled={saving}>Create draft repeats</button></footer></form></div>}
     {publishDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void batchPublishPeriod(); }} role="dialog" aria-modal="true" aria-labelledby="publish-period-title"><header><div><span>Publish</span><h2 id="publish-period-title">Publish {plural(draftCount, 'draft shift')}?</h2></div><button type="button" onClick={() => setPublishDialog(null)}><X /></button></header>{publishDialog === 'loading' ? <p className="roster-dialog-note">Checking the drafts in {periodLabel}…</p> : <ul className="roster-dialog-facts"><li><strong>{publishDialog.draft_count}</strong><span>draft shift{publishDialog.draft_count === 1 ? '' : 's'} in {periodLabel} will be published. Officers see them on their schedule and can accept or decline.</span></li>{publishDialog.leave_conflict_count > 0 && <li className="is-warning"><strong>{publishDialog.leave_conflict_count}</strong><span>clash with approved leave and will be skipped. Reassign them first.</span></li>}{publishDialog.unassigned_count > 0 && <li className="is-warning"><strong>{publishDialog.unassigned_count}</strong><span>have nobody assigned yet. They are published as open shifts for you to fill – assign someone or offer overtime.</span></li>}<li><strong>{publishDialog.field_shift_count}</strong><span>{publishDialog.field_shift_count === 1 ? 'is' : 'are'} field work (patrol run or static post) and get a shift record the officer can start. The rest are office or internal work.</span></li></ul>}<footer><button type="button" onClick={() => setPublishDialog(null)}>Back</button><button type="submit" disabled={saving || publishDialog === 'loading' || publishDialog.draft_count === 0}>Publish now</button></footer></form></div>}
     {templateDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void generateFromTemplates(); }} role="dialog" aria-modal="true" aria-labelledby="template-fill-title"><header><div><span>Templates</span><h2 id="template-fill-title">Fill {periodLabel} from templates?</h2></div><button type="button" onClick={() => setTemplateDialog(null)}><X /></button></header>{templateDialog === 'loading' ? <p className="roster-dialog-note">Checking your shift templates…</p> : <ul className="roster-dialog-facts"><li><strong>{templateDialog.new_slots}</strong><span>new draft shift{templateDialog.new_slots === 1 ? '' : 's'} will be created from {plural(templateDialog.templates_applied, 'active template')}. Nobody is assigned yet – assign staff, then publish.</span></li><li><strong>{templateDialog.existing_slots}</strong><span>already exist for these times and will not be duplicated.</span></li></ul>}<footer><button type="button" onClick={() => setTemplateDialog(null)}>Back</button><button type="submit" disabled={saving || templateDialog === 'loading' || templateDialog.new_slots === 0}>Create drafts</button></footer></form></div>}
     {attendanceAction && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={acknowledgeAttendance} role="dialog" aria-modal="true" aria-labelledby="attendance-action-title"><header><div><span>Attendance control</span><h2 id="attendance-action-title">Acknowledge exception</h2></div><button type="button" onClick={() => setAttendanceAction(null)}><X /></button></header><p>Record the supervisor decision for this {attendanceAction.item.exception_type.replaceAll('_', ' ')} exception.</p><label><span>Action notes</span><textarea required rows={4} value={attendanceAction.notes} onChange={(event) => setAttendanceAction({ ...attendanceAction, notes: event.target.value })} /></label><footer><button type="button" onClick={() => setAttendanceAction(null)}>Cancel</button><button type="submit" disabled={saving || !attendanceAction.notes.trim()}>Acknowledge exception</button></footer></form></div>}
@@ -793,19 +851,29 @@ const RosterOperationsPage: React.FC = () => {
         <div><dt>Status</dt><dd>{slotStatusLabel(selectedSlot.status)}</dd></div>
         <div><dt>Start</dt><dd>{new Date(selectedSlot.scheduled_start).toLocaleString('en-NZ')}</dd></div>
         <div><dt>End</dt><dd>{new Date(selectedSlot.scheduled_end).toLocaleString('en-NZ')}</dd></div>
+        {selectedSlotUnit?.work_unit_type === 'static' && <div><dt>Shift contact</dt><dd>{slotContact(selectedSlot) ? [slotContact(selectedSlot)?.contact_name, slotContact(selectedSlot)?.contact_phone].filter(Boolean).join(' · ') : 'Not designated'}</dd></div>}
         <div><dt>Field shift</dt><dd>{selectedSlot.external_refs?.source === 'rm_patrol_log_labour' ? 'Completed source labour; no live shift is created' : selectedSlot.linked_shift_id ? 'Created \u2013 the officer can start it' : selectedSlotUnit?.work_unit_type === 'workshop' ? 'Job execution and completion stay in Workshop' : selectedSlotUnit?.work_unit_type === 'internal' ? 'Not needed for office work' : 'Created when published'}</dd></div>
         {importedLabourLabel(selectedSlot.external_refs) && <div><dt>Source labour</dt><dd>{importedLabourLabel(selectedSlot.external_refs)}{selectedSlot.external_refs?.pay_code && ` · ${selectedSlot.external_refs.pay_code}`}</dd></div>}
         {selectedCommercialReadiness && <><div><dt>Wage rule</dt><dd>{plainWords(selectedCommercialReadiness.pay_status)}</dd></div><div><dt>Billing</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.billing_status)}</dd></div><div><dt>Quote</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.quote_status)}</dd></div><div><dt>Geofence</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.geofence_status)}</dd></div><div><dt>Cost centre</dt><dd>{plainWords(selectedCommercialReadiness.cost_centre_status)}</dd></div></>}
       </dl>
       {selectedSlotUnit?.workshop_work_order_id && <><p>Client billing, place or asset, job lead and completion are managed on the linked work order. This slot plans labour only and does not change the job lead.</p><button type="button" onClick={() => navigate(`/admin/workshop?workOrderId=${selectedSlotUnit.workshop_work_order_id}`)}>Open work order</button></>}
       {selectedSlot.notes && <p>{selectedSlot.notes}</p>}
-      <footer>{!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}{selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}{['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}{['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}{['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}{['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}</footer>
+      <footer>{selectedSlotUnit?.work_unit_type === 'static' && ['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button type="button" onClick={() => { const contact = slotContact(selectedSlot); setContactError(null); setContactDialog({ slot: selectedSlot, name: contact?.contact_name ?? '', phone: contact?.contact_phone ?? '', version: contact?.version ?? null }); }}>Edit shift contact</button>}{selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type="button" onClick={() => openEdit(selectedSlot)}>Edit draft</button>}{!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}{selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}{['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}{['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}{['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}{['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}</footer>
     </aside>}
+    {contactDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={saveSlotContact} role="dialog" aria-modal="true" aria-labelledby="shift-contact-title">
+      <header><div><span>Roster assignment</span><h2 id="shift-contact-title">Edit shift contact</h2></div><button type="button" onClick={() => setContactDialog(null)} aria-label="Close shift contact"><X /></button></header>
+      <p>Designate the person or phone number for this specific shift. Leave both blank to remove the contact.</p>
+      {contactError && <p className="roster-contact-error" role="alert">{contactError}</p>}
+      <label><span>Contact person</span><input maxLength={120} value={contactDialog.name} onChange={(event) => setContactDialog({ ...contactDialog, name: event.target.value })} /></label>
+      <label><span>Contact phone</span><input type="tel" maxLength={50} value={contactDialog.phone} onChange={(event) => setContactDialog({ ...contactDialog, phone: event.target.value })} /></label>
+      <footer><button type="button" onClick={() => setContactDialog(null)}>Cancel</button><button type="submit" disabled={saving}>{saving ? 'Saving' : 'Save contact'}</button></footer>
+    </form></div>}
     {selectedSlot && slotAction && <div className="roster-dialog-backdrop"><form className="roster-dialog roster-slot-dialog" onSubmit={manageSlot} role="dialog" aria-modal="true" aria-labelledby="slot-action-title"><header><div><span>Roster lifecycle</span><h2 id="slot-action-title">{slotAction === 'publish' ? 'Publish roster slot?' : slotAction === 'unpublish' ? 'Recall roster slot to draft?' : slotAction === 'reassign' ? 'Reassign roster slot?' : 'Cancel roster slot?'}</h2></div><button type="button" onClick={() => setSlotAction(null)}><X /></button></header><p>{slotAction === 'publish' ? 'The officer will see this shift on their schedule and can accept or decline it. Field work also gets its shift record now; office and internal work stays a roster slot only.' : slotAction === 'unpublish' ? 'The slot goes back to draft. If its shift has not started, the shift is cancelled.' : slotAction === 'reassign' ? 'The replacement officer must accept the assignment. The shift only moves to them if nothing has been recorded on it yet.' : 'If the linked shift has not started and nothing has been recorded on it, it is cancelled too.'}</p>{slotAction === 'reassign' && <label><span>Replacement officer</span><select required value={replacementStaffId} onChange={(event) => setReplacementStaffId(event.target.value)}><option value="">Select work-ready staff</option>{staff.filter((person) => person.workReady && person.staffId !== selectedSlot.staff_id).map((person) => <option value={person.staffId} key={person.staffId}>{person.name}</option>)}</select></label>}{slotAction !== 'publish' && <label><span>{slotAction === 'reassign' ? 'Reassignment reason' : slotAction === 'unpublish' ? 'Recall reason' : 'Cancellation reason'}</span><textarea required rows={4} value={slotReason} onChange={(event) => setSlotReason(event.target.value)} /></label>}<footer><button type="button" onClick={() => setSlotAction(null)}>Back</button><button type="submit" disabled={saving || (slotAction !== 'publish' && (!slotReason.trim() || (slotAction === 'reassign' && !replacementStaffId)))}>{saving ? 'Saving' : slotAction === 'publish' ? 'Confirm publication' : slotAction === 'unpublish' ? 'Confirm recall' : slotAction === 'reassign' ? 'Confirm reassignment' : 'Confirm cancellation'}</button></footer></form></div>}
     {showCreate && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={createAssignment} role="dialog" aria-modal="true" aria-labelledby="create-shift-title">
-      <header><div><span>Roster assignment</span><h2 id="create-shift-title">Create shift</h2></div><button type="button" onClick={() => setShowCreate(false)}><X /></button></header>
+      <header><div><span>Roster assignment</span><h2 id="create-shift-title">{editingSlot ? 'Edit draft shift' : 'Create shift'}</h2></div><button type="button" onClick={() => setShowCreate(false)} aria-label="Close shift form"><X /></button></header>
+      {formError && <p className="roster-contact-error" role="alert">{formError}</p>}
       <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={Boolean(editingSlot)} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">{editingSlot ? 'Select work-ready staff' : 'Open shift — advertise to available staff'}</option>{staff.filter((person) => person.workReady).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
-      <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value })}><option value="">Select the work this shift covers</option>{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
+      <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required disabled={Boolean(editingSlot)} value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value, contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false })}><option value="">Select the work this shift covers</option>{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
       <div><label><span>Start</span><input type="datetime-local" required value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
       <label><span>Planned break (minutes, optional)</span><input type="number" min="0" max="240" step="1" required value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></label>
       <label><input type="checkbox" checked={form.breakUnpaid} disabled={Number(form.breakMinutes) === 0} onChange={(event) => setForm({ ...form, breakUnpaid: event.target.checked })} /><span>Unpaid break</span></label>
@@ -813,9 +881,17 @@ const RosterOperationsPage: React.FC = () => {
       {unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
       {assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}
       <label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-      <label className="roster-publish"><input type="checkbox" aria-label="Publish immediately" checked={form.publish} onChange={(event) => setForm({ ...form, publish: event.target.checked })} /><span><UserCheck /><b>{form.officerId ? 'Publish immediately' : 'Advertise open shift immediately'}</b><small>{form.officerId ? 'The officer sees it straight away and can accept or decline. Leave off to keep it as a draft you publish later.' : 'Publish the unassigned slot so it can be offered to eligible staff. Leave off to keep it as a planning draft.'}</small></span></label>
+      {workUnits.find((unit) => unit.id === form.workUnitId)?.work_unit_type === 'static' && <fieldset className="roster-contact-fields">
+        <legend>Shift contact (optional)</legend>
+        <p>Only enter the person or number designated for this shift. The assigned officer can see it with the shift details.</p>
+        {copyingSlot && <p>Review the copied contact for this shift before saving.</p>}
+        <label><span>Contact person</span><input maxLength={120} value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value, contactReviewed: false })} /></label>
+        <label><span>Contact phone</span><input type="tel" maxLength={50} value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value, contactReviewed: false })} /></label>
+        {copyingSlot && (form.contactName.trim() || form.contactPhone.trim()) && <label className="roster-contact-review"><input type="checkbox" checked={form.contactReviewed} onChange={(event) => setForm({ ...form, contactReviewed: event.target.checked })} /><span>I confirmed this contact for the new shift.</span></label>}
+      </fieldset>}
+      {!editingSlot && <label className="roster-publish"><input type="checkbox" aria-label="Publish immediately" checked={form.publish} onChange={(event) => setForm({ ...form, publish: event.target.checked })} /><span><UserCheck /><b>{form.officerId ? 'Publish immediately' : 'Advertise open shift immediately'}</b><small>{form.officerId ? 'The officer sees it straight away and can accept or decline. Leave off to keep it as a draft you publish later.' : 'Publish the unassigned slot so it can be offered to eligible staff. Leave off to keep it as a planning draft.'}</small></span></label>}
       {error && <p className="roster-assignment-note is-stop roster-dialog-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /><span>{error}</span></p>}
-      <footer><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" disabled={saving || Boolean(editingSlot && !form.officerId) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Creating' : 'Create shift'}</button></footer>
+      <footer><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" disabled={saving || Boolean(editingSlot && !form.officerId) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Saving' : editingSlot ? 'Save draft' : 'Create shift'}</button></footer>
     </form></div>}
   </div>;
 };

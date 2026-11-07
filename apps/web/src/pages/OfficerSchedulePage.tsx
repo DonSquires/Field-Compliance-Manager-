@@ -10,6 +10,7 @@ import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import { briefingNeedsAcknowledgement, fetchShiftSafetyBriefing, type SafetyBriefing } from '../lib/safetyBriefing';
 import { SafetyBriefingDialog } from '../components/ShiftSafetyBriefing';
+import { fetchStaticShiftSafety, isStaticGuardingService } from '../lib/officerStaticBriefing';
 import './OfficerSchedulePage.css';
 import './OfficerScheduleActions.css';
 
@@ -108,9 +109,10 @@ const OfficerSchedulePage: React.FC = () => {
   const [endingShift, setEndingShift] = useState<AssignedShift | null>(null);
   const navigate = useNavigate();
   const endShiftDestination = (destination: EndShiftDestination, shift: AssignedShift) => {
-    const route = destination === 'stops' ? (shift.service_type === 'static_guarding' || shift.service_type === 'site_guard' ? '/officer/site_guard' : '/officer/patrol') : destination === 'home' ? '/officer' : `/officer/${destination}`;
+    const route = destination === 'stops' ? (isStaticGuardingService(shift.service_type) ? '/officer/site_guard' : '/officer/patrol') : destination === 'home' ? '/officer' : `/officer/${destination}`;
     setEndingShift(null);
-    navigate(route);
+    // Only the static post reads ?shift; other destinations scope themselves to the active shift.
+    navigate(route === '/officer/site_guard' ? `${route}?shift=${encodeURIComponent(shift.id)}` : route);
   };
   const [swapOfficers, setSwapOfficers] = useState<SwapOfficer[]>([]);
   const [swapOfficerId, setSwapOfficerId] = useState('');
@@ -164,7 +166,7 @@ const OfficerSchedulePage: React.FC = () => {
     setError(null);
     const now = new Date().toISOString();
     const [shiftResponse, overdueShiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse, onCallResponse, adHocUnitsResponse] = await Promise.all([
-      supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, notes, shift_health, total_stops, ended_reason').eq('officer_user_id', profile.id).gte('scheduled_end', now).neq('status', 'cancelled').order('scheduled_start', { ascending: true }).limit(40),
+      supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, shift_health, total_stops, ended_reason').eq('officer_user_id', profile.id).gte('scheduled_end', now).neq('status', 'cancelled').order('scheduled_start', { ascending: true }).limit(40),
       supabase.from('shifts').select('id, scheduled_start, scheduled_end, status, total_stops').eq('officer_user_id', profile.id).eq('status', 'in_progress').lt('scheduled_end', now).order('scheduled_start', { ascending: true }).limit(40),
       supabase.from('shift_coverage_requests').select('id, shift_date, start_time, end_time, required_staff_count, urgency, notes, site:site_id(name)').eq('organization_id', profile.organizationId).eq('status', 'open').gte('shift_date', localDateIso()).order('shift_date', { ascending: true }).order('start_time', { ascending: true }),
       supabase.from('staff_profiles').select('id').eq('organization_id', profile.organizationId).or(`user_id.eq.${profile.id},id.eq.${profile.id}`).limit(1).maybeSingle(),
@@ -179,7 +181,14 @@ const OfficerSchedulePage: React.FC = () => {
     const userResponse = candidateUsers.length ? await supabase.from('user_profiles').select('id,display_name,email').in('id', candidateUsers) : { data: [], error: null };
     const userLabels = new Map(((userResponse.data as Array<{ id: string; display_name: string | null; email: string | null }> | null) ?? []).map((user) => [user.id, user.display_name || user.email || user.id]));
     setSwapOfficers(candidateRows.filter((row) => row.user_id && row.user_id !== profile.id).map((row) => ({ id: row.id, label: userLabels.get(row.user_id as string) ?? row.id })));
-    const assignedById = new Map(((shiftResponse.data as AssignedShift[]) ?? []).map((shift) => [shift.id, shift]));
+    const upcomingRows = (shiftResponse.data as Omit<AssignedShift, 'notes'>[] | null) ?? [];
+    // Static-post instructions are private to the post briefing; only other assignments show their notes here.
+    const nonStaticIds = upcomingRows.filter((shift) => !isStaticGuardingService(shift.service_type)).map((shift) => shift.id);
+    const shiftNotesResponse = nonStaticIds.length
+      ? await supabase.from('shifts').select('id,notes').eq('officer_user_id', profile.id).not('service_type', 'ilike', '%static%').not('service_type', 'ilike', '%site_guard%').in('id', nonStaticIds)
+      : { data: [], error: null };
+    const shiftNotes = new Map(((shiftNotesResponse.data as Array<{ id: string; notes: string | null }> | null) ?? []).map((shift) => [shift.id, shift.notes]));
+    const assignedById = new Map<string, AssignedShift>(upcomingRows.map((shift) => [shift.id, { ...shift, notes: shiftNotes.get(shift.id) ?? null }]));
     for (const shift of (overdueShiftResponse.data as Pick<AssignedShift, 'id' | 'scheduled_start' | 'scheduled_end' | 'status' | 'total_stops'>[]) ?? []) {
       if (!assignedById.has(shift.id)) assignedById.set(shift.id, { ...shift, service_type: 'Unfinished', notes: null, shift_health: null, ended_reason: null, instructionsWithheld: true });
     }
@@ -210,19 +219,37 @@ const OfficerSchedulePage: React.FC = () => {
     let slotError: { message: string } | null = null;
     if (staffId) {
       const [slotResponse, overtimeResponse] = await Promise.all([
-        supabase.from('roster_slots').select('id, work_unit_id, scheduled_start, scheduled_end, status, linked_shift_id, notes').eq('staff_id', staffId).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start').limit(40),
+        supabase.from('roster_slots').select('id, work_unit_id, scheduled_start, scheduled_end, status, linked_shift_id').eq('staff_id', staffId).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start').limit(40),
         supabase.from('overtime_offers').select('id,roster_slot_id,seniority_position,status,expires_at').eq('staff_id', staffId).eq('status', 'offered').gte('expires_at', new Date().toISOString()).order('expires_at').limit(20),
       ]);
-      const rows = (slotResponse.data as RosterSlot[]) ?? [];
-      setSlots(rows);
+      const rows = (slotResponse.data as Omit<RosterSlot, 'notes'>[]) ?? [];
       setOvertimeOffers((overtimeResponse.data as OvertimeOffer[]) ?? []);
       slotError = slotResponse.error ?? overtimeResponse.error;
       const ids = Array.from(new Set(rows.map((slot) => slot.work_unit_id)));
+      const slotNotes = new Map<string, string | null>();
       if (ids.length) {
         const unitsResponse = await supabase.from('roster_work_units').select('id, name, work_unit_type, service_type').in('id', ids);
-        setWorkUnits((unitsResponse.data as WorkUnit[]) ?? []);
+        const units = (unitsResponse.data as WorkUnit[]) ?? [];
+        setWorkUnits(units);
         slotError = slotError ?? unitsResponse.error;
+        const nonStaticSlotIds = rows.filter((slot) => {
+          const unit = units.find((item) => item.id === slot.work_unit_id);
+          return !slot.linked_shift_id && unit && unit.work_unit_type !== 'static' && !isStaticGuardingService(unit.service_type);
+        }).map((slot) => slot.id);
+        if (nonStaticSlotIds.length) {
+          const notesResponse = await supabase.from('roster_slots')
+            .select('id,notes,work_unit:roster_work_units!inner(work_unit_type,service_type)')
+            .eq('staff_id', staffId).is('linked_shift_id', null).in('id', nonStaticSlotIds)
+            .not('work_unit.work_unit_type', 'eq', 'static')
+            .not('work_unit.service_type', 'ilike', '%static%')
+            .not('work_unit.service_type', 'ilike', '%site_guard%');
+          slotError = slotError ?? notesResponse.error;
+          for (const slot of (notesResponse.data as Array<{ id: string; notes: string | null }> | null) ?? []) {
+            slotNotes.set(slot.id, slot.notes);
+          }
+        }
       } else setWorkUnits([]);
+      setSlots(rows.map((slot) => ({ ...slot, notes: slotNotes.get(slot.id) ?? null })));
     } else { setSlots([]); setWorkUnits([]); setOvertimeOffers([]); }
     setCoverage(((coverageResponse.data as Array<Omit<CoverageRequest, 'site'> & { site: { name: string } | Array<{ name: string }> | null }>) ?? []).map((request) => ({
       ...request,
@@ -231,6 +258,7 @@ const OfficerSchedulePage: React.FC = () => {
     const failure = describeLoadFailures([
       ['assigned shifts', shiftResponse.error],
       ['unfinished shifts', overdueShiftResponse.error],
+      ['assignment instructions', shiftNotesResponse.error],
       ['open coverage', coverageResponse.error],
       ['your roster profile', staffResponse.error],
       ['on-call assignments', onCallResponse.error],
@@ -244,6 +272,11 @@ const OfficerSchedulePage: React.FC = () => {
 
   useEffect(() => { void loadSchedule(); }, [loadSchedule]);
   useEffect(()=>{if(requestedSlotId)document.getElementById(`officer-roster-slot-${requestedSlotId}`)?.scrollIntoView({block:'center'});},[requestedSlotId,slots]);
+  useEffect(() => {
+    if (!requestedShiftId || !assigned.some((shift) => shift.id === requestedShiftId)) return;
+    const slot = slots.find((item) => item.linked_shift_id === requestedShiftId);
+    document.getElementById(slot ? `officer-roster-slot-${slot.id}` : `officer-shift-${requestedShiftId}`)?.scrollIntoView({ block: 'center' });
+  }, [requestedShiftId, assigned, slots]);
 
   const workforceSlots = useMemo(() => slots.filter((slot) => !slot.linked_shift_id), [slots]);
   const nextShift = useMemo(() => [...assigned, ...workforceSlots].filter((item) => ['draft', 'scheduled', 'published', 'accepted'].includes(item.status)).sort((left, right) => left.scheduled_start.localeCompare(right.scheduled_start))[0] ?? null, [assigned, workforceSlots]);
@@ -425,11 +458,14 @@ const OfficerSchedulePage: React.FC = () => {
     else await submitStart(shift, coords, null);
   };
 
+  const loadShiftSafety = (shift: AssignedShift) => isStaticGuardingService(shift.service_type)
+    ? fetchStaticShiftSafety(shift.id) : fetchShiftSafetyBriefing(shift.id);
+
   const startShift = async (shift: AssignedShift) => {
     setStartingShiftId(shift.id); setError(null); setNotice(null);
     // The place's hazards are read and confirmed before the shift starts ("I've read these risks – start shift").
     try {
-      const briefing = await fetchShiftSafetyBriefing(shift.id);
+      const briefing = await loadShiftSafety(shift);
       if (briefingNeedsAcknowledgement(briefing)) { setStartBriefing({ shift, briefing }); setStartingShiftId(null); return; }
     } catch (briefingError) {
       setError(`The safety briefing for this shift could not be loaded (${briefingError instanceof Error ? briefingError.message : 'unknown error'}). Ask your supervisor about site risks before you start.`);
@@ -465,9 +501,10 @@ const OfficerSchedulePage: React.FC = () => {
             const pendingSwap = pendingSwaps.find((item) => item.original_shift_id === shift.id);
             return <article id={slot ? `officer-roster-slot-${slot.id}` : `officer-shift-${shift.id}`} className={`officer-assigned-shift ${slot?.id === requestedSlotId || shift.id === requestedShiftId ? 'is-context-focus' : ''}`} key={shift.id}>
               <div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div>
-              <div><strong>{unit?.name ?? shift.service_type.replaceAll('_', ' ')}</strong><small>{unit ? `${shift.service_type.replaceAll('_', ' ')} · ` : ''}{shift.total_stops} planned {shift.total_stops === 1 ? 'stop' : 'stops'}{shift.notes ? ` · ${shift.notes}` : ''}{shift.instructionsWithheld ? ' · Briefing notes are not shown here; ask operations.' : ''}{shift.ended_reason === 'superseded_by_next_shift' ? ' · ended when your next shift started' : ''}</small></div>
+              <div><strong>{unit?.name ?? shift.service_type.replaceAll('_', ' ')}</strong><small>{unit ? `${shift.service_type.replaceAll('_', ' ')} · ` : ''}{shift.total_stops} planned {shift.total_stops === 1 ? 'stop' : 'stops'}{!isStaticGuardingService(shift.service_type) && shift.notes ? ` · ${shift.notes}` : ''}{shift.instructionsWithheld ? ' · Briefing notes are not shown here; ask operations.' : ''}{shift.ended_reason === 'superseded_by_next_shift' ? ' · ended when your next shift started' : ''}</small></div>
               <span className={`status-${shift.status}`}>{officerShiftStatusLabel(shift.status)}</span>
-              {!shift.instructionsWithheld && shift.service_type === 'static_guarding' && <button type="button" onClick={() => navigate(`/officer/site_guard?shift=${encodeURIComponent(shift.id)}`)}>Open assigned site and job</button>}
+              {!shift.instructionsWithheld && isStaticGuardingService(shift.service_type) && <button type="button" onClick={() => navigate(`/officer/site_guard?shift=${encodeURIComponent(shift.id)}`)}>Open assigned site and job</button>}
+              {shift.status === 'in_progress' && !shift.instructionsWithheld && <button type="button" className="officer-swap-button" onClick={() => navigate(`/officer/report?shift=${encodeURIComponent(shift.id)}`)}>Record incident or report</button>}
               {pendingSwap ? <button type="button" className="officer-swap-button" onClick={() => setCancelSwap(pendingSwap)}>Cancel pending swap</button> : slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}
               {!pendingSwap && ['scheduled', 'published', 'accepted'].includes(shift.status) && <><button type="button" className="officer-swap-button" onClick={() => setSwapRequest(shift)}>Request swap</button>{canStartNow(shift.scheduled_start) ? <button type="button" className="officer-swap-button" onClick={() => void startShift(shift)} disabled={startingShiftId === shift.id}>{startingShiftId === shift.id ? 'Starting…' : 'Start shift'}</button> : <small className="officer-start-opens">{startOpensWords(shift.scheduled_start)}</small>}</>}
               {shift.status === 'in_progress' && <div className="officer-break-controls"><small>{entitlement ? `${entitlement.rest_breaks_taken}/${entitlement.rest_breaks_required} rest · ${entitlement.meal_breaks_taken}/${entitlement.meal_breaks_required} meal` : 'Break entitlement loading'}</small><OfficerShiftBreakControl shiftId={shift.id} /><button type="button" className="officer-end-shift-button" onClick={() => setEndingShift(shift)}>End shift</button></div>}
@@ -482,7 +519,7 @@ const OfficerSchedulePage: React.FC = () => {
       {workResponse && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="additional-work-response-title" onSubmit={respondToAdditionalWork}><header><div><span>Additional work</span><h2 id="additional-work-response-title">{workResponse.response === 'accepted' ? `Accept ${workResponse.title.toLowerCase()}?` : `Decline ${workResponse.title.toLowerCase()}?`}</h2></div><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }} title="Close"><X size={18}/></button></header><p>{workResponse.response === 'accepted' ? 'This confirms the assignment to the roster team. Check the dates and availability before continuing.' : 'Tell the roster team why you cannot cover this work so they can make a safe replacement decision.'}</p>{workResponse.response === 'declined' && <label><span>Decline reason</span><textarea required rows={4} value={workDeclineReason} onChange={(event) => setWorkDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }}>Back</button><button type="submit" disabled={claiming || (workResponse.response === 'declined' && !workDeclineReason.trim())}>{claiming ? 'Saving...' : workResponse.response === 'accepted' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></form></div>}
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
       {endingShift && <EndShiftDialog shiftId={endingShift.id} shiftStatus={endingShift.status} serviceType={endingShift.service_type} recoveryReadiness={Boolean(endingShift.instructionsWithheld)} stopsUnavailableReason={endingShift.instructionsWithheld ? 'Stops for this earlier shift cannot be opened here yet. Contact operations to finish them.' : undefined} dispatchUnavailableReason={endingShift.instructionsWithheld ? 'Dispatch jobs for this earlier shift cannot be opened here yet. Contact operations to finish them.' : undefined} onClose={() => setEndingShift(null)} onNavigate={(destination) => endShiftDestination(destination, endingShift)} onEnded={async ({ completed_at }) => { setEndingShift(null); setNotice(`Shift ended at ${new Date(completed_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Record your worked time on the timesheet when you are ready.`); await loadSchedule(); }} />}
-      {startBriefing && <SafetyBriefingDialog briefing={startBriefing.briefing} title={`Before you start: risks on this shift`} acknowledgeLabel="I've read these risks – start shift" onClose={() => setStartBriefing(null)} onReload={async () => { try { const next = await fetchShiftSafetyBriefing(startBriefing.shift.id); setStartBriefing({ shift: startBriefing.shift, briefing: next }); return next; } catch { return null; } }} onAcknowledged={async () => { const { shift } = startBriefing; setStartBriefing(null); setStartingShiftId(shift.id); await continueStart(shift); setStartingShiftId(null); }} />}
+      {startBriefing && <SafetyBriefingDialog briefing={startBriefing.briefing} title={`Before you start: risks on this shift`} acknowledgeLabel="I've read these risks – start shift" onClose={() => setStartBriefing(null)} onReload={async () => { const next = await loadShiftSafety(startBriefing.shift); setStartBriefing({ shift: startBriefing.shift, briefing: next }); return next; }} onAcknowledged={async () => { const { shift } = startBriefing; setStartBriefing(null); setStartingShiftId(shift.id); await continueStart(shift); setStartingShiftId(null); }} />}
       {startAdvisory && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="start-advisory-title">
         <header><h2 id="start-advisory-title">{startAdvisory.stillOn ? "You're still on another shift" : 'Attendance needs review'}</h2><button type="button" onClick={() => setStartAdvisory(null)} title="Close"><X size={18} /></button></header>
         {startAdvisory.stillOn && <p>Starting this shift ends your previous in-progress shift. Unfinished work remains on record. Choose Not yet to finish it properly first.</p>}

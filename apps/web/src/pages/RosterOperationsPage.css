@@ -692,3 +692,12 @@
 .admin-shell[data-theme='dark'] .roster-dialog-backdrop{background:var(--color-bg-overlay)}
 .admin-shell[data-theme='dark'] .roster-dialog{border-color:var(--color-border-strong);background:var(--color-bg-surface)}
 .admin-shell[data-theme='dark'] .roster-dialog input,.admin-shell[data-theme='dark'] .roster-dialog select,.admin-shell[data-theme='dark'] .roster-dialog textarea{border-color:var(--color-border);color:var(--color-text-primary);background:var(--color-bg-base)}
+.roster-dialog{max-height:calc(100vh - 32px);overflow-y:auto;overscroll-behavior:contain}
+@supports(height:100dvh){.roster-dialog{max-height:calc(100dvh - 32px)}}
+.roster-contact-fields{display:grid;gap:10px;min-width:0;margin:12px 0;padding:12px;border:1px solid var(--color-border,#40566a);border-radius:6px}
+.roster-contact-fields legend{padding:0 4px;font-weight:700}
+.roster-contact-fields p{margin:0;font-size:13px;line-height:1.45}
+.roster-contact-fields label{min-width:0}
+.roster-dialog .roster-contact-review{display:flex;align-items:center;gap:8px}
+.roster-dialog .roster-contact-review input{width:18px;height:18px;flex:none}
+.roster-contact-error{padding:10px;border:1px solid #b54747;border-radius:6px;color:var(--color-text-primary,#e7eef5);background:var(--color-bg-elevated,#35191b)}

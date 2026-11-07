@@ -44,17 +44,22 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     setLoading(true);
     setError(null);
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-    const [shiftResponse, debriefResponse] = await Promise.all([
-      supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, total_stops, completed_stops').eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_start', since).order('scheduled_start', { ascending: false }).limit(30),
+    const shiftColumns = 'id, service_type, scheduled_start, scheduled_end, status, total_stops, completed_stops';
+    // Open shifts are always eligible regardless of age: a shift left in_progress
+    // for weeks must still be debriefed and ended. Only completed shifts are windowed.
+    const [openShiftResponse, shiftResponse, debriefResponse] = await Promise.all([
+      supabase.from('shifts').select(shiftColumns).eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress']).order('scheduled_start', { ascending: false }).limit(30),
+      supabase.from('shifts').select(shiftColumns).eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).eq('status', 'completed').gte('scheduled_start', since).order('scheduled_start', { ascending: false }).limit(30),
       supabase.from('shift_debriefs').select('id, shift_id, summary, safety_incident_reported, equipment_issue_reported, follow_up_required, follow_up_notes, submitted_at').eq('officer_user_id', profile.id).order('submitted_at', { ascending: false }).limit(30),
     ]);
-    const shiftRows = (shiftResponse.data as ShiftOption[]) ?? [];
+    const openShiftRows = (openShiftResponse.data as ShiftOption[]) ?? [];
+    const shiftRows = [...new Map([...openShiftRows.filter((shift) => shift.status === 'in_progress'), ...openShiftRows.filter((shift) => shift.status !== 'in_progress'), ...((shiftResponse.data as ShiftOption[]) ?? [])].map((shift) => [shift.id, shift] as const)).values()];
     const debriefRows = (debriefResponse.data as DebriefRecord[]) ?? [];
     setShifts(shiftRows);
     setDebriefs(debriefRows);
     if(debriefRows.length){const{data:followupRows,error:followupError}=await supabase.from('debrief_followups').select('id,debrief_id,status,priority,owner_user_id,latest_note,resolved_at').in('debrief_id',debriefRows.map((debrief)=>debrief.id));if(followupError)setError(describeLoadFailures([['debrief follow-up status', followupError]]));else setFollowups(Object.fromEntries(((followupRows as DebriefFollowup[])??[]).map((item)=>[item.debrief_id,item])));}else setFollowups({});
     setShiftId((current) => current || shiftRows.find((shift) => !debriefRows.some((debrief) => debrief.shift_id === shift.id))?.id || '');
-    const failure = describeLoadFailures([['shifts', shiftResponse.error], ['debriefs', debriefResponse.error]]);
+    const failure = describeLoadFailures([['open shifts', openShiftResponse.error], ['shifts', shiftResponse.error], ['debriefs', debriefResponse.error]]);
     if (failure) setError(failure);
     setLoading(false);
   }, [profile?.id, profile?.organizationId]);

@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { OfficerSafetyBriefing } from './OfficerSafetyBriefing';
 
-type Props = { shiftId: string | null; shiftStatus: string | null; onStarted?: () => void };
+type Props = { shiftId: string | null; shiftStatus: string | null; shiftServiceType: string | null; onStarted?: () => void };
 
 type OpenBreak = { id: string; break_type: string; started_at: string };
 type Entitlement = {
@@ -16,7 +16,7 @@ type Entitlement = {
   compliant: boolean;
 };
 
-export function OfficerShiftClockPanel({ shiftId, shiftStatus, onStarted }: Props) {
+export function OfficerShiftClockPanel({ shiftId, shiftStatus, shiftServiceType, onStarted }: Props) {
   const [busy, setBusy] = useState(false);
   const [openBreak, setOpenBreak] = useState<OpenBreak | null>(null);
   const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
@@ -108,7 +108,7 @@ export function OfficerShiftClockPanel({ shiftId, shiftStatus, onStarted }: Prop
 
   return (
     <View style={styles.panel}>
-      {(notStarted || shiftStatus === 'in_progress') && <OfficerSafetyBriefing key={shiftId} shiftId={shiftId} shiftStatus={shiftStatus} busy={busy} onReadyToStart={startShift} />}
+      {(notStarted || shiftStatus === 'in_progress') && <OfficerSafetyBriefing key={shiftId} shiftId={shiftId} shiftStatus={shiftStatus} shiftServiceType={shiftServiceType} busy={busy} onReadyToStart={startShift} />}
 
       {shiftStatus === 'in_progress' && (
         <View style={styles.content}>

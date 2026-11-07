@@ -477,12 +477,15 @@ function entryFromLine(line, label) {
       title = [label('activity', line.a), label('subject', line.s), label('species', line.sp), label('equipment', line.eq)]
         .filter((value, index, all) => value && all.indexOf(value) === index && !sameText(value, category))
         .join(' · ');
+      // An attended call-out leads with what was asked for; its action line is the response timing.
+      if (!title && text(line.c) === 'call_out') title = issue;
       if (issue && !sameText(issue, noteText) && !repeats(issue, category) && !repeats(issue, title)) tags.push(issue);
     }
     if (noteText && !sameText(noteText, title)) lines.push({ text: noteText });
     const materials = materialsText(line, label);
     if (materials) lines.push({ label: 'Used', text: materials });
-    if (action && !sameText(action, noteText)) lines.push({ label: kind === 'work_order' ? 'Completion' : 'Action taken', text: action });
+    const actionLabel = kind === 'work_order' ? 'Completion' : text(line.c) === 'call_out' ? 'Response' : 'Action taken';
+    if (action && !sameText(action, noteText)) lines.push({ label: actionLabel, text: action });
   }
   if (text(line.j)) tags.push(`Ref ${text(line.j)}`);
   return {

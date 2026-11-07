@@ -24852,6 +24852,7 @@ export type Database = {
       }
       payroll_export_batches: {
         Row: {
+          client_request_id: string | null
           exported_at: string
           exported_by: string | null
           format: string
@@ -24864,6 +24865,7 @@ export type Database = {
           total_hours: number
         }
         Insert: {
+          client_request_id?: string | null
           exported_at?: string
           exported_by?: string | null
           format?: string
@@ -24876,6 +24878,7 @@ export type Database = {
           total_hours?: number
         }
         Update: {
+          client_request_id?: string | null
           exported_at?: string
           exported_by?: string | null
           format?: string
@@ -25428,6 +25431,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      person_housing_status_definitions: {
+        Row: {
+          code: string
+          label: string
+          requires_verified_identity: boolean
+        }
+        Insert: {
+          code: string
+          label: string
+          requires_verified_identity?: boolean
+        }
+        Update: {
+          code?: string
+          label?: string
+          requires_verified_identity?: boolean
+        }
+        Relationships: []
       }
       person_identity_documents: {
         Row: {
@@ -26022,6 +26043,111 @@ export type Database = {
             columns: ["retired_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      person_record_document_types: {
+        Row: {
+          code: string
+          label: string
+          notice_type: string | null
+        }
+        Insert: {
+          code: string
+          label: string
+          notice_type?: string | null
+        }
+        Update: {
+          code?: string
+          label?: string
+          notice_type?: string | null
+        }
+        Relationships: []
+      }
+      person_record_documents: {
+        Row: {
+          canonical_person_id: string
+          client_request_id: string
+          created_at: string
+          document_type: string
+          file_name: string
+          file_size_bytes: number
+          id: string
+          mime_type: string
+          notice_id: string | null
+          organization_id: string
+          request_payload: Json
+          sha256: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          canonical_person_id: string
+          client_request_id: string
+          created_at?: string
+          document_type: string
+          file_name: string
+          file_size_bytes: number
+          id?: string
+          mime_type: string
+          notice_id?: string | null
+          organization_id: string
+          request_payload: Json
+          sha256: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          canonical_person_id?: string
+          client_request_id?: string
+          created_at?: string
+          document_type?: string
+          file_name?: string
+          file_size_bytes?: number
+          id?: string
+          mime_type?: string
+          notice_id?: string | null
+          organization_id?: string
+          request_payload?: Json
+          sha256?: string
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_record_documents_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_document_type_fkey"
+            columns: ["document_type"]
+            isOneToOne: false
+            referencedRelation: "person_record_document_types"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "person_record_documents_notice_id_fkey"
+            columns: ["notice_id"]
+            isOneToOne: false
+            referencedRelation: "notices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_record_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -28600,6 +28726,48 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roster_slot_contacts: {
+        Row: {
+          contact_name: string | null
+          contact_phone: string | null
+          roster_slot_id: string
+          updated_at: string
+          updated_by: string
+          version: string
+        }
+        Insert: {
+          contact_name?: string | null
+          contact_phone?: string | null
+          roster_slot_id: string
+          updated_at?: string
+          updated_by: string
+          version?: string
+        }
+        Update: {
+          contact_name?: string | null
+          contact_phone?: string | null
+          roster_slot_id?: string
+          updated_at?: string
+          updated_by?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_slot_contacts_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: true
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slot_contacts_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -39689,6 +39857,42 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_requeue_failed_routine_repairs: {
+        Args: { _limit?: number; _release_sha: string; _released_at: string }
+        Returns: {
+          automation_attempt_count: number
+          automation_error_redacted: string | null
+          automation_status: string
+          automation_updated_at: string
+          basis: Json
+          builder_job_id: string | null
+          client_packet_key: string
+          confidence: number | null
+          covered_by_job_id: string | null
+          created_at: string
+          disposition: string
+          envelope: Json
+          id: string
+          organization_id: string
+          redaction: Json
+          repair_risk: string
+          retention_cutoff: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          route: string | null
+          stop_line_hit: string | null
+          triage: string | null
+          truth_state: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bob_friction_packets"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       builder_require_implementation_acceptance: {
         Args: { _job_id: string; _require_passed?: boolean }
         Returns: undefined
@@ -40209,6 +40413,15 @@ export type Database = {
         Args: { p_session_id: string }
         Returns: string
       }
+      builder_vibe_recover_failed_turn: {
+        Args: {
+          p_expected_head: string
+          p_message_id: string
+          p_request_id: string
+          p_session_id: string
+        }
+        Returns: Json
+      }
       builder_vibe_redeem_preview_ticket: {
         Args: { p_session_id: string; p_ticket: string }
         Returns: string
@@ -40683,6 +40896,17 @@ export type Database = {
           state: string
           transmission_id: string
         }[]
+      }
+      close_unfinished_officer_shift: {
+        Args: {
+          p_actual_end: string
+          p_client_request_id: string
+          p_expected_status: string
+          p_expected_updated_at: string
+          p_reason: string
+          p_shift_id: string
+        }
+        Returns: Json
       }
       coalesce_cctv_stationary_vehicle_observations: {
         Args: { p_job_id: string }
@@ -42249,6 +42473,45 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_static_roster_slot_with_contact: {
+        Args: {
+          p_break_unpaid: boolean
+          p_client_request_id: string
+          p_contact_name: string
+          p_contact_phone: string
+          p_notes: string
+          p_planned_break_minutes: number
+          p_publish: boolean
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+          p_work_unit_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_workshop_work_order:
         | {
             Args: {
@@ -43774,6 +44037,10 @@ export type Database = {
         Args: { p_observation_id: string }
         Returns: string
       }
+      get_client_portal_access: {
+        Args: { p_account_organization_id: string }
+        Returns: Json
+      }
       get_consolidated_commercial_overview: {
         Args: { p_from?: string; p_root_organization_id: string; p_to?: string }
         Returns: {
@@ -44337,6 +44604,14 @@ export type Database = {
         Args: { p_canonical_person_id: string; p_limit?: number }
         Returns: Json
       }
+      get_person_interest_summary: {
+        Args: { p_person_id: string }
+        Returns: Json
+      }
+      get_person_record_operations: {
+        Args: { p_organization_id: string; p_person_id: string }
+        Returns: Json
+      }
       get_person_search_access: { Args: { p_user_id: string }; Returns: Json }
       get_place_hazard_register: {
         Args: { p_include_retired?: boolean; p_location_id: string }
@@ -44519,6 +44794,15 @@ export type Database = {
           period_start: string
           staff_id: string
           timesheet_id: string
+        }[]
+      }
+      get_user_sign_in_states: {
+        Args: { p_user_ids: string[] }
+        Returns: {
+          invited_at: string
+          last_sign_in_at: string
+          sign_in_state: string
+          user_id: string
         }[]
       }
       get_user_spine_readiness: {
@@ -48010,6 +48294,18 @@ export type Database = {
         Args: { p_holder: string; p_reason: string; p_seconds: number }
         Returns: string
       }
+      person_document_orphan_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
+      person_document_read_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
+      person_document_upload_allowed: {
+        Args: { p_path: string }
+        Returns: boolean
+      }
       person_name_extends: {
         Args: { p_full: string; p_recorded: string }
         Returns: boolean
@@ -48027,6 +48323,10 @@ export type Database = {
           p_window_days?: number
         }
         Returns: string
+      }
+      person_record_admin_allowed: {
+        Args: { p_organization_id: string; p_person_id: string }
+        Returns: boolean
       }
       platform_list_subscribers: {
         Args: never
@@ -49468,6 +49768,20 @@ export type Database = {
         }
         Returns: string
       }
+      record_person_document: {
+        Args: {
+          p_client_request_id: string
+          p_document_type: string
+          p_file_name: string
+          p_notice?: Json
+          p_organization_id: string
+          p_person_id: string
+          p_reason: string
+          p_sha256: string
+          p_storage_path: string
+        }
+        Returns: Json
+      }
       record_person_interaction: {
         Args: {
           p_client_request_id: string
@@ -49507,6 +49821,23 @@ export type Database = {
           p_pdf_path: string
           p_pdf_sha256: string
           p_renderer_version: string
+        }
+        Returns: Json
+      }
+      record_retrospective_noise_job_outcome: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_job_id: string
+          p_outcome_notes: string
+          p_reason: string
+          p_source_arrived_local: string
+          p_source_departed_local: string
+          p_source_name: string
+          p_source_received_local: string
+          p_source_reference: string
+          p_source_sha256: string
+          p_source_time_zone: string
         }
         Returns: Json
       }
@@ -52226,6 +52557,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_roster_slot_contact: {
+        Args: {
+          p_contact_name: string
+          p_contact_phone: string
+          p_expected_status: string
+          p_expected_version: string
+          p_slot_id: string
+        }
+        Returns: Json
+      }
       set_site_geometry: {
         Args: {
           p_boundary?: Json
@@ -54012,6 +54353,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_person_housing_status: {
+        Args: {
+          p_client_request_id: string
+          p_expected_version: string
+          p_notes: string
+          p_organization_id: string
+          p_person_id: string
+          p_reason: string
+          p_status: string
+        }
+        Returns: Json
+      }
       update_roster_slot: {
         Args: {
           p_expected_status: string
@@ -54052,6 +54405,45 @@ export type Database = {
           p_expected_status: string
           p_notes?: string
           p_planned_break_minutes?: number
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_slot_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          break_unpaid: boolean
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          planned_break_minutes: number
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_static_roster_slot_with_contact: {
+        Args: {
+          p_break_unpaid: boolean
+          p_contact_name: string
+          p_contact_phone: string
+          p_expected_contact_version: string
+          p_expected_status: string
+          p_notes: string
+          p_planned_break_minutes: number
           p_scheduled_end: string
           p_scheduled_start: string
           p_slot_id: string

@@ -23,8 +23,11 @@ test('Zone context reaches alarm provenance and completion pricing', () => {
 });
 
 test('route guidance resolves Zone jobs and Zone patrol stops', () => {
-  assert.match(routeGuidance, /zone:zone_id\(name, center_point\)/);
-  assert.match(routeGuidance, /zone:zone_id\(center_point\)/);
-  assert.match(routeGuidance, /const place = assignedSite \?\? assignedZone/);
-  assert.match(routeGuidance, /const place = site \?\? zone/);
+  assert.match(routeGuidance, /zone:zone_id\(name, center_point, boundary\)/);
+  assert.match(routeGuidance, /zone:zone_id\(center_point, boundary\)/);
+  // Site GPS, then site centre, then Zone centre, then the middle of the Zone boundary.
+  assert.match(routeGuidance, /geometryCentre\(site\?\.center_point\) \?\? geometryCentre\(zone\?\.center_point\) \?\? geometryCentre\(zone\?\.boundary\)/);
+  assert.match(routeGuidance, /placePoint\(first\(assigned\.site\) as PlaceRow, first\(assigned\.zone\) as PlaceRow\)/);
+  assert.match(routeGuidance, /placePoint\(first\(stop\.site\) as PlaceRow, first\(stop\.zone\) as PlaceRow\)/);
+  assert.match(routeGuidance, /const destination = placePoint\(site, zone\)/);
 });

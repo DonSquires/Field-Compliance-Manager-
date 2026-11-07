@@ -32,7 +32,7 @@ describe('governed Bob roster plans', () => {
 
   it('exposes separate human edit and publish controls', () => {
     expect(page).toContain('const openEdit = (slot: RosterSlot)');
-    expect(page).toContain("selectedSlot?.status === 'draft'");
+    expect(page).toContain("selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type=\"button\" onClick={() => openEdit(selectedSlot)}>Edit draft</button>");
     expect(page).toContain('update_roster_slot');
     expect(page).toContain("setSlotAction('publish')");
   });

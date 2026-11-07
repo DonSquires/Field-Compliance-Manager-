@@ -24,6 +24,7 @@ import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { PermitAccessCard } from '../components/PermitAccessCard';
 import { NztaRevealDialog, nztaWarningText, type NztaRevealResult } from '../components/NztaRevealDialog';
 import { IdentityRecordsWorkspace } from '../components/IdentityRecordsWorkspace';
+import { PersonInterestSummary, PersonRecordOperations } from '../components/PersonRecordOperations';
 import { INTERACTION_TYPES } from '../components/PersonInteractionForm';
 import { useAuth } from '../context/AuthContext';
 import { isAdminTierRole } from '../lib/roles';
@@ -578,6 +579,21 @@ const PersonSearchPage: React.FC<{ officer?: boolean }> = ({ officer = false }) 
               </header>
 
               <SafetyWarningsPanel entityType="person" entityId={selected.canonical_person_id} entityLabel="this person" />
+              {!canManagePeople && <PersonInterestSummary key={selected.canonical_person_id} personId={selected.canonical_person_id} />}
+              {selected.homeless_status && selected.homeless_status !== 'none' && (
+                <p className="person-search-profile-section" role="note">Welfare: homelessness status is {selected.homeless_status}. Approach with care and follow your welfare procedure. This is separate from any vehicle record.</p>
+              )}
+              {canManagePeople && identityOrganizationId && (
+                <PersonRecordOperations
+                  key={`${identityOrganizationId}:${selected.canonical_person_id}`}
+                  organizationId={identityOrganizationId}
+                  personId={selected.canonical_person_id}
+                  onChanged={() => {
+                    void runSearch(selected.display_name, selected.canonical_person_id, true);
+                    void loadRegister();
+                  }}
+                />
+              )}
 
               {!officer && <PersonInteractionHistory key={`${selected.canonical_person_id}-${reviewVersion}`} canonicalPersonId={selected.canonical_person_id} />}
 

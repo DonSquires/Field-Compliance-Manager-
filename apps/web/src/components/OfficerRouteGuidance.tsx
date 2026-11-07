@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { LocateFixed, RefreshCw } from 'lucide-react';
+import { ExternalLink, LocateFixed, MapPinOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers } from '../lib/mapPreferences';
+import type { DispatchDestination } from '../lib/dispatchJobLocation';
 import './OfficerRouteGuidance.css';
 
 type Route = { distance_meters: number; duration_seconds: number; geometry: [number, number][]; steps: Array<{ instruction: string; distance_meters: number }>; destination_lat: number; destination_lng: number };
 type RoutePlan = { stops: Array<{ id: string; eta_seconds: number; distance_meters: number; sla_risk: string }> };
 
-export function OfficerRouteGuidance({ job, onRecommendation }: { job: { id: string; site: { name: string; address: string | null } | null; sla_respond_by: string | null }; onRecommendation: (jobId: string) => void }) {
+export function OfficerRouteGuidance({ job, onRecommendation }: { job: { id: string; site: { name: string; address: string | null } | null; sla_respond_by: string | null; destination?: DispatchDestination }; onRecommendation: (jobId: string) => void }) {
   const mapElement = useRef<HTMLDivElement | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
   const [parcel, setParcel] = useState<GeoJSON.GeoJsonObject | null>(null);
@@ -29,17 +30,21 @@ export function OfficerRouteGuidance({ job, onRecommendation }: { job: { id: str
     return () => { window.clearTimeout(timer); map.remove(); };
   }, [job.site?.name, parcel, route]);
 
+  const destination = job.destination;
+  const noLocation = destination?.kind === 'none';
+
   const calculateRoute = () => {
+    if (noLocation) { setMessage('No map location for this job. Ask dispatch for the address.'); return; }
     if (!navigator.geolocation) { setMessage('Location services are unavailable on this device.'); return; }
     setLoading(true); setMessage('Finding the best route for the current dispatch priority...');
     navigator.geolocation.getCurrentPosition(async (position) => {
       const origin = { origin_lat: position.coords.latitude, origin_lng: position.coords.longitude };
       const { data: plan, error: planError } = await supabase.functions.invoke<RoutePlan>('officer-route-guidance', { body: { dispatch_job_id: job.id, mode: 'plan', ...origin } });
       const nextJobId = plan?.stops?.[0]?.id ?? job.id;
-      if (planError || !nextJobId) { setMessage(planError?.message ?? 'Route plan is unavailable.'); setLoading(false); return; }
+      if (planError || !nextJobId) { setMessage(`In-app route unavailable (${planError?.message ?? 'no plan returned'}). Use Open in Maps for directions.`); setLoading(false); return; }
       onRecommendation(nextJobId);
       const { data, error } = await supabase.functions.invoke<Route>('officer-route-guidance', { body: { dispatch_job_id: nextJobId, ...origin } });
-      if (error || !data?.geometry?.length) setMessage(error?.message ?? 'Route guidance is unavailable.');
+      if (error || !data?.geometry?.length) setMessage(`In-app route unavailable (${error?.message ?? 'no route returned'}). Use Open in Maps for directions.`);
       else {
         setRoute(data); setMessage(`Route updated. ${Math.max(0, (plan?.stops.length ?? 1) - 1)} nearby job${(plan?.stops.length ?? 1) === 2 ? '' : 's'} consolidated after this stop.`);
         const { data: parcelData } = await supabase.functions.invoke<{ geometry?: GeoJSON.GeoJsonObject }>('linz-lookup', { body: { action: 'boundary_for_point_escalating', lat: data.destination_lat, lng: data.destination_lng } });
@@ -50,8 +55,11 @@ export function OfficerRouteGuidance({ job, onRecommendation }: { job: { id: str
   };
 
   return <section className="officer-route-guidance" aria-label="Recommended route guidance">
-    <header><div><span>Recommended next stop</span><h2>{job.site?.name ?? 'Assigned dispatch location'}</h2><p>{job.site?.address ?? 'Address unavailable'}{job.sla_respond_by ? ` · respond by ${new Date(job.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</p></div><button type="button" onClick={calculateRoute} disabled={loading}><LocateFixed size={16} />{loading ? 'Routing' : route ? 'Re-route' : 'Route from here'}</button></header>
-    <p className="officer-route-status">{message}</p>
+    <header><div><span>Recommended next stop</span><h2>{job.site?.name ?? 'Assigned dispatch location'}</h2><p>{job.site?.address ?? (destination?.kind === 'address' ? destination.address : 'Address unavailable')}{job.sla_respond_by ? ` · respond by ${new Date(job.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</p></div><button type="button" onClick={calculateRoute} disabled={loading || noLocation}><LocateFixed size={16} />{loading ? 'Routing' : route ? 'Re-route' : 'Route from here'}</button></header>
+    {noLocation
+      ? <p className="officer-route-status is-no-location" role="status"><MapPinOff size={16} aria-hidden="true" /> No map location for this job. The job has no site, zone position or address — ask dispatch where to attend.</p>
+      : <p className="officer-route-status" aria-live="polite">{message}</p>}
+    {destination && destination.kind !== 'none' && <a className="officer-route-external" href={destination.mapsUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} aria-hidden="true" />Open in Maps</a>}
     {route && <><div ref={mapElement} className="officer-route-map" /> <div className="officer-route-summary"><strong>{Math.ceil(route.duration_seconds / 60)} min</strong><span>{(route.distance_meters / 1000).toFixed(1)} km</span></div><ol>{route.steps.slice(0, 5).map((step, index) => <li key={`${step.instruction}-${index}`}><span>{step.instruction || 'Continue'}</span><small>{step.distance_meters >= 1000 ? `${(step.distance_meters / 1000).toFixed(1)} km` : `${step.distance_meters} m`}</small></li>)}</ol></>}
   </section>;
 }

@@ -8,6 +8,41 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Person profile flags, source documents and welfare (local acceptance, 2026-11-07):
+
+- **Before:** verified-person POI actions were buried in Identity Records;
+  the main person profile had no equivalent controls. Historical notice import
+  and canonical homelessness fields existed without profile entry paths.
+  Atlas's legacy `persons`/`person_flags` gaps were not the canonical spine;
+  live catalog inspection also found welfare columns omitted from Atlas.
+- **During:** one shared profile panel in person search and Identity Records
+  offers audited POI raise/resolve, homelessness updates and private original
+  attachments. Administrators need an active canonical person linked to their
+  organisation's local record; confirmed welfare status and new POI flags also
+  require verified local and canonical identities. Officers retain authorised,
+  redacted read-only flags and welfare status, not private reasons or documents.
+  Welfare notes belong to the shared canonical person, not a vehicle or a
+  tenant-private case file; the panel explains this before entry.
+- **After:** request-bound receipts and optimistic concurrency prevent duplicate
+  documents/notices and stale welfare overwrites. Original PDFs/images remain
+  private and immutable once registered, with SHA-256 provenance, size/type
+  checks, uploader ownership and short-lived administrator download links.
+  Existing warning/trespass sources require human comparison, client agreement,
+  source date and affected place; the existing notice importer supplies the
+  downstream register. Uploading does not serve a new notice, verify identity,
+  run OCR or send evidence to an external model. Options come from configuration
+  tables, not a second UI-specific lifecycle.
+- **Acceptance:** disposable PostgreSQL exercises actual notice import/expiry
+  and flag functions, administrator parity, officer/outsider denial, restrictive
+  storage guards, request replay, concurrent welfare updates and audit rollback.
+  Synthetic desktop/phone walkthroughs cover all three actions, lost-response
+  recovery with one persisted notice, repeat flagging after resolution, draft
+  preservation, explicit failures, read-only officer views and horizontal fit.
+  No real identity, welfare record, notice or source file was altered.
+- **Release gates:** protected PR/CI, governed migration application, live
+  schema/type regeneration, Atlas refresh and a production read-only smoke check
+  remain required. Local browser fixtures are not proof of live acceptance.
+
 Officer attendance, evidence and payroll recovery (local work, 2026-11-06):
 
 - **Before:** single-site shifts required disconnected attendance actions;
@@ -81,6 +116,49 @@ Officer overdue-shift recovery (local acceptance, 2026-11-06):
   live shift remain separate release gates. Existing raw officer paths still
   need private Oracle protection; this change does not close them.
 
+Officer selected-shift journey and private briefing (local acceptance, 2026-11-05):
+
+- **Before:** accepted static assignments had no detail action; static-post
+  navigation chose a shift implicitly. An overdue active shift disappeared
+  from the schedule, and reports could default to future work. Static arrival
+  also auto-started accepted work outside the canonical start/safety flow.
+- **During:** each own assigned static shift opens its exact post, time,
+  address/navigation, configured skills, an explicitly roster-designated
+  shift contact (if present) and H&S state. Scheduled/published assignments can load a pre-start
+  briefing as well, preserving unscheduled static starts; reading never starts
+  work. Start and changed-briefing reload use the private Oracle projection.
+  Oracle describes exact findings; Conductor removes spans or withholds whole
+  fields. Missing, malformed or source-mismatched review withholds narrative
+  and safety, rather than calling a cloud provider or raw briefing fallback.
+  Structured authorised operational contact names remain visible.
+- **After:** canonical start is required before arrival; existing verified
+  boundary, GPS, contract, audit and idempotent-receipt checks remain in force.
+  Reports carry the selected shift, otherwise prefer active/recent work, and
+  retain selection/writing on refresh. In-shift reporting and the existing
+  break/end/debrief journey are linked explicitly. Maps open separately.
+  Handover drafts survive briefing refreshes.
+- **Evidence:** synthetic Oracle/gateway tests, caller-scoped edge tests,
+  selected-shift component/submission tests and disposable PostGIS lifecycle
+  tests pass. Desktop/phone fixture journeys cover arrival receipts, selected
+  reports, pre-start detail, unavailable review and changed-safety reload.
+  These are not evidence of real officer attendance or receipt by staff.
+  The prospective helper was also run in an isolated temporary directory on
+  the private runtime, before release: its strengthened v2 instructions/schema
+  removed unseen synthetic names and a narrative phone number, withheld a
+  whole clinical/legal field, preserved safe operational/place wording and
+  resisted an embedded instruction to clear everything. The first prompt
+  failed this check and was not released. No real assessment was sent.
+  The private GPU passed all four cases. VPS qualification timed out, so the
+  officer route deliberately has no automatic VPS fallback; GPU unavailability
+  leaves narrative withheld rather than selecting an unqualified engine.
+- **Live blockers:** older raw static-post, safety and table paths remain
+  reachable and the private projection alone is not a complete access boundary.
+  The hospital boundary remains mapped but unverified;
+  no H&S notes/hazards have been recorded from the restricted assessment.
+  The source assessment has not been uploaded or promoted. An empty hazard
+  list is not safety clearance. Governed release, deployed-route verification
+  and a human-operated field session remain acceptance gates.
+
 Existing staff login invitations, 2026-11-05:
 
 - **Before:** imported officer profiles and their HR records can exist without
@@ -96,8 +174,12 @@ Existing staff login invitations, 2026-11-05:
 - **After:** retries reuse the same unconfirmed login; no password is supplied,
   no HR/credential/branch records are replaced, and invitation is not work
   readiness. Synthetic regression tests cover preservation, retries, lookup
-  failures and claimed/mismatched identities. Live invitations and roster
-  assignments remain pending release and confirmation.
+  failures and claimed/mismatched identities. PR #381 is merged/deployed.
+  Two existing officers were invited at their preserved identities and
+  progressed through audited employment/readiness reviews. Their twelve
+  original draft slots now have matching published field shifts and persisted
+  roster notifications. Other held/unassigned drafts were not published.
+  Invitation acceptance and device notification delivery are separate checks.
 
 Roster credential matching, 2026-11-04 (local acceptance):
 
@@ -272,6 +354,40 @@ Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
   tests without Expo installed; the test transform leaves production mobile
   settings unchanged. These checks do not replace a human walkthrough or live
   payroll verification.
+
+Payroll batch receipt recovery, 2026-11-02, reconciled 2026-11-07 (pre-release acceptance record):
+
+- **Before:** 20261106120100_admin_scheduled_timesheet_recovery already
+  restricts create_payroll_export_batch to active employer payroll
+  administrators, serialises exports per organisation, locks eligible sheets,
+  enforces dispatch-pay blockers, snapshots pay and downloads the batch CSV.
+  Its replay key lived only in audit metadata, replay was not bound to the
+  actor or notes, and the UI generated a new request ID on every click, so a
+  lost response could not be recovered by retrying. Local-month defaults also
+  lost a day when converted through UTC in New Zealand.
+- **During:** migration 20261107211000_payroll_export_receipt_recovery is
+  rebuilt from that current definition (same authority, empty search path,
+  lock key, blocker, messages and grants). It adds a tenant-unique
+  payroll_export_batches.client_request_id, backfills it from existing
+  audit receipts, binds replay to actor, dates, format and normalised notes,
+  totals exactly the locked sheets and requires the updated row count to
+  match before committing. Anonymous and public execution remain revoked.
+- **After:** unchanged UI retries reuse their actor/organisation/date-scoped
+  request ID; malformed receipts cannot claim success; a confirmed receipt
+  still downloads its CSV and survives a queue refresh failure; stale
+  responses cannot cross account context. The action is labelled "Create
+  payroll batch" and states that payment and IRD submission are not available
+  here. Month defaults use local calendar dates.
+- Local evidence: 12 desktop/mobile fixture browser checks (UTC and
+  Pacific/Auckland month boundaries, lost-response retry with CSV download,
+  changed inputs, malformed totals, failed refresh after confirmation), the
+  RosterHR guard contracts and 	sc -b pass. Disposable network-free
+  PostgreSQL checks cover replay/input binding, audit-receipt backfill,
+  employer-admin denial, pay blockers, concurrent overlapping exports, atomic
+  rollback on a skipped row update, legacy rows and grants. These are
+  synthetic checks, not a real payroll export or payment.
+- After governed deployment, regenerate schema/types from the live catalog
+  and refresh Atlas; do not hand-edit generated catalog or map rows.
 
 Vibe attachment context opt-in, owner decision 2026-10-25 (pre-release acceptance record):
 

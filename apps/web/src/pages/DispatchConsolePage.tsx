@@ -34,6 +34,7 @@ import { localToday } from '../lib/agreementTerm';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { findNearestAvailableUnit } from '../lib/dispatch/nearestUnit';
 import { resolveAddressCandidates } from '../lib/locationAddress';
+import { sha256Hex } from '../lib/importPreview';
 import { supabase } from '../lib/supabase';
 import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ALARM_INTAKE_CHANNELS, ALARM_SIGNAL_TYPES, localDateTimeValue, responseLadderWords, type AlarmIntakeChannel, type AlarmSignal, type AlarmSignalType } from '../lib/alarmResponse';
@@ -168,6 +169,36 @@ interface RunsheetActionDraft {
   notes: string;
   newOrder: number | null;
   endedAt: string;
+}
+
+interface RetrospectiveOutcomeDraft {
+  clientRequestId: string;
+  sourceName: string;
+  sourceSha256: string;
+  sourceReference: string;
+  sourceReceivedLocal: string;
+  sourceArrivedLocal: string;
+  sourceDepartedLocal: string;
+  outcomeNotes: string;
+  reason: string;
+  acknowledged: boolean;
+}
+
+const createRetrospectiveOutcomeDraft = (): RetrospectiveOutcomeDraft => ({
+  clientRequestId: crypto.randomUUID(),
+  sourceName: '',
+  sourceSha256: '',
+  sourceReference: '',
+  sourceReceivedLocal: '',
+  sourceArrivedLocal: '',
+  sourceDepartedLocal: '',
+  outcomeNotes: '',
+  reason: '',
+  acknowledged: false,
+});
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
 const toLocalDateTimeInput = (value: Date) => {
@@ -317,6 +348,8 @@ const DispatchConsolePage: React.FC = () => {
   const [jobRunsheetReason, setJobRunsheetReason] = useState('');
   const [jobRunsheetRequestId, setJobRunsheetRequestId] = useState(() => crypto.randomUUID());
   const [showRunsheetInsertConfirm, setShowRunsheetInsertConfirm] = useState(false);
+  const [showRetrospectiveOutcome, setShowRetrospectiveOutcome] = useState(false);
+  const [retrospectiveOutcomeDraft, setRetrospectiveOutcomeDraft] = useState(createRetrospectiveOutcomeDraft);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
@@ -1276,6 +1309,8 @@ const DispatchConsolePage: React.FC = () => {
     setJobRunsheetReason('');
     setJobRunsheetRequestId(crypto.randomUUID());
     setShowRunsheetInsertConfirm(false);
+    setShowRetrospectiveOutcome(false);
+    setRetrospectiveOutcomeDraft(createRetrospectiveOutcomeDraft());
     setError(null);
     setNotice(null);
   };
@@ -1317,6 +1352,106 @@ const DispatchConsolePage: React.FC = () => {
       await loadPhaseA();
     }
     setOperatorBusy(false);
+  };
+  const hashRetrospectiveSource = async (file: File | null) => {
+    const requestId = retrospectiveOutcomeDraft.clientRequestId;
+    if (!file) {
+      setRetrospectiveOutcomeDraft((draft) => draft.clientRequestId === requestId
+        ? { ...draft, sourceName: '', sourceSha256: '' }
+        : draft);
+      return;
+    }
+    try {
+      const sourceSha256 = await sha256Hex(await file.arrayBuffer());
+      setRetrospectiveOutcomeDraft((draft) => draft.clientRequestId === requestId
+        ? { ...draft, sourceName: file.name, sourceSha256 }
+        : draft);
+      setError(null);
+    } catch (hashError) {
+      console.error('Unable to hash retrospective source file', hashError);
+      setError(hashError instanceof Error
+        ? `Unable to hash the selected source file: ${hashError.message}`
+        : 'Unable to hash the selected source file.');
+    }
+  };
+  const recordRetrospectiveOutcome = async () => {
+    if (!selectedJob || selectedJob.jobType !== 'noise_control' || selectedJob.status !== 'pending') {
+      setError('Only a pending noise-control job can be completed from a historical source record.');
+      return;
+    }
+    if (!retrospectiveOutcomeDraft.sourceName || !/^[0-9a-f]{64}$/i.test(retrospectiveOutcomeDraft.sourceSha256)) {
+      setError('Select the source register file so its name and SHA-256 hash can be recorded.');
+      return;
+    }
+    if (!/^[0-9]{1,32}$/.test(retrospectiveOutcomeDraft.sourceReference)) {
+      setError('Enter the exact numeric despatch reference from the source register.');
+      return;
+    }
+    const sourceTimes = [
+      retrospectiveOutcomeDraft.sourceReceivedLocal,
+      retrospectiveOutcomeDraft.sourceArrivedLocal,
+      retrospectiveOutcomeDraft.sourceDepartedLocal,
+    ];
+    if (sourceTimes.some((value) => !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))) {
+      setError('Enter the register received, on-site, and off-site date and times.');
+      return;
+    }
+    if (sourceTimes[0] > sourceTimes[1] || sourceTimes[1] > sourceTimes[2]) {
+      setError('Source times must be in received, on-site, off-site order.');
+      return;
+    }
+    if (!retrospectiveOutcomeDraft.outcomeNotes.trim()) {
+      setError('Enter the source-reported outcome, excluding names and contact details.');
+      return;
+    }
+    if (!retrospectiveOutcomeDraft.reason.trim()) {
+      setError('Explain why this historical job is being reconciled now.');
+      return;
+    }
+    if (!retrospectiveOutcomeDraft.acknowledged) {
+      setError('Confirm that the register supports this historical outcome and that FCM did not capture its GPS.');
+      return;
+    }
+
+    setOperatorBusy(true);
+    setError(null);
+    try {
+      const { data, error: retrospectiveError } = await supabase.rpc('record_retrospective_noise_job_outcome', {
+        p_client_request_id: retrospectiveOutcomeDraft.clientRequestId,
+        p_job_id: selectedJob.id,
+        p_expected_status: selectedJob.status,
+        p_source_name: retrospectiveOutcomeDraft.sourceName,
+        p_source_sha256: retrospectiveOutcomeDraft.sourceSha256,
+        p_source_reference: retrospectiveOutcomeDraft.sourceReference,
+        p_source_time_zone: 'Pacific/Auckland',
+        p_source_received_local: retrospectiveOutcomeDraft.sourceReceivedLocal,
+        p_source_arrived_local: retrospectiveOutcomeDraft.sourceArrivedLocal,
+        p_source_departed_local: retrospectiveOutcomeDraft.sourceDepartedLocal,
+        p_outcome_notes: retrospectiveOutcomeDraft.outcomeNotes.trim(),
+        p_reason: retrospectiveOutcomeDraft.reason.trim(),
+      });
+      if (retrospectiveError) {
+        setError(retrospectiveError.message);
+        return;
+      }
+
+      const receipt = recordOf(data);
+      const finance = recordOf(receipt?.finance);
+      const financeStatus = finance?.status === 'resolved'
+        ? 'Finance was resolved through the linked shift; review its receipt before invoicing.'
+        : 'Finance needs review before invoicing.';
+      const replayed = receipt?.replayed === true;
+      closeJobDetail();
+      setNotice(`${replayed ? 'Historical outcome already recorded' : 'Historical outcome recorded'} from the source register. No FCM GPS was added. ${financeStatus}`);
+      await loadPhaseA();
+    } catch (requestError) {
+      console.error('Unable to record retrospective noise-control outcome', requestError);
+      setError(requestError instanceof Error
+        ? `Unable to record the historical outcome: ${requestError.message}`
+        : 'Unable to record the historical outcome.');
+    } finally {
+      setOperatorBusy(false);
+    }
   };
   const manageJobTiming = async () => {
     if (!selectedJob) return;
@@ -1589,6 +1724,87 @@ const DispatchConsolePage: React.FC = () => {
             <button type="button" className="btn btn-danger" disabled={operatorBusy} onClick={() => void manageJobFromDetail('cancel')}>Cancel job</button>
           </div>
         </section>
+
+        {selectedJob.jobType === 'noise_control' && selectedJob.status === 'pending' && (
+          <section className="dispatch-job-dialog-actions dispatch-retrospective-actions">
+            <h3>Historical source-register outcome</h3>
+            <p className="dispatch-console-form-note">
+              Use only when the register identifies this exact job. The source times flow into the completed job and client event ledger; they are not an FCM GPS fix. Finance is resolved only when a linked shift/officer exists and no dispatch-origin coordinates could create unverified travel.
+            </p>
+            {!showRetrospectiveOutcome ? (
+              <div>
+                <button type="button" className="btn btn-secondary" disabled={operatorBusy} onClick={() => setShowRetrospectiveOutcome(true)}>
+                  Record historical outcome
+                </button>
+              </div>
+            ) : (
+              <div className="dispatch-retrospective-form" role="group" aria-label="Record historical noise-control outcome">
+                <label>
+                  <span>Source register file · hashed locally, not uploaded</span>
+                  <input
+                    key={retrospectiveOutcomeDraft.clientRequestId}
+                    type="file"
+                    accept=".csv,text/csv"
+                    disabled={operatorBusy}
+                    onChange={(event) => void hashRetrospectiveSource(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {retrospectiveOutcomeDraft.sourceName && (
+                  <p className="dispatch-console-form-note">
+                    {retrospectiveOutcomeDraft.sourceName} · SHA-256 {retrospectiveOutcomeDraft.sourceSha256}
+                  </p>
+                )}
+                <label>
+                  <span>Exact despatch reference</span>
+                  <input
+                    value={retrospectiveOutcomeDraft.sourceReference}
+                    onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, sourceReference: event.target.value }))}
+                    inputMode="numeric"
+                    pattern="[0-9]+"
+                    maxLength={32}
+                    required
+                    disabled={operatorBusy}
+                  />
+                </label>
+                <p className="dispatch-console-form-note">Enter source times as printed, in Pacific/Auckland local time. No timezone conversion is applied.</p>
+                <div className="dispatch-retrospective-time-grid">
+                  <label>
+                    <span>Register received / alarm time</span>
+                    <input type="datetime-local" value={retrospectiveOutcomeDraft.sourceReceivedLocal} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, sourceReceivedLocal: event.target.value }))} required disabled={operatorBusy} />
+                  </label>
+                  <label>
+                    <span>Source-reported on-site time</span>
+                    <input type="datetime-local" value={retrospectiveOutcomeDraft.sourceArrivedLocal} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, sourceArrivedLocal: event.target.value }))} required disabled={operatorBusy} />
+                  </label>
+                  <label>
+                    <span>Source-reported off-site time</span>
+                    <input type="datetime-local" value={retrospectiveOutcomeDraft.sourceDepartedLocal} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, sourceDepartedLocal: event.target.value }))} required disabled={operatorBusy} />
+                  </label>
+                </div>
+                <label>
+                  <span>Source-reported outcome · exclude names and contact details</span>
+                  <textarea value={retrospectiveOutcomeDraft.outcomeNotes} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, outcomeNotes: event.target.value }))} rows={3} maxLength={2000} required disabled={operatorBusy} />
+                </label>
+                <label>
+                  <span>Reason for retrospective reconciliation</span>
+                  <textarea value={retrospectiveOutcomeDraft.reason} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, reason: event.target.value }))} rows={2} maxLength={1000} required disabled={operatorBusy} />
+                </label>
+                <label className="dispatch-retrospective-acknowledgement">
+                  <input type="checkbox" checked={retrospectiveOutcomeDraft.acknowledged} onChange={(event) => setRetrospectiveOutcomeDraft((draft) => ({ ...draft, acknowledged: event.target.checked }))} disabled={operatorBusy} />
+                  <span>I reviewed the exact source record. Its times are source-reported; FCM did not capture a GPS fix or create an officer stop for this historical event.</span>
+                </label>
+                <div>
+                  <button type="button" className="btn btn-primary" disabled={operatorBusy} onClick={() => void recordRetrospectiveOutcome()}>
+                    Confirm historical completion
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={operatorBusy} onClick={() => setShowRetrospectiveOutcome(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </section>
     </div>
   );

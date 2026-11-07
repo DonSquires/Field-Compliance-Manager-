@@ -43,7 +43,7 @@ test('the control plane claims routine packets and starts governed Builder jobs'
   assert.match(controlPlane, /builder_claim_routine_repairs/);
   assert.match(controlPlane, /builder_create_job_v2/);
   assert.match(controlPlane, /builder_bind_routine_repair/);
-  assert.match(controlPlane, /routineRepairBrief\(packet, \{ alsoReported: followers \}\)/);
+  assert.match(controlPlane, /routineRepairBrief\(packet, \{ alsoReported: followers, previousAttempts \}\)/);
   assert.match(controlPlane, /planRoutineIntake\(packets, openRepairs\)/);
   assert.match(intake, /Required verification: targeted tests, independent review/);
   assert.match(intake, /Do not redesign, add a feature\/module\/workflow/);

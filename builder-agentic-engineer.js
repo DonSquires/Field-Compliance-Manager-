@@ -29,12 +29,16 @@ const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generation-failure');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
+const { createBrowserGate } = require('./builder-browser-gate');
 
-const PROMPT_VERSION = 'agentic-engineer-v19';
+const PROMPT_VERSION = 'agentic-engineer-v21';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 // Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
 const COMPILE_REPAIR_TURNS = 6;
+// Granted once per run when the browser gate refuses a finish: a browser repair needs reading, an edit and a rerun.
+const BROWSER_REPAIR_TURNS = 10;
+const BROWSER_REPAIR_WALL_MS = 15 * 60_000;
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
@@ -55,13 +59,14 @@ const RUN_ALLOWLIST = [
   /^node --check [A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/,
   /^node -e "require\('\.\/[A-Za-z0-9_./-]+'\)"$/,
   /^npm run (?:lint|build) --prefix apps\/web$/,
-  /^npm run test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
-  /^npm test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
+  /^npm (?:run )?test --prefix apps\/web(?: -- [A-Za-z0-9_./*=\- ]+)?$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
-const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
+const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm test --prefix apps/web (full configured Vitest suite) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
 const RUN_REFUSED = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs.`;
+const RUN_REFUSED_BROWSER = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs: run them with the browser_test tool, never through run.`;
 const WEB_TEST_ARG = /^[A-Za-z0-9_./*=-]+$/;
+const WEB_TEST_COMMAND = /^npm (?:run )?test --prefix apps\/web(?: -- |$)/;
 
 function isWebTestPath(workspacePath, arg) {
   if (/^(?:\.\/)?apps\/web\//.test(arg)) return true;
@@ -81,6 +86,7 @@ function normalizeRunPart(part, inWeb, workspacePath) {
   const args = String(runner[2] ?? '').split(' ').filter((arg) => arg && !['--', '--run', 'run'].includes(arg));
   const files = args.filter((arg) => !arg.startsWith('-'));
   const web = inWeb || Boolean(runner[1]) || (files.length > 0 && files.every((arg) => isWebTestPath(workspacePath, arg)));
+  if (web && !args.length) return 'npm test --prefix apps/web';
   if (!web || !files.length) return part;
   const relative = args.map((arg) => arg.replace(/^(?:\.\/)?apps\/web\//, ''));
   return relative.every((arg) => WEB_TEST_ARG.test(arg)) ? `npm test --prefix apps/web -- ${relative.join(' ')}` : part;
@@ -298,14 +304,17 @@ const ATLAS_RESEARCH_GUIDANCE = [
   'Before a change, identify expected behavior, dependencies and permissions; during, trace requests/writes/audit and errors; after, verify persisted and downstream outcomes. Use the affected paths to select focused regression tests. Do not walk the entire graph or every FK. Guidance-only questions may be answered from relevant cards/receipts without Atlas or source inspection.',
 ].join('\n');
 
-function systemPrompt({ lane, limits, firewall = false }) {
+function systemPrompt({ lane, limits, firewall = false, browser = false }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
-    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; web lint/types "npm run lint --prefix apps/web". Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
-    '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; prefer a Vitest test under apps/web/src that you can run yourself. Before adding a Playwright spec, inspect apps/web/e2e/fixtures.ts and a passing authenticated spec, reuse their setup/navigation, and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid or use a bare unauthenticated page for a protected route.',
+    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; full configured web unit suite "npm test --prefix apps/web"; web lint/types "npm run lint --prefix apps/web". A command-policy refusal is not a request for human approval: use a supported command, never edit protected package scripts to work around command syntax. Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
+    '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). ' + (browser
+      ? 'apps/web/e2e/*.spec.ts are Playwright specs: run the ones your change targets with browser_test (offline fixtures, desktop Chromium, a few minutes) — never through run. finish runs the same browser gate and refuses failures your patch introduced; failures that also happen at the pinned commit are reported as pre-existing, not charged to you. Prefer a Vitest test under apps/web/src for logic you can test there. '
+      : 'apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; prefer a Vitest test under apps/web/src that you can run yourself. ')
+      + 'Before adding a Playwright spec, inspect apps/web/e2e/fixtures.ts and a passing authenticated spec, reuse their setup/navigation, and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid or use a bare unauthenticated page for a protected route.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen in this run. After the pull request merges, the release lane applies new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas; report those only from their receipts.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
     '7. DATA PATHS ARE CHECKED: a caller-scoped client (callerClient/userClient) reading a table whose row-level security admits only the service role returns no rows for a real user — the verifier fails such a patch. Before reading a table with the caller\'s client, search supabase/schema.sql for `CREATE POLICY ... ON "public"."<table>"`; if only service_role can see it, go through the path that verifies the caller and then reads with the service role (for Builder tables: callFn(\'bob-builder-control-room\', authHeader, { action: \'list\' }) as create_builder_job does).',
@@ -330,7 +339,8 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- apply_patch {diff}                     apply a git unified diff or a "*** Begin Patch"/"*** Update File: <path>" envelope; use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
-    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
+    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web (full configured unit suite) or npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
+    ...(browser ? ['- browser_test {reason}                  run the Playwright specs your current change targets (the verifier\'s targeted set: specs you changed plus specs naming the changed pages/components) in the offline browser worker; returns failures introduced by your patch, failures that also fail at the pinned commit, or "unavailable" when the worker gave no verdict. Takes minutes and is limited per run: edit first, then run it once the change is complete.'] : []),
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
@@ -655,7 +665,7 @@ function applyEnvelopeUpdate(content, lines, file) {
   return { content: source.join('\n') };
 }
 
-function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true }) {
+function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true, browserTest = null, remainingMs = () => Infinity }) {
   const generatedBaselines = new Map();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
   const runs = [];
@@ -674,12 +684,12 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   const run = (command) => {
     const text = String(command ?? '').trim();
     if (/^npm (?:run test|test) --prefix apps\/web -- /.test(text) && /(?:^|[\s/])e2e\//.test(text)) {
-      return { error: 'Wrong test runner: e2e/ specs use Playwright, not Vitest. Use human_test in Vibe or the browser verification worker. Do not rewrite Playwright imports or assertions to make Vitest load them.' };
+      return { error: `Wrong test runner: e2e/ specs use Playwright, not Vitest. ${browserTest && lane === 'frontend' ? 'Use the browser_test tool.' : 'Use human_test in Vibe or the browser verification worker.'} Do not rewrite Playwright imports or assertions to make Vitest load them.` };
     }
     if (/^npm (?:i|install)\b/.test(text)) {
       return { error: 'command not allowed in this lane: dependency installation is blocked; use the allowlisted npm run/npm test commands and report missing tooling as a workspace issue' };
     }
-    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: RUN_REFUSED };
+    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: browserTest && lane === 'frontend' ? RUN_REFUSED_BROWSER : RUN_REFUSED };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     const fingerprint = worktreeFingerprint();
@@ -689,7 +699,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     // Asynchronous: a full test suite can run for a minute, and a blocked event loop would stall
     // the control plane's own HTTP server (health, model gateway) for that long.
     return new Promise((resolve) => {
-      const webTest = /^npm (?:run test|test) --prefix apps\/web -- /.test(text);
+      const webTest = WEB_TEST_COMMAND.test(text);
       // `tsc --noEmit` on apps/web needs more than V8's ~1 GB container default (frontend-worker NODE_OPTIONS).
       const webTypecheck = /^npm run (?:lint|build) --prefix apps\/web$/.test(text);
       const child = spawn(argv[0], argv.slice(1), {
@@ -831,6 +841,10 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     return dropped.length ? `refused: ${droppedTestsMessage(file, dropped)}. ${PRESERVE_TESTS}` : null;
   };
 
+  const browserGate = typeof browserTest === 'function' && lane === 'frontend'
+    ? createBrowserGate({ workspacePath, runSpecs: browserTest, fingerprint: worktreeFingerprint, changedFiles, remainingMs, log })
+    : null;
+
   return {
     async generate_visual_baselines({ paths, reason }) {
       if (lane === 'backend') return { error: 'Visual baselines belong to the frontend lane' };
@@ -838,6 +852,10 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       for (const item of result.receipt.after) generatedBaselines.set(item.path, item);
       log({ visual_baselines: result });
       return result;
+    },
+    async browser_test({ reason } = {}) {
+      if (!browserGate) return { error: lane === 'frontend' ? 'browser_test is not available on this runner; the independent verifier runs the Playwright specs' : 'browser_test belongs to the frontend lane' };
+      return browserGate.test({ reason });
     },
     list_dir({ path: dir = '.' }) {
       const { normalized, absolute } = !dir || dir === '.' || dir === './'
@@ -1203,6 +1221,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     },
     __changedFiles: changedFiles,
     __compileGate: compileGate,
+    __browserGate: browserGate ? (files) => browserGate.gate(files) : null,
     __policyCheck: policyCheck,
     __runs: () => runs.slice(),
     __visualBaselines: () => [...generatedBaselines.values()],
@@ -1378,17 +1397,24 @@ function verifiedRuns(sessionRuns) {
     .map(({ command, exit_code, at, duration_ms }) => ({ command, exit_code, at, duration_ms }));
 }
 
-// Runs the compile gate on a built proposal. Returns a refusal the author can act on, or the proposal with
-// the gate's receipt (including checks that could not run, which the independent verifier must cover).
+// Runs the compile gate, then the browser gate, on a built proposal. Returns a refusal the author can act
+// on (gate: 'compile' | 'browser'), or the proposal with the gates' receipts (including checks that could
+// not run, which the independent verifier must cover).
 async function gateProposal(tools, proposal) {
   if (typeof tools.__compileGate !== 'function') return { proposal };
   const gate = await tools.__compileGate(proposal.changed_files);
   if (gate.failures.length) {
     const detail = gate.failures.map((failure) => `$ ${failure.command} (exit ${failure.exit_code})\n${failure.errors}`).join('\n\n');
-    return { error: `finish refused: the pre-handoff compile gate failed, so the independent verifier would reject this patch. Fix these errors in your change (read the named file and line; do not delete tests or weaken types to silence them), re-run the check, and finish again.\n${detail}` };
+    return { gate: 'compile', error: `finish refused: the pre-handoff compile gate failed, so the independent verifier would reject this patch. Fix these errors in your change (read the named file and line; do not delete tests or weaken types to silence them), re-run the check, and finish again.\n${detail}` };
+  }
+  let browser = null;
+  if (typeof tools.__browserGate === 'function') {
+    const verdict = await tools.__browserGate(proposal.changed_files);
+    if (verdict.error) return { gate: 'browser', error: verdict.error };
+    browser = verdict.receipt;
   }
   const runsNow = typeof tools.__runs === 'function' ? tools.__runs() : [];
-  return { proposal: { ...proposal, verified_runs: verifiedRuns(runsNow), compile_gate: { ran: gate.ran, unavailable: gate.unavailable } } };
+  return { proposal: { ...proposal, verified_runs: verifiedRuns(runsNow), compile_gate: { ran: gate.ran, unavailable: gate.unavailable }, ...(browser ? { browser_gate: browser } : {}) } };
 }
 
 function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], specification = null }) {
@@ -1434,7 +1460,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
   const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
-  const passingTestRuns = sessionRuns.filter((r) => /^(?:node --test\b|npm (?:run )?test --prefix apps\/web -- )/.test(r.command) && r.exit_code === 0);
+  const passingTestRuns = sessionRuns.filter((r) => (/^node --test\b/.test(r.command) || WEB_TEST_COMMAND.test(r.command)) && r.exit_code === 0);
   const touchesTests = files.some((file) => /^test\/|\.test\.(?:[cm]?js|tsx?)$/.test(file));
   const testsNotRunReason = String(args.tests_not_run_reason ?? '').trim();
   if (touchesTests && !passingTestRuns.length && !testsNotRunReason) {
@@ -1591,6 +1617,8 @@ async function runAgenticEngineer({
   providerHealth = null,
   // Installs the lockfile-pinned apps/web dependencies into the worktree (the Vibe dependency cache).
   prepareWorkspace = null,
+  // Runs named Playwright specs in the offline browser worker (builder-vibe-human-test runBrowserSpecs).
+  browserTest = null,
   now = Date.now,
   logger = console,
 }) {
@@ -1629,7 +1657,10 @@ async function runAgenticEngineer({
     // The dependency install replaces a directory that holds a tracked placeholder; it is never part of a change.
     try { git(workspacePath, ['checkout', '--', 'apps/web/node_modules/.gitkeep']); } catch { /* not tracked at this pin */ }
   }
-  const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log });
+  // Extended once when the browser gate refuses a finish late in the run.
+  let wallLimit = limits.wallBudgetMs;
+  const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log,
+    browserTest: lane === 'frontend' ? browserTest : null, remainingMs: () => started + wallLimit - now() });
   if (firewall) {
     const purposeOf = args => `job ${String(job.id).slice(0, 8)}: ${String(args.purpose || '').slice(0, 250)}`;
     tools.firewall_status = () => firewall.status();
@@ -1671,7 +1702,7 @@ async function runAgenticEngineer({
   const opening = buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap });
 
   const messages = [
-    { role: 'system', content: systemPrompt({ lane, limits, firewall: firewall ? { tailnet: Boolean(firewall.tailnet) } : false }) },
+    { role: 'system', content: systemPrompt({ lane, limits, firewall: firewall ? { tailnet: Boolean(firewall.tailnet) } : false, browser: typeof tools.__browserGate === 'function' }) },
     { role: 'user', content: opening.packet },
   ];
   if (saved?.messages) {
@@ -1736,6 +1767,7 @@ async function runAgenticEngineer({
   // was the second most common frontend failure). The ceiling keeps one run bounded.
   let turnLimit = limits.maxTurns;
   let compileRepairExtended = false;
+  let browserRepairExtended = false;
   const freshTurns = Math.max(12, Math.ceil(limits.maxTurns * 0.6));
   const turnCeiling = limits.maxTurns * 2;
   const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
@@ -1759,7 +1791,7 @@ async function runAgenticEngineer({
   // have nowhere stronger to escalate to, and the recent turns are what the model needs.
   let compaction = {};
 
-  while (now() - started < limits.wallBudgetMs) {
+  while (now() - started < wallLimit) {
     saveProgress();
     if (turns >= turnLimit) {
       if (!escalate(`turn allocation of ${turnLimit - providerStartedTurn} used${tools.__changedFiles().length ? ' with an unfinished change' : ''}`)) break;
@@ -1881,8 +1913,15 @@ async function runAgenticEngineer({
       const gated = built.error ? built : await gateProposal(tools, built.proposal);
       if (gated.error) {
         log({ turn: turns, finish_refused: gated.error.slice(0, 2000) });
+        // A browser failure needs reading, an edit and a multi-minute rerun: a one-time turn and wall allowance.
+        if (gated.gate === 'browser' && !browserRepairExtended) {
+          browserRepairExtended = true;
+          if (turnLimit - turns < BROWSER_REPAIR_TURNS && turnLimit < turnCeiling) turnLimit = Math.min(turnCeiling, turns + BROWSER_REPAIR_TURNS);
+          if (started + wallLimit - now() < BROWSER_REPAIR_WALL_MS) wallLimit = now() - started + BROWSER_REPAIR_WALL_MS;
+          log({ turn: turns, browser_repair_turns: turnLimit - turns, browser_repair_wall_ms: started + wallLimit - now() });
+        }
         // A compile failure found at the last turns gets a bounded repair allowance instead of a dead handoff.
-        if (!built.error && !compileRepairExtended && turnLimit - turns < COMPILE_REPAIR_TURNS && turnLimit < turnCeiling) {
+        if (gated.gate !== 'browser' && !built.error && !compileRepairExtended && turnLimit - turns < COMPILE_REPAIR_TURNS && turnLimit < turnCeiling) {
           compileRepairExtended = true;
           turnLimit = Math.min(turnCeiling, turns + COMPILE_REPAIR_TURNS);
           log({ turn: turns, compile_repair_turns: turnLimit - turns });
@@ -1967,7 +2006,7 @@ async function runAgenticEngineer({
     }
   }
 
-  if (!outcome) outcome = { ok: false, error: now() - started >= limits.wallBudgetMs ? 'time budget exhausted' : 'turn budget exhausted' };
+  if (!outcome) outcome = { ok: false, error: now() - started >= wallLimit ? 'time budget exhausted' : 'turn budget exhausted' };
   // The loop ran dry with nothing edited after a real exploration: same budget failure as a late no_change,
   // and the next attempt deserves the same reading map (job 79b4c08f: first edit at turn 24, reverted at 58).
   if (!outcome.ok && !outcome.budget_exhausted && !tools.__changedFiles().length && /budget exhausted/.test(String(outcome.error)) && classifyNoChange({ reason: outcome.error, turns, transcript, limits })) {

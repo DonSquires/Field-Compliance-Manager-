@@ -104,6 +104,17 @@ async function request(method, route, body, headers = {}) {
   return { response, body: await response.json() };
 }
 
+test('officer privacy route requires server authority and never echoes invalid source content', async () => {
+  const source = { fields: { site_brief: { private: 'SYNTHETIC-PRIVATE-SENTINEL' } } };
+  const denied = await request('POST', '/api/bob/officer/privacy', source);
+  assert.equal(denied.response.status, 401);
+  const result = await request('POST', '/api/bob/officer/privacy', source, { authorization: `Bearer ${adminToken}` });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.response.headers.get('cache-control'), 'no-store');
+  assert.match(result.body.error, /remains withheld/);
+  assert.doesNotMatch(JSON.stringify(result.body), /SYNTHETIC-PRIVATE-SENTINEL/);
+});
+
 test.before(async () => {
   const bin = path.join(stateDir, 'bin');
   fs.mkdirSync(bin);
@@ -192,7 +203,10 @@ test('health is public and reports the control plane', async () => {
 test('control-plane source has a bounded stale Builder lease recovery path', () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   assert.match(source, /BOB_BUILDER_STALE_RUN_MS/);
-  assert.match(source, /agenticWallBudgetMs \+ agenticTurnTimeoutMs \+ 5 \* 60_000/);
+  assert.match(source, /agenticWallBudgetMs \+ agenticTurnTimeoutMs \+ builderBrowserAllowanceMs \+ 5 \* 60_000/);
+  // The browser gate's wall extension and patched + base runs are inside the lease, never past it.
+  assert.match(source, /builderBrowserAllowanceMs = builderBrowserTest\s*\?\s*15 \* 60_000 \+ 2 \* /);
+  assert.match(source, /browserTest: builderBrowserTest,/);
   assert.match(source, /BOB_BUILDER_PREFLIGHT_TIMEOUT_MS/);
   assert.match(source, /builder\.run\.stale_lease_cleared/);
   assert.match(source, /clearStaleBuilderRun\(jobId\)/);

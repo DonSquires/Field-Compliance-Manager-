@@ -67,7 +67,24 @@ During:
   failure found in the last turns. `node --check` on a web `.ts/.tsx` file is
   rewritten to the web type check. The frontend lane provisions web
   dependencies (`prepareWorkspace`) before the author starts. Prompt version
-  is `agentic-engineer-v19`.
+  is `agentic-engineer-v21`.
+- Browser gate (`builder-browser-gate.js`): in the frontend lane, after the
+  compile gate passes, `finish` runs the Playwright specs the change targets
+  (changed specs plus specs owning changed baseline PNGs) in the offline
+  `vibe-human-qa` worker profile. The author can also call `browser_test`
+  before finishing. Failures are compared against one run of the same specs at
+  the pinned HEAD in a detached temporary worktree, so only failures the patch
+  introduces refuse `finish`; failures in specs the patch adds are always the
+  patch's. A verdict is reused for an unchanged worktree fingerprint. A run that
+  cannot produce a readable report, times out, runs out of memory or would
+  start with under eight minutes left is recorded as `browser_gate.unavailable`
+  and left to the verifier. The gate refuses at most twice, then hands off with
+  `handed_off_after_refusals`. The first refusal grants one extension
+  (`BROWSER_REPAIR_TURNS`, up to 15 minutes of wall time). The smoke specs stay
+  verifier-only. `BOB_BUILDER_BROWSER_TEST=0` disables the gate and
+  `BOB_BUILDER_BROWSER_TEST_TIMEOUT_MS` (default 15 minutes) bounds each run.
+  Runs share the Vibe human-test queue. The stale-run lease includes the
+  browser allowance so a gated run is never treated as abandoned.
 - Scope amendments: when the root cause sits in another changed file in the
   same lane, an acceptance entry may carry
   `scope_amendment {file, reason}`. The reason must be at least 30
@@ -103,6 +120,26 @@ During:
   follow that job instead of creating duplicate jobs. Only jobs the autopilot
   still drives cover new packets; a parked job (for example
   `acceptance_incomplete`) does not.
+- Routine retry after release: a routine repair that stopped left its packet
+  `failed` with disposition `open` after one attempt, so Dr Bob folded every
+  recurrence into a dead packet (live packets for `/admin/hub`,
+  `/admin/module-subscriptions` and `/admin/platform-subscribers`). Before
+  claiming new packets, the control plane now calls
+  `builder_requeue_failed_routine_repairs` with the release lane's
+  `deployed_sha` and the time that release went live. A failed routine packet
+  that failed under replaced code is queued again: one retry per verified
+  release, at most three attempts, within 21 days, never while a job still
+  works it, and only for packets nobody closed. Each requeue is audited
+  (`routine_repair_requeued`). The retry brief lists why earlier attempts
+  stopped so Bob addresses that reason instead of repeating it.
+- Routine continuations: autopilot continuations copy the packet onto the
+  child job, and the one-job-per-packet index rejected them (live: `7c6c68b6`,
+  "duplicate key value violates unique constraint
+  builder_jobs_source_friction_packet_unique"). The index now allows one live
+  root intake job per packet; continuations share it, and a failed or
+  cancelled root releases it. A job that continues as another job, or waits on
+  a repair of main, keeps its packet in progress instead of `completed` or
+  `failed`, and its covered packets move to the continuation.
 - Vibe (`vibe-v19`): failing verification gets up to `repairRounds`
   corrections (default 3). After the first round, a further correction is sent
   only when the failure signature changed or new edits landed. One
@@ -113,15 +150,24 @@ After: regression tests cover each rule:
 
 - `builder-agentic-engineer`: compile-gate refusal and recovery, unavailable
   toolchain, syntax error, fingerprint reuse, TSX rewrite and amendment
-  accept/refuse cases.
+  accept/refuse cases, and the browser-gate refusal, extension and receipt.
+- `builder-browser-gate`: spec selection, base subtraction, verdict reuse,
+  refusal cap and every unavailable outcome.
 - `builder-implementation-acceptance`: amendments in reconciliation.
 - `builder-autopilot`: the guardrail boilerplate no longer holds a repair; a
   migration holds the release.
-- `builder-routine-intake`: signature dedupe.
+- `builder-routine-intake`: signature dedupe, retry brief and packet status
+  for continuations.
+- `builder-routine-retry-migration` (disposable PostgreSQL): continuation and
+  re-bind index rules, requeue eligibility, one retry per release, attempt
+  ceiling, audit rows and service-only grants.
 - `builder-vibe-session`: repair rounds and extension.
 
 The migration `20261104090000_friction_packet_signature_cover.sql` adds the
-nullable cover column and index only. Human approval, code review, protected
+nullable cover column and index only.
+`20261107210000_routine_repair_retry_after_release.sql` narrows the packet
+index, adds the `routine_repair_requeued` audit type and the service-only
+requeue RPC. Human approval, code review, protected
 paths, the verified release identity and the PR-only path to `main` are
 unchanged.
 
@@ -169,6 +215,63 @@ Vibe drafts were changed by the audit. The deployed release marker remained
 the exact required author identity with the GitHub profile identity. Its merged
 tree must not be described as deployed; subsequent release commits must retain
 the verified author through the PR path (rebase merge, not squash).
+
+### Vibe automatic task continuation (2026-11-07)
+
+Routine verification commands do not require owner approval. The shared engineer
+and Vibe run tool accept `npm test --prefix apps/web` and
+`npm run test --prefix apps/web` as the full configured Vitest suite, with
+`NODE_ENV=test`. They preserve that scope rather than silently adding a `src`
+selector. Targeted commands, shell restrictions, protected package files and the
+independent Playwright verifier retain their existing boundaries.
+
+Vibe can record `abandon_failed_edit {path, reason}` for one outstanding failed
+edit when that edit was an unnecessary workaround. The receipt and final reply
+identify the unapplied path and rationale; restart restores the decision. This
+changes no file, grants no protected-file access and clears no failed test,
+typecheck or browser evidence. Actual verification must pass before a green
+handoff or publication.
+
+Before: the Builder chat-dock task remained on its intended branch, but its
+targeted browser check failed. A finite coding turn could stop even while
+repair work advanced, requiring another owner "continue". A successful diff
+inspection was not a passing application check.
+
+During: `vibe-v22` continues the original coding turn across step budgets and
+verification-correction limits while code, investigation or verification state
+advances. It permits at most five automatic rounds and 90 minutes from the
+recorded execution start, preserving the existing per-round budgets and loop
+guards. The start receipt is saved before the first model call; legacy turns
+without a timing receipt receive one new bounded window on recovery. Distinct
+completed checks count once per result and source revision, not on identical
+reruns. Each round has an append-only status receipt. Repeated state, exhausted
+limits, a genuine blocker, a closed session or newer owner instruction stops
+the turn with work preserved, explicitly failed rather than marked complete.
+No synthetic owner message, automatic PR, merge or release is introduced.
+
+Restarted turns restore same-message tool and verification receipts, failed edit
+targets and continuation limits, and use restart-specific model request keys.
+A missing original workspace fails closed instead of rebuilding from main.
+Legacy failed patches without recorded targets also stop for evidence review.
+Live firewall/ACL mutations are not replayed after interruption. Historical
+attachment-derived output, including failed-edit feedback, remains withheld from
+external models.
+
+The service-only `builder_vibe_recover_failed_turn` RPC permits one explicit,
+audited recovery of the original completed failed coding message. It requires
+the exact unpublished branch head and an eligible verification/budget failure;
+closed/busy sessions, newer/pending owner instructions, reused requests and
+exhausted restart counts refuse recovery. Request replay is idempotent and audit
+failure rolls back the queue change. The worker also rechecks the saved session
+and actual workspace head before changing anything. This is an operator
+recovery path, not a model tool or permission to impersonate an owner.
+
+After: focused runtime tests cover multi-round repair, fresh checks, honest
+budget exhaustion, interruption, restart evidence, private-context handling and
+unchanged publication gates. Disposable PostgreSQL tests cover ACLs, replay,
+head binding, competing recoveries, owner/closure races and audit rollback.
+Production readiness still requires the governed migration, runtime deployment
+and an actual passing task receipt. Merged is not deployed or glass-proven.
 
 ### Vibe continuation and browser diagnosis
 

@@ -14,6 +14,12 @@ const flagMigration = readFileSync(
   resolve(process.cwd(), "../../supabase/migrations/20260916100000_safety_warnings_and_plate_registry_read.sql"),
   "utf8",
 );
+const personOperations = readFileSync(
+  resolve(process.cwd(), "src/components/PersonRecordOperations.tsx"), "utf8",
+);
+const operationsMigration = readFileSync(
+  resolve(process.cwd(), "../../supabase/migrations/20261107200000_person_record_operations.sql"), "utf8",
+);
 const approvedVehicleMigration = readFileSync(
   resolve(process.cwd(), "../../supabase/migrations/20261010213204_promote_approved_vehicle_mentions.sql"),
   "utf8",
@@ -67,14 +73,13 @@ describe("identity person-of-interest workflow", () => {
   });
 
   it("flags only verified canonical people through the scoped audited RPC", () => {
-    expect(workspace).toContain('selectedPerson?.review_state === "verified"');
-    expect(workspace).toContain('selectedPerson.canonical_review_state === "verified"');
-    expect(workspace).toContain('"organization_id", organizationId');
-    expect(workspace).toContain('"raise_scoped_person_interest_flag"');
-    expect(workspace).toContain("p_organization_id: organizationId");
-    expect(workspace).toContain('supabase.rpc("resolve_entity_flag"');
-    expect(workspace).toContain("p_reason: personInterestReason.trim()");
-    expect(workspace).toContain('minLength={5}');
+    expect(workspace).toContain("<PersonRecordOperations");
+    expect(personOperations).toContain("'raise_scoped_person_interest_flag'");
+    expect(personOperations).toContain("p_organization_id: organizationId");
+    expect(personOperations).toContain("supabase.rpc('resolve_entity_flag'");
+    expect(personOperations).toContain("p_reason: reason.trim()");
+    expect(personOperations).toContain("!context?.verified");
+    expect(operationsMigration).toContain("cp.review_state = 'verified' AND pr.review_state = 'verified'");
     expect(flagMigration).toContain("entity_flag_raised");
     expect(flagMigration).toContain("entity_flag_resolved");
   });

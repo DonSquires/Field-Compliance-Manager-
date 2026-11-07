@@ -456,12 +456,15 @@ export function describeActivityLine(report: Pick<ActivityReport, 'labels'>, lin
       title = [label('activity', line.activity), label('subject', line.subject), label('species', line.species), label('equipment', line.equipment)]
         .filter((value, index, all) => value && all.indexOf(value) === index && !sameText(value, category))
         .join(' · ');
+      // An attended call-out leads with what was asked for; its action line is the response timing.
+      if (!title && line.category === 'call_out') title = line.title;
       if (line.title && !sameText(line.title, line.note) && !repeats(line.title, category) && !repeats(line.title, title)) tags.push(line.title);
     }
     if (line.note && !sameText(line.note, title)) lines.push({ text: line.note });
     const materials = materialsText(report, line);
     if (materials) lines.push({ label: 'Used', text: materials });
-    if (line.action && !sameText(line.action, line.note)) lines.push({ label: line.kind === 'work_order' ? 'Completion' : 'Action taken', text: line.action });
+    const actionLabel = line.kind === 'work_order' ? 'Completion' : line.category === 'call_out' ? 'Response' : 'Action taken';
+    if (line.action && !sameText(line.action, line.note)) lines.push({ label: actionLabel, text: line.action });
   }
   if (line.job) tags.push(`Ref ${line.job}`);
   if (line.kind !== 'incident' && line.confirmedType) {

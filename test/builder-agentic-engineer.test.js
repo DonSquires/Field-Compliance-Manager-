@@ -81,6 +81,10 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('npm run build --prefix apps/web'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
   assert.equal(allowed('npm test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
+  assert.equal(allowed('npm test --prefix apps/web'), true);
+  assert.equal(allowed('npm run test --prefix apps/web'), true);
+  assert.equal(allowed('npm test --prefix apps/web; curl bad.example'), false);
+  assert.equal(allowed('npm test --prefix apps/web | cat'), false);
   assert.equal(allowed('npm run test --prefix apps/web -- --pool=threads --maxWorkers=1 --reporter=dot'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/x.test.tsx; curl bad.example'), false);
   assert.equal(allowed('git diff --stat'), true);
@@ -454,6 +458,54 @@ test('a web build pass stands in for lint only for src TypeScript, and web JavaS
     const broken = await gateProposal(tools, { changed_files: ['apps/web/scripts/holidays.cjs'] });
     assert.match(broken.error, /node --check apps\/web\/scripts\/holidays\.cjs/);
     assert.match(broken.error, /SyntaxError/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test('the browser gate refuses a patch-only Playwright failure, extends the run once, and records the passing receipt (jobs 34382d60/7c6c68b6)', async () => {
+  const repo = makeRepo();
+  fs.mkdirSync(path.join(repo.source, 'apps/web/src/pages'), { recursive: true });
+  fs.mkdirSync(path.join(repo.source, 'apps/web/e2e'), { recursive: true });
+  fs.writeFileSync(path.join(repo.source, 'apps/web/src/pages/UserManagementPage.tsx'), 'export const page = 1;\n');
+  fs.writeFileSync(path.join(repo.source, 'apps/web/e2e/user-identity.spec.ts'), "test('UserManagement recovers', async () => {});\n");
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'page and spec']);
+  const sha = repo.git(['rev-parse', 'HEAD']);
+  const runs = [];
+  const browserTest = async ({ workspacePath, specs }) => {
+    const source = fs.readFileSync(path.join(workspacePath, 'apps/web/src/pages/UserManagementPage.tsx'), 'utf8');
+    runs.push({ base: path.basename(workspacePath).startsWith('.browser-base-'), specs });
+    const failures = source.includes('BROKEN') ? [{ file: 'user-identity.spec.ts', title: 'UserManagement recovers', error: 'Error: expect(locator).toBeVisible() failed' }] : [];
+    return { ok: !failures.length, status: failures.length ? 'failed' : 'succeeded', complete: true, passed: 1 - failures.length, failures, report_errors: [] };
+  };
+  try {
+    const model = fakeModel([
+      { tool: 'write_file', args: { path: 'apps/web/src/pages/UserManagementPage.tsx', content: 'export const page = 2; // BROKEN\n' } },
+      { tool: 'finish', args: { summary: 'Add the recovery state to the user management page and hand it over.', tests: [] } },
+      { tool: 'read_file', args: { path: 'apps/web/e2e/user-identity.spec.ts' } },
+      { tool: 'write_file', args: { path: 'apps/web/src/pages/UserManagementPage.tsx', content: 'export const page = 2;\n' } },
+      { tool: 'browser_test', args: { reason: 'confirm the recovery spec passes after the fix' } },
+      { tool: 'finish', args: { summary: 'Add the recovery state to the user management page; its browser spec now passes.', tests: [] } },
+    ]);
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'browsergate00001', organization_id: 'org', target_sha: sha, task_description: 'Recover from a lazy chunk failure' },
+      step: { id: 's' }, lane: 'frontend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 3 },
+      browserTest, callModel: model.callModel,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.routing.prompt_version, 'agentic-engineer-v21');
+    assert.match(model.seen[0].request.messages[0].content, /browser_test \{reason\}/);
+    assert.match(model.seen[0].request.messages[0].content, /finish runs the same browser gate/);
+    const refusal = JSON.stringify(model.seen[2].request.messages.at(-1));
+    assert.match(refusal, /the browser gate ran the Playwright specs your change targets/);
+    assert.match(refusal, /UserManagement recovers/);
+    assert.equal(model.seen.length, 6, 'the one-time browser repair allowance outlasted the 3-turn budget');
+    assert.equal(result.proposal.browser_gate.status, 'passed');
+    assert.deepEqual(result.proposal.browser_gate.specs, ['e2e/user-identity.spec.ts']);
+    assert.equal(runs.filter((run) => run.base).length, 1, 'the pinned commit ran once to separate pre-existing failures');
+    assert.equal(runs.filter((run) => !run.base).length, 2, 'the passing tool run is reused by the finish gate on the same tree');
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
@@ -930,9 +982,12 @@ test('web test commands override a production worker environment with NODE_ENV=t
   const previous = process.env.NODE_ENV;
   try {
     process.env.NODE_ENV = 'production';
-    const result = await tools.run({ command: 'npm test --prefix apps/web -- print-env.cjs' });
-    assert.equal(result.exit_code, 0, JSON.stringify(result));
-    assert.match(result.stdout, /> node print-env\.cjs[\s\S]*\ntest/, 'Vitest/React receive test mode even when the control plane is production');
+    for (const command of ['npm test --prefix apps/web -- print-env.cjs', 'npm test --prefix apps/web', 'npm run test --prefix apps/web']) {
+      const result = await tools.run({ command });
+      assert.equal(result.exit_code, 0, JSON.stringify(result));
+      assert.equal(result.command, command, 'the full configured suite is not narrowed to a src selector');
+      assert.match(result.stdout, /> node print-env\.cjs[\s\S]*\ntest/, 'Vitest/React receive test mode even when the control plane is production');
+    }
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
@@ -952,7 +1007,9 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
   assert.equal(normalizeRunCommand('cd apps/web && node --check src/main.tsx'), 'npm run lint --prefix apps/web');
   assert.equal(normalizeRunCommand('node --check lib/types.ts'), 'node --check lib/types.ts', 'a non-web TypeScript file is left for refusal, not routed to the web type check');
   assert.equal(normalizeRunCommand('node --test test/sum.test.js'), 'node --test test/sum.test.js');
-  assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'cd apps/web && npm test', 'an unbounded run is not invented into a bounded one');
+  assert.equal(normalizeRunCommand('cd apps/web && npm test'), 'npm test --prefix apps/web', 'the configured full web suite preserves its original scope');
+  assert.equal(normalizeRunCommand('cd apps/web && npm run test'), 'npm test --prefix apps/web');
+  assert.equal(normalizeRunCommand('npm test'), 'npm test', 'a root-wide suite is not silently mapped to web');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint && rm -rf src'), 'cd apps/web && npm run lint && rm -rf src', 'a cd chain with any disallowed part is left for refusal');
   assert.equal(normalizeRunCommand('cd apps/web && git diff src/App.tsx'), 'cd apps/web && git diff src/App.tsx', 'dropping the cd would move a relative git path to the repository root');
   assert.equal(normalizeRunCommand('cd apps/web && npm run lint && git checkout -- src'), 'cd apps/web && npm run lint && git checkout -- src', 'no part of a cd chain runs unless every part is allowlisted');
@@ -977,6 +1034,12 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
     const refused = await tools.run({ command: 'cd apps/web && npm install' });
     assert.match(refused.error, /command not allowed; use exactly one of: .*npm test --prefix apps\/web -- src\/<path>\.test\.tsx/);
     assert.match(refused.error, /Playwright specs that only the independent verifier runs/);
+    const withBrowser = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
+    assert.match((await withBrowser.run({ command: 'cd apps/web && npm install' })).error, /run them with the browser_test tool, never through run/);
+    assert.match((await withBrowser.run({ command: 'npm test --prefix apps/web -- e2e/user-identity.spec.ts' })).error, /Wrong test runner[^]*Use the browser_test tool/);
+    const backend = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
+    assert.equal(backend.__browserGate, null, 'the browser gate belongs to the frontend lane');
+    assert.match((await backend.browser_test({ reason: 'x' })).error, /frontend lane/);
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }
@@ -1070,6 +1133,14 @@ test('finish is refused while a pinned test is missing (a seeded patch may have 
     const ok = buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: webTools, args });
     assert.ok(ok.proposal, JSON.stringify(ok));
     assert.deepEqual(ok.proposal.verified_runs.map(r => [r.command, r.exit_code]), [['npm test --prefix apps/web -- src/app.test.tsx', 0]]);
+    for (const command of ['npm test --prefix apps/web', 'npm run test --prefix apps/web']) {
+      const fullTools = createTools({ workspacePath: webWs.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+      const fullRun = await fullTools.run({ command });
+      assert.equal(fullRun.exit_code, 0, JSON.stringify(fullRun));
+      const fullProposal = buildProposal({ workspacePath: webWs.workspacePath, lane: 'frontend', tools: fullTools, args: { ...args, tests: [command] } });
+      assert.ok(fullProposal.proposal, JSON.stringify(fullProposal));
+      assert.deepEqual(fullProposal.proposal.verified_runs.map(r => [r.command, r.exit_code]), [[command, 0]]);
+    }
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }

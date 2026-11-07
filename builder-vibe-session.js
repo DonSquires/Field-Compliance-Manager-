@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v21';
+const PROMPT_VERSION = 'vibe-v22';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -28,6 +28,8 @@ const VIBE_LIMITS = Object.freeze({
   repairRounds: Math.max(1, Number(process.env.BOB_VIBE_REPAIR_ROUNDS || 3)),
   repairTurns: Math.max(0, Number(process.env.BOB_VIBE_REPAIR_TURNS || 10)),
   repairBudgetMs: Math.max(0, Number(process.env.BOB_VIBE_REPAIR_BUDGET_MS || 6 * 60_000)),
+  autoContinuationRounds: 5,
+  autoContinuationWallMs: 90 * 60_000,
   readCapChars: 30_000,
   searchCapLines: 150,
   listCapEntries: 300,
@@ -96,6 +98,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'You are Bob Builder in a live vibe-coding session with the platform owner of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root, tests in test/ and apps/web).',
     'The owner describes what they want in plain language. You make it real in your worktree, the way a senior engineer pairing with them would: understand, change, verify, then reply briefly in plain language.',
     'WORKING RULES:',
+    '- Routine command syntax does not need human approval. The full configured web unit suite is npm test --prefix apps/web; a targeted suite adds -- src/<path>.test.tsx. Do not change protected package scripts as a command workaround. If a rejected edit is genuinely unnecessary, use abandon_failed_edit {path, reason}; this records the decision without editing that file or waiving any verification failure. Never claim an abandoned edit was applied.',
     ATLAS_RESEARCH_GUIDANCE,
     '- Read before you write: search / outline / read_file the code you will change; check the live Atlas (atlas, live_count) before touching a shared table, RPC or edge function. Never invent tables, columns or behaviour; verify against supabase/schema.sql.',
     '- Diagnose navigation before/during/after: find the clicked control, its URL, the router, and the destination data/permission path. Routes live in apps/web/src/App.tsx, routing/RoleRouter.tsx and shells/AdminShell.tsx; do not guess a routes.tsx file. Vibe preview uses /vibe/<session-id>/, unlike production at /. Check basename and native links/popouts that might escape it.',
@@ -105,8 +108,9 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Start with VERIFIED STARTING FILES: these are tracked candidates discovered from the request, not permission to edit blindly. Read the relevant file and existing design tokens before changing it. Do not invent a page filename from a screen label or interpret CSS as a new subsystem. A failed filename lookup disproves that guess; search visible text or use the starting map instead.',
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- You write the code and supply complete tool arguments. A tool validation error is yours to repair, not a reason to ask the owner for source code, filenames or replacement text already discoverable in the worktree. For UI changes, read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md and the existing page CSS/design tokens; do not append a second screen implementation to the application shell.',
-    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair. A failing check refuses your reply for up to ' + (limits.repairRounds ?? VIBE_LIMITS.repairRounds) + ' repair rounds while each round makes progress, and a step budget that runs out mid-repair is extended once: use those rounds to fix the cause, not to restate the claim.',
+    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair. Failing checks get bounded repair rounds, and an unfinished coding request can continue automatically while there is measurable progress. Use that time to fix and verify the actual work, not to restate a claim. Stop for a genuine blocker or human decision.',
     '- Match the runner to the test: npm run test --prefix apps/web runs Vitest with selectors relative to apps/web (src/..., not apps/web/src/...). Playwright specs under e2e/ belong to browser_test or human_test, not Vitest. A runner-discovery error is not an application defect: fix the runner configuration, never add any-typed imports, VITEST branches, empty placeholder edits or skipped assertions to a Playwright spec. A legitimate source repair allows a fresh check; unchanged failed checks do not justify a retry loop.',
+    '- A browser diagnostic that only prints output and has no meaningful behavioural assertion is not acceptance evidence. Convert it into a real regression check, preserving existing test titles and assertions; a passing check on an older draft does not certify the current draft.',
     '- Workflow acceptance: read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md section 8. Define expected BEFORE (role, organisation, route, records), DURING (selection, validation, request/RPC, audit, loading/errors), AFTER (saved record, reload, back/forward, downstream status and next actor). Use Atlas capability/direct edges/flow_reach and schema writers; keep structural fk_reach separate. The generic human_test walk is read-only smoke/UX evidence, not proof of writes or persistence. Add targeted fixture-backed workflow assertions for those outcomes; name untested stages instead of declaring the whole workflow passed.',
     '- Test data: text values start with "Bob Test"; numeric-only values start with "999"; dates may be chosen for the scenario. For constrained fields (email, UUID, enum, phone, bounded number), use a valid dedicated fixture value and record why the prefix cannot apply. Archive/suspend/reactivate only records created by that test, identified by ID, tenant and run provenance, never a real record that happens to share a prefix. Test data labels do not grant live-write, messaging, billing or destructive authority.',
     '- Browser verification: when you change what a person sees (apps/web/src), Dr Bob walks the rendered app like a human before your reply is accepted (human_test: offline fixture data, desktop, his admin/officer/client walk plus the e2e specs that target your changed files). The runtime runs it automatically at handoff when the changed web files differ from the last walk; call human_test yourself earlier when you want the evidence. After any failed walk, inspect the exact failure receipt and current diff; map each failing assertion to the changed code path, and run only the smallest relevant unit/type/browser check that adds evidence. Do not rerun an unchanged full walk or repeat a failed command unchanged. Fix failures the change could cause. If a failure appears outside the changed path, do not alter fixtures, weaken/delete assertions, or claim it is pre-existing without reproducing it on the pinned base. When no safe baseline comparison is available, state causality is unknown; report the exact failing spec, assertion, count, targeted checks passed, and that the requested change remains unverified via args.blocked_reason. Keep the human_test receipt visible; a passing focused test does not erase a failed browser walk. A screenshot mismatch on a spec you intentionally changed is not a regression to hide: regenerate that exact baseline with generate_visual_baselines and say so.',
@@ -186,6 +190,7 @@ function toolCallKey(tool, args) {
 
 const CACHEABLE_VIBE_TOOLS = new Set(['list_dir', 'find_files', 'read_file', 'outline', 'search', 'git_log', 'git_diff']);
 const EDIT_VIBE_TOOLS = new Set(['write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'generate_visual_baselines']);
+const UNKNOWN_PATCH_TARGET = 'apply_patch (no file paths in diff)';
 // Files an edit call targets, so a failure on one file is cleared only by a later success on that file.
 function editTargets(tool, args = {}) {
   if (tool === 'apply_patch') {
@@ -194,7 +199,7 @@ function editTargets(tool, args = {}) {
       const match = /^(?:\+\+\+|---) (?:[ab]\/)?(\S+)/.exec(line) || /^\*\*\* (?:Update|Add|Delete) File: (.+?)\s*$/.exec(line) || /^\*\*\* Move to: (.+?)\s*$/.exec(line);
       if (match && match[1] !== '/dev/null') paths.add(match[1]);
     }
-    return paths.size ? [...paths] : ['apply_patch (no file paths in diff)'];
+    return paths.size ? [...paths] : [UNKNOWN_PATCH_TARGET];
   }
   if (tool === 'generate_visual_baselines') {
     const paths = Array.isArray(args.paths) ? args.paths.map(String).filter(Boolean) : [];
@@ -217,6 +222,7 @@ function vibeToolSchema(tools) {
     replace_in_file: { properties: { path: nonEmpty, old_text: nonEmpty, new_text: text, all: { type: 'boolean' } }, required: ['path', 'old_text', 'new_text'] },
     apply_patch: { properties: { diff: nonEmpty }, required: ['diff'] },
     delete_file: { properties: { path: nonEmpty }, required: ['path'] },
+    abandon_failed_edit: { properties: { path: nonEmpty, reason: { type: 'string', minLength: 20, maxLength: 1000 } }, required: ['path', 'reason'] },
     run: { properties: { command: nonEmpty }, required: ['command'] },
     generate_visual_baselines: {
       properties: { paths: { type: 'array', items: nonEmpty, minItems: 1, maxItems: 6 }, reason: nonEmpty },
@@ -275,6 +281,7 @@ function vibeNativeTools(tools) {
     write_file: 'Write complete file content after inspecting existing source. Protected paths remain refused.',
     apply_patch: 'Apply a git unified diff or a "*** Begin Patch / *** Update File: <path>" envelope with @@ context hunks. A failed envelope changes nothing. Protected paths and binary patches remain refused.',
     delete_file: 'Delete an inspected, unprotected file only when required by the task.',
+    abandon_failed_edit: 'Record why a failed edit is unnecessary, without changing any file or clearing failed checks. Use for an abandoned workaround, never to claim an unapplied edit succeeded.',
     run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
     atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
     reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure, or no_change_reason when the request truly needs no file change.',
@@ -387,9 +394,35 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`session read failed: ${error.message}`);
       return data;
     },
-    async updateSession(sessionId, patch) {
-      const { error } = await supabase.from('builder_vibe_sessions').update({ ...patch, updated_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq('id', sessionId);
+    async updateSession(sessionId, patch, { unlessClosed = false } = {}) {
+      const query = supabase.from('builder_vibe_sessions').update({ ...patch, updated_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq('id', sessionId);
+      if (unlessClosed) {
+        const { data, error } = await query.neq('status', 'closed').select('id').maybeSingle();
+        if (error) throw new Error(`session update failed: ${error.message}`);
+        return Boolean(data);
+      }
+      const { error } = await query;
       if (error) throw new Error(`session update failed: ${error.message}`);
+      return true;
+    },
+    async continuationState(sessionId, messageSeq) {
+      const [sessionResult, queuedResult] = await Promise.all([
+        supabase.from('builder_vibe_sessions').select('status').eq('id', sessionId).maybeSingle(),
+        supabase.from('builder_vibe_messages').select('id').eq('session_id', sessionId).eq('role', 'owner')
+          .eq('status', 'queued').gt('seq', messageSeq).limit(1),
+      ]);
+      if (sessionResult.error) throw new Error(`continuation session read failed: ${sessionResult.error.message}`);
+      if (queuedResult.error) throw new Error(`continuation queue read failed: ${queuedResult.error.message}`);
+      if (!sessionResult.data || !Array.isArray(queuedResult.data)) throw new Error('continuation state is unavailable');
+      return { closed: sessionResult.data.status === 'closed', ownerQueued: queuedResult.data.length > 0 };
+    },
+    async continuationHistory(sessionId, messageId) {
+      const { data, error } = await supabase.from('builder_vibe_messages').select('seq,payload')
+        .eq('session_id', sessionId).eq('kind', 'status').eq('payload->>message_id', messageId)
+        .eq('payload->>reason', 'automatic_continuation').order('seq', { ascending: true });
+      if (error) throw new Error(`continuation history read failed: ${error.message}`);
+      if (!Array.isArray(data)) throw new Error('continuation history is unavailable');
+      return data;
     },
     async post(sessionId, row) {
       const { error } = await supabase.from('builder_vibe_messages').insert({ session_id: sessionId, role: 'bob', kind: 'message', payload: {}, ...row, content: clip(row.content, 39_000) });
@@ -411,13 +444,31 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`execution history read failed: ${error.message}`);
       return (data || []).reverse();
     },
-    async verificationHistory(sessionId, beforeSeq) {
+    async executionForMessage(sessionId, messageId) {
+      const entries = [];
+      let cursor = Number.MAX_SAFE_INTEGER;
+      while (true) {
+        const { data, error } = await supabase.from('builder_vibe_messages').select('role, kind, content, payload, seq')
+          .eq('session_id', sessionId).eq('payload->>message_id', messageId).lt('seq', cursor)
+          .in('kind', ['tool', 'test', 'error', 'status', 'diff']).order('seq', { ascending: false }).limit(VERIFICATION_PAGE_SIZE);
+        if (error) throw new Error(`interrupted execution read failed: ${error.message}`);
+        if (!Array.isArray(data)) throw new Error('interrupted execution history is unavailable');
+        entries.push(...data);
+        if (data.length < VERIFICATION_PAGE_SIZE) return entries.reverse();
+        const next = data.at(-1)?.seq;
+        if (next == null || String(next) === String(cursor)) throw new Error('interrupted execution pagination did not advance');
+        cursor = next;
+      }
+    },
+    async verificationHistory(sessionId, beforeSeq, { messageId } = {}) {
       const entries = [];
       let cursor = beforeSeq;
       while (true) {
-        const { data, error } = await supabase.from('builder_vibe_messages').select('kind, payload, seq').eq('session_id', sessionId)
+        let query = supabase.from('builder_vibe_messages').select('kind, payload, seq').eq('session_id', sessionId)
           .lt('seq', cursor).in('kind', ['tool', 'test']).in('payload->>tool', ['run', 'human_test', 'browser_test'])
           .order('seq', { ascending: false }).limit(VERIFICATION_PAGE_SIZE);
+        if (messageId) query = query.eq('payload->>message_id', messageId);
+        const { data, error } = await query;
         if (error) throw new Error(`verification history read failed: ${error.message}`);
         const page = data || [];
         entries.push(...page);
@@ -740,6 +791,17 @@ const trackedBrowserVerification = result => Array.isArray(result?.specs)
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
   const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {}, generateBaselines: deps.generateBaselines });
+  const failedEdits = new Map();
+  const abandonedEdits = new Map();
+  tools.abandon_failed_edit = ({ path: file, reason } = {}) => {
+    if (typeof file !== 'string' || typeof reason !== 'string' || reason.trim().length < 20 || reason.trim().length > 1000) {
+      return { error: 'Name one failed edit path and a specific reason of 20 to 1000 characters explaining why that edit is unnecessary.' };
+    }
+    if (!failedEdits.has(file)) return { error: 'There is no outstanding failed edit for that exact path. No edit or verification state was changed.' };
+    failedEdits.delete(file);
+    abandonedEdits.set(file, reason.trim());
+    return { abandoned_edit: file, reason: reason.trim(), file_changed: false, verification_waived: false };
+  };
   const uncommittedDiff = tools.git_diff;
   tools.git_diff = () => {
     const current = uncommittedDiff();
@@ -767,10 +829,23 @@ async function runConversation({ store, session, message, workspacePath, branch,
       tools.tailnet_acl = args => deps.firewall.tailnet.acl({ op: args.op, policy: args.policy, ifMatch: args.if_match, purpose: args.purpose });
     }
   }
+  const resuming = Number(message.payload?.restart_retries) > 0;
   const history = await store.history(session.id, message.seq);
-  const execution = typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, message.seq) : [];
+  let execution = typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, message.seq) : [];
   if (typeof store.verificationHistory !== 'function') throw new Error('Verification history is unavailable; the session cannot continue safely.');
-  const verificationHistory = await store.verificationHistory(session.id, message.seq);
+  let verificationHistory = await store.verificationHistory(session.id, message.seq);
+  let interruptedExecution = [];
+  let priorContinuations = [];
+  if (resuming) {
+    if (typeof store.executionForMessage !== 'function' || typeof store.continuationHistory !== 'function') {
+      throw new Error('Interrupted turn evidence is unavailable; the session cannot resume safely.');
+    }
+    interruptedExecution = await store.executionForMessage(session.id, message.id);
+    priorContinuations = await store.continuationHistory(session.id, message.id);
+    const interruptedVerification = await store.verificationHistory(session.id, Number.MAX_SAFE_INTEGER, { messageId: message.id });
+    execution = [...execution, ...interruptedExecution.slice(-HISTORY_EXECUTION)];
+    verificationHistory = [...verificationHistory, ...interruptedVerification];
+  }
   const attachmentContext = await prepareVibeAttachmentContext({ store, session, message, supabase, deps });
   const historyHasAttachments = history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length)
     || (typeof store.hasEarlierAttachments === 'function' && await store.hasEarlierAttachments(session.id, message.seq));
@@ -853,15 +928,38 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let active = 0;
   let unparseable = 0;
   let protocolRefusals = 0;
-  let executedTools = 0;
+  let executedTools = interruptedExecution.filter(entry => entry.role === 'tool' && entry.payload?.tool).length;
   let unavailable = 0;
   let loopRecoveryUsed = false;
   let emptyReplyCorrected = false;
   // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
-  let effectiveEdits = 0;
+  const recoveredCommittedEdits = message.payload?.governed_recovery_committed_edits === true;
+  let effectiveEdits = resuming && (tools.__changedFiles().length || recoveredCommittedEdits)
+    && interruptedExecution.some(entry => EDIT_VIBE_TOOLS.has(entry.payload?.tool) && entry.payload?.ok === true) ? 1 : 0;
   let noChangeReplyCorrected = false;
   // Edit targets whose latest edit failed; a success elsewhere must not let the reply claim these were done.
-  const failedEdits = new Map();
+  for (const entry of interruptedExecution) {
+    const payload = entry.payload || {};
+    if (payload.tool === 'abandon_failed_edit' && payload.ok === true) {
+      if (typeof payload.args?.path !== 'string' || typeof payload.args?.reason !== 'string'
+        || payload.args.reason.trim().length < 20 || payload.args.reason.trim().length > 1000) {
+        throw new Error('Interrupted failed-edit abandonment evidence is unavailable; the session cannot resume safely.');
+      }
+      failedEdits.delete(payload.args.path);
+      abandonedEdits.set(payload.args.path, payload.args.reason.trim());
+      continue;
+    }
+    if (!EDIT_VIBE_TOOLS.has(payload.tool)) continue;
+    const targets = Array.isArray(payload.edit_targets) ? payload.edit_targets : editTargets(payload.tool, payload.args);
+    if ((!targets.length || targets.includes(UNKNOWN_PATCH_TARGET))
+      && payload.ok === false && !/^no-op edit refused/.test(String(payload.preview || ''))) {
+      throw new Error('Interrupted edit targets are unavailable; review the saved edit evidence before resuming.');
+    }
+    for (const target of targets) {
+      if (payload.ok === true) { failedEdits.delete(target); abandonedEdits.delete(target); }
+      else if (payload.ok === false && !/^no-op edit refused/.test(String(payload.preview || ''))) failedEdits.set(target, clip(String(payload.preview || 'Edit failed.'), 200));
+    }
+  }
   let failedEditReplyCorrected = false;
   let cloudStartIndex = null;
   const cloudEgressReceipts = new Set();
@@ -979,12 +1077,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
     try { result = await tools.run({ command }); } catch (error) { result = { error: clip(redactGitError(error.message), 1500) }; }
     checkedFingerprint = revision;
     toolCache.clear();
-    recordVerification(command, result);
+    const verificationSteps = recordVerification(command, result);
+    const progressMarkers = markVerificationSteps(verificationSteps);
     await store.post(session.id, {
       role: 'tool', kind: 'test', content: toolHeadline('run', { command }),
       payload: {
         message_id: message.id, tool: 'run', args: { command }, ok: !failedVerifications.has(verificationKey(command)),
         preview: resultPreview(result), automatic: true, reason: 'web_typescript_handoff', source_fingerprint: revision,
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}),
       },
     });
   };
@@ -1005,6 +1105,21 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     return hash.digest('hex');
   };
+  const verificationProgress = new Set(interruptedExecution.flatMap(entry =>
+    Array.isArray(entry.payload?.verification_progress)
+      ? entry.payload.verification_progress.filter(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value))
+      : []));
+  const markVerificationProgress = (command, ok) => {
+    const marker = crypto.createHash('sha256')
+      .update(uiFingerprint(changedVsBase())).update('\0')
+      .update(verificationKey(command)).update('\0')
+      .update(ok ? 'passed' : 'failed').digest('hex');
+    verificationProgress.add(marker);
+    return marker;
+  };
+  const markVerificationSteps = steps => steps
+    .filter(step => /^exit \d+\b/.test(String(step.preview || '')))
+    .map(step => markVerificationProgress(step.command, step.ok));
   const runHumanTest = async ({ reason, automatic, rerun = false, external = false }) => {
     const changedFiles = changedVsBase();
     const fingerprint = uiFingerprint(humanTestInputFiles(changedFiles));
@@ -1121,9 +1236,12 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const uiFiles = humanTestInputFiles(changedVsBase());
     if (!uiFiles.length || uiFingerprint(uiFiles) === humanFingerprint || uiFingerprint(uiFiles) === humanTestAttemptedFingerprint) return;
     const { result, preview, fingerprint } = await runHumanTest({ reason: 'automatic pre-handoff check of the changed web files', automatic: true });
+    const progressMarkers = !result.reused && reusableHumanTest(result)
+      ? [markVerificationProgress('human_test', result.ok)] : [];
     await store.post(session.id, {
       role: 'tool', kind: 'test', content: toolHeadline('human_test', {}),
-      payload: { message_id: message.id, args: { automatic: true }, preview, automatic: true, reason: 'web_ui_handoff', ...humanTestPayload(result, fingerprint) },
+      payload: { message_id: message.id, args: { automatic: true }, preview, automatic: true, reason: 'web_ui_handoff', ...humanTestPayload(result, fingerprint),
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}) },
     });
   };
   const repairRounds = limits.repairRounds ?? VIBE_LIMITS.repairRounds;
@@ -1138,6 +1256,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
     const noChange = !effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply);
+    const abandoned = abandonedEdits.size
+      ? `\n\nUnneeded edits not applied:\n${[...abandonedEdits].map(([file, reason]) => `- ${file}: ${reason}`).join('\n')}` : '';
     if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
     if (noChange) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk${humanTestRan.reused ? ' (earlier evidence reused; no new walk)' : ' (fixture data, desktop)'}: ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
@@ -1150,35 +1270,119 @@ async function runConversation({ store, session, message, workspacePath, branch,
       unverifiedReply = `${failedEdits.size ? `These edits failed and were not applied: ${[...failedEdits.keys()].join(', ')}.\n` : ''}A completion claim was withheld because verification failed.`;
     }
     return lastVerification?.failed
-      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}`, error: true, tools, model }
-      : { reply: `${clip(reply, 8000)}${walked}`, tools, model };
+      ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${boundedPreview(lastVerification.preview, 900)}\n${unverifiedReply}${abandoned}`, error: true, tools, model }
+      : { reply: `${clip(reply, 8000)}${walked}${abandoned}`, ...(failedEdits.size ? { error: true } : {}), tools, model };
   };
   let turnCeiling = limits.maxTurns;
   let wallCeiling = limits.wallBudgetMs;
   let repairExtended = false;
+  const autoRoundLimit = Math.min(VIBE_LIMITS.autoContinuationRounds, Math.max(0, Number.isInteger(limits.autoContinuationRounds) ? limits.autoContinuationRounds : VIBE_LIMITS.autoContinuationRounds));
+  const autoWallLimit = Math.min(VIBE_LIMITS.autoContinuationWallMs, Math.max(0, Number.isFinite(limits.autoContinuationWallMs) ? limits.autoContinuationWallMs : VIBE_LIMITS.autoContinuationWallMs));
+  let autoRounds = priorContinuations.length;
+  const startReceipt = interruptedExecution.find(entry => entry.payload?.reason === 'vibe_execution_started');
+  const autoStarted = startReceipt ? Date.parse(startReceipt.payload?.started_at)
+    : priorContinuations.length ? Date.parse(priorContinuations[0].payload?.started_at) : started;
+  if (!Number.isFinite(autoStarted) || autoStarted > started + 60_000
+    || priorContinuations.some(entry => Date.parse(entry.payload?.started_at) !== autoStarted)) {
+    throw new Error('Automatic continuation timing evidence is invalid.');
+  }
+  if (!startReceipt) {
+    await store.post(session.id, {
+      role: 'system', kind: 'status',
+      content: 'Bob started this coding turn; its time limit is preserved if the worker restarts.',
+      payload: { message_id: message.id, reason: 'vibe_execution_started', started_at: new Date(autoStarted).toISOString(),
+        timing_source: priorContinuations.length ? 'continuation_receipt' : resuming ? 'legacy_recovery' : 'new_turn' },
+    });
+  }
+  const investigated = new Set(interruptedExecution
+    .filter(entry => CACHEABLE_VIBE_TOOLS.has(entry.payload?.tool) && entry.payload?.ok === true)
+    .map(entry => toolCallKey(entry.payload.tool, entry.payload.args || {})));
+  const progressFingerprint = () => crypto.createHash('sha256')
+    .update(uiFingerprint(changedVsBase())).update('\0')
+    .update([...failedVerifications.keys()].sort().join('\0')).update('\0')
+    .update([...failedEdits.keys()].sort().join('\0')).update('\0')
+    .update([...investigated].sort().join('\0')).update('\0')
+    .update([...verificationProgress].sort().join('\0')).digest('hex');
+  const seenProgress = new Set(priorContinuations.map(entry => entry.payload?.state_fingerprint).filter(Boolean));
+  seenProgress.add(progressFingerprint());
+  let budgetReason = 'The execution budget was reached before this request was finished.';
+  const interruption = async () => {
+    const state = await store.continuationState(session.id, message.seq);
+    if (state.closed) return 'This session was closed. The work already performed is preserved on its branch.';
+    if (state.ownerQueued) return 'A newer owner instruction is waiting. The current work is preserved so that instruction can be handled next.';
+    return null;
+  };
+  const beginAutoContinuation = async nextTurn => {
+    if (!ownerWantsChange) return { reason: 'The execution budget was reached before this request was finished.' };
+    const progress = progressFingerprint();
+    if (seenProgress.has(progress)) {
+      return { reason: 'The automatic continuation stopped because there was no new code, investigation evidence, or verification progress.' };
+    }
+    if (autoRounds >= autoRoundLimit || Date.now() - autoStarted >= autoWallLimit) {
+      return { reason: 'The automatic continuation reached its safety limit before the request was finished.' };
+    }
+    const interrupted = await interruption();
+    if (interrupted) return { interrupted };
+    seenProgress.add(progress);
+    autoRounds++;
+    repairExtended = false;
+    verificationCorrections = 0;
+    correctedFailure = null;
+    editsAtCorrection = effectiveEdits;
+    turnCeiling = nextTurn - 1 + limits.maxTurns;
+    wallCeiling = Date.now() - started - pausedMs + limits.wallBudgetMs;
+    await store.post(session.id, {
+      role: 'system', kind: 'status',
+      content: `Bob is continuing this unfinished request automatically (round ${autoRounds} of ${autoRoundLimit}), using the existing work and check results.`,
+      payload: { message_id: message.id, reason: 'automatic_continuation', round: autoRounds, started_at: new Date(autoStarted).toISOString(), state_fingerprint: progress },
+    });
+    const continuation = {
+      instruction: 'Continue the original owner request from the current branch and recorded evidence. Fix outstanding failures, run appropriate checks on the final draft, and reply only when the work is verified or a genuine blocker needs a person. Do not open a PR without the owner asking.',
+      verification: lastVerification,
+    };
+    const cloudVerification = cloudSafeVerification(lastVerification);
+    pushModelFeedback(continuation, cloudVerification !== lastVerification ? { ...continuation, verification: cloudVerification } : null);
+    return { continued: true };
+  };
+  if (resuming) {
+    const reason = await interruption();
+    if (reason) return { reply: reason, error: true, tools };
+  }
   const contextOverrides = new Map();
   const reportedCompaction = new Set();
   for (let turn = 1; ; turn++) {
+    if ((resuming || autoRounds > 0) && Date.now() - autoStarted >= autoWallLimit) {
+      budgetReason = 'The automatic continuation reached its safety limit before the request was finished.';
+      break;
+    }
+    if (resuming || autoRounds > 0 || repairExtended) {
+      const reason = await interruption();
+      if (reason) return { reply: reason, error: true, tools };
+    }
     if (turn > turnCeiling || Date.now() - started - pausedMs >= wallCeiling) {
-      if (repairExtended || repairTurns < 1) break;
+      const beforeCheck = await interruption();
+      if (beforeCheck) return { reply: beforeCheck, error: true, tools };
       await ensureTypecheck();
-      if (!lastVerification?.failed) break;
-      // The budget ran out mid-repair: one bounded extension to fix the failing check, not an unverified handoff.
-      repairExtended = true;
-      turnCeiling = turn - 1 + repairTurns;
-      wallCeiling = Date.now() - started - pausedMs + repairBudgetMs;
-      await store.post(session.id, {
-        role: 'system', kind: 'status',
-        content: `Bob reached this message's step budget with ${lastVerification.command} failing; continuing for up to ${repairTurns} more steps to repair it.`,
-        payload: { message_id: message.id, reason: 'verification_repair_extension', command: lastVerification.command, repair_turns: repairTurns, repair_budget_ms: repairBudgetMs },
-      });
-      const extensionMessage = command => `Step budget reached while ${command} is failing. You have ${repairTurns} more steps: read the exact failure, fix its cause in source, rerun the same check, then reply. If it cannot be fixed safely, reply with args.blocked_reason.`;
-      const extension = {
-        error: extensionMessage(lastVerification.command),
-        verification: lastVerification,
-      };
-      const cloudExtension = cloudSafeVerification(lastVerification);
-      pushModelFeedback(extension, cloudExtension !== lastVerification ? { ...extension, error: extensionMessage(cloudExtension.command), verification: cloudExtension } : null);
+      const interruptionReason = await interruption();
+      if (interruptionReason) return { reply: interruptionReason, error: true, tools };
+      if (!repairExtended && repairTurns >= 1 && lastVerification?.failed) {
+        repairExtended = true;
+        turnCeiling = turn - 1 + repairTurns;
+        wallCeiling = Date.now() - started - pausedMs + repairBudgetMs;
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `Bob reached this message's step budget with ${lastVerification.command} failing; continuing for up to ${repairTurns} more steps to repair it.`,
+          payload: { message_id: message.id, reason: 'verification_repair_extension', command: lastVerification.command, repair_turns: repairTurns, repair_budget_ms: repairBudgetMs },
+        });
+        const extensionMessage = command => `Step budget reached while ${command} is failing. You have ${repairTurns} more steps: read the exact failure, fix its cause in source, rerun the same check, then reply. If it cannot be fixed safely, reply with args.blocked_reason.`;
+        const extension = { error: extensionMessage(lastVerification.command), verification: lastVerification };
+        const cloudExtension = cloudSafeVerification(lastVerification);
+        pushModelFeedback(extension, cloudExtension !== lastVerification ? { ...extension, error: extensionMessage(cloudExtension.command), verification: cloudExtension } : null);
+      } else {
+        const next = await beginAutoContinuation(turn);
+        if (next.interrupted) return { reply: next.interrupted, error: true, tools };
+        if (!next.continued) { budgetReason = next.reason; break; }
+      }
     }
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
@@ -1230,7 +1434,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       if (active + 1 < candidates.length) { active++; turn--; continue; }
       return { reply: 'The model context cannot fit the current request and tool history. The existing branch is preserved; use a larger private model or start a shorter continuation.', error: true, tools };
     }
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
+    const request = { ...base, idempotency_key: `${base.idempotency_key}${resuming ? `::restart-${message.payload.restart_retries}` : ''}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     if (candidate.provider === 'ollama_cloud' && !cloudEgressReceipts.has(candidate.model)) {
       await store.post(session.id, {
         role: 'system', kind: 'status',
@@ -1245,6 +1449,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
       cloudEgressReceipts.add(candidate.model);
     }
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
+    if (resuming || autoRounds > 0 || repairExtended) {
+      const reason = await interruption();
+      if (reason) return { reply: reason, error: true, tools };
+    }
+    if ((resuming || autoRounds > 0) && Date.now() - autoStarted >= autoWallLimit) {
+      budgetReason = 'The automatic continuation reached its safety limit before the request was finished.';
+      break;
+    }
     if (!response.ok) {
       if (response.status === 413 && response.code === 'context_exceeded') {
         const reported = Number(String(response.error || '').match(/\((\d+) tokens\)/)?.[1]);
@@ -1378,10 +1590,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
       if (failedEdits.size && !args.blocked_reason && !failedEditReplyCorrected) {
         // One file changed is not the whole request; failed edits elsewhere must be fixed or reported, never claimed.
         failedEditReplyCorrected = true;
-        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) });
+        const correction = {
           error: 'Reply refused: these edits failed and were never applied, so that part of the owner\'s request is not done. read_file the exact current lines and retry with old_text copied verbatim, or reply with args.blocked_reason naming what remains undone. Do not claim changes to these files.',
           failed_edits: Object.fromEntries(failedEdits),
-        }) });
+        };
+        pushModelFeedback(correction, historyHasAttachments
+          ? { ...correction, failed_edits: '[Earlier failed edit paths and output withheld from external models; use a private model to inspect them.]' }
+          : null);
         const next = nextCandidate();
         if (next > 0) {
           const previous = candidates[active];
@@ -1410,15 +1626,27 @@ async function runConversation({ store, session, message, workspacePath, branch,
         pushModelFeedback(correction, cloudVerification !== lastVerification ? { ...correction, verification: cloudVerification } : null);
         continue;
       }
-      return handoff(args.blocked_reason || args.no_change_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
+      let continuationStop = null;
+      if (lastVerification?.failed && !args.blocked_reason && repairRounds > 0 && verificationCorrections >= repairRounds && repairProgressed) {
+        const next = await beginAutoContinuation(turn + 1);
+        if (next.interrupted) return { reply: next.interrupted, error: true, tools };
+        if (next.continued) continue;
+        continuationStop = next.reason;
+      }
+      const reply = args.blocked_reason || args.no_change_reason || args.message || args.summary || call.thought || 'Done.';
+      const result = await handoff(continuationStop ? `${reply}\n\n${continuationStop}` : reply, response.data?.model);
+      return args.blocked_reason ? { ...result, error: true } : result;
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 1500), tool: call.tool, args }) });
     const callKey = toolCallKey(call.tool, args);
     const repeatCount = (repeatedCalls.get(callKey) || 0) + 1;
     repeatedCalls.set(callKey, repeatCount);
     let result;
+    const unsafeReplay = resuming && (call.tool === 'firewall_change' || (call.tool === 'tailnet_acl' && args.op === 'set'));
     if (repeatCount > 3) {
       result = { error: 'identical tool call limit reached; use prior results or report the blocker instead of repeating this call' };
+    } else if (unsafeReplay) {
+      result = { error: 'A live configuration change cannot be repeated after an interrupted turn. Inspect the current configuration and obtain a fresh owner instruction before changing it.' };
     } else if (typeof tools[call.tool] === 'function' && !call.tool.startsWith('__')) {
       if (CACHEABLE_VIBE_TOOLS.has(call.tool) && toolCache.has(callKey)) {
         result = { ...toolCache.get(callKey), reused: true, instruction: 'Already executed against unchanged workspace. Use this result; choose a different, narrower next step.' };
@@ -1430,7 +1658,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
         if (EDIT_VIBE_TOOLS.has(call.tool)) {
           for (const target of editTargets(call.tool, args)) {
-            if (!result?.error) failedEdits.delete(target);
+            if (!result?.error) { failedEdits.delete(target); abandonedEdits.delete(target); }
             else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
           }
         }
@@ -1459,19 +1687,27 @@ async function runConversation({ store, session, message, workspacePath, branch,
       result = { error: `unknown tool ${call.tool}` };
     }
     const verificationSteps = call.tool === 'run' ? recordVerification(String(args.command || ''), result) : [];
+    if (CACHEABLE_VIBE_TOOLS.has(call.tool) && !result?.error && !result?.reused) investigated.add(callKey);
     const humanTestCall = call.tool === 'human_test' && result && !result.error?.startsWith?.('identical tool call');
     const browserTestCall = call.tool === 'browser_test' && result && !result.error?.startsWith?.('identical tool call');
+    const progressMarkers = call.tool === 'run' ? markVerificationSteps(verificationSteps)
+      : humanTestCall && !result.reused && reusableHumanTest(result) ? [markVerificationProgress('human_test', result.ok)]
+        : browserTestCall && result.scope === 'targeted' && reusableHumanTest(result)
+          ? [markVerificationProgress(`${result.verification_key}@${result.revision}`, result.ok)] : [];
     await store.post(session.id, {
       role: 'tool', kind: call.tool === 'run' || humanTestCall || browserTestCall ? 'test' : 'tool', content: toolHeadline(call.tool, args),
       payload: {
         message_id: message.id, tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args),
         ok: !result?.error && !result?.timed_out && (call.tool === 'run' ? result?.exit_code === 0 : typeof result?.exit_code !== 'number' || result.exit_code === 0) && (!(humanTestCall || browserTestCall) || result.ok === true),
         preview: humanTestCall || browserTestCall ? humanTestPreview(browserTestCall ? { ...result, scope: 'targeted', revision: args.revision } : result) : resultPreview(result), turn,
+        ...(EDIT_VIBE_TOOLS.has(call.tool) ? { edit_targets: editTargets(call.tool, args) } : {}),
         ...(verificationSteps.length ? { verification_steps: verificationSteps } : {}),
+        ...(progressMarkers.length ? { verification_progress: progressMarkers } : {}),
         ...(humanTestCall ? humanTestPayload(result, humanFingerprint) : {}),
         ...(browserTestCall && result.scope === 'targeted' ? { browser_test: result } : {}),
       },
     });
+    if (unsafeReplay) return { reply: result.error, error: true, tools, model: response.data?.model };
     if (repeatCount > 3) {
       const next = nextCandidate();
       if (!loopRecoveryUsed && next > 0) {
@@ -1516,7 +1752,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       ...(remaining <= 3 ? { budget: `${remaining} step(s) left: verify and reply now.` } : {}),
     }) });
   }
-  return { ...await handoff('I ran out of steps for this message. What I changed so far is kept on the branch; say "continue" to carry on.', undefined, { browser: false }), budget: true };
+  return { ...await handoff(`${budgetReason} The work is preserved on the branch and is not ready for a PR.`, undefined, { browser: false }), error: true, budget: true };
 }
 
 async function shipSession({ store, session, workspacePath, branch, baseSha, deps, beforeSeq = Number.MAX_SAFE_INTEGER, limits = VIBE_LIMITS }) {
@@ -1637,14 +1873,32 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
   let session = await store.session(message.session_id);
   if (!session || session.status === 'closed') { await store.complete(message.id, 'failed'); return { skipped: true }; }
   const action = message.payload?.action || 'message';
-  await store.updateSession(session.id, { status: 'working' });
+  if (!await store.updateSession(session.id, { status: 'working' }, { unlessClosed: true })) {
+    await store.complete(message.id, 'failed');
+    return { skipped: true };
+  }
   let outcome;
   try {
+    const recoveryHead = message.payload?.governed_recovery_expected_head;
+    if (recoveryHead !== undefined && (!/^[0-9a-f]{40}$/.test(String(recoveryHead))
+      || !session.base_sha || session.head_sha !== recoveryHead || !(Number(message.payload?.restart_retries) >= 1))) {
+      throw new Error('The governed recovery branch head no longer matches the saved session and workspace. Recovery stopped without changing the branch.');
+    }
+    if (Number(message.payload?.restart_retries) > 0 && session.base_sha
+      && !fs.existsSync(path.join(vibeWorkspacePath(deps.workspaceRoot, session.id), '.git'))) {
+      throw new Error('The interrupted Vibe workspace is missing. Recovery stopped without recreating or resetting the branch; restore the workspace before retrying.');
+    }
     const ws = ensureVibeWorkspace({ workspaceRoot: deps.workspaceRoot, session, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead });
+    if (recoveryHead !== undefined && git(ws.workspacePath, ['rev-parse', 'HEAD']) !== recoveryHead) {
+      throw new Error('The governed recovery branch head no longer matches the saved session and workspace. Recovery stopped without changing the branch.');
+    }
     if (deps.prepareWorkspace) await deps.prepareWorkspace(ws.workspacePath);
     revertEphemeralWorkspaceChanges(ws.workspacePath);
     if (ws.created) {
-      await store.updateSession(session.id, { base_sha: ws.baseSha, branch: ws.branch, head_sha: ws.baseSha });
+      if (!await store.updateSession(session.id, { base_sha: ws.baseSha, branch: ws.branch, head_sha: ws.baseSha }, { unlessClosed: true })) {
+        await store.complete(message.id, 'failed');
+        return { skipped: true };
+      }
       await store.post(session.id, { role: 'system', kind: 'status', content: ws.recovered ? `The session workspace was missing, so the branch was recreated from main ${ws.baseSha.slice(0, 10)}; earlier unshipped changes are not in it.` : `Working on branch ${ws.branch} from main ${ws.baseSha.slice(0, 10)}.` });
       session = { ...session, base_sha: ws.baseSha, branch: ws.branch };
     }
@@ -1667,7 +1921,10 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
     }
     const state = branchState(ws.workspacePath, ws.baseSha);
     const status = session.pr_url || outcome.payload?.pr_url ? 'shipped' : 'open';
-    await store.updateSession(session.id, { status, head_sha: state.head, changed_files: state.files });
+    if (!await store.updateSession(session.id, { status, head_sha: state.head, changed_files: state.files }, { unlessClosed: true })) {
+      await store.complete(message.id, 'failed');
+      return { skipped: true };
+    }
     await store.post(session.id, { role: 'bob', kind: outcome.error ? 'error' : 'message', content: outcome.reply, payload: outcome.payload || {} });
     await store.complete(message.id, outcome.error ? 'failed' : 'done');
     if (state.head && deps.onHeadChanged) deps.onHeadChanged(session.id);
@@ -1675,7 +1932,7 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
   } catch (error) {
     const detail = clip(redactGitError(error && error.message), 600);
     await store.post(session.id, { role: 'bob', kind: 'error', content: `Something went wrong: ${detail}` }).catch(() => {});
-    await store.updateSession(session.id, { status: session.pr_url ? 'shipped' : 'open' }).catch(() => {});
+    await store.updateSession(session.id, { status: session.pr_url ? 'shipped' : 'open' }, { unlessClosed: true }).catch(() => {});
     await store.complete(message.id, 'failed').catch(() => {});
     return { error: detail };
   }

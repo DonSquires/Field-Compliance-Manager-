@@ -228,4 +228,97 @@ test.describe('in New Zealand', () => {
     await expect(page.getByLabel('Alarm received at')).toHaveValue('2026-08-30T00:00');
     await expect(page.getByText('The response target counts from this time, not from when the job is saved.')).toBeVisible();
   });
+
+  test('a dispatcher records a source-backed noise outcome without claiming FCM GPS', async ({ page }, testInfo) => {
+    const browserErrors = monitorBrowserErrors(page);
+    const dispatchJob = {
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccd',
+      job_type: 'noise_control',
+      priority: 'normal',
+      status: 'pending',
+      briefing_notes: 'Despatch 58184481',
+      sla_minutes: 30,
+      sla_respond_by: null,
+      sla_breached: false,
+      expected_dwell_minutes: 5,
+      timing_source: 'dispatch_default',
+      created_at: '2026-08-29T20:00:00.000Z',
+      dispatched_at: null,
+      acknowledged_at: null,
+      en_route_at: null,
+      on_scene_at: null,
+      completed_at: null,
+      shift_id: null,
+      shift_stop_id: null,
+      client_site_id: '42424242-4242-4242-8242-424242424242',
+      service_agreement_id: '24242424-2424-4424-8424-242424242424',
+      billing_basis: null,
+      extra_work_order_id: null,
+      site: { name: 'Noise Source Site', address: '1 Civic Square, Nelson', hs_notes: null, access_instructions: null },
+      resource: null,
+    };
+    let completed = false;
+    const actionRequests: Record<string, unknown>[] = [];
+    await page.route('**/rest/v1/dispatch_jobs**', async (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(completed ? [] : [dispatchJob]),
+    }));
+    await page.route('**/rest/v1/rpc/record_retrospective_noise_job_outcome', async (route) => {
+      actionRequests.push(route.request().postDataJSON() as Record<string, unknown>);
+      completed = true;
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ replayed: false, finance: { status: 'review_required' } }),
+      });
+    });
+
+    await signInAsAdmin(page, '/admin/field-ops?area=dispatch');
+    const mobileTabs = page.getByRole('tablist', { name: 'Dispatch console sections' });
+    if (await page.evaluate(() => window.innerWidth < 768)) {
+      await expect(mobileTabs).toBeVisible();
+      await expect(page.getByText('1 active jobs')).toBeVisible();
+      const jobsTab = mobileTabs.getByRole('button', { name: 'Jobs', exact: true });
+      await jobsTab.click();
+      await expect(jobsTab).toHaveClass(/is-active/);
+    }
+    await expect(page.locator('.dispatch-job-list')).toBeVisible();
+    await page.getByRole('row').filter({ hasText: 'Noise Control' }).click();
+    const detail = page.getByRole('dialog', { name: 'Dispatch details for Noise Source Site' });
+    await detail.getByRole('button', { name: 'Record historical outcome' }).click();
+    await detail.getByLabel('Source register file · hashed locally, not uploaded').setInputFiles({
+      name: 'noise-register.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('Despatch No,Outcome\n58184481,Source report fixture'),
+    });
+    await expect(detail.getByText(/noise-register\.csv · SHA-256 [0-9a-f]{64}/i)).toBeVisible();
+    await detail.getByLabel('Exact despatch reference').fill('58184481');
+    await detail.getByLabel('Register received / alarm time').fill('2026-08-29T22:00');
+    await detail.getByLabel('Source-reported on-site time').fill('2026-08-29T22:15');
+    await detail.getByLabel('Source-reported off-site time').fill('2026-08-29T22:45');
+    await detail.getByLabel('Source-reported outcome · exclude names and contact details').fill('Source record reports the noise had ceased on arrival.');
+    await detail.getByLabel('Reason for retrospective reconciliation').fill('Reconcile the source register after the app failure.');
+    await expect(detail.getByText(/not an FCM GPS fix/)).toBeVisible();
+    await detail.getByLabel(/I reviewed the exact source record/).check();
+    await page.screenshot({ path: testInfo.outputPath('retrospective-noise-form.png'), fullPage: true });
+    await detail.getByRole('button', { name: 'Confirm historical completion' }).click();
+
+    await expect(page.getByText(/Historical outcome recorded from the source register\. No FCM GPS was added\. Finance needs review before invoicing\./)).toBeVisible();
+    await expect(page.locator('.dispatch-job-dialog')).toBeHidden();
+    const actionRequest = actionRequests[0] ?? {};
+    expect(actionRequest).toMatchObject({
+      p_expected_status: 'pending',
+      p_source_name: 'noise-register.csv',
+      p_source_reference: '58184481',
+      p_source_time_zone: 'Pacific/Auckland',
+      p_source_received_local: '2026-08-29T22:00',
+      p_source_arrived_local: '2026-08-29T22:15',
+      p_source_departed_local: '2026-08-29T22:45',
+    });
+    expect(actionRequest.p_source_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(actionRequest.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(actionRequest).not.toHaveProperty('p_gps_lat');
+    expect(actionRequest).not.toHaveProperty('p_gps_lng');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+  });
 });

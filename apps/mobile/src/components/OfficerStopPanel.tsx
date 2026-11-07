@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View 
 import { captureCoordinates } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 
-type ShiftStop = { id: string; module_key: string; stop_order: number; visit_number: number; status: string; sla_status: string; sla_arrive_by: string; officer_notes: string | null; client_sites: Array<{ name: string }>; location_zones: Array<{ name: string }> };
+type ShiftStop = { id: string; module_key: string; stop_order: number; visit_number: number; status: string; sla_status: string; sla_arrive_by: string; client_sites: Array<{ name: string }>; location_zones: Array<{ name: string }> };
 type Props = { shiftId: string | null };
 
 export function OfficerStopPanel({ shiftId }: Props) {
@@ -18,7 +18,7 @@ export function OfficerStopPanel({ shiftId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: queryError } = await supabase.from('shift_stops').select('id, module_key, stop_order, visit_number, status, sla_status, sla_arrive_by, officer_notes, client_sites(name), location_zones(name)').eq('shift_id', shiftId).in('status', ['pending', 'en_route', 'on_scene']).order('stop_order').order('visit_number');
+      const { data, error: queryError } = await supabase.from('shift_stops').select('id, module_key, stop_order, visit_number, status, sla_status, sla_arrive_by, client_sites(name), location_zones(name)').eq('shift_id', shiftId).in('status', ['pending', 'en_route', 'on_scene']).order('stop_order').order('visit_number');
       if (queryError) throw queryError;
       setStops((data as ShiftStop[]) ?? []);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Shift stops could not be loaded.'); } finally { setLoading(false); }

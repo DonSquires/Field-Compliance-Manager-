@@ -7,6 +7,7 @@ import { ServiceClientWorkspace } from '../components/ServiceClientWorkspace';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { supabase } from '../lib/supabase';
+import { edgeFunctionErrorMessage } from '../lib/edgeFunctionError';
 import { readWorkflowContext, workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
 import './ClientSetupPage.css';
 
@@ -309,7 +310,7 @@ const DeliveryWorkspace: React.FC<ClientSetupProps & { onNavigate: NavigateWithC
     const prepared = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: client.id });
     if (prepared.error || !prepared.data) throw prepared.error ?? new Error('Invitation could not be prepared.');
     const invitation = await supabase.functions.invoke('invite-org', { body: { target_organization_id: client.id, email: prepared.data.email, display_name: prepared.data.display_name?.trim() || client.name } });
-    if (invitation.error) throw invitation.error;
+    if (invitation.error) throw new Error(await edgeFunctionErrorMessage(invitation.error, 'The client invitation could not be sent.'));
     setInviteEmail(prepared.data.email); setNotice('Invitation sent. Portal access is optional and does not authorize provider configuration.');
   });
   const buildRun = () => void run(async () => {
