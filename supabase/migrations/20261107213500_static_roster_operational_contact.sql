@@ -118,13 +118,16 @@ begin
   return jsonb_build_object('roster_slot_id', v_slot.id, 'changed', true);
 end;
 $function$;
-revoke all on function public.set_roster_slot_contact(uuid, text, text, text, uuid) from public, anon, authenticated;
+revoke all on function public.set_roster_slot_contact(uuid, text, text, text, uuid) from public, anon, authenticated, service_role;
 grant execute on function public.set_roster_slot_contact(uuid, text, text, text, uuid) to authenticated;
 
+-- The contact wrappers delegate to the rostered-break primitives (20261106120000) so a
+-- static slot keeps its planned break and paid/unpaid setting when a contact is designated.
 create function public.create_static_roster_slot_with_contact(
   p_client_request_id uuid, p_work_unit_id uuid, p_staff_id uuid,
   p_scheduled_start timestamptz, p_scheduled_end timestamptz, p_publish boolean,
-  p_notes text, p_contact_name text, p_contact_phone text
+  p_notes text, p_planned_break_minutes integer, p_break_unpaid boolean,
+  p_contact_name text, p_contact_phone text
 ) returns public.roster_slots
 language plpgsql
 security definer
@@ -136,6 +139,7 @@ declare
   v_contact public.roster_slot_contacts%rowtype;
 begin
   if auth.uid() is null or p_client_request_id is null then raise exception 'Authentication and request ID required'; end if;
+  if p_planned_break_minutes is null or p_break_unpaid is null then raise exception 'Break settings are required'; end if;
   select u.* into v_unit from public.roster_work_units u
   where u.id = p_work_unit_id and u.active and u.work_unit_type = 'static';
   if not found or not public.is_admin_for_org(v_unit.organization_id) then
@@ -151,6 +155,8 @@ begin
     if v_slot.work_unit_id is distinct from p_work_unit_id or v_slot.staff_id is distinct from p_staff_id
       or v_slot.scheduled_start is distinct from p_scheduled_start or v_slot.scheduled_end is distinct from p_scheduled_end
       or v_slot.notes is distinct from nullif(btrim(p_notes), '')
+      or v_slot.planned_break_minutes is distinct from p_planned_break_minutes
+      or v_slot.break_unpaid is distinct from p_break_unpaid
       or (v_slot.status in ('draft', 'published') and v_slot.status is distinct from case when p_publish then 'published' else 'draft' end)
       or v_contact.contact_name is distinct from nullif(btrim(p_contact_name), '')
       or v_contact.contact_phone is distinct from nullif(btrim(p_contact_phone), '') then
@@ -158,17 +164,19 @@ begin
     end if;
     return v_slot;
   end if;
-  v_slot := public.create_roster_slot(p_client_request_id, p_work_unit_id, p_staff_id, p_scheduled_start, p_scheduled_end, p_publish, p_notes);
+  v_slot := public.create_roster_slot_with_break(p_client_request_id, p_work_unit_id, p_staff_id, p_scheduled_start,
+    p_scheduled_end, p_publish, p_notes, p_planned_break_minutes, p_break_unpaid);
   perform public.set_roster_slot_contact(v_slot.id, v_slot.status, p_contact_name, p_contact_phone, null);
   return v_slot;
 end;
 $function$;
-revoke all on function public.create_static_roster_slot_with_contact(uuid, uuid, uuid, timestamptz, timestamptz, boolean, text, text, text) from public, anon, authenticated;
-grant execute on function public.create_static_roster_slot_with_contact(uuid, uuid, uuid, timestamptz, timestamptz, boolean, text, text, text) to authenticated;
+revoke all on function public.create_static_roster_slot_with_contact(uuid, uuid, uuid, timestamptz, timestamptz, boolean, text, integer, boolean, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.create_static_roster_slot_with_contact(uuid, uuid, uuid, timestamptz, timestamptz, boolean, text, integer, boolean, text, text) to authenticated;
 
 create function public.update_static_roster_slot_with_contact(
   p_slot_id uuid, p_expected_status text, p_staff_id uuid,
   p_scheduled_start timestamptz, p_scheduled_end timestamptz, p_notes text,
+  p_planned_break_minutes integer, p_break_unpaid boolean,
   p_contact_name text, p_contact_phone text, p_expected_contact_version uuid
 ) returns public.roster_slots
 language plpgsql
@@ -179,10 +187,11 @@ declare
   v_slot public.roster_slots%rowtype;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
-  v_slot := public.update_roster_slot(p_slot_id, p_expected_status, p_staff_id, p_scheduled_start, p_scheduled_end, p_notes);
+  v_slot := public.update_roster_slot_with_break(p_slot_id, p_expected_status, p_staff_id, p_scheduled_start,
+    p_scheduled_end, p_notes, p_planned_break_minutes, p_break_unpaid);
   perform public.set_roster_slot_contact(v_slot.id, v_slot.status, p_contact_name, p_contact_phone, p_expected_contact_version);
   return v_slot;
 end;
 $function$;
-revoke all on function public.update_static_roster_slot_with_contact(uuid, text, uuid, timestamptz, timestamptz, text, text, text, uuid) from public, anon, authenticated;
-grant execute on function public.update_static_roster_slot_with_contact(uuid, text, uuid, timestamptz, timestamptz, text, text, text, uuid) to authenticated;
+revoke all on function public.update_static_roster_slot_with_contact(uuid, text, uuid, timestamptz, timestamptz, text, integer, boolean, text, text, uuid) from public, anon, authenticated, service_role;
+grant execute on function public.update_static_roster_slot_with_contact(uuid, text, uuid, timestamptz, timestamptz, text, integer, boolean, text, text, uuid) to authenticated;

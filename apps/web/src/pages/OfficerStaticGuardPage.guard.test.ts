@@ -6,7 +6,7 @@ const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx')
 const home = readFileSync(resolve(process.cwd(), 'src/pages/OfficerHomePage.tsx'), 'utf8');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerStaticGuardPage.tsx'), 'utf8');
 const privateBriefing = readFileSync(resolve(process.cwd(), 'src/lib/officerStaticBriefing.ts'), 'utf8');
-const startGateMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261104214253_static_arrival_requires_started_shift.sql'), 'utf8');
+const startGateMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261107213000_static_arrival_requires_started_shift.sql'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901014000_static_guard_post_attendance.sql'), 'utf8');
 const shiftUpdateFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901015000_fix_static_guard_shift_updates.sql'), 'utf8');
 const rehydrationMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901016000_rehydrate_static_guard_evidence.sql'), 'utf8');
@@ -29,7 +29,7 @@ describe('officer static guarding post', () => {
     expect(page).toContain('Static post data was incomplete');
     expect(page).not.toContain('p_zone_ids:');
     expect(page).not.toContain("p_module_key: 'site_guard'");
-    expect(page).toContain('p_shift_id: requestedShiftId');
+    expect(privateBriefing).toContain('{ shift_id: shiftId }');
     expect(page).toContain('EndShiftDialog');
     expect(page).not.toMatch(/from\('shift_stops'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
     expect(page).not.toContain("supabase.rpc('manage_officer_static_post'");

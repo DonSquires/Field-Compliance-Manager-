@@ -25,8 +25,7 @@ test('creates a static shift with a designated contact and safely retries a lost
   });
   await page.route('**/rest/v1/rpc/materialize_roster_slot', async (route) => {
     materializations += 1;
-    expect(route.request().postDataJSON()).toMatchObject({ p_slot_id: slotId, p_expected_status: 'published' });
-    return route.fulfill({ json: [{ slot_id: slotId, shift_id: '31313131-3131-4131-8131-313131313131', created: true }] });
+    return route.fulfill({ status: 500, json: { message: 'Publishing materialises on the server' } });
   });
   await signInAsAdmin(page, '/admin/roster');
   await page.getByRole('button', { name: /Create shift/ }).first().click();
@@ -48,7 +47,8 @@ test('creates a static shift with a designated contact and safely retries a lost
   expect(attempts).toHaveLength(2);
   expect(attempts[0]).toMatchObject({ p_work_unit_id: staticUnit, p_staff_id: officerId, p_contact_name: 'Synthetic duty contact', p_contact_phone: '+64 (0)3 555 1234 ext. 21', p_publish: true });
   expect(attempts[0].p_client_request_id).toEqual(attempts[1].p_client_request_id);
-  expect(materializations).toBe(1);
+  expect(attempts[0]).toHaveProperty('p_planned_break_minutes');
+  expect(materializations).toBe(0);
 });
 
 test('updates and clears the contact on a published static shift', async ({ page }) => {
@@ -144,7 +144,7 @@ test('requires review of copied contacts and warns that bulk repeats omit them',
   expect(creates).toBe(0);
   await dialog.getByLabel('I confirmed this contact for the new shift.').check();
   await dialog.getByRole('button', { name: 'Create shift' }).click();
-  await expect(page.getByText(/Shift copied and saved as a draft/)).toBeVisible();
+  await expect(page.getByText(/Shift copied as a draft/)).toBeVisible();
   expect(creates).toBe(1);
   await page.locator('.roster-slot-queue').getByRole('button', { name: /Civic Centre Static Post/ }).click();
   await inspector.getByRole('button', { name: 'Copy selected' }).click();

@@ -1,3 +1,6 @@
+-- Rebuilt from the live definitions in supabase/schema.sql (refresh 135ae793):
+-- static attendance now requires the canonical started shift, and the officer can read
+-- the post brief for a published or accepted shift before starting it.
 CREATE OR REPLACE FUNCTION public.manage_officer_static_post(p_stop_id uuid, p_expected_status text, p_action text, p_request_id uuid, p_notes text DEFAULT NULL::text, p_gps_lat double precision DEFAULT NULL::double precision, p_gps_lng double precision DEFAULT NULL::double precision, p_gps_accuracy_metres double precision DEFAULT NULL::double precision)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -112,3 +115,8 @@ begin
     'attendance_evidence',jsonb_build_object('arrival',v_arrival_receipt,'departure',v_departure_receipt)
   );
 end;$function$;
+
+revoke all on function public.manage_officer_static_post(uuid, text, text, uuid, text, double precision, double precision, double precision) from public, anon;
+grant execute on function public.manage_officer_static_post(uuid, text, text, uuid, text, double precision, double precision, double precision) to authenticated, service_role;
+revoke all on function public.get_officer_static_post(uuid) from public, anon;
+grant execute on function public.get_officer_static_post(uuid) to authenticated, service_role;
