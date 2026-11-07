@@ -160,6 +160,24 @@ describe('describeActivityLine', () => {
     expect(describeActivityLine(report, line(3))).toMatchObject({ tags: ['Maintenance and repairs', 'Completed', 'Ref WO-1'], title: 'Repair north gate latch', lines: [{ label: 'Completion', text: 'Latch replaced and tested.' }] });
     expect(describeActivityLine(report, line(4)).tags).toEqual(['Observations', 'General observation']);
   });
+
+  it('titles an attended call-out and labels its response times', () => {
+    const [callOut] = readActivityLines({
+      version: 2,
+      lines: [{
+        d: '2026-11-04', t: '22:44', p: 'Burger N Beast Richmond', k: 'event', c: 'call_out',
+        ti: 'Call-out attended: Patrol Support (high priority)',
+        n: 'No one inside during site visit.',
+        ac: 'Requested 22:32, on scene 22:44 (12 min response; 30 min target met), completed 23:07.',
+      }],
+    })!.lines;
+    const entry = describeActivityLine(report, callOut);
+    expect(entry.title).toBe('Call-out attended: Patrol Support (high priority)');
+    expect(entry.lines).toEqual([
+      { text: 'No one inside during site visit.' },
+      { label: 'Response', text: 'Requested 22:32, on scene 22:44 (12 min response; 30 min target met), completed 23:07.' },
+    ]);
+  });
 });
 
 describe('siteLogGroups', () => {
