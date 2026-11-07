@@ -70,7 +70,8 @@ test('historical outcomes execute the real milestone, SLA and client-ledger trig
         briefing_notes text DEFAULT 'Source register 12345; PRIVATE_COMPLAINANT',
         outcome_notes text, dispatched_at timestamptz, acknowledged_at timestamptz,
         en_route_at timestamptz, on_scene_at timestamptz, completed_at timestamptz,
-        insert_gps_lat numeric, insert_gps_lng numeric
+        insert_gps_lat numeric, insert_gps_lng numeric, sla_minutes integer, sla_delay_reason text,
+        created_at timestamptz DEFAULT now()
       );
       CREATE TABLE public.shifts (id uuid PRIMARY KEY, organization_id uuid, officer_user_id uuid);
       CREATE TABLE public.audit_log (
@@ -81,7 +82,7 @@ test('historical outcomes execute the real milestone, SLA and client-ledger trig
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, dispatch_job_id uuid,
         started_at timestamptz DEFAULT now(), target_minutes integer DEFAULT 10,
         arrived_at timestamptz, elapsed_minutes integer, status text DEFAULT 'running',
-        updated_at timestamptz DEFAULT now()
+        updated_at timestamptz DEFAULT now(), created_at timestamptz DEFAULT now()
       );
       CREATE TABLE public.incidents (investigation_id uuid, is_staff_sensitive boolean, dispatch_job_id uuid);
       CREATE TABLE public.location_events (
@@ -163,7 +164,8 @@ test('historical outcomes execute the real milestone, SLA and client-ledger trig
     assert.equal(sql(`SELECT elapsed_minutes || ':' || status FROM public.sla_clocks
       WHERE dispatch_job_id='${job(1)}'`), '15:breached', 'SLA uses source receipt, not import time');
     const event = JSON.parse(sql(`SELECT payload FROM public.location_events WHERE external_ref='${job(1)}'`));
-    assert.equal(event.issue, 'Callout attendance');
+    // The snapshot projection is either the original or the enriched call-out (20261107212000).
+    assert.match(event.issue, /^(Callout attendance|Call-out attended: Noise Control)$/);
     assert.match(event.comments, /Retrospective source-register.*did not capture GPS/);
     assert.doesNotMatch(JSON.stringify(event), /PRIVATE_COMPLAINANT/);
     assert.equal(JSON.parse(sql(invoke(1, request))).replayed, true);
