@@ -4,15 +4,18 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
 async function openStaffProfile(page: Page, name = 'Ana Ngata', staffId = '22222222-2222-4222-8222-222222222222') {
-  const profilePromise = page.waitForEvent('popup');
   await page.getByRole('row', { name: new RegExp(name) }).getByRole('button', { name: 'Open profile ↗' }).click();
-  const popup = await profilePromise;
-  await popup.waitForURL(new RegExp(`profile=${staffId}`));
-  const profileUrl = popup.url();
-  await expect(page.getByRole('row', { name: new RegExp(name) })).toBeVisible();
-  await popup.close();
-  await page.goto(profileUrl);
+  await page.waitForURL(new RegExp(`profile=${staffId}`));
+  await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   return page;
+}
+
+async function savePayrollRole(page: Page, roleCode: string) {
+  await page.getByLabel('Payroll role').selectOption(roleCode);
+  const startDate = page.getByLabel('Start date', { exact: true });
+  if (!(await startDate.inputValue())) await startDate.fill('2026-09-01');
+  await page.getByLabel('Reason for change').fill('Payroll role confirmed by HR.');
+  await page.getByRole('button', { name: 'Save employment details' }).click();
 }
 
 test('organization role codes appear in Payroll role and do not replace the staff authorization role', async ({ page }) => {
@@ -22,7 +25,7 @@ test('organization role codes appear in Payroll role and do not replace the staf
     referenceCodeRequest.url = new URL(route.request().url());
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) });
   });
-  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+  await page.route('**/rest/v1/rpc/set_staff_employment_setup', async (route) => {
     savedPayRole = JSON.parse(route.request().postData() ?? '{}');
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'field_security' }) });
   });
@@ -35,9 +38,8 @@ test('organization role codes appear in Payroll role and do not replace the staf
   const payrollRole = staffProfile.getByLabel('Payroll role');
   await expect(payrollRole.locator('option')).toHaveCount(2);
   await expect(payrollRole).toHaveValue('');
-  await payrollRole.selectOption('field_security');
-  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  await savePayrollRole(staffProfile, 'field_security');
+  await expect(staffProfile.getByRole('status')).toContainText('Employment details saved for Ana Ngata.');
 
   expect(referenceCodeRequest.url?.searchParams.get('organization_id')).toBe('eq.33333333-3333-4333-8333-333333333333');
   expect(referenceCodeRequest.url?.searchParams.get('code_type')).toBe('eq.role_code');
@@ -57,7 +59,7 @@ test('payroll administrator creates an organization code and assigns it to staff
     roleCodes.push(code);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(code) });
   });
-  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+  await page.route('**/rest/v1/rpc/set_staff_employment_setup', async (route) => {
     assignmentPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'FIELD_SECURITY' }) });
   });
@@ -73,9 +75,8 @@ test('payroll administrator creates an organization code and assigns it to staff
 
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
-  await staffProfile.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
-  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  await savePayrollRole(staffProfile, 'FIELD_SECURITY');
+  await expect(staffProfile.getByRole('status')).toContainText('Employment details saved for Ana Ngata.');
   expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'FIELD_SECURITY', p_name: 'Field Security Officer' });
   expect(assignmentPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'FIELD_SECURITY' });
 });
@@ -102,7 +103,7 @@ test('HR records a current roster skill and auditable training evidence for staf
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'Credentials', exact: true }).click();
+  await page.getByRole('button', { name: 'Check credentials' }).click();
   await page.getByRole('button', { name: 'Assign skill' }).click();
   const skillForm = page.locator('form', { has: page.getByRole('button', { name: 'Save staff skill' }) });
   await skillForm.getByLabel('Staff member').selectOption('22222222-2222-4222-8222-222222222222');
@@ -141,7 +142,7 @@ test('saving a changed payroll role sends the existing role as the expected valu
     ]) });
   });
   await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'existing_guard', name: 'Existing Guard' }, { code: 'field_security', name: 'Field Security' }]) }));
-  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+  await page.route('**/rest/v1/rpc/set_staff_employment_setup', async (route) => {
     savedPayRole = JSON.parse(route.request().postData() ?? '{}');
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'field_security' }) });
   });
@@ -151,9 +152,8 @@ test('saving a changed payroll role sends the existing role as the expected valu
   await expect(page.getByRole('row', { name: /Ana Ngata/ })).not.toContainText('Officer');
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
-  await staffProfile.getByLabel('Payroll role').selectOption('field_security');
-  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  await savePayrollRole(staffProfile, 'field_security');
+  await expect(staffProfile.getByRole('status')).toContainText('Employment details saved for Ana Ngata.');
   expect(savedPayRole).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: 'existing_guard', p_role_code: 'field_security' });
 });
 
@@ -164,20 +164,20 @@ test('an empty organization role-code list leaves Payroll role unassigned and sa
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
   const payrollRole = staffProfile.getByLabel('Payroll role');
-  await expect(payrollRole.locator('option')).toHaveText(['No payroll role assigned']);
+  await expect(payrollRole.locator('option')).toHaveText(['Choose a payroll role']);
   await expect(payrollRole).toHaveValue('');
-  await expect(staffProfile.getByRole('button', { name: 'Save payroll role' })).toBeDisabled();
+  await expect(staffProfile.getByText('No active payroll roles are configured for this organisation.')).toBeVisible();
+  await expect(staffProfile.getByRole('button', { name: 'Save employment details' })).toBeDisabled();
 });
 
 test('a rejected payroll-role write is shown without changing the authorization role', async ({ page }) => {
   await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
-  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: '23505', message: 'Role code already exists for this staff member.' }) }));
+  await page.route('**/rest/v1/rpc/set_staff_employment_setup', async (route) => await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: '23505', message: 'Role code already exists for this staff member.' }) }));
 
   await signInAsAdmin(page, '/admin/people-hr');
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
-  await staffProfile.getByLabel('Payroll role').selectOption('field_security');
-  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
+  await savePayrollRole(staffProfile, 'field_security');
   await expect(staffProfile.getByRole('alert')).toContainText('Role code already exists for this staff member.');
 });
 
@@ -452,7 +452,7 @@ test('an offered candidate can be hired later, which creates the login and staff
   await expect(dialog.getByLabel('Proposed start')).toHaveValue('2026-09-14');
   await dialog.getByLabel('Offer note').fill('Accepted by phone, start confirmed.');
   await dialog.getByRole('button', { name: 'Confirm acceptance and hire' }).click();
-  await expect(page.getByRole('status')).toContainText('Tama Rangi hired. Their login and staff record are created for this branch and onboarding has started – see the Staff tab.');
+  await expect(page.getByRole('status')).toContainText('Tama Rangi hired. Their login and staff record are ready for profile-based onboarding.');
   expect(calls).toEqual(['manage', 'create-user', 'convert']);
 });
 
@@ -461,7 +461,7 @@ test('onboarding shows each person as a searchable single row with the next requ
   await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: '2026-09-07', identity_status: 'complete', employment_status: 'complete', evidence_status: 'complete', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['Assign a line manager'], next_action: 'Assign line manager' }])));
   await page.route('**/rest/v1/rpc/manage_staff_onboarding', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); expect(payload.p_action).toBe('advance'); expect(payload.p_stage).toBe('supervision'); expect(payload.p_expected_version).toBe(3); await route.fulfill(json([{ ledger_id: payload.p_ledger_id, current_stage: 'supervision', status: 'in_progress', version: 4 }])); });
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  await page.getByRole('button', { name: 'Prepare someone to work' }).click();
   const row = page.getByRole('row', { name: /Ana Ngata/ });
   await expect(row).toContainText('Evidence');
   await expect(row).toContainText('In progress');
@@ -487,7 +487,7 @@ test('a first credential is recorded and verified from the onboarding row throug
   let payload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); payload = body; await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: body.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  await page.getByRole('button', { name: 'Prepare someone to work' }).click();
   const row = page.getByRole('row', { name: /Ana Ngata/ });
   await row.getByRole('button', { name: 'Verify credential' }).click();
   const dialog = page.getByRole('dialog', { name: 'Record credential' });
@@ -521,7 +521,7 @@ test('onboarding guides HR through employment setup as one audited step', async 
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  await page.getByRole('button', { name: 'Prepare someone to work' }).click();
   const row = page.getByRole('row', { name: /Ana Ngata/ });
   await row.getByRole('button', { name: 'Complete employment setup' }).click();
   const dialog = page.getByRole('dialog', { name: 'Complete employment setup' });
