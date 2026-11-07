@@ -21,7 +21,9 @@ describe('enterprise identity console', () => {
   it('filters invite roles through the non-escalating presentation policy', () => {
     expect(source).toContain('getAssignableRoles');
     expect(source).toContain('directInviteRoles.map');
-    expect(source).toContain('const directInviteRoles = assignableRoles;');
+    expect(source).toContain('const directInviteRoles = useMemo(() => assignableRoles.filter(');
+    expect(source).toContain("if (profile?.role === 'client_admin') return clientRole;");
+    expect(source).toContain("return !clientRole || profile?.role === 'grand_master';");
     expect(source).toContain('linkHR: false, linkRoster: false');
     expect(source).toContain('isFieldInvite && inviteForm.linkHR');
     expect(source).toContain('isFieldInvite && inviteForm.linkRoster');
@@ -41,5 +43,12 @@ describe('enterprise identity console', () => {
   it('names the row action for what it edits, so changing a person is discoverable', () => {
     expect(source).toContain('Edit user');
     expect(source).not.toContain('<span>Manage access</span>');
+  });
+
+  it('offers resend only to pending invitations and shows real edge-function errors', () => {
+    expect(source).toContain("supabase.rpc('get_user_sign_in_states'");
+    expect(source).toContain("signInState?.sign_in_state === 'invited' && !user.deactivated_at");
+    expect(source).toContain("signInState?.sign_in_state === 'no_login' && !user.deactivated_at");
+    expect(source).toContain('edgeFunctionErrorMessage(invokeError');
   });
 });

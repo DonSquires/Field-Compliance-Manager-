@@ -71,7 +71,8 @@ test('administrator sends a non-field identity invitation', async ({ page }) => 
   await expect(invite.getByRole('heading', { name: 'Invite a user' })).toBeVisible();
   await invite.getByLabel('Display name').fill('Tama Ropata');
   await invite.getByLabel('Email address').fill('tama@fcm.test');
-  await invite.getByLabel('Role').selectOption('client_viewer');
+  await invite.getByLabel('Role').selectOption('admin');
+  await expect(invite.getByLabel('Role').locator('option[value="client_viewer"]')).toHaveCount(0);
   await expect(invite.getByRole('switch')).toHaveCount(0);
   await invite.getByRole('button', { name: 'Send invitation' }).click();
   await expect(page.getByRole('status')).toContainText('Invitation sent to tama@fcm.test');
@@ -205,5 +206,22 @@ test('administrator grants a local branch authority with retained reason', async
   await dialog.getByRole('button', { name: 'Add permission' }).click();
   await expect(page.getByText('Timesheet local review', { exact: true })).toBeVisible();
   await expect(page.getByText('timesheet_local_review', { exact: true })).toHaveCount(0);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('identity list shows real sign-in state and only offers resend to pending invitations', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  const resends: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('/functions/v1/resend-invite')) resends.push(request.postData() ?? ''); });
+  await signInAsAdmin(page, '/admin/users');
+  const ana = page.getByText('Ana Ngata', { exact: true }).locator('..').locator('..');
+  const jordan = page.getByText('Jordan Lee', { exact: true }).locator('..').locator('..');
+  await expect(ana.locator('.identity-sign-in')).toHaveText('Signed in');
+  await expect(jordan.locator('.identity-sign-in')).toHaveText('Invite pending');
+  await expect(ana.getByRole('button', { name: 'Resend' })).toHaveCount(0);
+  await jordan.getByRole('button', { name: 'Resend' }).click();
+  await expect(page.getByRole('status')).toContainText(/Jordan|jordan@fcm.test|resent|sent/i);
+  expect(resends).toHaveLength(1);
+  if (process.env.E2E_VISUAL_DIR) await page.screenshot({ path: `${process.env.E2E_VISUAL_DIR}/identity-sign-in-${test.info().project.name}.png`, fullPage: true });
   expect(errors, errors.join('\n')).toEqual([]);
 });
