@@ -43956,6 +43956,10 @@ export type Database = {
         Args: { p_observation_id: string }
         Returns: string
       }
+      get_client_portal_access: {
+        Args: { p_account_organization_id: string }
+        Returns: Json
+      }
       get_consolidated_commercial_overview: {
         Args: { p_from?: string; p_root_organization_id: string; p_to?: string }
         Returns: {
@@ -44709,6 +44713,15 @@ export type Database = {
           period_start: string
           staff_id: string
           timesheet_id: string
+        }[]
+      }
+      get_user_sign_in_states: {
+        Args: { p_user_ids: string[] }
+        Returns: {
+          invited_at: string
+          last_sign_in_at: string
+          sign_in_state: string
+          user_id: string
         }[]
       }
       get_user_spine_readiness: {
