@@ -19,6 +19,11 @@ const fnBody = (sql, head) => {
 };
 const migrationBody = (name) => fnBody(migration, `create or replace function public.${name}(`);
 const liveBody = (name) => fnBody(schema, `CREATE OR REPLACE FUNCTION "public"."${name}"(`);
+// Before release the snapshot holds the prior definition; after release the live catalog refresh makes it identical to the migration.
+const assertPriorOrApplied = (migrated, prior, live) => {
+  if (migrated === live) return;
+  assert.equal(prior, live);
+};
 
 test('the existing dispatch_callout projection stays the single ledger row per job, enriched for the client', () => {
   const sql = migrationBody('project_dispatch_job_to_ledger');
@@ -130,8 +135,10 @@ test('the migration runs against PostgreSQL: one refreshed call-out per job, nev
         ('${job(4)}', '${org}', '${site}', 'normal', 'completed', 'Incident raised.', NULL, NULL, '2026-01-15T09:40Z', '2026-01-15T10:00Z'),
         ('${job(6)}', '${org}', NULL, 'normal', 'completed', NULL, NULL, NULL, '2026-01-15T09:40Z', '2026-01-15T10:00Z');
     `);
-    assert.equal(payload(1).issue, 'Callout attendance', 'the live projection wrote its thin row first');
-    assert.equal(payload(1).work_activity_code, 'other');
+    if (migrationBody('project_dispatch_job_to_ledger') !== liveBody('project_dispatch_job_to_ledger')) {
+      assert.equal(payload(1).issue, 'Callout attendance', 'the live projection wrote its thin row first');
+      assert.equal(payload(1).work_activity_code, 'other');
+    }
 
     sql(`SET check_function_bodies = off;\n${migration}`);
 
@@ -185,7 +192,7 @@ test('the migration runs against PostgreSQL: one refreshed call-out per job, nev
 test('call-outs are their own client category, after incidents and before everything else', () => {
   const sql = migrationBody('report_activity_category');
   assert.match(sql, /when p_kind = 'incident' then 'incident'\n\t\twhen p_event_type = 'dispatch_callout' then 'call_out'\n\t\twhen p_service_line = 'pest_control'/);
-  assert.equal(sql.replace("\t\twhen p_event_type = 'dispatch_callout' then 'call_out'\n", ''), liveBody('report_activity_category'));
+  assertPriorOrApplied(sql, sql.replace("\t\twhen p_event_type = 'dispatch_callout' then 'call_out'\n", ''), liveBody('report_activity_category'));
 });
 
 test('the report builder counts and labels call-outs and otherwise keeps the live definition', () => {
@@ -206,7 +213,7 @@ test('the report builder counts and labels call-outs and otherwise keeps the liv
     ['camera_activation', 8], ['vehicle_observation', 9], ['other_work', 10], ['administration', 11], ['patrol_visit', 12], ['unclassified', 13], ['travel_admin', 14]]) {
     restored = restored.replace(new RegExp(`(\\('${code}', '[^']+', )${order}\\)`), `$1${order - 1})`);
   }
-  assert.equal(restored, liveBody('build_agreement_activity_report_core'));
+  assertPriorOrApplied(sql, restored, liveBody('build_agreement_activity_report_core'));
   assert.match(migration, /REVOKE ALL ON FUNCTION "public"\."build_agreement_activity_report_core"\([^)]*\) FROM PUBLIC, "anon", "authenticated", "service_role";/);
 });
 
@@ -217,7 +224,7 @@ test('both officer timelines list each dispatch milestone the officer recorded, 
     assert.match(sql, /from public\.dispatch_jobs j/);
     assert.match(sql, /where j\.organization_id = v_org_id and j\.assigned_officer_id = p_officer_id and m\.at between p_from and p_to/);
     const live = liveBody(name).toLowerCase();
-    assert.equal(sql.slice(0, sql.indexOf('\n\n    union all\n    select \'dispatch_job:')), live.slice(0, live.lastIndexOf('\n  )')));
+    assertPriorOrApplied(sql, sql.slice(0, sql.indexOf('\n\n    union all\n    select \'dispatch_job:')), live === sql ? live : live.slice(0, live.lastIndexOf('\n  )')));
   }
   assert.match(migration, /REVOKE ALL ON FUNCTION "public"\."get_officer_activity_timeline_unlogged"\([^)]*\) FROM PUBLIC, "anon", "authenticated", "service_role";/);
   assert.ok(!/GRANT EXECUTE ON FUNCTION "public"\."get_officer_activity_timeline_unlogged"\([^)]*\) TO "authenticated"/.test(migration));
