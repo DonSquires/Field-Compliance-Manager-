@@ -2,7 +2,7 @@
 
 ## Scope and method
 
-The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). Production alias verification returned `9bea8729f4528cc8ddd8b2065a66a3987cf0981b`. The earlier private-Oracle proxy repair is deployed. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
+The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). Production alias verification returned `0f87882cc2b1a7a42e47e28fa92d77392a4a2206` after PR #427 merged at 2026-11-08 14:17 UTC. The earlier private-Oracle proxy repair is deployed. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
 
 The authenticated production browser could not be operated from this session. Human screenshots are evidence of visible UI state, not proof that the current authenticated page was reloaded after deployment.
 
@@ -25,12 +25,12 @@ The authenticated production browser could not be operated from this session. Hu
 ### 3. Admin Officer was missing from the activity-timeline subject picker
 
 - The signed-in field-working identity has role `admin_officer`. The activity timeline UI queried only `officer` and `scan_operator`, although the timeline RPC allows an authorized organization admin to read the subject and canon defines `admin_officer` as admin-tier.
-- Fixed locally: include `admin_officer` in the picker. A synthetic desktop browser test verified the officer appears and the expected ID is sent to `get_officer_activity_timeline`. The live audit-writing timeline RPC was not invoked.
+- Fixed and deployed in [PR #427](https://github.com/DonSquires/Field-Compliance-Manager-/pull/427): include `admin_officer` in the picker. A synthetic desktop browser test verified the officer appears and the expected ID is sent to `get_officer_activity_timeline`. The live audit-writing timeline RPC was not invoked.
 
 ### 4. Site-only reports were omitted from zone-scoped admin views
 
 - `FieldReportsPage`, Field Operations follow-up counts, and Admin Hub follow-up counts filtered officer reports only by `zone_id` when the selected agreement had Zones. Reports anchored only to a contracted Site therefore disappeared in a mixed Site+Zone agreement.
-- Fixed locally: the three report reads now use a shared Site-OR-Zone agreement-place filter. The unchanged status, organization, and governed review-RPC checks remain in place.
+- Fixed and deployed in [PR #427](https://github.com/DonSquires/Field-Compliance-Manager-/pull/427): the three report reads now use a shared Site-OR-Zone agreement-place filter. The unchanged status, organization, and governed review-RPC checks remain in place.
 - A synthetic site-only report was visible in the admin review queue in both desktop and phone browser tests with a mixed Site+Zone agreement.
 - Production has 3 recent submitted officer reports: 2 H&S records are linked to a Site and shift but have no Zone; 1 incident report is not linked to a shift or Site. All 3 remain submitted/unreviewed at the time checked. Private narratives were not inspected.
 
@@ -40,6 +40,7 @@ The authenticated production browser could not be operated from this session. Hu
 - The same Auckland-local period now contains 3 completed shifts with 99.56 gross hours, 0 unpaid-break rows, and no standalone completed dispatch jobs. One shift source was updated after submission; the post-submission audit actions include `shift_record_corrected` and `roster_attendance_exception_acknowledged`.
 - `review_branch_timesheet` checks submitted status, actual hours and dispatch-pay blockers but does not compare the source ledger to current shift/break sources. `guard_timesheet_payroll_evidence` protects exported values and payroll corrections, but does not invalidate a submitted snapshot when a source shift changes.
 - The 8.01-hour difference is therefore an unresolved source-snapshot discrepancy, not an authorized adjustment. No timesheet mutation or approval/export was made. Do not branch-check or export this period until an authorized reviewer reconciles it through the governed correction/resubmission path. A stale-source approval guard should be designed and migration-tested as a separate payroll-integrity change.
+- Ledger follow-up confirms 2 saved shift entries versus 3 current completed shifts; one completed shift is missing from the snapshot, and one source changed after submission. The 2 saved entries total 5,493 minutes. No standalone completed dispatch source exists in this period, and no export batch is linked.
 
 ## Verified data paths
 
@@ -51,10 +52,10 @@ The authenticated production browser could not be operated from this session. Hu
 
 ## Verification
 
-- Production Vercel alias matched merged commit `9bea8729f` at verification.
+- Production Vercel alias matched merged commit `0f87882cc2b1a7a42e47e28fa92d77392a4a2206` at verification.
 - Complete web unit suite before the final targeted browser additions: 444 files and 2,315 tests passed. Focused admin/timeline/place-filter suite: 5 files, 33 tests passed.
 - Web lint/type checks and production build passed. Root shift-start and VPS-route tests: 8 passed.
-- Synthetic admin-officer timeline browser check: desktop passed. Site-only report visibility with mixed Site+Zone agreement: desktop and phone passed.
+- Synthetic admin-officer timeline browser check: desktop passed. Site-only report visibility with mixed Site+Zone agreement: desktop and phone passed. Protected PR #427 runtime, web, and offline-browser checks all passed; Vercel serves the merged SHA above.
 - The broad Field Operations browser suite reported 10 failures and 2 passes. Failures included stale screenshot baselines, vehicle-search input timeouts, and a selected-text color assertion. Baselines were not updated. The separately launched full officer-spec run had no captured report and is not claimed as passing.
 - Screenshots for the synthetic report path and the supplied production schedule view were inspected. No real-device/background-GPS proof is available.
 
@@ -64,4 +65,4 @@ The authenticated production browser could not be operated from this session. Hu
 2. Decide whether field-officer place context should follow the assigned shift contract or remain independently selected, with an explicit mismatch explanation.
 3. Reconcile the submitted Nov 2–6 timesheet snapshot before any branch review or payroll export; do not backdate attendance.
 4. Design and test a stale-source guard before allowing submitted timesheets to advance after source shifts or breaks change.
-5. The admin-officer picker and Site-or-Zone report filters are local follow-up changes, not merged or deployed yet. Their normal PR/CI/release path remains to be completed.
+5. Keep the resolved admin-officer picker and Site-or-Zone report filters in production. The stale submitted timesheet source snapshot still requires a separate, migration-tested blocker and authorized reconciliation.
