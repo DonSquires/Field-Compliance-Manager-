@@ -101,6 +101,22 @@ as compliance observations).
   is not permission to publish it to a client; existing disclosure/review gates
   continue to apply.
 
+### Owner direction 2026-11-08: timesheet roster tolerances
+
+- Timesheet start and finish snap independently to their rostered timestamps
+  when the recorded endpoint is within 15 minutes either side, inclusive.
+  Beyond that tolerance, retain the recorded time and highlight the mismatch.
+- A positive rostered unpaid-break allowance is the mandatory unpaid-break plan
+  for this rule. Its recorded unpaid duration snaps to the plan within five
+  minutes either side, inclusive. Missing, open, paid-only, shorter and longer
+  out-of-tolerance unpaid breaks are highlighted; missing breaks never create
+  a deduction. Paid breaks and unplanned unpaid breaks remain actual-duration.
+- This is a timesheet-only derivation exception to the exact-duration deduction
+  above. Preserve original attendance, break timestamps and recorded duration;
+  retain the snapped values and review flags in the submitted work snapshot.
+  Existing submitted, approved and exported snapshots are not silently rewritten.
+  Split periods must not duplicate worked time or break deductions.
+
 ### Owner direction 2026-10-25: roster placement and Workshop labour
 
 - Imported forestry assignments belong in the ordinary staff/work-unit roster

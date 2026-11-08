@@ -3,6 +3,22 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('timesheet reviewer sees saved roster and mandatory unpaid-break mismatches', async ({ page }, testInfo) => {
+  const rows = [{ id: '38383838-3838-4838-8838-383838383838',
+    staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-24', period_end: '2026-08-29',
+    scheduled_hours: 8, actual_hours: 7.5, adjustment_hours: 0, work_derived_hours: 7.5,
+    overtime_hours: 0, status: 'submitted', submitted_at: '2026-08-29T08:05:00Z',
+    work_summary: { entries: [{ metadata: { start_mismatch: true, unpaid_break_mismatch: true } }] },
+  }];
+  await page.route('**/rest/v1/timesheets**', async (route) => route.fulfill({ status: 200, json: rows }));
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => route.fulfill({ status: 200, json: rows }));
+  await signInAsAdmin(page, '/admin/timesheets');
+  const row = page.getByRole('row').filter({ hasText: 'Start time does not match roster' });
+  await expect(row).toHaveClass(/timesheet-mismatch/);
+  await expect(row).toContainText('Mandatory unpaid break does not match roster');
+  await row.screenshot({ path: testInfo.outputPath('reviewer-roster-mismatch.png') });
+});
+
 async function openStaffProfile(page: Page, name = 'Ana Ngata', staffId = '22222222-2222-4222-8222-222222222222') {
   await page.getByRole('row', { name: new RegExp(name) }).getByRole('button', { name: 'Open profile ↗' }).click();
   await page.waitForURL(new RegExp(`profile=${staffId}`));

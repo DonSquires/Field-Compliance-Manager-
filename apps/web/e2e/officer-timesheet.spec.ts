@@ -39,7 +39,7 @@ test('officer timesheet derives hours from completed work only', async ({ page }
   await signInAsOfficer(page, '/officer/timesheet');
   // The period defaults to this week so far (the test browser runs in UTC, where the fixed clock is Sat 29 Aug) and previews on load.
   await expect(page.getByLabel('From')).toHaveValue('2026-08-24');
-  await expect(page.getByLabel('To')).toHaveValue('2026-08-29');
+  await expect(page.getByLabel('To', { exact: true })).toHaveValue('2026-08-29');
   await expect(page.getByText(/Worked time: 8h 00m across 1 shift/)).toBeVisible();
   await expect(page.locator('.officer-timesheet-entries li').filter({ hasText: 'Night patrol' })).toContainText('8h 00m');
   await page.getByLabel('Adjustment (hours)').fill('0');
@@ -59,7 +59,7 @@ test('branch shifts reach the timesheet, unpaid breaks come off, and a shift end
   await signInAsOfficer(page, '/officer/timesheet');
   await expect(page.getByText('Worked time: 12h 00m across 2 shifts and 1 stand-alone job')).toBeVisible();
   const entries = page.locator('.officer-timesheet-entries li');
-  await expect(entries.filter({ hasText: 'Static guarding' })).toContainText('7h 30m (30 min unpaid break taken off)');
+  await expect(entries.filter({ hasText: 'Static guarding' })).toContainText('7h 30m (30 min recorded unpaid break deducted)');
   await expect(entries.filter({ hasText: 'Patrol' }).first()).toContainText('3h 30m · ended when your next shift started');
   await expect(entries.filter({ hasText: 'Alarm response' })).toContainText('1h 00m');
 });
@@ -90,7 +90,7 @@ test('officer resubmits a rejected period after correction', async ({ page }) =>
   });
   await signInAsOfficer(page, '/officer/timesheet');
   await page.getByLabel('From').fill('2026-08-17');
-  await page.getByLabel('To').fill('2026-08-23');
+  await page.getByLabel('To', { exact: true }).fill('2026-08-23');
   await expect(page.getByRole('heading', { name: 'Send the corrected timesheet' })).toBeVisible();
   await page.getByRole('button', { name: 'Send corrected timesheet' }).click();
   await expect(page.getByRole('status').filter({ hasText: '8 hours from 1 work record' })).toBeVisible();
