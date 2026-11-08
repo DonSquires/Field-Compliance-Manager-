@@ -3,6 +3,61 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('workforce staff and Monday week filters persist across shift, roster and HR data', async ({ page }) => {
+  const staffId = '22222222-2222-4222-8222-222222222222';
+  const requests: Array<Record<string, unknown>> = [];
+  const periodRequests: URL[] = [];
+  const branchPeriodRequests: Array<Record<string, unknown>> = [];
+  await page.route('**/rest/v1/rpc/get_operating_organization_contexts', async (route) => route.fulfill({ status: 200, json: [{
+    organization_id: '33333333-3333-4333-8333-333333333333', organization_name: 'Harbour Compliance Services',
+    authority_basis: 'organisation_home', role_at_branch: 'admin', module_access: [], can_be_rostered: true, is_default: true,
+  }] }));
+  await page.route('**/rest/v1/rpc/get_timesheet_shift_rows', async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, json: [] });
+  });
+  await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => route.fulfill({ status: 200, json: [
+    { staff_id: staffId, user_id: staffId, display_name: 'Ana Ngata', work_ready: true },
+  ] }));
+  await page.route('**/rest/v1/timesheets*', async (route) => route.fulfill({ status: 200, json: [] }));
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => {
+    branchPeriodRequests.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, json: [] });
+  });
+  page.on('request', (request) => { if (request.url().includes('/rest/v1/timesheets?')) periodRequests.push(new URL(request.url())); });
+  await signInAsAdmin(page, '/admin/timesheets');
+  await expect(page.getByRole('button', { name: 'Shift hours', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Submitted periods', exact: true })).toBeVisible();
+  await expect(page.getByLabel('From', { exact: true })).toHaveValue('2026-08-24');
+  await expect(page.getByLabel('To', { exact: true })).toHaveValue('2026-08-30');
+  await page.getByLabel('Filter shift hours by staff member').selectOption(staffId);
+  await expect.poll(() => requests.at(-1)?.p_staff_id).toBe(staffId);
+  await page.getByLabel('From', { exact: true }).fill('2026-08-17');
+  await page.getByLabel('To', { exact: true }).fill('2026-08-23');
+  await expect.poll(() => requests.at(-1)?.p_to).toBe('2026-08-23');
+  await page.getByRole('button', { name: 'Submitted periods', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Submitted periods', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const periodScopes = [
+    ...branchPeriodRequests.map((request) => ({ staffId: request.p_staff_id, from: request.p_from, to: request.p_to })),
+    ...periodRequests.map((url) => ({ staffId: url.searchParams.get('or')?.includes(`staff_id.eq.${staffId}`) ? staffId : null,
+      from: url.searchParams.get('period_end')?.replace('gte.', ''), to: url.searchParams.get('period_start')?.replace('lte.', '') })),
+  ];
+  expect(periodScopes).toContainEqual({ staffId, from: '2026-08-17', to: '2026-08-23' });
+  await page.reload();
+  await expect(page.getByLabel('Filter shift hours by staff member')).toHaveValue(staffId);
+  await expect(page.getByLabel('From', { exact: true })).toHaveValue('2026-08-17');
+  const rosterRequests: URL[] = [];
+  page.on('request', (request) => { if (request.url().includes('/rest/v1/shifts?')) rosterRequests.push(new URL(request.url())); });
+  await page.goto('/admin/roster');
+  await expect.poll(() => rosterRequests.some((url) => url.searchParams.get('or')?.includes(`officer_user_id.eq.${staffId}`))).toBe(true);
+  const hrRequests: URL[] = [];
+  page.on('request', (request) => { if (request.url().includes('/rest/v1/timesheets?')) hrRequests.push(new URL(request.url())); });
+  await page.goto('/admin/people-hr?tab=timesheets');
+  await expect.poll(() => hrRequests.some((url) => url.searchParams.get('or')?.includes(`staff_id.eq.${staffId}`)
+    && url.searchParams.get('period_start') === 'lte.2026-08-23'
+    && url.searchParams.get('period_end') === 'gte.2026-08-17')).toBe(true);
+});
+
 test('timesheet reviewer sees saved roster and mandatory unpaid-break mismatches', async ({ page }, testInfo) => {
   const rows = [{ id: '38383838-3838-4838-8838-383838383838',
     staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-24', period_end: '2026-08-29',
@@ -12,11 +67,62 @@ test('timesheet reviewer sees saved roster and mandatory unpaid-break mismatches
   }];
   await page.route('**/rest/v1/timesheets**', async (route) => route.fulfill({ status: 200, json: rows }));
   await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => route.fulfill({ status: 200, json: rows }));
-  await signInAsAdmin(page, '/admin/timesheets');
+  await signInAsAdmin(page, '/admin/people-hr?tab=timesheets');
   const row = page.getByRole('row').filter({ hasText: 'Start time does not match roster' });
   await expect(row).toHaveClass(/timesheet-mismatch/);
   await expect(row).toContainText('Mandatory unpaid break does not match roster');
   await row.screenshot({ path: testInfo.outputPath('reviewer-roster-mismatch.png') });
+});
+
+test('per-shift timesheets confirm matching hours and recover a missed replacement through payable edits', async ({ page }, testInfo) => {
+  const base = { organization_id: '33333333-3333-4333-8333-333333333333',
+    staff_id: '22222222-2222-4222-8222-222222222222', staff_name: 'Ana Ngata',
+    officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'static_guarding',
+    scheduled_start: '2026-08-28T08:00:00Z', scheduled_end: '2026-08-28T16:00:00Z',
+    updated_at: '2026-08-29T08:00:00Z', unpaid_minutes: 30, planned_unpaid_minutes: 30,
+    recorded_unpaid_minutes: 30, correction_updated_at: null, correction_reason: null,
+    start_mismatch: false, finish_mismatch: false, unpaid_break_mismatch: false };
+  const rows = [
+    { ...base, id: '11111111-1111-4111-8111-111111111110', status: 'completed', hours_status: 'confirmed',
+      actual_start: base.scheduled_start, actual_end: base.scheduled_end, payable_start: base.scheduled_start, payable_end: base.scheduled_end },
+    { ...base, id: '11111111-1111-4111-8111-111111111111', status: 'completed', hours_status: 'review', start_mismatch: true,
+      actual_start: '2026-08-28T08:30:00Z', actual_end: base.scheduled_end, payable_start: '2026-08-28T08:30:00Z', payable_end: base.scheduled_end },
+    { ...base, id: '11111111-1111-4111-8111-111111111112', status: 'missed', hours_status: 'missed',
+      actual_start: null, actual_end: null, payable_start: null, payable_end: null },
+  ];
+  const replacement = '2f2f2f2f-2222-4222-8222-222222222222';
+  await page.route('**/rest/v1/rpc/get_timesheet_shift_rows', async (route) => route.fulfill({ status: 200, json: rows }));
+  await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => route.fulfill({ status: 200, json: [
+    { staff_id: base.staff_id, user_id: base.officer_user_id, display_name: 'Ana Ngata' },
+    { staff_id: replacement, user_id: replacement, display_name: 'Replacement Guard' },
+  ] }));
+  let correction: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/correct_timesheet_shift_hours', async (route) => {
+    correction = route.request().postDataJSON();
+    await route.fulfill({ status: 200, json: { shift_id: rows[2].id, staff_id: replacement, hours_status: 'review' } });
+  });
+  await signInAsAdmin(page, '/admin/timesheets');
+  const confirmed = page.getByRole('row').filter({ hasText: 'Hours auto-confirmed' });
+  await expect(confirmed).toHaveClass('shift-hours-confirmed');
+  await expect(confirmed.getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: 'Needs review' })).toHaveClass('shift-hours-review');
+  const missed = page.getByRole('row').filter({ hasText: 'Missed shift' });
+  await expect(missed).toHaveClass('shift-hours-missed');
+  await expect(missed).toContainText('8:00 pm');
+  await missed.getByRole('button', { name: 'Edit shift hours for Ana Ngata' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Payable shift hours' });
+  await dialog.getByLabel('Payable staff member', { exact: true }).selectOption(replacement);
+  await dialog.getByRole('button', { name: 'Use roster dates and times' }).click();
+  await expect(dialog.getByLabel('Payable start')).not.toHaveValue('');
+  await expect(dialog.getByLabel('Payable finish')).not.toHaveValue('');
+  await expect(dialog.getByLabel('Unpaid break minutes')).toHaveValue('30');
+  await dialog.getByLabel('Reason for correction').fill('Original guard called in sick; replacement confirmed by supervisor');
+  await dialog.screenshot({ path: testInfo.outputPath('missed-shift-payable-edit.png') });
+  await dialog.getByRole('button', { name: 'Save for review' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Payable shift hours saved for review' })).toBeVisible();
+  expect(correction).toMatchObject({ p_shift_id: rows[2].id, p_staff_id: replacement,
+    p_payable_start: new Date(base.scheduled_start).toISOString(), p_payable_end: new Date(base.scheduled_end).toISOString(), p_unpaid_minutes: 30 });
+  expect(correction).not.toHaveProperty('p_actual_start');
 });
 
 async function openStaffProfile(page: Page, name = 'Ana Ngata', staffId = '22222222-2222-4222-8222-222222222222') {

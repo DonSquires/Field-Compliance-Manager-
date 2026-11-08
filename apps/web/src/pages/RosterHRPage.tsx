@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords, submittedWords } from '../lib/rosterWords';
 import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
+import { useWorkforceScope } from '../lib/workforceScope';
 import { RosterRulesPanel } from '../components/RosterRulesPanel';
 import { CREDENTIAL_TYPES, credentialExpiryState, credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import './PageStyles.css';
@@ -499,6 +500,7 @@ const RosterHRPage: React.FC = () => {
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const { scope: workforceScope } = useWorkforceScope(profile?.id, operatingBranchId);
   // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
   const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
   const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && isAdminTierRole(profile.role));
@@ -751,9 +753,9 @@ const RosterHRPage: React.FC = () => {
             ? supabase.rpc('get_branch_leave_queue', { p_operating_organization_id: operatingBranchId })
             : Promise.resolve({ data: [], error: null }),
           workingInBranch
-            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })
+            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId, p_from: workforceScope.from, p_to: workforceScope.to, p_staff_id: workforceScope.staffId })
             // ATLAS READS: timesheets — at organisation level the corporate payroll reviewer sees every branch's sheets (RLS: is_admin_for_org)
-            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at, revision, pay_code_override, hourly_rate_override, pay_override_reason').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
+            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by, submitted_at, revision, pay_code_override, hourly_rate_override, pay_override_reason').eq('organization_id', orgId).or(workforceScope.staffId ? `staff_id.eq.${workforceScope.staffId}` : 'id.not.is.null').lte('period_start', workforceScope.to).gte('period_end', workforceScope.from).order('period_start', { ascending: false }).limit(200),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
@@ -891,7 +893,7 @@ const RosterHRPage: React.FC = () => {
       setStaffSkills((staffSkillsRes.data as StaffSkillRow[]) || []);
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
-      setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
+      setTimesheets(((timesheetsRes.data as TimesheetRow[]) || []).filter((row) => !workforceScope.staffId || row.staff_id === workforceScope.staffId));
       setDispatchPayLines((payLinesRes.data as DispatchPayLineRow[]) || []);
       setDispatchPayLineReviews((payLineReviewsRes.data as DispatchPayLineReviewRow[]) || []);
       setPayReviewGovernanceAvailable(PAY_LINE_REVIEW_TABLE_DEPLOYED);
@@ -920,7 +922,7 @@ const RosterHRPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingBranchId, profile?.organizationId]);
+  }, [operatingBranchId, profile?.organizationId, workforceScope.from, workforceScope.to, workforceScope.staffId]);
 
   useEffect(() => {
     loadAll();

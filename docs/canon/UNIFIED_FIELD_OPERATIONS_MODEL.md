@@ -117,6 +117,17 @@ as compliance observations).
   Existing submitted, approved and exported snapshots are not silently rewritten.
   Split periods must not duplicate worked time or break deductions.
 
+- Timesheets are reviewed one shift at a time: completed shifts whose endpoints
+  and mandatory unpaid break match the tolerances are green and their **hours**
+  are automatically confirmed. Final payroll review remains separate (owner
+  clarification, 2026-11-08). Mismatches are amber; missed shifts are red.
+- An authorised reviewer may edit payable start/finish dates and unpaid minutes,
+  or explicitly copy the roster dates/times. These are reasoned administrative
+  corrections, not changes to recorded presence, and require payroll review.
+  Missed work without recorded attendance may be reassigned to an active,
+  branch-authorised replacement staff member. Preserve the original assignment
+  and decision in audit; never transfer recorded attendance or finalised payroll.
+
 ### Owner direction 2026-10-25: roster placement and Workshop labour
 
 - Imported forestry assignments belong in the ordinary staff/work-unit roster
