@@ -86,7 +86,7 @@ serve(async (req)=>{
   try {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const { data: creds, error } = await admin.from('staff_credentials').select('id, staff_id, organization_id, credential_type, credential_number, expiry_date, staff_profiles(display_name)').not('expiry_date', 'is', null).lte('expiry_date', in30);
+    const { data: creds, error } = await admin.from('staff_credentials').select('id, staff_id, organization_id, credential_type, credential_number, expiry_date, staff_profiles(user_profiles!staff_profiles_user_id_fkey(display_name))').not('expiry_date', 'is', null).lte('expiry_date', in30);
     if (error) return json({
       error: 'Query failed',
       details: error.message
@@ -104,7 +104,7 @@ serve(async (req)=>{
         continue;
       }
       const sp = c.staff_profiles;
-      const who = sp?.display_name ?? 'A staff member';
+      const who = sp?.user_profiles?.display_name ?? 'A staff member';
       const credLabel = String(c.credential_type ?? 'credential').replace(/_/g, ' ');
       const title = t.label === 'expired' ? `Credential expired: ${credLabel}` : `Credential expiring (${t.label}): ${credLabel}`;
       const body = t.label === 'expired' ? `${who}'s ${credLabel} has expired (${String(c.expiry_date)}).` : `${who}'s ${credLabel} expires on ${String(c.expiry_date)} (${days} day${days === 1 ? '' : 's'}).`;

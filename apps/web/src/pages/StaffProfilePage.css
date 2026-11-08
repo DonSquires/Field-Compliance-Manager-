@@ -16,3 +16,12 @@
 .staff-profile-document-row .staff-profile-record-row{min-width:0}
 @media(max-width:620px){.staff-profile-form-grid{grid-template-columns:1fr}.staff-profile-form-wide{grid-column:auto}.staff-profile-document-row{grid-template-columns:1fr}}
 .staff-profile-chip{display:inline-block;margin-right:6px;padding:1px 8px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:800}.staff-profile-chip.is-ok{color:#79cda8}.staff-profile-chip.is-warn{color:#e2c172}
+.staff-pay-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.staff-pay-head p{margin:0 0 12px;color:#93a8b6;font-size:13px}.staff-pay-head-actions{display:flex;gap:6px;flex:0 0 auto}
+.staff-pay-message{margin:10px 0;padding:10px;border-left:3px solid #4fb59a;color:#c9f0e3;background:#0d2620}
+.staff-pay-table-wrap{overflow-x:auto;border:1px solid #263c4d;border-radius:5px}
+.staff-pay-table{width:100%;border-collapse:collapse;font-size:13px}.staff-pay-table th{padding:8px 10px;color:#8299aa;font-size:11px;font-weight:850;text-align:left;text-transform:uppercase;background:#08141f}.staff-pay-table td{padding:8px 10px;border-top:1px solid #22384a;color:#d6e2e8;white-space:nowrap}.staff-pay-table small{color:#8ea3b1}
+.staff-pay-actions{display:flex;justify-content:flex-end;gap:6px}
+.staff-pay-state{display:inline-block;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:850}.staff-pay-state-current{color:#9ff0d4;background:#123a30}.staff-pay-state-upcoming{color:#b9dcff;background:#14304a}.staff-pay-state-past{color:#a8b4bd;background:#1b2832}
+.staff-pay-form-actions{display:flex;gap:8px}
+.staff-pay-shared{margin-top:12px}.staff-pay-shared summary{cursor:pointer;color:#a8bbc7;font-size:13px;font-weight:800}.staff-pay-shared[open] summary{margin-bottom:8px}.staff-pay-shared p{color:#8ea3b1;font-size:12px}
+@media(max-width:620px){.staff-pay-head{display:grid}.staff-pay-table th:nth-child(2),.staff-pay-table td:nth-child(2),.staff-pay-table th:nth-child(5),.staff-pay-table td:nth-child(5){display:none}.staff-pay-actions{flex-direction:column}}

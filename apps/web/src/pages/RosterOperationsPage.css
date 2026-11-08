@@ -453,6 +453,24 @@
         background: #3a1618;
 }
 
+.roster-attendance-queue > div > article {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 9px;
+        padding: 9px;
+        border: 1px solid #5c4e2d;
+        border-radius: 5px;
+        background: #211e13;
+}
+
+.roster-attendance-queue article > div { display: grid; gap: 3px; min-width: 0; }
+.roster-attendance-queue article small { color: #b5a476; font-size: 12px; text-transform: capitalize; }
+.roster-attendance-queue article i { color: #e0c27c; font-size: 12px; font-style: normal; font-weight: 850; }
+.roster-attendance-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; }
+.roster-attendance-actions button { min-height: 32px; padding: 4px 10px; border: 1px solid #5c4e2d; border-radius: 5px; color: #f0d89d; background: #2b2616; font-size: 12px; font-weight: 700; cursor: pointer; }
+.roster-attendance-actions button:first-child { border-color: #2f6f8f; color: #bae6fd; background: #10283a; }
+
 .roster-attendance-queue article.is-missed {
         border-left: 3px solid #ff8a80;
         color: #ffb4ad;
