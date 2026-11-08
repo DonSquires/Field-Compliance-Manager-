@@ -51,9 +51,13 @@ test('the officer shell only warns about the geofence on a place-bound shift in 
   assert.doesNotMatch(advisory, /Outside the selected service geofence/);
 });
 
-test('the active shift is the officer own shift for today whichever branch rostered it', () => {
+test('the active shift keeps the officer current or unfinished roster whichever branch rostered it', () => {
   assert.doesNotMatch(activeShift, /\.eq\('organization_id', organizationId\)/);
-  assert.match(activeShift, /\.lte\('scheduled_start', todayEnd\.toISOString\(\)\)\r?\n\s+\.gte\('scheduled_end', todayStart\.toISOString\(\)\)/);
+  assert.match(activeShift, /\.eq\('officer_user_id', userId\)/);
+  assert.ok(activeShift.includes('.or(`status.eq.in_progress,and(scheduled_start.lte.${todayEnd.toISOString()},scheduled_end.gte.${todayStart.toISOString()})`)'));
   assert.match(activeShift, /\.in\('status', \['accepted', 'in_progress'\]\)/);
+  assert.match(activeShift, /\.order\('scheduled_start', \{ ascending: true \}\)/);
+  assert.match(activeShift, /rows\.find\(\(candidate\) => candidate\.status === 'in_progress'\)/);
+  assert.doesNotMatch(activeShift, /\.limit\(1\)/);
   assert.doesNotMatch(activeShift, /maybeSingle\(\)/);
 });
