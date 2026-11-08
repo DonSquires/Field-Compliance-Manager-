@@ -2,7 +2,7 @@
 
 ## Scope and method
 
-The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). Vercel serves `960ad26da4d48e2c8fc94fda89974be6d4900658`, but the VPS release lane is still deployed at `65371fc20145df3bc34195c6a874ef03b90d600b`. The release lane refuses current `main` because the GitHub-generated merge commit author does not match the lane's exact verified author. The managed live nginx config consequently lacks the private-Oracle route in the repository; the public route returns 404 while the synthetic internal control-plane review succeeds. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
+The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). After canonical-author rebase recovery, Vercel and the VPS release lane both serve `99d177bb703ad4f9a64c3d66e6244836266b612f`; the managed nginx site is installed from that same SHA. The private-Oracle route returns 401 without auth and a checked private-GPU receipt for a synthetic authenticated review. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
 
 The authenticated production browser could not be operated from this session. Human screenshots are evidence of visible UI state, not proof that the current authenticated page was reloaded after deployment.
 
@@ -11,23 +11,24 @@ The authenticated production browser could not be operated from this session. Hu
 ### 1. Start is still blocked before attendance
 
 - **Before:** the rostered overnight static shift is `accepted`, has one active site contract, and its site boundary is active, verified, and valid.
-- **During:** the supplied UI reports that private Oracle review is unavailable. The briefing function calls the private Oracle before the static-start RPC. A synthetic internal control-plane review returns a checked `gpu_workstation` receipt. The public route currently returns 404 because the managed VPS nginx site has not received the repository route. This does not reproduce the shift's private briefing payload; logs intentionally withhold narrative and expose only generic failure status.
+- **During:** the supplied UI reported that private Oracle review was unavailable. The briefing function calls the private Oracle before the static-start RPC. At discovery, the public route returned 404 because the VPS lane was refusing the GitHub merge-commit author. This was resolved through PR #429's canonical-author rebase merge; the managed lane then installed the repo-owned nginx route. Post-recovery synthetic verification: anonymous HTTP 401; authenticated synthetic review HTTP 200 with a checked `gpu_workstation` receipt. This does not reproduce the shift's private briefing payload; logs intentionally withhold narrative and expose only generic failure status.
 - **After:** live state still has no `actual_start`, static arrival/departure action, or submitted debrief. The last scoped position check found the fix inside the rostered site's attendance boundary and linked to this accepted shift. A GPS breadcrumb is not a start or arrival receipt.
-- **Safe action:** wait until the managed release lane installs the route, then refresh and retry **Start shift** for the original rostered assignment. Do not start an unscheduled shift or infer/backdate attendance. If Oracle still fails after the public route returns authenticated review, contact operations; do not bypass the briefing privacy gate.
+- **Safe action:** the managed route is now installed; refresh and retry **Start shift** for the original rostered assignment. Do not start an unscheduled shift or infer/backdate attendance. If Oracle still fails despite the restored route, contact operations; do not bypass the briefing privacy gate.
 
-### Release lane: merged commits rejected by author policy
+### Release lane: canonical-author recovery
 
-- The host's `bob-release-lane.timer` is active. Its latest run rejects the
-	`main` branch-head author; its deployed SHA remains `65371fc...`.
+- Before recovery, the host's `bob-release-lane.timer` repeatedly rejected the
+	`main` branch-head author and remained at SHA `65371fc...`.
 - The managed repository requires the branch-head author to be exactly
 	`Don Squires <256263525+DonSquires@users.noreply.github.com>`. The PR head
 	commits use that identity, but GitHub merge commits use `DonSquires
 	<squires.don@gmail.com>`, so subsequent timer ticks keep refusing `main`.
-- Repository settings allow rebase merge. A follow-up PR with a canonical
-	author commit, merged by rebase, is the narrow path to restore lane progress
-	without weakening the author check or pushing directly to `main`.
+- Repository settings allowed rebase merge. PR #429's canonical author commit
+	was merged by rebase, preserving the release-lane check without weakening it
+	or pushing directly to `main`.
 - The host release lane restores nginx from its managed repository on each
-	live tick. Manual nginx edits are not durable and were not repeated here.
+	live tick. It completed successfully at `99d177bb...`; deployed and nginx
+	hashes now match. No unmanaged nginx edit was made.
 
 ### 2. GPS place context is bound to another agreement, not the rostered site
 
@@ -66,7 +67,8 @@ The authenticated production browser could not be operated from this session. Hu
 
 ## Verification
 
-- Production Vercel alias matched `960ad26da4d48e2c8fc94fda89974be6d4900658`, while the VPS release lane remained behind at `65371fc20145df3bc34195c6a874ef03b90d600b`.
+- Production Vercel alias, VPS `deployed_sha`, and VPS `nginx_sha` matched
+	`99d177bb703ad4f9a64c3d66e6244836266b612f` after managed release.
 - Complete web unit suite before the final targeted browser additions: 444 files and 2,315 tests passed. Focused admin/timeline/place-filter suite: 5 files, 33 tests passed.
 - Web lint/type checks and production build passed. Root shift-start and VPS-route tests: 8 passed.
 - Synthetic admin-officer timeline browser check: desktop passed. Site-only report visibility with mixed Site+Zone agreement: desktop and phone passed. Protected PR #427 runtime, web, and offline-browser checks all passed; Vercel serves the merged SHA above.
@@ -75,7 +77,7 @@ The authenticated production browser could not be operated from this session. Hu
 
 ## Outstanding human and engineering actions
 
-1. After the release lane installs the private Oracle proxy, human-operated retry at [the production officer schedule](https://www.fcmanager.co.nz/officer/schedule); confirm that private briefing delivery succeeds, then verify the exact rostered shift's `actual_start` and static arrival receipt. Share only redacted result status.
+1. Human-operated retry at [the production officer schedule](https://www.fcmanager.co.nz/officer/schedule); the officer's shift remains `accepted` with no start/arrival receipt at last check. Confirm private briefing delivery, then verify that the original rostered shift's `actual_start` and static arrival receipt were recorded. Share only redacted result status.
 2. Decide whether field-officer place context should follow the assigned shift contract or remain independently selected, with an explicit mismatch explanation.
 3. Reconcile the submitted Nov 2–6 timesheet snapshot before any branch review or payroll export; do not backdate attendance.
 4. Design and test a stale-source guard before allowing submitted timesheets to advance after source shifts or breaks change.
