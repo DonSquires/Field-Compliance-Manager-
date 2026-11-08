@@ -2,7 +2,7 @@
 
 ## Scope and method
 
-The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). Production alias verification returned `0f87882cc2b1a7a42e47e28fa92d77392a4a2206` after PR #427 merged at 2026-11-08 14:17 UTC. The earlier private-Oracle proxy repair is deployed. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
+The production target is [the officer schedule](https://www.fcmanager.co.nz/officer/schedule). Vercel serves `960ad26da4d48e2c8fc94fda89974be6d4900658`, but the VPS release lane is still deployed at `65371fc20145df3bc34195c6a874ef03b90d600b`. The release lane refuses current `main` because the GitHub-generated merge commit author does not match the lane's exact verified author. The managed live nginx config consequently lacks the private-Oracle route in the repository; the public route returns 404 while the synthetic internal control-plane review succeeds. This audit used scoped, read-only database/Atlas diagnostics and synthetic browser fixtures; no real user session, password, business-record write, timesheet correction, review, or attendance mutation was used.
 
 The authenticated production browser could not be operated from this session. Human screenshots are evidence of visible UI state, not proof that the current authenticated page was reloaded after deployment.
 
@@ -11,9 +11,23 @@ The authenticated production browser could not be operated from this session. Hu
 ### 1. Start is still blocked before attendance
 
 - **Before:** the rostered overnight static shift is `accepted`, has one active site contract, and its site boundary is active, verified, and valid.
-- **During:** the supplied UI reports that private Oracle review is unavailable. The briefing function calls the private Oracle before the static-start RPC. A synthetic authenticated review through the deployed proxy returns a checked `gpu_workstation` receipt, but that does not reproduce this shift's private briefing payload. The current failure's per-request cause is unknown; error logs intentionally withhold narrative and expose only a generic failure.
+- **During:** the supplied UI reports that private Oracle review is unavailable. The briefing function calls the private Oracle before the static-start RPC. A synthetic internal control-plane review returns a checked `gpu_workstation` receipt. The public route currently returns 404 because the managed VPS nginx site has not received the repository route. This does not reproduce the shift's private briefing payload; logs intentionally withhold narrative and expose only generic failure status.
 - **After:** live state still has no `actual_start`, static arrival/departure action, or submitted debrief. The last scoped position check found the fix inside the rostered site's attendance boundary and linked to this accepted shift. A GPS breadcrumb is not a start or arrival receipt.
-- **Safe action:** refresh and retry **Start shift** for the original rostered assignment. Do not start an unscheduled shift or infer/backdate attendance. If Oracle still fails, contact operations; do not bypass the briefing privacy gate.
+- **Safe action:** wait until the managed release lane installs the route, then refresh and retry **Start shift** for the original rostered assignment. Do not start an unscheduled shift or infer/backdate attendance. If Oracle still fails after the public route returns authenticated review, contact operations; do not bypass the briefing privacy gate.
+
+### Release lane: merged commits rejected by author policy
+
+- The host's `bob-release-lane.timer` is active. Its latest run rejects the
+	`main` branch-head author; its deployed SHA remains `65371fc...`.
+- The managed repository requires the branch-head author to be exactly
+	`Don Squires <256263525+DonSquires@users.noreply.github.com>`. The PR head
+	commits use that identity, but GitHub merge commits use `DonSquires
+	<squires.don@gmail.com>`, so subsequent timer ticks keep refusing `main`.
+- Repository settings allow rebase merge. A follow-up PR with a canonical
+	author commit, merged by rebase, is the narrow path to restore lane progress
+	without weakening the author check or pushing directly to `main`.
+- The host release lane restores nginx from its managed repository on each
+	live tick. Manual nginx edits are not durable and were not repeated here.
 
 ### 2. GPS place context is bound to another agreement, not the rostered site
 
@@ -52,7 +66,7 @@ The authenticated production browser could not be operated from this session. Hu
 
 ## Verification
 
-- Production Vercel alias matched merged commit `0f87882cc2b1a7a42e47e28fa92d77392a4a2206` at verification.
+- Production Vercel alias matched `960ad26da4d48e2c8fc94fda89974be6d4900658`, while the VPS release lane remained behind at `65371fc20145df3bc34195c6a874ef03b90d600b`.
 - Complete web unit suite before the final targeted browser additions: 444 files and 2,315 tests passed. Focused admin/timeline/place-filter suite: 5 files, 33 tests passed.
 - Web lint/type checks and production build passed. Root shift-start and VPS-route tests: 8 passed.
 - Synthetic admin-officer timeline browser check: desktop passed. Site-only report visibility with mixed Site+Zone agreement: desktop and phone passed. Protected PR #427 runtime, web, and offline-browser checks all passed; Vercel serves the merged SHA above.
@@ -61,7 +75,7 @@ The authenticated production browser could not be operated from this session. Hu
 
 ## Outstanding human and engineering actions
 
-1. Human-operated retry at [the production officer schedule](https://www.fcmanager.co.nz/officer/schedule); confirm that private briefing delivery succeeds, then verify the exact rostered shift's `actual_start` and static arrival receipt. Share only redacted result status.
+1. After the release lane installs the private Oracle proxy, human-operated retry at [the production officer schedule](https://www.fcmanager.co.nz/officer/schedule); confirm that private briefing delivery succeeds, then verify the exact rostered shift's `actual_start` and static arrival receipt. Share only redacted result status.
 2. Decide whether field-officer place context should follow the assigned shift contract or remain independently selected, with an explicit mismatch explanation.
 3. Reconcile the submitted Nov 2–6 timesheet snapshot before any branch review or payroll export; do not backdate attendance.
 4. Design and test a stale-source guard before allowing submitted timesheets to advance after source shifts or breaks change.
