@@ -46,6 +46,7 @@ export function useActiveShift(userId: string, organizationId: string) {
     setError(null);
 
     try {
+      const now = new Date();
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
@@ -80,18 +81,20 @@ export function useActiveShift(userId: string, organizationId: string) {
           )
         `)
         .eq('officer_user_id', userId)
-        .lte('scheduled_start', todayEnd.toISOString())
-        .gte('scheduled_end', todayStart.toISOString())
+        .or(`status.eq.in_progress,and(scheduled_start.lte.${todayEnd.toISOString()},scheduled_end.gte.${todayStart.toISOString()})`)
         .in('status', ['accepted', 'in_progress'])
         .order('status', { ascending: false })
-        .order('scheduled_start', { ascending: false })
-        .limit(1);
+        .order('scheduled_start', { ascending: true });
 
       if (err && err.code !== 'PGRST116') {
         throw err;
       }
 
-      const row = Array.isArray(data) ? data[0] : data;
+      const rows = Array.isArray(data) ? data : data ? [data] : [];
+      const row = rows.find((candidate) => candidate.status === 'in_progress')
+        ?? rows.find((candidate) => Date.parse(candidate.scheduled_start) <= now.getTime()
+          && Date.parse(candidate.scheduled_end) >= now.getTime())
+        ?? rows.find((candidate) => Date.parse(candidate.scheduled_start) > now.getTime());
       if (row) {
         const data = row;
         const shift: ActiveShift = {
