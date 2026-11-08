@@ -23,6 +23,7 @@ const officerUser = { ...user, id: OFFICER_ID, email: 'ana@fcm.test' };
 const reports = [
   {
     id: '44444444-4444-4444-8444-444444444444', organization_id: ORG_ID, officer_id: OFFICER_ID,
+    site_id: '42424242-4242-4242-8242-424242424242', zone_id: null,
     report_type: 'health_safety', severity: 'critical', status: 'submitted', title: 'Unsafe access at North Yard',
     description: 'Gate lighting failed during the patrol. The officer used the alternate controlled entrance.',
     location_name: 'North Yard', address: '14 Harbour Road', immediate_action: 'Area isolated and supervisor notified.',
@@ -31,6 +32,7 @@ const reports = [
   },
   {
     id: '55555555-5555-4555-8555-555555555555', organization_id: ORG_ID, officer_id: OFFICER_ID,
+    site_id: null, zone_id: '66666666-6666-4666-8666-666666666666',
     report_type: 'incident', severity: 'medium', status: 'reviewed', title: 'After-hours gate contact',
     description: 'Contractor arrived outside the approved access window.', location_name: 'South Gate', address: null,
     immediate_action: 'Identity checked and access declined.', follow_up_required: false, follow_up_notes: null,

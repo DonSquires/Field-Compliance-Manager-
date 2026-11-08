@@ -9,6 +9,8 @@ const css = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.c
 describe('field operations command surface', () => {
   it('invalidates previous-scope counts and validates agreement scope', () => {
     expect(page).toContain('loadedOrganizationId === organizationId');
+    expect(page).toContain('buildAgreementPlaceFilter(activeSiteIds, activeZoneIds ?? [])');
+    expect(page).toContain('reportQuery = reportQuery.or(reportPlaceFilter)');
     expect(page).toContain('const request = ++requestGeneration.current');
     expect(page).toContain('if (request !== requestGeneration.current) return;');
     expect(page).toContain('if (request === requestGeneration.current) setLoading(false)');
@@ -60,7 +62,7 @@ describe('field operations command surface', () => {
     expect(page).toContain('safetyRelevant: workflow.safetyRelevant');
     expect(page).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
     expect(page).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
-    expect(page).toContain('[dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]');
+    expect(page).toContain('[dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementSites, selectedAgreementZones, welfareEnabled]');
     expect(page).toContain('Some operational counts are unavailable');
   });
 

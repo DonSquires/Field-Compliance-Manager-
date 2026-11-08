@@ -9,6 +9,8 @@ const shellCss = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.css'
 describe('Admin Hub operational data contract', () => {
   it('invalidates previous-scope requests and validates agreement scope', () => {
     expect(source).toContain('loadedOrganizationId === organizationId');
+    expect(source).toContain('buildAgreementPlaceFilter(activeSiteIds, activeZoneIds ?? [])');
+    expect(source).toContain('reportQuery = reportQuery.or(reportPlaceFilter)');
     expect(source).toContain('const request = ++requestGeneration.current');
     expect(source).toContain('if (request !== requestGeneration.current) return;');
     expect(source).toContain('if (request === requestGeneration.current) setLoading(false)');

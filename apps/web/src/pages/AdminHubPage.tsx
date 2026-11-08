@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { buildAgreementPlaceFilter } from '../lib/agreementPlaceFilter';
 import { LoggedActivityPanel } from './LoggedActivityPanel';
 import { SafetyGate } from '../components/SafetyGate';
 import { MetricCard } from '../components/MetricCard/MetricCard';
@@ -91,7 +92,7 @@ function relativeTime(value: string): string {
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { profile, operatingOrganizationId } = useAuth();
   const organizationId = operatingOrganizationId ?? profile?.organizationId;
-  const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
+  const { selectedAgreementSites, selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   // A deliberate "off" switch is a setting, not missing evidence; loading and read errors still fail closed below.
@@ -114,7 +115,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     setLastUpdated(null);
     setLoading(true);
     return () => { requestGeneration.current += 1; };
-  }, [organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]);
+  }, [organizationId, loadedOrganizationId, selectedAgreementSites, selectedAgreementZones, welfareEnabled]);
 
   const loadDashboard = useCallback(async () => {
     const request = ++requestGeneration.current;
@@ -132,6 +133,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     setQueueWarnings([]);
 
     const activeZoneIds = loadedOrganizationId === organizationId && selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+    const activeSiteIds = loadedOrganizationId === organizationId ? selectedAgreementSites.map((site) => site.id) : [];
+    const reportPlaceFilter = buildAgreementPlaceFilter(activeSiteIds, activeZoneIds ?? []);
+    let reportQuery = supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6);
+    if (reportPlaceFilter) reportQuery = reportQuery.or(reportPlaceFilter);
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -166,9 +171,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         activeZoneIds && activeZoneIds.length > 0
           ? supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6)
           : supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
-        activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6)
-          : supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
+        reportQuery,
         supabase.from('inference_jobs').select('id, evidence_item_id, domain, status, created_at').eq('organization_id', organizationId).in('domain', ['video_motion', 'vehicle', 'face']).in('status', ['queued', 'processing', 'manual_review_required']).order('created_at', { ascending: false }).limit(6),
       ]);
       if (request !== requestGeneration.current) return;

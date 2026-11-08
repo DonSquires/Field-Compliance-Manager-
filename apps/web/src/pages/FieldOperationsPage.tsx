@@ -19,6 +19,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { buildAgreementPlaceFilter } from '../lib/agreementPlaceFilter';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
@@ -97,7 +98,7 @@ function toMetric(response: { count: number | null; error: { message: string } |
 const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate }) => {
   const { profile, operatingOrganizationId } = useAuth();
   const organizationId = operatingOrganizationId ?? profile?.organizationId;
-  const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
+  const { selectedAgreementSites, selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
   const { isModuleEnabled } = useEnabledModules(organizationId);
   const dispatchEnabled = isModuleEnabled('dispatch');
   const dispatchAvailable = dispatchEnabled;
@@ -135,6 +136,10 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
     setLoading(true);
     const now = new Date().toISOString();
     const activeZoneIds = loadedOrganizationId === organizationId && selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+    const activeSiteIds = loadedOrganizationId === organizationId ? selectedAgreementSites.map((site) => site.id) : [];
+    const reportPlaceFilter = buildAgreementPlaceFilter(activeSiteIds, activeZoneIds ?? []);
+    let reportQuery = supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted');
+    if (reportPlaceFilter) reportQuery = reportQuery.or(reportPlaceFilter);
     const unavailableForRole = Promise.resolve({ count: null, error: null });
     try {
       const [onDuty, dispatch, welfare, reports] = await Promise.all([
@@ -147,9 +152,7 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
         welfareEnabled
           ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
           : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
-        activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted')
-          : supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
+        reportQuery,
       ]);
       if (request !== requestGeneration.current) return;
       setMetrics({ onDuty: toMetric(onDuty), activeDispatch: toMetric(dispatch), welfareAlerts: toMetric(welfare), reportFollowUp: toMetric(reports) });
@@ -160,7 +163,7 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
     } finally {
       if (request === requestGeneration.current) setLoading(false);
     }
-  }, [dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]);
+  }, [dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementSites, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => {
     void loadMetrics();

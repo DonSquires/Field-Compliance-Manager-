@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, FileText, FolderPlus, RefreshCw, Search, S
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { buildAgreementPlaceFilter } from '../lib/agreementPlaceFilter';
 import { supabase } from '../lib/supabase';
 import './FieldReportsPage.css';
 import { SafetyReviewWorkspace } from '../components/SafetyReviewWorkspace';
@@ -31,7 +32,7 @@ type StatusFilter = 'all' | 'submitted' | 'reviewed' | 'closed';
 
 const FieldReportsPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
-  const { selectedAgreementZones } = useServiceRelationships();
+  const { selectedAgreementSites, selectedAgreementZones } = useServiceRelationships();
   const navigate = useNavigate();
   const [reports, setReports] = useState<FieldReport[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -60,9 +61,11 @@ const FieldReportsPage: React.FC = () => {
       .from('officer_field_reports')
       .select('id, officer_id, report_type, severity, status, title, description, location_name, address, immediate_action, follow_up_required, follow_up_notes, reviewed_by, reviewed_at, review_notes, reported_at, zone_id')
       .eq('organization_id', organizationId);
-    if (selectedAgreementZones.length > 0) {
-      query = query.in('zone_id', selectedAgreementZones.map((zone) => zone.id));
-    }
+    const placeFilter = buildAgreementPlaceFilter(
+      selectedAgreementSites.map((site) => site.id),
+      selectedAgreementZones.map((zone) => zone.id),
+    );
+    if (placeFilter) query = query.or(placeFilter);
     const { data, error: reportError } = await query.order('reported_at', { ascending: false });
     if (reportError) {
       setError(reportError.message);
@@ -79,7 +82,7 @@ const FieldReportsPage: React.FC = () => {
       else setNames(Object.fromEntries((users ?? []).map((user: { id: string; display_name: string | null; email: string | null }) => [user.id, user.display_name || user.email || user.id])));
     }
     setLoading(false);
-  }, [operatingOrganizationId, profile?.organizationId, selectedAgreementZones]);
+  }, [operatingOrganizationId, profile?.organizationId, selectedAgreementSites, selectedAgreementZones]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 

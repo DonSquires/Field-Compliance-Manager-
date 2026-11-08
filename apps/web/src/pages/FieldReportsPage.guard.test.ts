@@ -8,6 +8,10 @@ const outcomeSql = readFileSync(resolve(process.cwd(), '../../supabase/migration
 describe('field report review workbench', () => {
   it('uses only the governed review RPC for lifecycle transition', () => {
     expect(source).toContain("supabase.rpc('review_officer_field_report'");
+    expect(source).toContain('buildAgreementPlaceFilter(');
+    expect(source).toContain('selectedAgreementSites.map((site) => site.id)');
+    expect(source).toContain('selectedAgreementZones.map((zone) => zone.id)');
+    expect(source).toContain('query.or(placeFilter)');
     expect(source).not.toContain(".update({ status: 'reviewed'");
     expect(source).not.toContain(".from('incidents')");
   });
