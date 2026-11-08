@@ -8,6 +8,7 @@ const { randomUUID } = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20261108200000_service_task_codes.sql'), 'utf8');
+const pickerMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20261108210000_service_task_picker_shows_tasks.sql'), 'utf8');
 const squash = (text) => text.replace(/\s+/g, ' ');
 
 test('task codes are one catalogue shared by pickers, staff pay and every rate rule write', () => {
@@ -22,8 +23,21 @@ test('task codes are one catalogue shared by pickers, staff pay and every rate r
   assert.match(sql, /REVOKE ALL ON FUNCTION public\.manage_service_code\(text, text, text, uuid\) FROM PUBLIC, anon;/);
 });
 
+test('pickers list registered and in-use tasks, not every platform module', () => {
+  const sql = squash(pickerMigration);
+  assert.match(sql, /FROM public\.rate_rules r JOIN chain ON chain\.id = r\.organization_id WHERE r\.active/);
+  assert.match(sql, /SELECT m\.module_key, NULL, 'module', 9/);
+  assert.match(sql, /WHERE c\.source <> 'module' ORDER BY c\.name/);
+  assert.doesNotMatch(sql, /already a module task/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.service_code_catalog\(uuid\) FROM PUBLIC, anon, authenticated;/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.list_service_codes\(uuid\) FROM PUBLIC, anon;/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.manage_service_code\(text, text, text, uuid\) FROM PUBLIC, anon;/);
+});
+
 test('the release lane can apply the migration (no destructive SQL)', () => {
-  assert.doesNotMatch(migration, /^\s*(drop\s+(table|schema|database|column)|truncate\s+table|alter\s+table[^;]*\bdrop\b|delete\s+from\s+\S+\s*;)/im);
+  for (const text of [migration, pickerMigration]) {
+    assert.doesNotMatch(text, /^\s*(drop\s+(table|schema|database|column)|truncate\s+table|alter\s+table[^;]*\bdrop\b|delete\s+from\s+\S+\s*;)/im);
+  }
 });
 
 test('task codes, owner corrections and write guards run in disposable PostgreSQL', {
@@ -71,7 +85,7 @@ test('task codes, owner corrections and write guards run in disposable PostgreSQ
       INSERT INTO public.user_profiles VALUES ('${admin}','${org}','admin',null,'Payroll Admin'),('${officer}','${org}','field_officer',null,'Officer'),('${don}','${org}','field_officer',null,'Don Squires Field');
       INSERT INTO public.staff_profiles VALUES ('${don}','${don}','${org}','SECURITY_OFFICER','EMP-000027');
       INSERT INTO public.reference_codes(organization_id,code_type,code,name) VALUES ('${org}','pay_item','GUARD-HOURLY','Guard'),('${org}','pay_item','OPERATIONS_MANAGER','Ops');
-      INSERT INTO public.module_catalog VALUES ('static_guarding',true),('patrol',true);
+      INSERT INTO public.module_catalog VALUES ('static_guarding',true),('patrol',true),('hr',true);
       INSERT INTO public.shifts(organization_id,service_type) VALUES ('${org}','general');
       INSERT INTO public.rate_rules(id,organization_id,rule_kind,name,rate_type,amount,pay_code,role_code,service_type,effective_from) VALUES
         ('537a7504-61e8-49b0-84ce-bd66a8f31d83','${org}','pay','Guard 30','hourly',30,'GUARD-HOURLY',null,'Security Officer','2026-10-01'),
@@ -84,6 +98,8 @@ test('task codes, owner corrections and write guards run in disposable PostgreSQ
     `);
     sql(migration);
     sql(migration);
+    sql(pickerMigration);
+    sql(pickerMigration);
 
     const rule = (id) => sql(`SELECT concat_ws('|',coalesce(role_code,'-'),coalesce(service_type,'-'),coalesce(staff_id::text,'-'),active::text) FROM public.rate_rules WHERE id='${id}'`).trim();
     assert.equal(rule('537a7504-61e8-49b0-84ce-bd66a8f31d83'), 'SECURITY_OFFICER|-|-|true');
@@ -97,7 +113,9 @@ test('task codes, owner corrections and write guards run in disposable PostgreSQ
     assert.equal(sql(`SELECT count(*) FROM public.audit_log WHERE action='rate_rule_owner_correction'`).trim(), '4');
 
     const list = (user, target) => sql(`BEGIN; ${as(user)} SELECT string_agg(code||'='||name, ',' ORDER BY code) FROM public.list_service_codes('${target}'); COMMIT;`).trim();
-    assert.equal(list(officer, org), 'camera_review=Camera review,general=General,patrol=Patrol,static_guarding=Static guarding');
+    assert.equal(list(officer, org), 'camera_review=Camera review,general=General,static_guarding=Static guarding');
+    assert.equal(list(admin, branch), 'alarm_response=Alarm Response');
+    assert.equal(sql(`SELECT count(*) FROM public.service_code_catalog('${org}') WHERE code IN ('patrol','hr')`).trim(), '2');
     fails(`BEGIN; ${as(outsider)} SELECT * FROM public.list_service_codes('${org}'); COMMIT;`, /cannot read task codes/);
 
     fails(`INSERT INTO public.rate_rules(organization_id,rule_kind,name,rate_type,amount,service_type) VALUES ('${org}','pay','Bad','hourly',30,'Security Officer')`, /not a task code/);
@@ -105,10 +123,12 @@ test('task codes, owner corrections and write guards run in disposable PostgreSQ
     sql(`UPDATE public.rate_rules SET amount=31 WHERE id='d32bb481-2c3c-4b32-b5c9-8955f09fcaa2'`);
 
     fails(`BEGIN; ${as(officer)} SELECT public.manage_service_code('create','Excavator hire'); COMMIT;`, /administrator required/);
-    fails(`BEGIN; ${as(admin)} SELECT public.manage_service_code('create','Static guarding'); COMMIT;`, /already a module task/);
+    sql(`INSERT INTO public.rate_rules(organization_id,rule_kind,name,rate_type,amount,service_type) VALUES ('${org}','billing','Patrol','hourly',50,'patrol')`);
+    assert.equal(sql(`BEGIN; ${as(admin)} SELECT code||'='||name FROM public.manage_service_code('create','Patrol'); COMMIT;`).trim(), 'patrol=Patrol');
+    assert.match(list(officer, org), /patrol=Patrol/);
     assert.equal(sql(`BEGIN; ${as(admin)} SELECT code FROM public.manage_service_code('create','Excavator hire'); COMMIT;`).trim(), 'excavator_hire');
     assert.equal(sql(`BEGIN; ${as(admin)} SELECT code FROM public.manage_service_code('create','Excavator  hire!'); COMMIT;`).trim(), 'excavator_hire');
-    assert.equal(sql(`SELECT count(*) FROM public.audit_log WHERE action='service_code_created'`).trim(), '1');
+    assert.equal(sql(`SELECT count(*) FROM public.audit_log WHERE action='service_code_created'`).trim(), '2');
     assert.equal(sql(`BEGIN; ${as(admin)} SELECT organization_id FROM public.manage_service_code('create','Alarm monitoring',null,'${branch}'); COMMIT;`).trim(), branch);
     sql(`INSERT INTO public.rate_rules(organization_id,rule_kind,name,rate_type,amount,service_type) VALUES ('${branch}','billing','Monitoring','hourly',20,'alarm_monitoring')`);
     fails(`INSERT INTO public.rate_rules(organization_id,rule_kind,name,rate_type,amount,service_type) VALUES ('${org}','billing','Monitoring','hourly',20,'alarm_monitoring')`, /not a task code/);
