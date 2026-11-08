@@ -85,6 +85,7 @@ interface ShiftRecord {
   actual_start: string | null;
   actual_end: string | null;
   status: string;
+  updated_at: string;
 }
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -477,7 +478,7 @@ const TimesheetsPage: React.FC = () => {
     try {
       const { error: rpcError } = await supabase.rpc('manage_shift_record', {
         p_shift_id: editingShift.id,
-        p_expected_status: editingShift.status,
+        p_expected_updated_at: editingShift.updated_at,
         p_scheduled_start: fromNzDateInput(shiftForm.scheduledStart),
         p_scheduled_end: fromNzDateInput(shiftForm.scheduledEnd),
         p_actual_start: fromNzDateInput(shiftForm.actualStart),
@@ -503,9 +504,9 @@ const TimesheetsPage: React.FC = () => {
     setError(null);
     try {
       const { error: rpcError } = await supabase.rpc('acknowledge_roster_attendance_exception', {
-        p_organization_id: profile.organizationId,
         p_shift_id: row.shift_id,
         p_exception_type: row.exception_type,
+        p_notes: `Acknowledged from timesheet review`,
       });
       if (rpcError) throw rpcError;
       setNotice('Attendance exception acknowledged.');
