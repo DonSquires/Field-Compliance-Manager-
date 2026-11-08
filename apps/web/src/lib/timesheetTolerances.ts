@@ -26,3 +26,15 @@ export function timesheetSummaryMismatchReasons(value: unknown): string[] {
   if (!Array.isArray(summary.entries)) return [];
   return [...new Set(summary.entries.flatMap((entry) => timesheetMismatchReasons(record(entry).metadata)))];
 }
+
+export function shiftHoursReviewStatus(status: string, metadata: unknown): 'confirmed' | 'review' | 'missed' | 'pending' {
+  if (status === 'missed') return 'missed';
+  if (status !== 'completed') return 'pending';
+  const evidence = record(metadata);
+  if (typeof evidence.actual_start !== 'string' || typeof evidence.actual_end !== 'string'
+    || !Number.isFinite(Date.parse(evidence.actual_start)) || !Number.isFinite(Date.parse(evidence.actual_end))
+    || Date.parse(evidence.actual_end) <= Date.parse(evidence.actual_start)
+    || typeof evidence.scheduled_start !== 'string' || typeof evidence.scheduled_end !== 'string'
+    || !Number.isFinite(Date.parse(evidence.scheduled_start)) || !Number.isFinite(Date.parse(evidence.scheduled_end))) return 'review';
+  return timesheetMismatchReasons(metadata).length || evidence.manual_correction === true ? 'review' : 'confirmed';
+}

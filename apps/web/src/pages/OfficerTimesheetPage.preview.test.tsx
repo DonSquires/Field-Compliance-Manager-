@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimesheetWorkEntry } from '../lib/officerTimesheetWork';
+import { shiftHoursReviewStatus } from '../lib/timesheetTolerances';
 
 const mocked = vi.hoisted(() => ({ loadWork: vi.fn(), submit: vi.fn(), resubmit: vi.fn(), read: vi.fn(), staff: vi.fn() }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'officer', organizationId: 'org' } }) }));
@@ -53,6 +54,16 @@ async function choosePeriod() {
 }
 
 describe('timesheet work preview', () => {
+  it('automatically confirms only completed matching shift hours, never missing or corrected evidence', () => {
+    const metadata = { actual_start: '2026-08-26T08:00:00Z', actual_end: '2026-08-26T16:00:00Z',
+      scheduled_start: '2026-08-26T08:00:00Z', scheduled_end: '2026-08-26T16:00:00Z' };
+    expect(shiftHoursReviewStatus('completed', metadata)).toBe('confirmed');
+    expect(shiftHoursReviewStatus('completed', { ...metadata, unpaid_break_mismatch: true })).toBe('review');
+    expect(shiftHoursReviewStatus('completed', { ...metadata, manual_correction: true })).toBe('review');
+    expect(shiftHoursReviewStatus('completed', {})).toBe('review');
+    expect(shiftHoursReviewStatus('missed', metadata)).toBe('missed');
+    expect(shiftHoursReviewStatus('in_progress', metadata)).toBe('pending');
+  });
   it('highlights endpoint and mandatory-break mismatches without preventing review submission', async () => {
     const entries = work('Roster mismatch', 450);
     entries[0].metadata = { start_mismatch: true, finish_mismatch: true, unpaid_break_mismatch: true };

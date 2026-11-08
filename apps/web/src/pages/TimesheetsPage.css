@@ -3,6 +3,10 @@
 .timesheets-page > .page-header h1 { margin:0; font-size:20px; font-weight:700; }
 .timesheets-page > .page-header .subtitle { margin:2px 0 0; font-size:12px; color:#8fa3b8; }
 .timesheets-page .back-btn { flex-shrink:0; }
+.timesheets-table .shift-hours-confirmed > td { background:var(--color-success-bg); }
+.timesheets-table .shift-hours-review > td { background:var(--color-warning-bg); }
+.timesheets-table .shift-hours-missed > td { background:var(--color-status-critical-bg); }
+.timesheets-page .modal-content { width:min(600px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:auto; }
 
 .timesheets-tabs { display:flex; gap:4px; padding:10px 20px 0; border-bottom:1px solid #1f2d3d; background:#0d1725; }
 .timesheets-tabs button { display:inline-flex; align-items:center; gap:6px; padding:10px 16px; font-size:13px; font-weight:600; color:#8fa3b8; background:transparent; border:none; border-bottom:2px solid transparent; cursor:pointer; }

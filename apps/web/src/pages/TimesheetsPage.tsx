@@ -16,6 +16,7 @@ import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode, type Serv
 import { PayCodeSelect } from '../components/PayCodeSelect';
 import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
 import { ServiceCodeSelect } from '../components/ServiceCodeSelect';
+import { useWorkforceScope, workforceWeek } from '../lib/workforceScope';
 import './PageStyles.css';
 import './TimesheetsPage.css';
 
@@ -94,6 +95,25 @@ interface ShiftRecord {
 
 interface EffectivePay { pay_code: string | null; hourly_rate: number | null }
 
+interface ShiftHoursRow extends ShiftRecord {
+  staff_id: string | null;
+  staff_name: string | null;
+  payable_start: string | null;
+  payable_end: string | null;
+  unpaid_minutes: number;
+  planned_unpaid_minutes: number;
+  recorded_unpaid_minutes: number;
+  correction_updated_at: string | null;
+  correction_reason: string | null;
+  manual_update?: boolean;
+  hours_status: 'confirmed' | 'review' | 'missed' | 'pending';
+  start_mismatch: boolean;
+  finish_mismatch: boolean;
+  unpaid_break_mismatch: boolean;
+}
+interface ShiftHoursStaff { staff_id: string; user_id: string; display_name: string | null }
+const SHIFT_HOURS_LABELS = { confirmed: 'Hours auto-confirmed', review: 'Needs review', missed: 'Missed shift', pending: 'Not finished' };
+
 const READY_STATES = new Set(['ready', 'source_verified', 'not_applicable', 'accepted', 'verified']);
 const DIMENSIONS: { key: ReadinessDimension; label: string; field: keyof CommercialReadinessRow }[] = [
   { key: 'pay', label: 'Pay', field: 'pay_status' },
@@ -108,21 +128,36 @@ const EDITABLE_TIMESHEET = new Set(['submitted', 'branch_checked']);
 const MAX_WINDOW_DAYS = 62;
 
 const isoDate = (date: Date) => date.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+const nzParts = (date: Date) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+}).formatToParts(date).reduce<Record<string, string>>((parts, part) => {
+  if (part.type !== 'literal') parts[part.type] = part.value;
+  return parts;
+}, {});
 const nzDateInput = (iso: string | null | undefined) => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const parts = nzParts(d);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 };
 const fromNzDateInput = (value: string) => {
   if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+  let instant = target;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = nzParts(new Date(instant));
+    const displayed = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));
+    instant += target - displayed;
+  }
+  return new Date(instant).toISOString();
 };
-const when = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
-const timeOnly = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' }) : '';
-const dayText = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+const when = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
+const timeOnly = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: 'numeric', minute: '2-digit' }) : '';
+const dayText = (value: string) => new Date(`${value}T00:00:00+12:00`).toLocaleDateString('en-NZ', { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short' });
 const hours = (value: number | null | undefined) => value === null || value === undefined ? '—' : Number(value).toFixed(2);
 const statusBadge = (status: string) => {
   const map: Record<string, string> = { draft: 'status-draft', submitted: 'status-submitted', branch_checked: 'status-branch', approved: 'status-approved', rejected: 'status-rejected', paid: 'status-paid' };
@@ -150,10 +185,23 @@ const TimesheetsPage: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null);
 
   const today = useMemo(() => isoDate(new Date()), []);
-  const [rangeStart, setRangeStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 14); return isoDate(d); });
-  const [rangeEnd, setRangeEnd] = useState(today);
+  const { scope, setScope } = useWorkforceScope(profile?.id, branchId);
+  const rangeStart = scope.from;
+  const rangeEnd = scope.to;
+  const setRangeStart = (from: string) => setScope({ ...scope, from });
+  const setRangeEnd = (to: string) => setScope({ ...scope, to });
 
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
+  const [timesheetView, setTimesheetView] = useState<'shifts' | 'periods'>('shifts');
+  const [shiftHoursRows, setShiftHoursRows] = useState<ShiftHoursRow[]>([]);
+  const [shiftHoursStaff, setShiftHoursStaff] = useState<ShiftHoursStaff[]>([]);
+  const staffFilter = scope.staffId ?? 'all';
+  const setStaffFilter = (staffId: string) => setScope({ ...scope,
+    staffId: staffId === 'all' ? null : staffId,
+    userId: shiftHoursStaff.find((staff) => staff.staff_id === staffId)?.user_id ?? null });
+  const [editingHours, setEditingHours] = useState<ShiftHoursRow | null>(null);
+  const [hoursForm, setHoursForm] = useState({ staffId: '', start: '', finish: '', unpaid: '0', reason: '' });
+  const hoursRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -176,7 +224,7 @@ const TimesheetsPage: React.FC = () => {
 
   const generation = useRef(0);
   const days = windowDays(rangeStart, rangeEnd);
-  const rangeProblem = rangeEnd < rangeStart ? 'The end date is before the start date.' : tab !== 'timesheets' && days > MAX_WINDOW_DAYS ? `Choose ${MAX_WINDOW_DAYS} days or fewer for readiness and attendance.` : null;
+  const rangeProblem = rangeEnd < rangeStart ? 'The end date is before the start date.' : days > MAX_WINDOW_DAYS ? `Choose ${MAX_WINDOW_DAYS} days or fewer for this review.` : null;
 
   const setQuery = useCallback((updates: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -215,13 +263,14 @@ const TimesheetsPage: React.FC = () => {
     try {
       let rows: TimesheetRow[];
       if (workingInBranch && branchId) {
-        const { data, error: rpcError } = await supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: branchId, p_from: rangeStart, p_to: rangeEnd });
+        const { data, error: rpcError } = await supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: branchId, p_from: rangeStart, p_to: rangeEnd, p_staff_id: scope.staffId });
         if (rpcError) throw rpcError;
         rows = (data as TimesheetRow[] | null) ?? [];
       } else {
         const { data, error: dbError } = await supabase.from('timesheets')
           .select('id,organization_id,staff_id,shift_id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,work_derived_hours,work_summary,status,pay_code_override,hourly_rate_override,review_notes,submitted_at,payroll_export_batch_id,revision,shift:shifts(service_type)')
           .eq('organization_id', homeOrganizationId)
+          .or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null')
           .lte('period_start', rangeEnd)
           .gte('period_end', rangeStart)
           .order('period_start', { ascending: false });
@@ -237,6 +286,29 @@ const TimesheetsPage: React.FC = () => {
       if (version === generation.current) setLoading(false);
     }
   }, [homeOrganizationId, workingInBranch, branchId, rangeStart, rangeEnd, resolveNames]);
+
+  const loadShiftHours = useCallback(async () => {
+    if (!branchId || rangeProblem) return;
+    const version = ++generation.current;
+    setLoading(true); setError(null);
+    try {
+      const [rows, staff] = await Promise.all([
+        supabase.rpc('get_timesheet_shift_rows', { p_organization_id: branchId, p_from: rangeStart, p_to: rangeEnd, p_staff_id: scope.staffId }),
+        supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: branchId }),
+      ]);
+      if (rows.error) throw rows.error;
+      if (staff.error) throw staff.error;
+      if (!Array.isArray(rows.data) || !Array.isArray(staff.data)) throw new Error('Shift hours and staff selection were not confirmed.');
+      if (version !== generation.current) return;
+      setShiftHoursRows(rows.data as ShiftHoursRow[]);
+      setShiftHoursStaff(staff.data as ShiftHoursStaff[]);
+    } catch (err) {
+      if (version === generation.current) {
+        setShiftHoursRows([]); setShiftHoursStaff([]);
+        setError(err instanceof Error ? err.message : 'Shift hours could not be loaded.');
+      }
+    } finally { if (version === generation.current) setLoading(false); }
+  }, [branchId, rangeProblem, rangeStart, rangeEnd, scope.staffId]);
 
   const loadCommercial = useCallback(async () => {
     if (!branchId || rangeProblem) return;
@@ -269,7 +341,7 @@ const TimesheetsPage: React.FC = () => {
         p_to: new Date(`${rangeEnd}T23:59:59`).toISOString(),
       });
       if (rpcError) throw rpcError;
-      const rows = (data as AttendanceExceptionRow[] | null) ?? [];
+      const rows = ((data as AttendanceExceptionRow[] | null) ?? []).filter((row) => !scope.userId || row.officer_user_id === scope.userId);
       setAttendanceRows(rows);
       await resolveNames([], rows.map((r) => r.officer_user_id));
     } catch (err) {
@@ -277,9 +349,9 @@ const TimesheetsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [branchId, rangeStart, rangeEnd, attendanceGrace, rangeProblem, resolveNames]);
+  }, [branchId, rangeStart, rangeEnd, attendanceGrace, rangeProblem, resolveNames, scope.userId]);
 
-  const reload = tab === 'timesheets' ? loadTimesheets : tab === 'commercial' ? loadCommercial : loadAttendance;
+  const reload = tab === 'timesheets' ? timesheetView === 'shifts' ? loadShiftHours : loadTimesheets : tab === 'commercial' ? loadCommercial : loadAttendance;
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -396,6 +468,37 @@ const TimesheetsPage: React.FC = () => {
     }
   };
 
+  const openHoursEdit = (row: ShiftHoursRow) => {
+    setEditingHours(row); setError(null); hoursRequest.current = null;
+    setHoursForm({ staffId: row.staff_id ?? '', start: nzDateInput(row.payable_start ?? row.actual_start),
+      finish: nzDateInput(row.payable_end ?? row.actual_end), unpaid: String(row.unpaid_minutes ?? 0), reason: '' });
+  };
+
+  const saveShiftHours = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingHours || saving) return;
+    setSaving(true); setError(null);
+    try {
+      const request = { p_shift_id: editingHours.id, p_expected_updated_at: editingHours.updated_at,
+        p_expected_correction_updated_at: editingHours.correction_updated_at, p_staff_id: hoursForm.staffId,
+        p_payable_start: fromNzDateInput(hoursForm.start), p_payable_end: fromNzDateInput(hoursForm.finish),
+        p_unpaid_minutes: Number(hoursForm.unpaid), p_reason: hoursForm.reason.trim() };
+      const fingerprint = JSON.stringify(request);
+      if (hoursRequest.current?.fingerprint !== fingerprint) hoursRequest.current = { fingerprint, id: crypto.randomUUID() };
+      const { data, error: correctionError } = await supabase.rpc('correct_timesheet_shift_hours', {
+        ...request, p_client_request_id: hoursRequest.current.id,
+      });
+      if (correctionError) throw correctionError;
+      if (!data || data.shift_id !== editingHours.id || data.staff_id !== hoursForm.staffId || data.hours_status !== 'review') {
+        throw new Error('Payable correction receipt was not confirmed.');
+      }
+      setNotice('Payable shift hours saved for review. Recorded attendance remains unchanged.');
+      setEditingHours(null); hoursRequest.current = null;
+      await loadShiftHours();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Payable correction could not be saved.'); }
+    finally { setSaving(false); }
+  };
+
   const submitShiftEdit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingShift) return;
@@ -491,13 +594,45 @@ const TimesheetsPage: React.FC = () => {
       <section className="timesheets-toolbar">
         <label className="date-field"><CalendarDays size={14} /><span>From</span><input type="date" value={rangeStart} max={rangeEnd} onChange={(e) => setRangeStart(e.target.value)} /></label>
         <label className="date-field"><CalendarDays size={14} /><span>To</span><input type="date" value={rangeEnd} min={rangeStart} onChange={(e) => setRangeEnd(e.target.value)} /></label>
-        <button type="button" className="btn btn-secondary" onClick={() => { setRangeStart(today); setRangeEnd(today); }}>Today</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setScope({ ...workforceWeek(), staffId: scope.staffId, userId: scope.userId })}>This week</button>
         <button type="button" className="btn btn-secondary" onClick={() => void reload()} disabled={loading || !!rangeProblem}><RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh</button>
         {rangeProblem && <span className="timesheets-range-warning" role="status">{rangeProblem}</span>}
       </section>
 
       {tab === 'timesheets' && (
         <section className="timesheets-section">
+          <div className="timesheets-filters" role="group" aria-label="Timesheet view">
+            <button type="button" className="btn btn-secondary" aria-pressed={timesheetView === 'shifts'} onClick={() => { setTimesheetView('shifts'); setStatusFilter('all'); }}>Shift hours</button>
+            <button type="button" className="btn btn-secondary" aria-pressed={timesheetView === 'periods'} onClick={() => { setTimesheetView('periods'); setStatusFilter('all'); }}>Submitted periods</button>
+          </div>
+          {timesheetView === 'shifts' ? <>
+            <div className="timesheets-filters">
+              <label className="filter-field">Staff member<select aria-label="Filter shift hours by staff member" value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)}>
+                <option value="all">All staff</option>{shiftHoursStaff.map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staff.display_name ?? 'Staff member'}</option>)}
+              </select></label>
+              <label className="filter-field">Hours status<select aria-label="Shift hours status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All statuses</option>{Object.entries(SHIFT_HOURS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select></label>
+            </div>
+            {loading ? <div className="timesheets-empty" role="status">Loading shift hours…</div> : shiftHoursRows.length === 0 ? <div className="timesheets-empty">No shifts in this period.</div> :
+              <div className="reports-table-wrapper"><table className="reports-table timesheets-table">
+                <caption className="sr-only">One timesheet entry per shift</caption>
+                <thead><tr><th>Staff member</th><th>Service</th><th>Rostered start / finish</th><th>Recorded start / finish</th><th>Payable start / finish</th><th>Unpaid break</th><th>Hours review</th><th>Actions</th></tr></thead>
+                <tbody>{shiftHoursRows.filter((row) => (staffFilter === 'all' || row.staff_id === staffFilter) && (statusFilter === 'all' || row.hours_status === statusFilter)).map((row) =>
+                  <tr key={row.id} className={`shift-hours-${row.hours_status}`}>
+                    <td>{row.staff_name ?? 'Staff identity unavailable'}</td><td>{serviceLabel(row.service_type)}</td>
+                    <td>{when(row.scheduled_start)}<br />{when(row.scheduled_end)}</td>
+                    <td>{when(row.actual_start)}<br />{when(row.actual_end)}</td>
+                    <td>{when(row.payable_start)}<br />{when(row.payable_end)}</td>
+                    <td>{Number(row.unpaid_minutes).toFixed(0)} min<small>Recorded {Number(row.recorded_unpaid_minutes).toFixed(1)} · planned {row.planned_unpaid_minutes}</small></td>
+                    <td><strong>{SHIFT_HOURS_LABELS[row.hours_status]}</strong>{row.manual_update && <small>Manual timesheet update</small>}
+                      {row.manual_update && <small>Manual payable update</small>}
+                      {row.hours_status === 'review' && <small>{row.correction_reason ?? [row.start_mismatch && 'Start differs', row.finish_mismatch && 'Finish differs', row.unpaid_break_mismatch && 'Unpaid break differs'].filter(Boolean).join('; ')}</small>}
+                    </td>
+                    <td>{isAdmin && ['review', 'missed'].includes(row.hours_status) && <button className="icon-btn" type="button" aria-label={`Edit shift hours for ${row.staff_name ?? 'staff member'}`} title="Edit payable shift hours" onClick={() => openHoursEdit(row)}><Edit3 size={16} /></button>}</td>
+                  </tr>)}</tbody>
+              </table></div>}
+          </> : <>
           <div className="timesheets-filters">
             <div className="search-field"><Search size={14} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search staff, service, status…" aria-label="Search timesheets" /></div>
             <label className="filter-field"><Filter size={14} />
@@ -543,8 +678,25 @@ const TimesheetsPage: React.FC = () => {
                 </table>
               </div>
             )}
+          </>}
         </section>
       )}
+
+      {editingHours && <div className="modal-backdrop"><form className="modal-content assessment-form" role="dialog" aria-modal="true" aria-labelledby="shift-hours-title" onSubmit={saveShiftHours}>
+        <h2 id="shift-hours-title">Payable shift hours</h2>
+        <p>Rostered: {when(editingHours.scheduled_start)} – {when(editingHours.scheduled_end)}</p>
+        <p>Recorded: {when(editingHours.actual_start)} – {when(editingHours.actual_end)}</p>
+        <label>Staff member<select aria-label="Payable staff member" required disabled={saving || editingHours.actual_start !== null || editingHours.actual_end !== null} value={hoursForm.staffId} onChange={(event) => setHoursForm({ ...hoursForm, staffId: event.target.value })}>
+          <option value="">Select staff member</option>{shiftHoursStaff.map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staff.display_name ?? 'Staff member'}</option>)}
+        </select></label>
+        <label>Payable start<input type="datetime-local" required disabled={saving} value={hoursForm.start} onChange={(event) => setHoursForm({ ...hoursForm, start: event.target.value })} /></label>
+        <label>Payable finish<input type="datetime-local" required disabled={saving} value={hoursForm.finish} onChange={(event) => setHoursForm({ ...hoursForm, finish: event.target.value })} /></label>
+        <label>Unpaid break minutes<input type="number" min="0" step="1" required disabled={saving} value={hoursForm.unpaid} onChange={(event) => setHoursForm({ ...hoursForm, unpaid: event.target.value })} /></label>
+        <button className="btn btn-secondary" type="button" disabled={saving} onClick={() => setHoursForm({ ...hoursForm, start: nzDateInput(editingHours.scheduled_start), finish: nzDateInput(editingHours.scheduled_end), unpaid: String(editingHours.planned_unpaid_minutes) })}><CalendarDays size={16} /> Use roster dates and times</button>
+        <label>Reason for correction<textarea required disabled={saving} value={hoursForm.reason} onChange={(event) => setHoursForm({ ...hoursForm, reason: event.target.value })} /></label>
+        {error && <p role="alert">{error}</p>}
+        <div className="modal-actions"><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setEditingHours(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}><Save size={16} />{saving ? 'Saving…' : 'Save for review'}</button></div>
+      </form></div>}
 
       {tab === 'commercial' && (
         <section className="timesheets-section">

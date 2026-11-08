@@ -154,13 +154,20 @@ const addDays = (date: Date, days: number) => { const value = new Date(date); va
 const isoDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 const localInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
+import { useWorkforceScope } from '../lib/workforceScope';
+
 const RosterOperationsPage: React.FC = () => {
   const { profile, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
   const rosterView = ROSTER_VIEW_BY_ROLE[profile?.role ?? 'unknown'] ?? ROSTER_VIEW_BY_ROLE.admin!;
   const navigate = useNavigate();
   const location = useLocation();
   const workflowContext = readWorkflowContext(location.search);
-  const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
+  const { scope, setScope } = useWorkforceScope(profile?.id, operatingOrganizationId ?? profile?.organizationId);
+  const periodAnchor = useMemo(() => new Date(`${scope.from}T12:00:00`), [scope.from]);
+  const setPeriodAnchor = (anchor: Date) => {
+    const nextPeriod = rosterPeriod(anchor, horizon);
+    setScope({ ...scope, from: isoDate(nextPeriod.start), to: isoDate(addDays(nextPeriod.end, -1)) });
+  };
   const [horizon, setHorizon] = useState<RosterHorizon>('week');
   const [calendarRegion, setCalendarRegion] = useState<string | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -183,7 +190,9 @@ const RosterOperationsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const selectedStaffId = scope.staffId;
+  const setSelectedStaffId = (staffId: string | null) => setScope({ ...scope, staffId,
+    userId: staff.find((person) => person.staffId === staffId)?.id ?? null });
   const [timesheetCount, setTimesheetCount] = useState<number | null>(null);
   const [timesheetsOpen, setTimesheetsOpen] = useState(false);
   const [rosterDataReady, setRosterDataReady] = useState(false);
@@ -263,9 +272,9 @@ const RosterOperationsPage: React.FC = () => {
       canLoadBranchStaff
         ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })
         : Promise.resolve({ data: [], error: null }),
-      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs,patrol_route:patrol_routes!roster_work_units_patrol_route_id_fkey(primary_staff_id)').eq('organization_id', org).eq('active', true).order('name'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
       supabase.from('staff_availability').select('id,staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes,created_at').eq('organization_id', org).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
@@ -288,26 +297,26 @@ const RosterOperationsPage: React.FC = () => {
       return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk, credentialExpiry: user.credential_expiry ?? null };
     }));
     setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setRosterDataReady(![rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes].some((response) => response.error) && canLoadBranchStaff); setLoading(false);
-  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart]);
+  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
   useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [load]);
   const syncOfficerResponses = useCallback(async () => {
     const version = loadVersion.current;
     const org = operatingOrganizationId ?? profile?.organizationId;
     if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
-      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (version !== loadVersion.current) return;
     if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
     if (!slotResponse.error) setSlots((slotResponse.data as RosterSlot[]) ?? []);
-  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart]);
+  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
   useEffect(() => {
     const interval = window.setInterval(() => void syncOfficerResponses(), 15_000);
     return () => window.clearInterval(interval);
   }, [syncOfficerResponses]);
 
-  const visibleStaff = staff.filter((person) => (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
+  const visibleStaff = staff.filter((person) => (!scope.staffId || person.staffId === scope.staffId) && (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
   const scheduleStaff = visibleStaff.filter((person) => !selectedStaffId || person.staffId === selectedStaffId);
   const visibleWorkUnits = workUnits.filter((unit) => !search || unit.name.toLowerCase().includes(search.toLowerCase()));
   const sourceBoardAssignments = sourceAssignments.filter((assignment) => !slots.some((slot) =>
@@ -325,7 +334,7 @@ const RosterOperationsPage: React.FC = () => {
   const draftCount = slots.filter((slot) => slot.status === 'draft').length;
   const openSlots = slots.filter((slot) => !slot.staff_id && !['cancelled', 'completed'].includes(slot.status));
   useEffect(() => {
-    setSelectedStaffId(null); setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
+    setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
     setSelectedSourceAssignment(null);
     setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setContactDialog(null); setAttendanceAction(null);
     setNotice(null);

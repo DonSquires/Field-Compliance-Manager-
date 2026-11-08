@@ -59,6 +59,7 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
   const admin = '00000000-0000-4000-8000-000000000002';
   const other = '00000000-0000-4000-8000-000000000003';
   const officer = '00000000-0000-4000-8000-000000000004';
+  const branchManager = '00000000-0000-4000-8000-000000000008';
   const slot = '00000000-0000-4000-8000-000000000005';
   const shift = '00000000-0000-4000-8000-000000000006';
   const request = '00000000-0000-4000-8000-000000000007';
@@ -73,6 +74,7 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
     sql(`
       CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN;
       CREATE SCHEMA auth;
+      CREATE TABLE public.organizations(id uuid PRIMARY KEY);
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
         $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       CREATE TABLE public.user_profiles(id uuid PRIMARY KEY,organization_id uuid,employer_organization_id uuid,deactivated_at timestamptz,role text);
@@ -83,11 +85,21 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
         acknowledged_at timestamptz,dispatched_at timestamptz,created_at timestamptz,completed_at timestamptz);
       CREATE FUNCTION public.is_admin_for_org(uuid) RETURNS boolean LANGUAGE sql STABLE AS
         $$ SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND organization_id=$1 AND role='admin' AND deactivated_at IS NULL) $$;
+      CREATE FUNCTION public.user_can_operate_organization(p_org uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND organization_id=p_org AND role='branch_manager' AND deactivated_at IS NULL) $$;
+      CREATE FUNCTION public.user_can_exercise_branch_authority(p_org uuid,p_target uuid,p_area text,p_level text DEFAULT 'approve') RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT p_area='timesheet_local_review' AND EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND organization_id=p_org AND role='branch_manager' AND deactivated_at IS NULL) AND p_target IN('${officer}'::uuid,'${other}'::uuid) $$;
       CREATE TABLE public.audit_log(id uuid DEFAULT gen_random_uuid(),organization_id uuid,actor_user_id uuid,action text,target_table text,target_id uuid,metadata jsonb);
       ${['timesheets','roster_slots','shifts','shift_breaks','rate_rules','payroll_export_batches',
         'finance_pl_periods','service_agreements','service_agreement_locations','service_agreement_modules',
         'finance_service_costs','finance_labour_cost_postings','cost_centres','timesheet_work_entries'].map(table).join('\n')}
       ALTER TABLE public.roster_slots ADD COLUMN IF NOT EXISTS planned_break_minutes integer NOT NULL DEFAULT 0,ADD COLUMN IF NOT EXISTS break_unpaid boolean NOT NULL DEFAULT false;
+      ALTER TABLE public.shifts ADD PRIMARY KEY(id);
+      ALTER TABLE public.user_profiles ADD COLUMN display_name text;
+      CREATE TABLE public.staff_branch_authorisations(user_id uuid,branch_org_id uuid,status text);
+      CREATE TABLE public.shift_stop_actions(shift_id uuid);
+      CREATE TABLE public.officer_gps_log(shift_id uuid);
+      CREATE TABLE public.shift_debriefs(shift_id uuid);
       ALTER TABLE public.timesheets DROP COLUMN IF EXISTS recovery_request,DROP COLUMN IF EXISTS pay_code_override,
         DROP COLUMN IF EXISTS hourly_rate_override,DROP COLUMN IF EXISTS pay_override_reason,
         DROP COLUMN IF EXISTS payroll_snapshot,DROP COLUMN IF EXISTS revision;
@@ -97,6 +109,9 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       ${migration}
       ${fs.readFileSync(path.join(root, 'supabase/migrations/20261108190000_timesheet_roster_tolerances.sql'), 'utf8')}
       ${fn('submit_officer_timesheet_from_work')}
+      ${fn('resubmit_rejected_timesheet_from_work')}
+      ${fn('get_branch_timesheet_queue')}
+      ${fs.readFileSync(path.join(root, 'supabase/migrations/20261108220000_shift_timesheet_review.sql'), 'utf8')}
       CREATE FUNCTION public.expect_error(p_sql text,p_message text) RETURNS void LANGUAGE plpgsql AS $$
       BEGIN
         BEGIN EXECUTE p_sql; EXCEPTION WHEN OTHERS THEN
@@ -105,10 +120,12 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
         END;
         RAISE EXCEPTION 'Expected error: %',p_message;
       END $$;
-      INSERT INTO public.user_profiles VALUES
+      INSERT INTO public.user_profiles(id,organization_id,employer_organization_id,deactivated_at,role) VALUES
         ('${admin}','${org}','${org}',NULL,'admin'),('${other}','${org}','${org}',NULL,'admin'),
+        ('${branchManager}','${org}','${org}',NULL,'branch_manager'),
         ('${officer}','${org}','${org}',NULL,'officer');
       INSERT INTO public.staff_profiles VALUES('${officer}','${officer}','${org}','GUARD');
+      INSERT INTO public.organizations VALUES('${org}');
       INSERT INTO public.shifts(id,organization_id,officer_user_id,service_type,scheduled_start,scheduled_end,status)
         VALUES('${shift}','${org}','${officer}','site_guard','2026-10-01 08:00+13','2026-10-01 16:00+13','missed');
       INSERT INTO public.roster_slots(id,organization_id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,client_request_id,planned_break_minutes,break_unpaid)
@@ -218,6 +235,87 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       END $$;
       ROLLBACK;
     `);
+    sql(`BEGIN;
+      SELECT set_config('request.jwt.claim.sub','${admin}',true);
+      SELECT public.correct_timesheet_shift_hours('00000000-0000-4000-8000-000000000090','${shift}',
+        (SELECT updated_at FROM public.shifts WHERE id='${shift}'),NULL,'${officer}',
+        '2026-10-01 08:00+13','2026-10-01 16:00+13',30,'Correct manual break allowance');
+      DO $$ BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.timesheets WHERE actual_hours=7.5 AND adjustment_hours=7.5
+          AND work_summary->>'evidence_kind'='manual_admin' AND status='submitted')
+          THEN RAISE EXCEPTION 'Manual timesheet correction lost source or hours'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.shifts WHERE id='${shift}' AND actual_start IS NULL AND actual_end IS NULL)
+          THEN RAISE EXCEPTION 'Manual correction rewrote attendance'; END IF;
+      END $$;
+      SELECT public.expect_error($$SELECT public.correct_timesheet_shift_hours(gen_random_uuid(),'${shift}',
+        '2000-01-01'::timestamptz,NULL,'${officer}','2026-10-01 08:00+13','2026-10-01 16:00+13',30,'Stale edit')$$,'Shift changed');
+      ROLLBACK;`);
+    sql(`BEGIN;
+      SET LOCAL TIME ZONE 'Pacific/Auckland';
+      SELECT set_config('request.jwt.claim.sub','${admin}',true);
+      INSERT INTO public.staff_profiles VALUES('${other}','${other}','${org}','GUARD');
+      INSERT INTO public.shifts(id,organization_id,officer_user_id,service_type,scheduled_start,scheduled_end,status)
+        VALUES('00000000-0000-4000-8000-000000000080','${org}','${other}','site_guard',
+          '2026-10-01 16:00+13','2026-10-02 00:00+13','in_progress');
+      DO $$ BEGIN
+        IF jsonb_array_length(public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01','${other}'))<>1
+          OR public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01','${other}')->0->>'hours_status'<>'pending'
+          THEN RAISE EXCEPTION 'Open staff shift must appear before submission'; END IF;
+      END $$;
+      DELETE FROM public.shifts WHERE id='00000000-0000-4000-8000-000000000080';
+      DO $$ BEGIN
+        IF public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01')->0->>'hours_status'<>'review'
+          OR public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01')->0->>'payable_start' IS NULL
+          THEN RAISE EXCEPTION 'Manual recovery must still appear as a timesheet'; END IF;
+      END $$;
+      INSERT INTO public.staff_branch_authorisations VALUES('${officer}','${org}','active');
+      SELECT set_config('request.jwt.claim.sub','${branchManager}',true);
+      DO $$ BEGIN
+        IF (SELECT count(*) FROM public.get_branch_timesheet_queue('${org}','2026-10-01','2026-10-01','${officer}'))<>1
+          THEN RAISE EXCEPTION 'Authorized branch reviewer could not load filtered period'; END IF;
+        IF (SELECT count(*) FROM public.get_branch_timesheet_queue('${org}','2026-10-01','2026-10-01','${other}'))<>0
+          THEN RAISE EXCEPTION 'Branch period filter returned another staff member'; END IF;
+      END $$;
+      SELECT set_config('request.jwt.claim.sub','${admin}',true);
+      SELECT public.expect_error($$SELECT public.correct_timesheet_shift_hours(gen_random_uuid(),'${shift}',
+        (SELECT updated_at FROM public.shifts WHERE id='${shift}'),NULL,'${other}',
+        '2026-10-01 08:00+13','2026-10-01 16:00+13',30,'Replacement guard')$$,'Existing manual recovery');
+      DELETE FROM public.timesheets WHERE period_start='2026-10-01';
+      SELECT public.correct_timesheet_shift_hours('00000000-0000-4000-8000-000000000070','${shift}',
+        (SELECT updated_at FROM public.shifts WHERE id='${shift}'),NULL,'${other}',
+        '2026-10-01 08:00+13','2026-10-01 16:00+13',30,'Replacement guard confirmed by supervisor');
+      SELECT public.correct_timesheet_shift_hours('00000000-0000-4000-8000-000000000070','${shift}',
+        (SELECT (metadata->'request'->>'source_version')::timestamptz FROM public.audit_log
+          WHERE action='timesheet_shift_hours_corrected' LIMIT 1),NULL,'${other}',
+        '2026-10-01 08:00+13','2026-10-01 16:00+13',30,'Replacement guard confirmed by supervisor');
+      DO $$ BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.shifts WHERE id='${shift}' AND officer_user_id='${other}'
+          AND actual_start IS NULL AND actual_end IS NULL AND status='missed') THEN RAISE EXCEPTION 'Replacement fabricated attendance'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.roster_slots WHERE linked_shift_id='${shift}' AND staff_id='${other}')
+          THEN RAISE EXCEPTION 'Replacement roster attribution missing'; END IF;
+        IF (SELECT count(*) FROM public.audit_log WHERE action='timesheet_shift_hours_corrected')<>1
+          THEN RAISE EXCEPTION 'Correction replay duplicated decision'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.audit_log WHERE action='timesheet_shift_hours_corrected'
+          AND metadata->>'original_assignment_user_id'='${officer}') THEN RAISE EXCEPTION 'Original assignment lost'; END IF;
+      END $$;
+      SELECT set_config('request.jwt.claim.sub','${other}',true);
+      DO $$ BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01')
+          WHERE source_id='${shift}' AND calculated_minutes=450 AND (metadata->>'manual_correction')::boolean)
+          THEN RAISE EXCEPTION 'Replacement payable work missing'; END IF;
+      END $$;
+      SELECT set_config('request.jwt.claim.sub','${officer}',true);
+      DO $$ BEGIN IF EXISTS(SELECT 1 FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01'))
+        THEN RAISE EXCEPTION 'Replaced officer retained payable correction'; END IF; END $$;
+      SELECT public.expect_error($$SELECT public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01')$$,'authority');
+      SELECT set_config('request.jwt.claim.sub','${branchManager}',true);
+      DO $$ BEGIN
+        IF jsonb_array_length(public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01','${other}'))<>1
+          THEN RAISE EXCEPTION 'Authorized branch timesheet reviewer could not see assigned shift'; END IF;
+        IF jsonb_array_length(public.get_timesheet_shift_rows('${org}','2026-10-01','2026-10-01','${officer}'))<>0
+          THEN RAISE EXCEPTION 'Branch staff filter exposed an unauthorized shift'; END IF;
+      END $$;
+      ROLLBACK;`);
     assert.equal(sql("SELECT actual_hours||':'||work_derived_hours||':'||adjustment_hours FROM public.timesheets").trim(), '7.75:0.00:7.75');
     assert.equal(sql("SELECT actual_start IS NULL AND actual_end IS NULL AND status='missed' FROM public.shifts").trim(), 't', 'no fabricated attendance');
     assert.equal(sql(`SELECT set_config('request.jwt.claim.sub','${admin}',false);
