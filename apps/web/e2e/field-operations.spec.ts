@@ -71,6 +71,35 @@ test('report review dialog is usable without overlap', async ({ page }) => {
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
+test('field report review includes site-only records in a mixed Site and Zone agreement', async ({ page }) => {
+  const filters: string[] = [];
+  await page.route('**/rest/v1/service_agreement_locations**', async (route) => {
+    await route.fulfill({ json: [
+      { service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, status: 'active' },
+      { service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: null, zone_id: '66666666-6666-4666-8666-666666666666', status: 'active' },
+    ] });
+  });
+  await page.route('**/rest/v1/location_zones**', async (route) => {
+    await route.fulfill({ json: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone', zone_type: 'operations', location_id: '65656565-6565-4565-8565-656565656565', organization_id: '33333333-3333-4333-8333-333333333333', is_active: true }] });
+  });
+  await page.route('**/rest/v1/officer_field_reports**', async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (!query.get('select')?.includes('title')) return route.fallback();
+    filters.push(query.get('or') ?? '');
+    await route.fulfill({ json: [{
+      id: '78787878-7878-4787-8787-787878787878', officer_id: '22222222-2222-4222-8222-222222222222',
+      report_type: 'health_safety', severity: 'high', status: 'submitted', title: 'Synthetic site-only report',
+      description: 'Synthetic acceptance report for agreement place filtering.', location_name: 'Civic Events Centre',
+      address: null, immediate_action: null, follow_up_required: true, follow_up_notes: null,
+      reviewed_by: null, reviewed_at: null, review_notes: null, reported_at: '2026-08-30T09:00:00.000Z', zone_id: null,
+    }] });
+  });
+  await signInAsAdmin(page, '/admin/field-ops?area=field-reports');
+  await expect(page.getByRole('heading', { name: 'Synthetic site-only report', exact: true })).toBeVisible();
+  expect(filters.some((filter) => filter.includes('site_id.in.(42424242-4242-4242-8242-424242424242)')
+    && filter.includes('zone_id.in.(66666666-6666-4666-8666-666666666666)'))).toBe(true);
+});
+
 test('supervisor records acknowledgement and verified resolution through the governed welfare lifecycle', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/field-ops?area=welfare-alerts');

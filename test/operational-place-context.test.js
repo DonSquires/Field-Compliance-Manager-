@@ -58,8 +58,10 @@ test('biosecurity oversight resolves agreement sites before organization fallbac
   assert.match(sources.biosecurityOversight, /query\.in\('site_id'/);
 });
 
-test('field reports resolve agreement zones before organization fallback', () => {
+test('field reports resolve agreement Sites and Zones before organization fallback', () => {
   assert.match(sources.fieldReports, /useServiceRelationships/);
+  assert.match(sources.fieldReports, /selectedAgreementSites/);
   assert.match(sources.fieldReports, /selectedAgreementZones/);
-  assert.match(sources.fieldReports, /query\.in\('zone_id'/);
+  assert.match(sources.fieldReports, /buildAgreementPlaceFilter/);
+  assert.match(sources.fieldReports, /query\.or\(placeFilter\)/);
 });

@@ -73,7 +73,7 @@ const OfficerActivityTimelinePage: React.FC = () => {
         .from('user_profiles')
         .select('id, display_name, email, deactivated_at')
         .eq('organization_id', profile.organizationId)
-        .in('role', ['officer', 'scan_operator'])
+        .in('role', ['officer', 'admin_officer', 'scan_operator'])
         .order('display_name', { ascending: true });
       if (officerError) {
         setError(officerError.message);
