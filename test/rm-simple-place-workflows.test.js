@@ -12,6 +12,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./report-privacy-save-permis
 if (process.env.BOB_TEST_POSTGRES === '1') require('./report-service-delivery-db.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-ledger-cost-db.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./person-interactions-write-path.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./geofence-place-enrichment-migration.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
