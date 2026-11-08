@@ -1168,6 +1168,7 @@
 
 .rate-rules-form label {
   display: grid;
+  align-content: start;
   gap: 5px;
   min-width: 0;
   color: var(--color-text-secondary);
@@ -1176,6 +1177,10 @@
 
 .rate-rules-form label > span {
   overflow-wrap: anywhere;
+}
+
+.rate-rules-form .pay-code-select > label {
+  font-weight: inherit;
 }
 
 .rate-rules-form input,

@@ -15,22 +15,31 @@ export const loadPayCodes = async (organizationId: string): Promise<PayCode[]> =
   return (data ?? []) as PayCode[];
 };
 
-export const loadServiceCatalog = async (organizationId?: string | null): Promise<string[]> => {
-  const [catalog, rostered] = await Promise.all([
-    supabase.from('module_catalog').select('module_key').eq('active', true),
-    organizationId
-      ? supabase.from('roster_work_units').select('service_type').eq('organization_id', organizationId).eq('active', true)
-      : Promise.resolve({ data: [] as { service_type: string }[], error: null }),
-  ]);
-  if (catalog.error) throw catalog.error;
-  if (rostered.error) throw rostered.error;
-  const keys = new Set<string>();
-  (catalog.data ?? []).forEach((row) => keys.add(String(row.module_key)));
-  (rostered.data ?? []).forEach((row) => { if (row.service_type) keys.add(String(row.service_type)); });
-  return [...keys].sort((a, b) => a.localeCompare(b));
+export interface ServiceCode { code: string; name: string; source: string }
+
+// One catalogue for every task picker: registered task codes, modules, and tasks the organisation already rosters.
+export const loadServiceCatalog = async (organizationId?: string | null): Promise<ServiceCode[]> => {
+  if (!organizationId) return [];
+  const { data, error } = await supabase.rpc('list_service_codes', { p_organization_id: organizationId });
+  if (error) throw error;
+  return ((data ?? []) as ServiceCode[]).filter((row) => row.code);
 };
 
-export const serviceLabel = (key: string | null | undefined) => key ? key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : 'All tasks';
+const humanise = (key: string) => key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+export const serviceLabel = (key: string | null | undefined, catalog?: ServiceCode[]) =>
+  key ? catalog?.find((row) => row.code === key)?.name ?? humanise(key) : 'All tasks';
+
+export const createServiceCode = async (name: string, organizationId?: string | null): Promise<ServiceCode> => {
+  if (!/[a-z]/i.test(name.trim())) throw new Error('Give the task a name that starts with a letter, for example "Camera review".');
+  const { data, error } = await supabase.rpc('manage_service_code', {
+    p_action: 'create', p_name: name.trim(), p_code: null, p_organization_id: organizationId ?? null,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { code?: string; name?: string } | null;
+  if (!row?.code) throw new Error('The task was not returned. Reload and check the task list.');
+  return { code: row.code, name: row.name ?? humanise(row.code), source: 'registered' };
+};
 
 export const createPayCode = async (code: string, name: string): Promise<PayCode> => {
   const normalised = code.trim().toUpperCase();

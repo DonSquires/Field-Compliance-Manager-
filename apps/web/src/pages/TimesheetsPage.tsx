@@ -12,9 +12,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
-import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode } from '../lib/payCatalog';
+import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode, type ServiceCode } from '../lib/payCatalog';
 import { PayCodeSelect } from '../components/PayCodeSelect';
 import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
+import { ServiceCodeSelect } from '../components/ServiceCodeSelect';
 import './PageStyles.css';
 import './TimesheetsPage.css';
 
@@ -170,7 +171,7 @@ const TimesheetsPage: React.FC = () => {
   const [attendanceRows, setAttendanceRows] = useState<AttendanceExceptionRow[]>([]);
   const [attendanceGrace, setAttendanceGrace] = useState(15);
   const [editingShift, setEditingShift] = useState<ShiftRecord | null>(null);
-  const [services, setServices] = useState<string[]>([]);
+  const [services, setServices] = useState<ServiceCode[]>([]);
   const [shiftForm, setShiftForm] = useState({ scheduledStart: '', scheduledEnd: '', actualStart: '', actualEnd: '', serviceType: '', status: '', reason: '' });
 
   const generation = useRef(0);
@@ -700,12 +701,10 @@ const TimesheetsPage: React.FC = () => {
                 <label><span>Actual finish</span><input type="datetime-local" value={shiftForm.actualEnd} min={shiftForm.actualStart || undefined} onChange={(e) => setShiftForm({ ...shiftForm, actualEnd: e.target.value })} /></label>
               </div>
               <div className="form-row">
-                <label><span>Service</span>
-                  <select value={shiftForm.serviceType} onChange={(e) => setShiftForm({ ...shiftForm, serviceType: e.target.value })} required>
-                    {shiftForm.serviceType && !services.includes(shiftForm.serviceType) && <option value={shiftForm.serviceType}>{serviceLabel(shiftForm.serviceType)}</option>}
-                    {services.map((service) => <option key={service} value={service}>{serviceLabel(service)}</option>)}
-                  </select>
-                </label>
+                <ServiceCodeSelect label="Service" codes={services} value={shiftForm.serviceType} required allowEmpty={false} emptyLabel="Choose a service"
+                  canCreate={isAdmin} organizationId={editingShift.organization_id}
+                  onChange={(code) => setShiftForm((current) => ({ ...current, serviceType: code }))}
+                  onCreated={(code) => setServices((current) => [...current, code].sort((a, b) => a.name.localeCompare(b.name)))} />
                 <label><span>Status</span>
                   <select value={shiftForm.status} onChange={(e) => setShiftForm({ ...shiftForm, status: e.target.value })} required>
                     {SHIFT_STATUSES.map((status) => <option key={status} value={status}>{plainWords(status)}</option>)}

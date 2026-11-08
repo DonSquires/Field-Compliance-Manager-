@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { RATE_TYPES, loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode } from '../lib/payCatalog';
+import { RATE_TYPES, loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode, type ServiceCode } from '../lib/payCatalog';
 import { plainWords } from '../lib/rosterWords';
 import { PayCodeSelect } from './PayCodeSelect';
+import { ServiceCodeSelect } from './ServiceCodeSelect';
 
 interface PayRule {
   id: string;
@@ -50,7 +51,7 @@ const ruleState = (rule: PayRule, on: string) => {
 export const StaffPayRatesPanel: React.FC<StaffPayRatesPanelProps> = ({ staffId, staffName, organizationId, roleCode, canManage, canCreatePayCode, initialService }) => {
   const [rules, setRules] = useState<PayRule[]>([]);
   const [payCodes, setPayCodes] = useState<PayCode[]>([]);
-  const [services, setServices] = useState<string[]>([]);
+  const [services, setServices] = useState<ServiceCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -153,7 +154,7 @@ export const StaffPayRatesPanel: React.FC<StaffPayRatesPanelProps> = ({ staffId,
   const row = (rule: PayRule, actions: boolean) => {
     const state = ruleState(rule, on);
     return <tr key={rule.id}>
-      <td>{serviceLabel(rule.service_type)}</td>
+      <td>{serviceLabel(rule.service_type, services)}</td>
       <td>{plainWords(rule.rate_type)}</td>
       <td>{money(Number(rule.amount))}</td>
       <td>{rule.pay_code ?? '—'}</td>
@@ -184,13 +185,11 @@ export const StaffPayRatesPanel: React.FC<StaffPayRatesPanelProps> = ({ staffId,
     {notice && <p className="staff-pay-message" role="status">{notice}</p>}
 
     {mode && canManage && <form className="staff-profile-action-form staff-profile-form-grid" onSubmit={submit} aria-label={title}>
-      <h3 className="staff-profile-form-wide">{title}{mode.action !== 'create' && <small> · {serviceLabel(mode.rule.service_type)} at {money(Number(mode.rule.amount))}</small>}</h3>
+      <h3 className="staff-profile-form-wide">{title}{mode.action !== 'create' && <small> · {serviceLabel(mode.rule.service_type, services)} at {money(Number(mode.rule.amount))}</small>}</h3>
       {mode.action !== 'end' && <>
-        <label><span>Task</span><select value={draft.service} disabled={mode.action === 'review'} onChange={(event) => setDraft({ ...draft, service: event.target.value })}>
-          <option value="">All tasks</option>
-          {draft.service && !services.includes(draft.service) && <option value={draft.service}>{serviceLabel(draft.service)}</option>}
-          {services.map((service) => <option key={service} value={service}>{serviceLabel(service)}</option>)}
-        </select></label>
+        <ServiceCodeSelect codes={services} value={draft.service} disabled={mode.action === 'review'} canCreate={canCreatePayCode} organizationId={organizationId}
+          onChange={(code) => setDraft((current) => ({ ...current, service: code }))}
+          onCreated={(code) => setServices((current) => [...current, code].sort((a, b) => a.name.localeCompare(b.name)))} />
         <label><span>Rate type</span><select value={draft.rateType} onChange={(event) => setDraft({ ...draft, rateType: event.target.value })}>
           {RATE_TYPES.map((type) => <option key={type} value={type}>{plainWords(type)}</option>)}
         </select></label>
