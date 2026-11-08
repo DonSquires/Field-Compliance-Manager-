@@ -45104,6 +45104,10 @@ export type Database = {
         Returns: boolean
       }
       is_grand_master: { Args: never; Returns: boolean }
+      is_known_service_code: {
+        Args: { p_code: string; p_organization_id: string }
+        Returns: boolean
+      }
       is_master_for_org: { Args: { p_org_id: string }; Returns: boolean }
       is_master_or_above: { Args: never; Returns: boolean }
       is_platform_owner: { Args: { p_user_id: string }; Returns: boolean }
@@ -45449,6 +45453,14 @@ export type Database = {
       list_report_incident_triage: {
         Args: { p_pack_id: string }
         Returns: Json
+      }
+      list_service_codes: {
+        Args: { p_organization_id: string }
+        Returns: {
+          code: string
+          name: string
+          source: string
+        }[]
       }
       list_unlinked_plate_mentions_for_agreement: {
         Args: {
@@ -47599,6 +47611,41 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "service_agreement_continuity_policies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_service_code: {
+        Args: {
+          p_action: string
+          p_code?: string
+          p_name?: string
+          p_organization_id?: string
+        }
+        Returns: {
+          code: string
+          code_type: string
+          created_at: string
+          created_by: string | null
+          default_rate: number | null
+          description: string | null
+          external_refs: Json
+          id: string
+          is_active: boolean
+          item_category: string | null
+          name: string
+          organization_id: string
+          parent_code: string | null
+          region_code: string | null
+          service_type: string | null
+          sort_order: number
+          unit: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "reference_codes"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -52414,6 +52461,14 @@ export type Database = {
       seed_org_reference_code_defaults: {
         Args: { p_organization_id: string }
         Returns: undefined
+      }
+      service_code_catalog: {
+        Args: { p_organization_id: string }
+        Returns: {
+          code: string
+          name: string
+          source: string
+        }[]
       }
       set_agreement_commercial_terms: {
         Args: {
