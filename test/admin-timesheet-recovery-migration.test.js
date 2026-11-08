@@ -77,12 +77,16 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
         $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       CREATE TABLE public.user_profiles(id uuid PRIMARY KEY,organization_id uuid,employer_organization_id uuid,deactivated_at timestamptz,role text);
       CREATE TABLE public.staff_profiles(id uuid PRIMARY KEY,user_id uuid,organization_id uuid,role_code text);
+      CREATE TABLE public.dispatch_resources(id uuid,assigned_officer_id uuid);
+      CREATE TABLE public.dispatch_jobs(id uuid,organization_id uuid,dispatch_resource_id uuid,status text,
+        shift_id uuid,shift_stop_id uuid,job_type text,on_scene_at timestamptz,en_route_at timestamptz,
+        acknowledged_at timestamptz,dispatched_at timestamptz,created_at timestamptz,completed_at timestamptz);
       CREATE FUNCTION public.is_admin_for_org(uuid) RETURNS boolean LANGUAGE sql STABLE AS
         $$ SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE id=auth.uid() AND organization_id=$1 AND role='admin' AND deactivated_at IS NULL) $$;
       CREATE TABLE public.audit_log(id uuid DEFAULT gen_random_uuid(),organization_id uuid,actor_user_id uuid,action text,target_table text,target_id uuid,metadata jsonb);
       ${['timesheets','roster_slots','shifts','shift_breaks','rate_rules','payroll_export_batches',
         'finance_pl_periods','service_agreements','service_agreement_locations','service_agreement_modules',
-        'finance_service_costs','finance_labour_cost_postings','cost_centres'].map(table).join('\n')}
+        'finance_service_costs','finance_labour_cost_postings','cost_centres','timesheet_work_entries'].map(table).join('\n')}
       ALTER TABLE public.roster_slots ADD COLUMN IF NOT EXISTS planned_break_minutes integer NOT NULL DEFAULT 0,ADD COLUMN IF NOT EXISTS break_unpaid boolean NOT NULL DEFAULT false;
       ALTER TABLE public.timesheets DROP COLUMN IF EXISTS recovery_request,DROP COLUMN IF EXISTS pay_code_override,
         DROP COLUMN IF EXISTS hourly_rate_override,DROP COLUMN IF EXISTS pay_override_reason,
@@ -91,6 +95,8 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       ${preMigrationFinanceFn()}
       ${fn('create_payroll_export_batch')}
       ${migration}
+      ${fs.readFileSync(path.join(root, 'supabase/migrations/20261108190000_timesheet_roster_tolerances.sql'), 'utf8')}
+      ${fn('submit_officer_timesheet_from_work')}
       CREATE FUNCTION public.expect_error(p_sql text,p_message text) RETURNS void LANGUAGE plpgsql AS $$
       BEGIN
         BEGIN EXECUTE p_sql; EXCEPTION WHEN OTHERS THEN
@@ -121,6 +127,97 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       SELECT public.recover_scheduled_timesheet('${request}','${officer}','2026-10-01','2026-10-01',(SELECT rows FROM request_rows),0,'Supervisor confirmed time');
     `);
     assert.equal(sql('SELECT count(*) FROM public.timesheets').trim(), '1', 'replay creates no duplicate');
+    sql(`
+      BEGIN;
+      SET LOCAL TIME ZONE 'Pacific/Auckland';
+      SELECT set_config('request.jwt.claim.sub','${officer}',true);
+      UPDATE public.shifts SET status='completed',actual_start=scheduled_start,actual_end=scheduled_end;
+      INSERT INTO public.shift_breaks(organization_id,shift_id,officer_user_id,break_type,started_at,ended_at,is_paid,client_request_id)
+        VALUES('${org}','${shift}','${officer}','meal','2026-10-01 12:00+13','2026-10-01 12:30+13',false,gen_random_uuid());
+      DO $$ DECLARE test_case record; work_row record; BEGIN
+        FOR test_case IN SELECT * FROM (VALUES (-901,false),(-900,true),(0,true),(900,true),(901,false)) AS cases(seconds,snaps) LOOP
+          UPDATE public.shifts SET actual_start=scheduled_start+make_interval(secs=>test_case.seconds),
+            actual_end=scheduled_end+make_interval(secs=>test_case.seconds);
+          SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+          IF (work_row.metadata->>'start_snapped')::boolean IS DISTINCT FROM test_case.snaps
+            OR (work_row.metadata->>'finish_snapped')::boolean IS DISTINCT FROM test_case.snaps
+            OR (work_row.metadata->>'timesheet_mismatch')::boolean IS DISTINCT FROM NOT test_case.snaps
+            THEN RAISE EXCEPTION 'Endpoint boundary failed: %',test_case.seconds; END IF;
+          IF test_case.snaps AND (work_row.started_at<>'2026-10-01 08:00+13'::timestamptz
+            OR work_row.ended_at<>'2026-10-01 16:00+13'::timestamptz OR work_row.calculated_minutes<>450)
+            THEN RAISE EXCEPTION 'Snapped endpoints or deduction incorrect'; END IF;
+          IF (work_row.metadata->>'actual_start')::timestamptz IS DISTINCT FROM
+            (SELECT actual_start FROM public.shifts WHERE id='${shift}') THEN RAISE EXCEPTION 'Actual evidence lost'; END IF;
+        END LOOP;
+        UPDATE public.shifts SET actual_start=scheduled_start+interval '15 minutes 1 second',actual_end=scheduled_end-interval '15 minutes';
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+        IF NOT (work_row.metadata->>'start_mismatch')::boolean OR (work_row.metadata->>'finish_mismatch')::boolean
+          THEN RAISE EXCEPTION 'Endpoint review must be independent'; END IF;
+        UPDATE public.shifts SET actual_start=scheduled_start,actual_end=scheduled_end;
+        FOR test_case IN SELECT * FROM (VALUES (1499,false),(1500,true),(1800,true),(2100,true),(2101,false)) AS cases(seconds,snaps) LOOP
+          UPDATE public.shift_breaks SET ended_at=started_at+make_interval(secs=>test_case.seconds);
+          SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+          IF (work_row.metadata->>'break_snapped')::boolean IS DISTINCT FROM test_case.snaps
+            OR (work_row.metadata->>'unpaid_break_mismatch')::boolean IS DISTINCT FROM NOT test_case.snaps
+            THEN RAISE EXCEPTION 'Break boundary failed: %',test_case.seconds; END IF;
+          IF test_case.snaps AND work_row.calculated_minutes<>450 THEN RAISE EXCEPTION 'Roster deduction not snapped'; END IF;
+        END LOOP;
+        DELETE FROM public.shift_breaks;
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+        IF work_row.calculated_minutes<>480 OR NOT (work_row.metadata->>'unpaid_break_mismatch')::boolean
+          THEN RAISE EXCEPTION 'Missing break must flag without inventing a deduction'; END IF;
+        INSERT INTO public.shift_breaks(organization_id,shift_id,officer_user_id,break_type,started_at,ended_at,is_paid,client_request_id)
+          VALUES('${org}','${shift}','${officer}','meal','2026-10-01 12:00+13','2026-10-01 12:30+13',true,gen_random_uuid());
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+        IF work_row.calculated_minutes<>480 OR NOT (work_row.metadata->>'unpaid_break_mismatch')::boolean
+          THEN RAISE EXCEPTION 'Paid break cannot satisfy mandatory unpaid break'; END IF;
+        UPDATE public.shift_breaks SET is_paid=false,ended_at=NULL;
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+        IF (work_row.metadata->>'break_snapped')::boolean OR NOT (work_row.metadata->>'unpaid_break_mismatch')::boolean
+          THEN RAISE EXCEPTION 'Open unpaid break must remain unresolved'; END IF;
+        DELETE FROM public.shift_breaks;
+        UPDATE public.shifts SET scheduled_start='2026-10-01 23:00+13',scheduled_end='2026-10-02 01:00+13',
+          actual_start='2026-10-01 22:50+13',actual_end='2026-10-02 01:10+13';
+        UPDATE public.roster_slots SET planned_break_minutes=0;
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01');
+        IF work_row.calculated_minutes<>60 THEN RAISE EXCEPTION 'First clipped period incorrect'; END IF;
+        SELECT * INTO STRICT work_row FROM public.get_officer_timesheet_work('2026-10-02','2026-10-02');
+        IF work_row.calculated_minutes<>60 THEN RAISE EXCEPTION 'Second clipped period incorrect'; END IF;
+        UPDATE public.roster_slots SET planned_break_minutes=25;
+        INSERT INTO public.shift_breaks(organization_id,shift_id,officer_user_id,break_type,started_at,ended_at,is_paid,client_request_id)
+          VALUES('${org}','${shift}','${officer}','meal','2026-10-01 23:45+13','2026-10-02 00:15+13',false,gen_random_uuid());
+        IF (SELECT sum(calculated_minutes) FROM (
+          SELECT calculated_minutes FROM public.get_officer_timesheet_work('2026-10-01','2026-10-01')
+          UNION ALL SELECT calculated_minutes FROM public.get_officer_timesheet_work('2026-10-02','2026-10-02')) portions)<>95
+          THEN RAISE EXCEPTION 'Split period duplicated snapped break deduction'; END IF;
+        DELETE FROM public.shift_breaks;
+      END $$;
+      SELECT set_config('request.jwt.claim.sub','${other}',true);
+      DO $$ BEGIN IF EXISTS(SELECT 1 FROM public.get_officer_timesheet_work('2026-10-01','2026-10-02'))
+        THEN RAISE EXCEPTION 'Other officer work disclosed'; END IF; END $$;
+      SELECT set_config('request.jwt.claim.sub','',true);
+      SELECT public.expect_error($$SELECT public.get_officer_timesheet_work('2026-10-01','2026-10-01')$$,'Authentication');
+      SELECT set_config('request.jwt.claim.sub','${officer}',true);
+      UPDATE public.shifts SET scheduled_start='2026-10-03 08:00+13',scheduled_end='2026-10-03 16:00+13',
+        actual_start='2026-10-03 08:15+13',actual_end='2026-10-03 16:15+13';
+      UPDATE public.roster_slots SET planned_break_minutes=30;
+      INSERT INTO public.shift_breaks(organization_id,shift_id,officer_user_id,break_type,started_at,ended_at,is_paid,client_request_id)
+        VALUES('${org}','${shift}','${officer}','meal','2026-10-03 12:00+13','2026-10-03 12:10+13',false,gen_random_uuid()),
+          ('${org}','${shift}','${officer}','meal','2026-10-03 12:20+13','2026-10-03 12:35+13',false,gen_random_uuid());
+      SELECT public.submit_officer_timesheet_from_work(gen_random_uuid(),'2026-10-03','2026-10-03',0,NULL);
+      DO $$ BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.timesheet_work_entries WHERE source_id='${shift}'
+          AND calculated_minutes=450 AND (metadata->>'recorded_unpaid_break_minutes')::numeric=25
+          AND (metadata->>'break_snapped')::boolean AND NOT (metadata->>'timesheet_mismatch')::boolean)
+          THEN RAISE EXCEPTION 'Split-break snapping missing from submitted snapshot'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.shifts WHERE id='${shift}' AND actual_start='2026-10-03 08:15+13'::timestamptz)
+          THEN RAISE EXCEPTION 'Submission changed original attendance'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.timesheets WHERE period_start='2026-10-03' AND work_derived_hours=7.5
+          AND (work_summary->'entries'->0->'metadata'->>'roster_tolerance_version')::integer=1)
+          THEN RAISE EXCEPTION 'Submission summary lost roster derivation'; END IF;
+      END $$;
+      ROLLBACK;
+    `);
     assert.equal(sql("SELECT actual_hours||':'||work_derived_hours||':'||adjustment_hours FROM public.timesheets").trim(), '7.75:0.00:7.75');
     assert.equal(sql("SELECT actual_start IS NULL AND actual_end IS NULL AND status='missed' FROM public.shifts").trim(), 't', 'no fabricated attendance');
     assert.equal(sql(`SELECT set_config('request.jwt.claim.sub','${admin}',false);
@@ -132,6 +229,11 @@ test('scheduled recovery, scoped pay, payroll export and finance run in disposab
       DO $$ BEGIN
         IF (SELECT review_status FROM public.get_timesheet_break_review((SELECT id FROM public.timesheets)))<>'short'
           THEN RAISE EXCEPTION 'Short break evidence missing'; END IF;
+      END $$;
+      UPDATE public.shift_breaks SET ended_at='2026-10-01 12:25+13';
+      DO $$ BEGIN
+        IF (SELECT review_status FROM public.get_timesheet_break_review((SELECT id FROM public.timesheets)))<>'matched'
+          THEN RAISE EXCEPTION 'Unpaid break within five minutes must match'; END IF;
       END $$;
       UPDATE public.shift_breaks SET ended_at='2026-10-01 12:45+13';
       DO $$ BEGIN

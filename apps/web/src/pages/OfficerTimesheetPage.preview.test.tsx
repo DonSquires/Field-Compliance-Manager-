@@ -53,6 +53,17 @@ async function choosePeriod() {
 }
 
 describe('timesheet work preview', () => {
+  it('highlights endpoint and mandatory-break mismatches without preventing review submission', async () => {
+    const entries = work('Roster mismatch', 450);
+    entries[0].metadata = { start_mismatch: true, finish_mismatch: true, unpaid_break_mismatch: true };
+    mocked.loadWork.mockResolvedValue(entries);
+    render(<OfficerTimesheetPage />);
+    await screen.findByText('Roster mismatch');
+    const warning = screen.getByText('Start time does not match roster; Finish time does not match roster; Mandatory unpaid break does not match roster');
+    expect(warning.closest('li')?.classList.contains('timesheet-mismatch')).toBe(true);
+    expect((screen.getByRole('button', { name: 'Send for approval' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('ignores a late result for an earlier period', async () => {
     const earlier = deferred<TimesheetWorkEntry[]>();
     mocked.loadWork.mockImplementation((start: string) => {

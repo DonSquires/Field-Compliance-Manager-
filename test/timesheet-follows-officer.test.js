@@ -41,7 +41,7 @@ test('the officer timesheet page speaks plainly, defaults to this week and shows
   assert.match(page, /useState\(\{ \.\.\.thisWeekSoFar\(\), adjustmentHours: '0', notes: '' \}\)/);
   assert.match(page, /void loadOfficerTimesheetWork\(form\.periodStart, form\.periodEnd\)/);
   assert.match(page, /Worked time: \$\{hoursAndMinutes\(workedMinutes\)\} across \$\{plural\(shiftCount, 'shift'\)\}/);
-  assert.match(page, /min unpaid break taken off/);
+  assert.match(page, /unpaid break deducted/);
   assert.match(page, /ended when your next shift started/);
   assert.match(page, /submitted: 'Waiting for review',\n\s+branch_checked: 'Checked by your branch',\n\s+approved: 'Approved',\n\s+rejected: 'Sent back to you',/);
   assert.match(page, /rejectedForPeriod \? 'Send corrected timesheet' : 'Send for approval'/);

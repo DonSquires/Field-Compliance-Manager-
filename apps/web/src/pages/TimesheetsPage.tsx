@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
 import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode } from '../lib/payCatalog';
 import { PayCodeSelect } from '../components/PayCodeSelect';
+import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
 import './PageStyles.css';
 import './TimesheetsPage.css';
 
@@ -33,6 +34,7 @@ interface TimesheetRow {
   overtime_hours?: number | null;
   adjustment_hours: number | null;
   work_derived_hours: number | null;
+  work_summary?: unknown;
   status: string;
   pay_code_override?: string | null;
   hourly_rate_override?: number | null;
@@ -217,7 +219,7 @@ const TimesheetsPage: React.FC = () => {
         rows = (data as TimesheetRow[] | null) ?? [];
       } else {
         const { data, error: dbError } = await supabase.from('timesheets')
-          .select('id,organization_id,staff_id,shift_id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,work_derived_hours,status,pay_code_override,hourly_rate_override,review_notes,submitted_at,payroll_export_batch_id,revision,shift:shifts(service_type)')
+          .select('id,organization_id,staff_id,shift_id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,work_derived_hours,work_summary,status,pay_code_override,hourly_rate_override,review_notes,submitted_at,payroll_export_batch_id,revision,shift:shifts(service_type)')
           .eq('organization_id', homeOrganizationId)
           .lte('period_start', rangeEnd)
           .gte('period_end', rangeStart)
@@ -518,9 +520,9 @@ const TimesheetsPage: React.FC = () => {
                   <thead><tr><th scope="col">Staff</th><th scope="col">Period</th><th scope="col">Service</th><th scope="col">Scheduled</th><th scope="col">Worked</th><th scope="col">Overtime</th><th scope="col">Adjustment</th><th scope="col">Pay</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
                   <tbody>
                     {filteredTimesheets.map((row) => (
-                      <tr key={row.id}>
+                      <tr key={row.id} className={timesheetSummaryMismatchReasons(row.work_summary).length ? 'timesheet-mismatch' : undefined}>
                         <td>{isAdmin ? <button type="button" className="link-button" onClick={() => navigate(staffLink(row.staff_id))} title="Open staff profile, employment and pay">{names[row.staff_id] ?? 'Staff member'}</button> : names[row.staff_id] ?? 'Staff member'}</td>
-                        <td>{row.period_start === row.period_end ? dayText(row.period_start) : `${dayText(row.period_start)} – ${dayText(row.period_end)}`}</td>
+                        <td>{row.period_start === row.period_end ? dayText(row.period_start) : `${dayText(row.period_start)} – ${dayText(row.period_end)}`}<small className="timesheet-mismatch-note">{timesheetSummaryMismatchReasons(row.work_summary).join('; ')}</small></td>
                         <td>{row.shift?.service_type ? serviceLabel(row.shift.service_type) : '—'}</td>
                         <td>{hours(row.scheduled_hours)}</td>
                         <td>{hours(row.actual_hours)}</td>

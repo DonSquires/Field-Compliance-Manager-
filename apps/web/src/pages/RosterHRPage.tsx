@@ -14,6 +14,7 @@ import { ROSTERING_HR_TABS, isRosteringHrView } from '../lib/workforceSections';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords, submittedWords } from '../lib/rosterWords';
+import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
 import { RosterRulesPanel } from '../components/RosterRulesPanel';
 import { CREDENTIAL_TYPES, credentialExpiryState, credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import './PageStyles.css';
@@ -400,10 +401,10 @@ const TimesheetRows: React.FC<TimesheetRowsProps> = ({ rows, staffNames, corpora
     <table className="reports-table">
       <caption className="sr-only">Timesheet reconciliation: rostered, worked, adjusted and submitted hours</caption>
       <thead><tr><th scope="col">Staff</th><th scope="col">Period</th><th scope="col">Rostered h</th><th scope="col">Worked h</th><th scope="col">Adjustment h</th><th scope="col">To pay h</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead>
-      <tbody>{rows.length === 0 ? <tr><td colSpan={8}>No timesheets in this scope.</td></tr> : rows.map((item) => <tr key={item.id}>
+      <tbody>{rows.length === 0 ? <tr><td colSpan={8}>No timesheets in this scope.</td></tr> : rows.map((item) => <tr key={item.id} className={timesheetSummaryMismatchReasons(item.work_summary).length ? 'timesheet-mismatch' : undefined}>
         <td>{staffNames[item.staff_id] || 'Staff identity unavailable'}</td>
         <td>{item.period_start} – {item.period_end}{item.work_summary?.evidence_kind === 'manual_admin' && <details><summary>Manual admin evidence — not actual attendance</summary>{item.work_summary.manual_sources?.map((source) => <p key={`${source.source_type}:${source.source_id}`}>{source.source_type}: {source.source_id}{source.shift_id && <> · Shift: {source.shift_id}</>} · {source.reason}</p>)}</details>}</td>
-        <td>{item.scheduled_hours ?? '—'}</td><td>{item.work_derived_hours ?? '—'}{item.work_summary?.source_count !== undefined && <small> · {item.work_summary.source_count} work records</small>}</td><td>{item.adjustment_hours ?? '—'}</td><td>{item.actual_hours ?? '—'}</td>
+        <td>{item.scheduled_hours ?? '—'}</td><td>{item.work_derived_hours ?? '—'}{item.work_summary?.source_count !== undefined && <small> · {item.work_summary.source_count} work records</small>}<small className="timesheet-mismatch-note">{timesheetSummaryMismatchReasons(item.work_summary).join('; ')}</small></td><td>{item.adjustment_hours ?? '—'}</td><td>{item.actual_hours ?? '—'}</td>
         <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span>{item.submitted_at && <small className="hr-timesheet-submitted">{submittedWords(item.submitted_at)}</small>}{item.pay_override_reason && <small>This timesheet only: {item.pay_code_override ?? 'standard pay code'} · {item.hourly_rate_override == null ? 'standard hourly rate' : `$${Number(item.hourly_rate_override).toFixed(4)}/h`} · {item.pay_override_reason}</small>}</td>
         <td><div className="hr-timesheet-actions">
           {onCorrect && ['submitted', 'branch_checked'].includes(item.status) && <button className="btn btn-sm btn-secondary" onClick={() => onCorrect(item)}>Edit hours</button>}

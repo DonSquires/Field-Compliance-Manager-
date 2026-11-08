@@ -22,6 +22,44 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test('roster tolerances show adjusted values and highlight mismatches before submission', async ({ page }, testInfo) => {
+  const entries = [
+    { ...work('Snapped static shift', 450)[0], metadata: {
+      actual_start: '2026-08-26T08:10:00.000Z', actual_end: '2026-08-26T15:50:00.000Z',
+      scheduled_start: '2026-08-26T08:00:00.000Z', scheduled_end: '2026-08-26T16:00:00.000Z',
+      unpaid_break_minutes: 30, recorded_unpaid_break_minutes: 27, start_snapped: true,
+      finish_snapped: true, break_snapped: true,
+    } },
+    { ...work('Mismatch static shift', 440)[0], source_id: '13131313-1313-4313-8313-131313131313', metadata: {
+      start_mismatch: true, finish_mismatch: true, unpaid_break_mismatch: true,
+    } },
+  ];
+  await page.route('**/rest/v1/rpc/get_officer_timesheet_work', async (route) => {
+    await route.fulfill({ status: 200, json: entries });
+  });
+  let submitted = false;
+  await page.route('**/rest/v1/rpc/submit_officer_timesheet_from_work', async (route) => {
+    const payload = route.request().postDataJSON();
+    expect(payload.p_notes).toBe('Supervisor to review time and break mismatch');
+    submitted = true;
+    await route.fulfill({ status: 200, json: [{ id: 'abababab-abab-4bab-8bab-abababababab', actual_hours: 14.83, source_count: 2 }] });
+  });
+  await signInAsOfficer(page, '/officer/timesheet');
+  const snapped = page.locator('.officer-timesheet-entries li').filter({ hasText: 'Snapped static shift' });
+  await expect(snapped).not.toHaveClass(/timesheet-mismatch/);
+  await expect(snapped).toContainText('30 min rostered unpaid break deducted');
+  await expect(snapped).toContainText('unpaid break 27.0 min');
+  const mismatch = page.locator('.officer-timesheet-entries li').filter({ hasText: 'Mismatch static shift' });
+  await expect(mismatch).toHaveClass(/timesheet-mismatch/);
+  await expect(mismatch).toContainText('Start time does not match roster; Finish time does not match roster; Mandatory unpaid break does not match roster');
+  await page.getByLabel('Anything payroll should know').fill('Supervisor to review time and break mismatch');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator('.officer-timesheet-form').screenshot({ path: testInfo.outputPath('roster-tolerances.png') });
+  await page.getByRole('button', { name: 'Send for approval' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Timesheet sent for approval' })).toBeVisible();
+  expect(submitted).toBe(true);
+});
+
 test('a late response cannot replace the selected period preview', async ({ page }) => {
   let releaseEarlier!: () => void;
   let signalEarlierRequested!: () => void;
@@ -44,7 +82,7 @@ test('a late response cannot replace the selected period preview', async ({ page
   });
 
   await signInAsOfficer(page, '/officer/timesheet');
-  await page.getByLabel('To').fill('2026-08-29');
+  await page.getByLabel('To', { exact: true }).fill('2026-08-29');
   await expect(page.getByText('Initial patrol', { exact: true })).toBeVisible();
   await page.getByLabel('From').fill('2026-08-25');
   await earlierRequested;
@@ -69,7 +107,7 @@ test('a failed preview hides old work and must be retried before sending', async
   });
 
   await signInAsOfficer(page, '/officer/timesheet');
-  await page.getByLabel('To').fill('2026-08-29');
+  await page.getByLabel('To', { exact: true }).fill('2026-08-29');
   await expect(page.getByText('Old patrol', { exact: true })).toBeVisible();
   await page.getByLabel('From').fill('2026-08-26');
   await expect(page.getByText(/could not load.*finished work/i)).toBeVisible();
@@ -156,7 +194,7 @@ test('a sent receipt remains clear when the timesheet list fails to refresh', as
   });
 
   await signInAsOfficer(page, '/officer/timesheet');
-  await page.getByLabel('To').fill('2026-08-29');
+  await page.getByLabel('To', { exact: true }).fill('2026-08-29');
   await expect(page.getByText('Current patrol', { exact: true })).toBeVisible();
   await expect(page.getByText(/Nothing sent yet/)).toBeVisible();
   await page.getByRole('button', { name: 'Send for approval' }).click();

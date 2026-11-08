@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { loadOfficerTimesheetWork, resubmitRejectedTimesheetFromWork, submitOfficerTimesheetFromWork, type TimesheetWorkEntry } from '../lib/officerTimesheetWork';
 import { plainWords, plural, submittedWords } from '../lib/rosterWords';
+import { timesheetMismatchReasons } from '../lib/timesheetTolerances';
 import './PageStyles.css';
 
 interface Timesheet {
@@ -273,9 +274,14 @@ const OfficerTimesheetPage: React.FC = () => {
             {workEntries.map((entry) => {
               const unpaidBreak = Number(entry.metadata?.unpaid_break_minutes ?? 0);
               const endedEarly = entry.metadata?.ended_reason === 'superseded_by_next_shift';
-              return <li key={`${entry.source_type}-${entry.source_id}`}>
+              const mismatchReasons = timesheetMismatchReasons(entry.metadata);
+              const actualStart = entry.metadata?.actual_start;
+              const actualEnd = entry.metadata?.actual_end;
+              return <li key={`${entry.source_type}-${entry.source_id}`} className={mismatchReasons.length ? 'timesheet-mismatch' : undefined}>
                 <span><strong>{plainWords(entry.label)}</strong> · {dateWords(entry.started_at)}, {timeWords(entry.started_at)} – {timeWords(entry.ended_at)}</span>
-                <span>{hoursAndMinutes(entry.calculated_minutes)}{unpaidBreak > 0 ? ` (${unpaidBreak} min unpaid break taken off)` : ''}{endedEarly ? ' · ended when your next shift started' : ''}</span>
+                <span>{hoursAndMinutes(entry.calculated_minutes)}{unpaidBreak > 0 ? ` (${unpaidBreak} min ${entry.metadata?.break_snapped === true ? 'rostered' : 'recorded'} unpaid break deducted)` : ''}{endedEarly ? ' · ended when your next shift started' : ''}</span>
+                {typeof actualStart === 'string' && typeof actualEnd === 'string' && <small>Recorded: {dateWords(actualStart)}, {timeWords(actualStart)} – {dateWords(actualEnd)}, {timeWords(actualEnd)}{entry.metadata?.recorded_unpaid_break_minutes !== undefined ? ` · unpaid break ${Number(entry.metadata.recorded_unpaid_break_minutes).toFixed(1)} min` : ''}</small>}
+                {mismatchReasons.length > 0 && <small className="timesheet-mismatch-note">{mismatchReasons.join('; ')}</small>}
               </li>;
             })}
           </ul>}
