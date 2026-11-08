@@ -104,7 +104,7 @@ async function finishToolExecution(supabase: any, taskLedger: TaskLedger | null,
   const outcome = String(result.meta.outcome ?? 'ok');
   let updateResult;
 
-  if (outcome === 'ok' || outcome === 'completed') {
+  if (outcome === 'ok' || outcome === 'completed' || outcome === 'answer') {
     // Tool succeeded
     const summary = result.reply ? result.reply.slice(0, 500) : 'Tool executed successfully';
     const evidence = result.meta.evidence_refs || result.meta.references || [];

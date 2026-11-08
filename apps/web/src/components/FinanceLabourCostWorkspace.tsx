@@ -12,7 +12,7 @@ type Period = { id: string; name: string; period_start: string; period_end: stri
 type Agreement = { id: string; name: string };
 type AgreementLink = { id: string; service_agreement_id: string; active: boolean };
 type CostCentre = { id: string; code: string; name: string };
-type Rate = { id: string; amount: number; pay_code: string | null; role_code: string | null; service_type: string | null; effective_from: string | null; effective_to: string | null; priority: number };
+type Rate = { id: string; amount: number; pay_code: string | null; staff_id: string | null; role_code: string | null; service_type: string | null; effective_from: string | null; effective_to: string | null; priority: number };
 type Posting = { timesheet_id: string };
 
 const financeRoles = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
@@ -54,7 +54,7 @@ export function FinanceLabourCostWorkspace({ activePeriodId, onChanged }: { acti
       supabase.from('finance_pl_periods').select('id,name,period_start,period_end').eq('organization_id', orgId).in('status', ['draft', 'locked']).order('period_start', { ascending: false }),
       supabase.from('service_agreements').select('id,name').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').order('name'),
       supabase.from('cost_centres').select('id,code,name').eq('organization_id', orgId).eq('active', true).order('code'),
-      supabase.from('rate_rules').select('id,amount,pay_code,role_code,service_type,effective_from,effective_to,priority').eq('organization_id', orgId).eq('rule_kind', 'pay').eq('rate_type', 'hourly').eq('active', true),
+      supabase.from('rate_rules').select('id,amount,pay_code,staff_id,role_code,service_type,effective_from,effective_to,priority').eq('organization_id', orgId).eq('rule_kind', 'pay').eq('rate_type', 'hourly').eq('active', true),
     ]);
     const firstError = sheetResult.error ?? postingResult.error ?? periodResult.error ?? agreementResult.error ?? centreResult.error ?? rateResult.error;
     if (firstError) {
@@ -116,11 +116,13 @@ export function FinanceLabourCostWorkspace({ activePeriodId, onChanged }: { acti
     const agreement = agreements.find((row) => row.id === agreementId);
     const hours = Number(sheet.actual_hours ?? sheet.work_derived_hours ?? 0);
     const rate = rates
-      .filter((row) => (!row.role_code || row.role_code === employee?.role_code)
+      .filter((row) => (!row.staff_id || row.staff_id === sheet.staff_id)
+        && (!row.role_code || row.role_code === employee?.role_code)
         && (!row.service_type || row.service_type === shift?.service_type)
         && (!row.effective_from || row.effective_from <= sheet.period_start)
         && (!row.effective_to || row.effective_to >= sheet.period_start))
-      .sort((left, right) => Number(Boolean(right.role_code)) - Number(Boolean(left.role_code))
+      .sort((left, right) => Number(Boolean(right.staff_id)) - Number(Boolean(left.staff_id))
+        || Number(Boolean(right.role_code)) - Number(Boolean(left.role_code))
         || Number(Boolean(right.service_type)) - Number(Boolean(left.service_type))
         || right.priority - left.priority
         || (right.effective_from ?? '').localeCompare(left.effective_from ?? ''))[0];

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import type { AppRole } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { StaffBranchAccessPanel } from '../components/StaffBranchAccessPanel';
+import { StaffPayRatesPanel } from '../components/StaffPayRatesPanel';
 import { credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { plainWords } from '../lib/rosterWords';
@@ -786,6 +787,15 @@ const StaffProfilePage: React.FC = () => {
                 {roleCodes.length === 0 && <p className="staff-profile-warning staff-profile-form-wide">No active payroll roles are configured for this organisation.</p>}
               </form> : <p>You do not have permission to change employment or payroll details.</p>}
             </section>
+            <StaffPayRatesPanel
+              staffId={staffProfile.id}
+              staffName={userProfile?.display_name || 'this person'}
+              organizationId={staffProfile.organization_id}
+              roleCode={staffProfile.role_code}
+              canManage={canManagePay}
+              canCreatePayCode={canManagePay && actor?.organizationId === staffProfile.organization_id}
+              initialService={params.get('payService')}
+            />
             {staffProfile.user_id && <StaffBranchAccessPanel userId={staffProfile.user_id} branches={operatingOrganizations} onChanged={loadProfile} />}
           </>}
 

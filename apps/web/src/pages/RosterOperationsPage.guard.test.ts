@@ -102,7 +102,8 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("scheduleMode === 'staff' && staff.length === 0");
     expect(page).toContain("scheduleMode === 'staff' && <div className=\"roster-readiness\"");
     expect(page).toContain("scheduleMode === 'staff' ? 'Staff' : 'Work unit'");
-    expect(page).toContain("navigate('/admin/people-hr?tab=timesheets')");
+    expect(page).toContain("navigate('/admin/timesheets')");
+    expect(page).toContain('/admin/timesheets?tab=attendance&shift=${exception.shift_id}');
   });
   it('locks the workbench to its parent and selects officers without creating a shift', () => {
     expect(page).toContain('roster-workbench-panes');

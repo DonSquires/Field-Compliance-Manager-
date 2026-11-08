@@ -93,3 +93,20 @@
   .timesheet-dialog { width:calc(100vw - 24px); max-height:calc(100vh - 24px); }
   .timesheet-dialog .form-row { flex-direction:column; }
 }
+
+.timesheets-page .link-button { padding:0; border:0; background:none; color:#7dd3fc; font:inherit; text-align:left; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.timesheets-page .link-button:hover, .timesheets-page .link-button:focus-visible { color:#bae6fd; }
+.timesheets-range-warning { color:#fde047; font-size:12px; }
+.timesheet-ref { display:flex; flex-direction:column; gap:2px; min-width:200px; }
+.timesheet-ref strong { color:#e7eef5; font-size:13px; }
+.timesheet-ref small { color:#8fa3b8; font-size:11px; }
+.commercial-table td { vertical-align:top; }
+.readiness-fix { display:flex; align-items:center; gap:4px; margin-top:6px; padding:0; border:0; background:none; color:#7dd3fc; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap; }
+.readiness-fix:hover, .readiness-fix:focus-visible { color:#bae6fd; text-decoration:underline; }
+.timesheet-dialog-note { margin:0; padding:10px 12px; border-left:3px solid #e0c27c; background:#1a2433; color:#cbd5e1; font-size:13px; line-height:1.5; }
+.timesheet-dialog-group { display:flex; flex-direction:column; gap:10px; margin:0; padding:12px; border:1px solid #2a3b4d; border-radius:8px; }
+.timesheet-dialog-group legend { padding:0 6px; color:#e0c27c; font-size:11px; font-weight:800; text-transform:uppercase; }
+.timesheet-dialog-group p { margin:0; color:#a9b8c8; font-size:12px; line-height:1.5; }
+.timesheet-dialog .pay-code-select { flex:1; min-width:180px; }
+.timesheet-dialog .pay-code-select > label { min-width:0; flex:none; }
+.timesheet-dialog .pay-code-new input { min-width:0; }

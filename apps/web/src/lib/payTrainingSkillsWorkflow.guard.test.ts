@@ -63,7 +63,7 @@ describe('pay, training, and skills operational workflow', () => {
 
   it('uses the selected branch for finance while preserving server-owned posting', () => {
     expect(financeWorkspace).toContain('operatingOrganizationId ?? profile?.organizationId');
-    expect(financeWorkspace).toContain("select('id,amount,pay_code,role_code");
+    expect(financeWorkspace).toContain("select('id,amount,pay_code,staff_id,role_code");
     expect(financeWorkspace).toContain("supabase.rpc('post_finance_timesheet_labour_cost'");
     expect(financeWorkspace).toContain('Open pay and charge rules');
     expect(financeWorkspace).not.toMatch(/from\('(finance_service_costs|finance_labour_cost_postings)'\)[\s\S]{0,500}\.(insert|update|upsert|delete)\(/);
