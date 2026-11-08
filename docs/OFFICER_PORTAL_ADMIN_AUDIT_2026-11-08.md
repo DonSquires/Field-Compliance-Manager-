@@ -30,6 +30,34 @@ The authenticated production browser could not be operated from this session. Hu
 	live tick. It completed successfully at `99d177bb...`; deployed and nginx
 	hashes now match. No unmanaged nginx edit was made.
 
+### Static-start follow-up: acknowledgement scope mismatch
+
+- **Before:** after route recovery, the officer acknowledged the whole-shift
+	safety briefing. Scoped live reads confirm that receipt is current and its
+	hazards, warnings and places contain every item in the stop briefing. The
+	two scopes have different content hashes.
+- **During:** server logs recovered the exact `P0001` error: "Read and
+	acknowledge the current risks for this stop before recording arrival."
+	`require_stop_safety_acknowledgement` rejects the arrival inside
+	`record_static_shift_presence`, rolling back `start_officer_static_shift`.
+	The old guard accepts only a stop-scoped receipt, while the schedule presents
+	and acknowledges the whole-shift briefing.
+- **After:** the real shift remains accepted, its static stop remains pending,
+	and no start/arrival was written. No real user session or credentials were
+	used to retrieve this diagnostic.
+- **Repair:** migration `20261108173000_static_start_safety_acknowledgement`
+	allows the assigned officer's current whole-shift receipt only for one
+	static stop, and only when that current briefing contains every stop hazard,
+	warning and place. Patrols and multi-stop assignments retain stop-scoped
+	acknowledgement. No receipt is fabricated, and changed content remains gated.
+- **Verification:** the existing disposable PostgreSQL attendance harness now
+	installs the actual arrival-safety trigger. It reproduced the production
+	error before the repair and passes after it, including differing scope hashes,
+	missing/stale/wrong-officer/wrong-stop receipts, uncovered hazards/warnings/
+	places, patrol and multi-stop denials, transaction rollback and start replay.
+	Production migration deployment and a human-operated start remain required;
+	the fixture is not proof of real attendance.
+
 ### 2. GPS place context is bound to another agreement, not the rostered site
 
 - **Observed:** direct attendance geometry says the assigned site is verified and the latest fix is within its attendance radius. The general operational resolver returns a resolved place, but not the rostered site. The service-context hook only marks a match when the resolved Site/Zone belongs to its selected agreement.

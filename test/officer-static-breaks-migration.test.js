@@ -7,6 +7,7 @@ const { join } = require('node:path');
 const test = require('node:test');
 const schema = readFileSync(join(__dirname, '../supabase/schema.sql'), 'utf8');
 const migration = readFileSync(join(__dirname, '../supabase/migrations/20261106120000_officer_static_attendance_and_rostered_breaks.sql'), 'utf8');
+const safetyMigration = readFileSync(join(__dirname, '../supabase/migrations/20261108173000_static_start_safety_acknowledgement.sql'), 'utf8');
 function fn(name) {
   const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${name}"`);
   assert.ok(start >= 0, name);
@@ -72,6 +73,20 @@ test('static attendance, break plan, authorization, retries and completion are t
       create table public.staff_branch_authorisations(user_id uuid,branch_org_id uuid,status text);
       create table public.leave_requests(staff_id uuid,status text,starts_on date,ends_on date);
       ${['shifts', 'shift_stops', 'shift_stop_modules', 'shift_stop_actions', 'shift_breaks', 'shift_debriefs', 'roster_slots', 'roster_work_units'].map(table).join('\n')}
+      ${table('safety_briefing_acknowledgements')}
+      create function public.build_shift_safety_briefing(uuid,uuid default null) returns jsonb
+        language sql stable as $f$ select jsonb_build_object('item_count',
+          coalesce(nullif(current_setting('test.safety_item_count',true),''),'0')::integer,
+          'briefing_hash',case when $2 is null then 'synthetic-current-hash' else 'synthetic-stop-hash' end,
+          'places',case when $2 is null and current_setting('test.safety_coverage',true)='missing_place'
+            then '[]'::jsonb else '[{"id":"synthetic-stop-place"}]'::jsonb end,
+          'warnings',case when $2 is null and current_setting('test.safety_coverage',true)='missing_warning'
+            then '[]'::jsonb else '[{"id":"synthetic-stop-warning"}]'::jsonb end,
+          'hazards',case when $2 is null and current_setting('test.safety_coverage',true)='missing'
+            then '[]'::jsonb else '[{"id":"synthetic-stop-hazard"}]'::jsonb end) $f$;
+      ${fn('require_stop_safety_acknowledgement')}
+      create trigger require_stop_safety_acknowledgement before insert or update of status
+        on public.shift_stops for each row execute function public.require_stop_safety_acknowledgement();
       alter table public.roster_slots add primary key(id);
       alter table public.roster_slots drop column if exists planned_break_minutes, drop column if exists break_unpaid;
       alter table public.shift_breaks add unique(organization_id,client_request_id);
@@ -91,6 +106,7 @@ test('static attendance, break plan, authorization, retries and completion are t
       ${['start_officer_shift','complete_officer_shift','get_shift_end_readiness','create_roster_slot','update_roster_slot','manage_roster_slot','start_shift_break','end_shift_break'].map(fn).join('\n')}
       ${readFileSync(join(__dirname, '../supabase/migrations/20261105165648_officer_recovery_readiness.sql'), 'utf8')}
       ${migration}
+      ${safetyMigration}
       begin;
       create function pg_temp.ok(value boolean,message text) returns void language plpgsql as $f$
         begin if value is distinct from true then raise exception '%',message; end if; end $f$;
@@ -131,6 +147,47 @@ test('static attendance, break plan, authorization, retries and completion are t
       select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,null)$q$,'Explain');
       reset role;
       select pg_temp.ok((select status='accepted' from public.shifts where id='${shift}'),'failed exception rolls back shift start');
+      select set_config('test.safety_item_count','1',false);
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      select pg_temp.ok((select status='accepted' and actual_start is null from public.shifts where id='${shift}'),'missing safety receipt rolls back shift start');
+      select pg_temp.ok((select count(*)=0 from public.shift_stop_actions where shift_id='${shift}'),'missing safety receipt leaves no arrival');
+      insert into public.safety_briefing_acknowledgements(organization_id,shift_id,officer_user_id,
+        briefing_hash,hazard_snapshot,item_count,client_request_id)
+        values('${org}','${shift}','${admin}','synthetic-current-hash','{}',1,gen_random_uuid());
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      update public.safety_briefing_acknowledgements set officer_user_id='${officer}',briefing_hash='synthetic-stale-hash';
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      update public.safety_briefing_acknowledgements set briefing_hash='synthetic-current-hash',shift_stop_id=gen_random_uuid();
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      update public.safety_briefing_acknowledgements set shift_stop_id=null;
+      select set_config('test.safety_coverage','missing',false);
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      select set_config('test.safety_coverage','missing_warning',false);
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      select set_config('test.safety_coverage','missing_place',false);
+      set role authenticated;
+      select pg_temp.fails($q$select public.start_officer_static_shift(gen_random_uuid(),'${shift}','accepted',null,null,'Synthetic location unavailable')$q$,'Read and acknowledge');
+      reset role;
+      select set_config('test.safety_coverage','complete',false);
+      update public.shifts set service_type='patrol' where id='${shift}';
+      select pg_temp.fails($q$update public.shift_stops set status='on_scene' where id='${stop}'$q$,'Read and acknowledge');
+      update public.shifts set service_type='static_guarding' where id='${shift}';
+      insert into public.shift_stops(id,organization_id,shift_id,site_id,module_key,sla_arrive_by)
+        values('40000000-0000-4000-8000-000000000002','${org}','${shift}','${site}','static_guarding',now());
+      select pg_temp.fails($q$update public.shift_stops set status='on_scene' where id='${stop}'$q$,'Read and acknowledge');
+      delete from public.shift_stops where id='40000000-0000-4000-8000-000000000002';
       set role authenticated;
       select public.start_officer_static_shift('90000000-0000-4000-8000-000000000001','${shift}','accepted',null,null,'Synthetic location unavailable');
       select public.start_officer_static_shift('90000000-0000-4000-8000-000000000001','${shift}','accepted',null,null,'Synthetic location unavailable');
