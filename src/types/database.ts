@@ -27796,6 +27796,7 @@ export type Database = {
           rule_kind: string
           service_type: string | null
           site_id: string | null
+          staff_id: string | null
           updated_at: string
           updated_by: string | null
           vehicle_type: string | null
@@ -27829,6 +27830,7 @@ export type Database = {
           rule_kind: string
           service_type?: string | null
           site_id?: string | null
+          staff_id?: string | null
           updated_at?: string
           updated_by?: string | null
           vehicle_type?: string | null
@@ -27862,6 +27864,7 @@ export type Database = {
           rule_kind?: string
           service_type?: string | null
           site_id?: string | null
+          staff_id?: string | null
           updated_at?: string
           updated_by?: string | null
           vehicle_type?: string | null
@@ -27887,6 +27890,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rate_rules_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
             referencedColumns: ["id"]
           },
           {
@@ -43972,47 +43982,28 @@ export type Database = {
           status: string
         }[]
       }
-      get_branch_timesheet_queue:
-        | {
-            Args: { p_operating_organization_id: string }
-            Returns: {
-              actual_hours: number
-              adjustment_hours: number
-              branch_review_notes: string
-              branch_reviewed_by: string
-              id: string
-              period_end: string
-              period_start: string
-              scheduled_hours: number
-              staff_id: string
-              status: string
-              submitted_at: string
-              work_derived_hours: number
-              work_summary: Json
-            }[]
-          }
-        | {
-            Args: {
-              p_from?: string
-              p_operating_organization_id: string
-              p_to?: string
-            }
-            Returns: {
-              actual_hours: number
-              adjustment_hours: number
-              branch_review_notes: string
-              branch_reviewed_by: string
-              id: string
-              period_end: string
-              period_start: string
-              scheduled_hours: number
-              staff_id: string
-              status: string
-              submitted_at: string
-              work_derived_hours: number
-              work_summary: Json
-            }[]
-          }
+      get_branch_timesheet_queue: {
+        Args: {
+          p_from?: string
+          p_operating_organization_id: string
+          p_to?: string
+        }
+        Returns: {
+          actual_hours: number
+          adjustment_hours: number
+          branch_review_notes: string
+          branch_reviewed_by: string
+          id: string
+          period_end: string
+          period_start: string
+          scheduled_hours: number
+          staff_id: string
+          status: string
+          submitted_at: string
+          work_derived_hours: number
+          work_summary: Json
+        }[]
+      }
       get_callout_pay_summary: {
         Args: { p_callout_id: string }
         Returns: {
@@ -44675,11 +44666,24 @@ export type Database = {
         Args: { p_from: string; p_organization_id: string; p_to: string }
         Returns: {
           billing_status: string
+          client_organization_id: string
           cost_centre_status: string
           geofence_status: string
+          linked_shift_id: string
           pay_status: string
           quote_status: string
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_id: string
+          service_agreement_name: string
+          service_type: string
+          site_id: string
           slot_id: string
+          staff_id: string
+          staff_name: string
+          work_unit_id: string
+          work_unit_name: string
+          work_unit_type: string
         }[]
       }
       get_roster_labour_cost: {
@@ -47045,6 +47049,7 @@ export type Database = {
           rule_kind: string
           service_type: string | null
           site_id: string | null
+          staff_id: string | null
           updated_at: string
           updated_by: string | null
           vehicle_type: string | null
@@ -47896,6 +47901,62 @@ export type Database = {
           p_training_name?: string
         }
         Returns: Json
+      }
+      manage_staff_pay_rate: {
+        Args: {
+          p_action: string
+          p_amount?: number
+          p_client_request_id: string
+          p_effective_from?: string
+          p_effective_to?: string
+          p_expected_updated_at?: string
+          p_pay_code?: string
+          p_rate_rule_id?: string
+          p_rate_type?: string
+          p_reason?: string
+          p_service_type?: string
+          p_staff_id: string
+        }
+        Returns: {
+          active: boolean
+          amount: number
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          day_category: string | null
+          distance_max_km: number | null
+          distance_min_km: number | null
+          effective_from: string | null
+          effective_to: string | null
+          gl_account: string | null
+          id: string
+          job_code: string | null
+          job_type: string | null
+          module_key: string | null
+          name: string
+          organization_id: string
+          outside_area: boolean | null
+          pay_code: string | null
+          priority: number
+          rate_type: string
+          region_code: string | null
+          role_code: string | null
+          rule_kind: string
+          service_type: string | null
+          site_id: string | null
+          staff_id: string | null
+          updated_at: string
+          updated_by: string | null
+          vehicle_type: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "rate_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       manage_user_identity_access: {
         Args: {
@@ -53456,6 +53517,10 @@ export type Database = {
           p_staff_id: string
         }
         Returns: boolean
+      }
+      stage_canonical_boundary_for_siblings: {
+        Args: { p_canonical_place_id: string; p_from_site_id?: string }
+        Returns: number
       }
       stage_org_jurisdiction_part: {
         Args: { p_org_id: string; p_polygon: Json; p_stage_id: string }
