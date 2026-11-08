@@ -32,16 +32,30 @@ describe('geofence workbench — every boundary is a proposal until a human acce
     expect(page).toContain('Every rung lands as a proposal.');
   });
 
-  it('accepts only through the governed decision with the edited shape, and verification stays an explicit human confirmation', () => {
+  it('accepts only through the governed decision with the edited shape, and verification stays an explicit human map check', () => {
     expect(page).toContain("supabase.rpc('accept_boundary_proposal'");
     expect(page).toContain('p_final_geojson: proposalEdited && editRing ? ringPolygon(editRing) : null');
-    expect(page).toContain('p_verify: visualReviewConfirmed');
+    expect(page).toContain('p_verify: verify,');
     expect(page).toContain("supabase.rpc('reject_boundary_proposal'");
     expect(page).toContain("throw new Error('A rejection reason is required.')");
     expect(page).toContain("supabase.rpc('verify_boundary'");
-    expect(page).toContain('visualReviewConfirmed');
-    expect(page).toContain('disabled={busy !== null || !visualReviewConfirmed}');
-    expect(page).toContain('I inspected the full boundary against the {inspectionTarget}.');
+    // Verification is its own named button; accepting alone never verifies.
+    expect(page).toContain("onClick={() => void acceptProposal(false)}");
+    expect(page).toContain("'Accept, verify later'");
+    expect(page).toContain("onClick={() => void acceptProposal(true)}");
+    expect(page).toContain("'Checked on the map — accept and verify'");
+    expect(page).toContain("'Checked on the map — verify'");
+    expect(page).toContain('Only verify what you have checked with your own eyes.');
+  });
+
+  it('suggests missing boundaries in bulk only as proposals, and lists every place LINZ could not resolve', () => {
+    expect(page).toContain("entity.boundary_state === 'missing' && !entity.open_proposal_id && entity.center_lat != null");
+    expect(page).toContain("'batch'");
+    expect(page).toContain("p_proposed_via: via,");
+    expect(page).toContain('nothing is verified automatically');
+    expect(page).toContain("report.push({ name: entity.name, ok: false");
+    expect(page).not.toMatch(/suggestAllFromLinz[\s\S]{0,1500}verify_boundary/);
+    expect(page).toContain("canonical_place_inherited: 'Shared from this place");
   });
 
   it('is loud about P1 states and the area gate instead of hiding them', () => {

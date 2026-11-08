@@ -451,3 +451,46 @@
     justify-content: center;
   }
 }
+.workbench-batch {
+  max-width: 1440px;
+  margin: 0 auto 16px;
+}
+
+.workbench-batch .boundary-panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workbench-batch-report {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  margin: 12px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.workbench-batch-report li {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 220px) 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #12212a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workbench-batch-report li.is-ok svg { color: #2fc4a7; }
+.workbench-batch-report li.is-fail svg { color: #e0a93a; }
+.workbench-batch-report li span { color: #b9c7cd; }
+
+@media (max-width: 720px) {
+  .workbench-batch-report li { grid-template-columns: auto 1fr; }
+  .workbench-batch-report li span { grid-column: 2; }
+}

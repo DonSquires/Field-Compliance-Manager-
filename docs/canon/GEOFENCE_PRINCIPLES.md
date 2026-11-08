@@ -87,6 +87,17 @@ Every write path (`set_org_jurisdiction_geom`, `set_zone_geometry`,
 create/update) resets the state to `unverified`. Only the map-confirm action flips
 it to `verified`.
 
+Owner ruling 2026-11-08 (geofence simplification): one place, one check. When a
+human verifies a site's boundary, the shape fills the shared
+`canonical_places.boundary` if it is empty and is **offered** to every other
+organisation's site on the same canonical place as a `canonical_place_inherited`
+proposal. The offer lands `proposed`/`unverified`; each organisation still
+confirms it on its own map, so P2 holds per tenant. A site with no geometry can
+never claim `authoritative` provenance or `verified` (trigger
+`tg_client_sites_boundary_truth`). In the workbench, verification is a single
+explicit "Checked on the map" action; LINZ may suggest boundaries for every
+place with a centre and no shape in one batch, each landing as a proposal.
+
 ## The four-tier hierarchy and three resolution layers
 
 ```

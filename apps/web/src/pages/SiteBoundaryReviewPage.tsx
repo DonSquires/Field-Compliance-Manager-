@@ -73,6 +73,7 @@ type SourcePanel = 'linz' | 'radius' | 'draw';
 const SOURCE_LABEL: Record<string, string> = {
   linz_parcel: 'LINZ legal parcel', linz_building: 'LINZ building outline', council_gis: 'Council GIS', nzta: 'NZTA',
   google_point_radius: 'Point + radius (provisional)', user_drawn: 'Drawn by hand', bob: 'Bob extraction', imported_geojson: 'Imported GeoJSON',
+  canonical_place_inherited: 'Shared from this place (verified by another organisation or site)',
 };
 const STATE_LABEL: Record<BoundaryState, string> = { missing: 'Geometry required', unverified: 'Visual review required', verified: 'Verified boundary' };
 const keyOf = (entity: Pick<QueueEntity, 'entity_type' | 'entity_id'>) => `${entity.entity_type}:${entity.entity_id}`;
@@ -146,7 +147,8 @@ const SiteBoundaryReviewPage = () => {
   const [addressCandidate, setAddressCandidate] = useState<AddressCandidate | null>(null);
   const [drawPoints, setDrawPoints] = useState<Ring>([]);
   const [editRing, setEditRing] = useState<Ring | null>(null);
-  const [visualReviewConfirmed, setVisualReviewConfirmed] = useState(false);
+  const [batchReport, setBatchReport] = useState<{ name: string; ok: boolean; detail: string }[]>([]);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [rejectNote, setRejectNote] = useState('');
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
@@ -214,7 +216,7 @@ const SiteBoundaryReviewPage = () => {
   useEffect(() => {
     if (!selected) return;
     setCoordinates({ latitude: selected.center_lat?.toString() ?? '', longitude: selected.center_lng?.toString() ?? '', radius: '50' });
-    setVisualReviewConfirmed(false); setDecisionNote(''); setRejectNote(''); setDrawPoints([]); setAddressCandidate(null); setAddressQuery('');
+    setDecisionNote(''); setRejectNote(''); setDrawPoints([]); setAddressCandidate(null); setAddressQuery('');
     setCheckpointForm(EMPTY_CHECKPOINT_FORM); setPlacingCheckpoint(false); setCheckpointReviewed(null);
     setSourcePanel(selected.entity_type === 'location_zone' && selected.center_lat == null ? 'draw' : 'linz');
   }, [selectedKey]);
@@ -373,7 +375,7 @@ const SiteBoundaryReviewPage = () => {
     return `${checkpoint.name} verified from visual map review.`;
   });
 
-  const propose = async (entity: QueueEntity, geometry: GeoJSON.Geometry, source: string, sourceRef: Record<string, unknown>) => {
+  const propose = async (entity: QueueEntity, geometry: GeoJSON.Geometry, source: string, sourceRef: Record<string, unknown>, via: 'workbench' | 'batch' = 'workbench') => {
     // ATLAS WRITES: propose_boundary (stages only; never touches the live boundary)
     const { data, error: proposeError } = await supabase.rpc('propose_boundary', {
       p_organization_id: entity.organization_id,
@@ -384,10 +386,11 @@ const SiteBoundaryReviewPage = () => {
       p_source_ref: sourceRef,
       p_address_candidate: addressCandidate ? { label: addressCandidate.label, lat: addressCandidate.lat, lng: addressCandidate.lng, source: addressCandidate.source } : null,
       p_zone_type: entity.entity_type === 'location_zone' ? entity.zone_type : null,
-      p_proposed_via: 'workbench',
+      p_proposed_via: via,
     });
     const receipt = (data as ProposeReceipt[] | null)?.[0];
     if (proposeError || !receipt?.proposal_id) throw proposeError ?? new Error('The proposal receipt was not confirmed.');
+    if (via === 'batch') return `${formatArea(receipt.area_m2)}${receipt.gate_ok ? '' : ` — outside the area band (${receipt.gate_reason})`}`;
     setDrawPoints([]);
     await loadQueue(keyOf(entity));
     return `${SOURCE_LABEL[source] ?? source} proposed for ${entity.name}: ${formatArea(receipt.area_m2)}${receipt.gate_ok ? '' : ` — outside the ${entity.entity_type === 'client_site' ? 'site' : entity.zone_type ?? 'zone'} area band (${receipt.gate_reason}); it cannot be accepted as drawn`}${receipt.drift_from_current_m != null ? ` · ${Math.round(receipt.drift_from_current_m)} m from the current boundary` : ''}. Inspect it on the map before deciding.`;
@@ -401,15 +404,39 @@ const SiteBoundaryReviewPage = () => {
     return `Address resolved: ${candidate.label}. Suggest a LINZ boundary or use it as the point-radius centre.`;
   });
 
-  const proposeFromLinz = () => run('linz', async () => {
-    if (!selected || !centre) throw new Error('Resolve an address first so LINZ can be queried at a point.');
-    const { data, error: linzError } = await supabase.functions.invoke<LinzBoundary>('linz-lookup', { body: { action: 'boundary_for_point_escalating', lat: centre.lat, lng: centre.lng } });
+  const linzSuggestion = async (entity: QueueEntity, point: { lat: number; lng: number }, via: 'workbench' | 'batch') => {
+    const { data, error: linzError } = await supabase.functions.invoke<LinzBoundary>('linz-lookup', { body: { action: 'boundary_for_point_escalating', lat: point.lat, lng: point.lng } });
     if (linzError) throw linzError;
     if (!data?.geometry || !data.kind) throw new Error(data?.note ?? 'No parcel or building polygon was found at this point. Draw the boundary on the map or use point + radius (provisional).');
     const properties = (data.properties ?? {}) as Record<string, unknown>;
-    return propose(selected, data.geometry, data.kind === 'building' ? 'linz_building' : 'linz_parcel', {
-      appellation: properties.appellation ?? null, parcel_id: properties.id ?? null, matched_via: data.matched_via ?? null, queried_at: { lat: centre.lat, lng: centre.lng },
-    });
+    return propose(entity, data.geometry, data.kind === 'building' ? 'linz_building' : 'linz_parcel', {
+      appellation: properties.appellation ?? null, parcel_id: properties.id ?? null, matched_via: data.matched_via ?? null, queried_at: { lat: point.lat, lng: point.lng },
+    }, via);
+  };
+
+  const proposeFromLinz = () => run('linz', async () => {
+    if (!selected || !centre) throw new Error('Resolve an address first so LINZ can be queried at a point.');
+    return linzSuggestion(selected, centre, 'workbench');
+  });
+
+  // Places with a centre but no shape and nothing staged: LINZ can suggest each one; a person still inspects and decides each proposal.
+  const batchCandidates = useMemo(() => queue.filter((entity) => entity.boundary_state === 'missing' && !entity.open_proposal_id && entity.center_lat != null && entity.center_lng != null), [queue]);
+  const suggestAllFromLinz = () => run('batch', async () => {
+    const report: { name: string; ok: boolean; detail: string }[] = [];
+    setBatchReport([]);
+    for (const [index, entity] of batchCandidates.entries()) {
+      setBatchProgress(`Asking LINZ for ${entity.name} (${index + 1} of ${batchCandidates.length})`);
+      try {
+        const detail = await linzSuggestion(entity, { lat: entity.center_lat as number, lng: entity.center_lng as number }, 'batch');
+        report.push({ name: entity.name, ok: true, detail: `Proposal staged: ${detail}` });
+      } catch (batchError) {
+        report.push({ name: entity.name, ok: false, detail: batchError instanceof Error ? batchError.message : (batchError as { message?: string })?.message ?? 'LINZ suggestion failed.' });
+      }
+    }
+    setBatchProgress(null); setBatchReport(report);
+    await loadQueue(selectedKey);
+    const staged = report.filter((row) => row.ok).length;
+    return `LINZ suggested ${staged} of ${report.length} boundaries. Each one is a proposal: inspect it on the map and decide.${staged < report.length ? ' The places LINZ could not resolve are listed below — draw them or use point + radius.' : ''}`;
   });
 
   const proposePointRadius = (event: FormEvent) => {
@@ -435,19 +462,27 @@ const SiteBoundaryReviewPage = () => {
     return propose(selected, ringPolygon(currentRing), 'user_drawn', { adjusted_from: 'current_boundary', configuration_version: selected.configuration_version, vertices: currentRing.length });
   });
 
-  const acceptProposal = () => run('accept', async () => {
+  // After a decision the next place needing attention opens, so a reviewer works down the list without hunting.
+  const nextAttentionKey = (current: QueueEntity) => {
+    const pending = queue.filter((entity) => entity.boundary_state !== 'verified' || entity.open_proposal_id);
+    const index = pending.findIndex((entity) => keyOf(entity) === keyOf(current));
+    const next = pending.slice(index + 1).concat(pending.slice(0, Math.max(index, 0))).find((entity) => keyOf(entity) !== keyOf(current));
+    return next ? keyOf(next) : keyOf(current);
+  };
+
+  const acceptProposal = (verify: boolean) => run(verify ? 'accept-verify' : 'accept', async () => {
     if (!selected?.open_proposal_id) return;
-    // ATLAS WRITES: accept_boundary_proposal (the human-confirmed shape becomes the live boundary; verify is a separate human act)
+    // ATLAS WRITES: accept_boundary_proposal (the human-confirmed shape becomes the live boundary; verify only on the explicit map-checked button)
     const { data, error: acceptError } = await supabase.rpc('accept_boundary_proposal', {
       p_proposal_id: selected.open_proposal_id,
       p_final_geojson: proposalEdited && editRing ? ringPolygon(editRing) : null,
-      p_verify: visualReviewConfirmed,
+      p_verify: verify,
       p_note: decisionNote.trim() || null,
     });
     const receipt = (data as AcceptReceipt[] | null)?.[0];
     if (acceptError || !receipt?.entity_id) throw acceptError ?? new Error('The acceptance receipt was not confirmed.');
-    await loadQueue(keyOf(selected));
-    return `${selected.name} boundary accepted${receipt.human_edited ? ' with your edits' : ''} (${formatArea(receipt.area_m2)}, history v${receipt.history_version})${receipt.verified ? ' and verified from visual map review.' : '. It stays unverified until you confirm it on the map.'}`;
+    await loadQueue(verify ? nextAttentionKey(selected) : keyOf(selected));
+    return `${selected.name} boundary accepted${receipt.human_edited ? ' with your edits' : ''} (${formatArea(receipt.area_m2)}, history v${receipt.history_version})${receipt.verified ? ' and verified from your map check. Any other organisation working at this place has been offered the same shape to confirm.' : '. It stays unverified until you check it on the map and verify it.'}`;
   });
 
   const rejectProposal = () => run('reject', async () => {
@@ -461,13 +496,13 @@ const SiteBoundaryReviewPage = () => {
   });
 
   const verifyBoundary = () => run('verify', async () => {
-    if (!selected?.has_boundary || !visualReviewConfirmed) return;
+    if (!selected?.has_boundary) return;
     // ATLAS WRITES: verify_boundary (refuses when no valid geometry exists — P1)
     const { data, error: verifyError } = await supabase.rpc('verify_boundary', { p_entity_type: selected.entity_type, p_entity_id: selected.entity_id });
     if (verifyError) throw verifyError;
     if (data !== true) throw new Error('The place could not be found for verification.');
-    await loadQueue(keyOf(selected));
-    return `${selected.name} boundary verified from visual map review.`;
+    await loadQueue(nextAttentionKey(selected));
+    return `${selected.name} boundary verified from your map check. Any other organisation working at this place has been offered the same shape to confirm.`;
   });
 
   const counts = useMemo(() => ({
@@ -485,14 +520,19 @@ const SiteBoundaryReviewPage = () => {
   });
 
   const verdict = selected ? (selected.open_proposal_id ? 'Proposal awaiting decision' : STATE_LABEL[selected.boundary_state]) : '';
-  const placeNoun = selected?.entity_type === 'location_zone' ? 'zone' : 'site';
   const inspectionTarget = selected?.entity_type === 'location_zone' ? 'zone extent' : 'site address';
 
   return <ShellLayout shell="admin" className="boundary-shell">
     <div className="boundary-page">
-    <header className="boundary-heading"><div><span>Site operations</span><h1>Geofence workbench</h1><p>Every boundary is proposed from a source, inspected on the LINZ map by a person, then accepted and verified. Nothing becomes authoritative on its own.</p></div><button type="button" onClick={() => void loadQueue(selectedKey)} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} />Refresh</button></header>
+    <header className="boundary-heading"><div><span>Site operations</span><h1>Geofence workbench</h1><p>Pick a place, check its shape on the map, then verify it. LINZ suggests shapes; only your map check makes a boundary count. A shape verified at a place is offered to every other organisation working there.</p></div><button type="button" onClick={() => void loadQueue(selectedKey)} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} />Refresh</button></header>
     {error && <div className="boundary-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>}
     {notice && <div className="boundary-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span></div>}
+    {(batchCandidates.length > 0 || batchProgress || batchReport.length > 0) && <section className="boundary-action-panel workbench-batch" aria-label="Suggest missing boundaries">
+      <div className="boundary-panel-heading"><div><Landmark size={18} /><span><strong>{batchCandidates.length ? `${batchCandidates.length} ${batchCandidates.length === 1 ? 'place has' : 'places have'} no boundary yet` : 'LINZ suggestions staged — check each one on the map'}</strong><small>LINZ can suggest a legal parcel or building outline for each one at its recorded centre. Every suggestion lands as a proposal for you to check on the map — nothing is verified automatically.</small></span></div>
+        {batchCandidates.length > 0 && <button type="button" onClick={() => void suggestAllFromLinz()} disabled={busy !== null}>{busy === 'batch' ? 'Suggesting' : `Suggest ${batchCandidates.length} from LINZ`}</button>}</div>
+      {batchProgress && <p className="workbench-hint" role="status"><RefreshCw size={14} className="is-spinning" /> {batchProgress}</p>}
+      {batchReport.length > 0 && <ul className="workbench-batch-report">{batchReport.map((row) => <li key={row.name} className={row.ok ? 'is-ok' : 'is-fail'}>{row.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}<strong>{row.name}</strong><span>{row.detail}</span></li>)}</ul>}
+    </section>}
 
     <section className="boundary-summary workbench-summary" aria-label="Geofence review status"><div><MapPin size={18} /><span>No geometry</span><strong>{counts.missing}</strong></div><div><AlertTriangle size={18} /><span>Awaiting verification</span><strong>{counts.unverified}</strong></div><div><PenTool size={18} /><span>Open proposals</span><strong>{counts.proposals}</strong></div><div><ShieldCheck size={18} /><span>Verified</span><strong>{counts.verified}</strong></div></section>
 
@@ -517,12 +557,13 @@ const SiteBoundaryReviewPage = () => {
           <section className="boundary-action-panel workbench-proposal" aria-label="Open boundary proposal">
             <div className="boundary-panel-heading"><div><PenTool size={18} /><span><strong>Proposal awaiting your decision</strong><small>{SOURCE_LABEL[selected.open_proposal_source ?? ''] ?? selected.open_proposal_source}</small></span></div></div>
             <div className="boundary-facts workbench-facts"><div><span>Proposed area</span><strong>{formatArea(selected.open_proposal_area_m2)}</strong></div><div><span>Area gate</span><strong className={selected.open_proposal_gate_ok ? 'is-ok' : 'is-fail'}>{selected.open_proposal_gate_ok ? 'Within band' : 'Outside band — cannot be accepted as drawn'}</strong></div><div><span>Drift from current</span><strong>{selected.open_proposal_drift_m != null ? `${Math.round(selected.open_proposal_drift_m)} m` : selected.has_boundary ? 'Not measured' : 'No current boundary'}</strong></div><div><span>Your edits</span><strong>{proposalRing ? (proposalEdited ? `Vertices changed (${editRing?.length ?? 0} now)` : 'None') : 'Not editable (multi-part or holes)'}</strong></div></div>
-            <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Visual verification</strong><span>Accepting writes this shape to the live {placeNoun} as unverified. Tick to also verify it now — only if you have inspected the full boundary on the map.</span><label><input type="checkbox" checked={visualReviewConfirmed} onChange={(event) => setVisualReviewConfirmed(event.target.checked)} />I inspected the full boundary against the {inspectionTarget}.</label></div></div>
             <div className="workbench-decision">
               <label><span>Decision note (optional)</span><input aria-label="Decision note" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="e.g. nudged to the fence line" /></label>
+              <p className="workbench-hint"><ShieldCheck size={14} /> Look at the whole amber shape against the {inspectionTarget} on the map first. Only verify what you have checked with your own eyes.</p>
               <div className="workbench-decision-actions">
                 {proposalEdited && <button type="button" className="is-secondary" onClick={() => setEditRing(proposalRing)} disabled={busy !== null}>Undo edits</button>}
-                <button type="button" onClick={() => void acceptProposal()} disabled={busy !== null}>{busy === 'accept' ? 'Accepting' : visualReviewConfirmed ? 'Accept and verify boundary' : 'Accept boundary'}</button>
+                <button type="button" className="is-secondary" onClick={() => void acceptProposal(false)} disabled={busy !== null}>{busy === 'accept' ? 'Accepting' : 'Accept, verify later'}</button>
+                <button type="button" onClick={() => void acceptProposal(true)} disabled={busy !== null}><ShieldCheck size={15} /> {busy === 'accept-verify' ? 'Accepting and verifying' : 'Checked on the map — accept and verify'}</button>
               </div>
               <label><span>Rejection reason (required to reject)</span><input aria-label="Rejection reason" value={rejectNote} onChange={(event) => setRejectNote(event.target.value)} placeholder="Why this shape is wrong" /></label>
               <div className="workbench-decision-actions"><button type="button" className="is-danger" onClick={() => void rejectProposal()} disabled={busy !== null || !rejectNote.trim()}><XCircle size={15} /> Reject proposal</button></div>
@@ -548,7 +589,7 @@ const SiteBoundaryReviewPage = () => {
               <div className="workbench-decision-actions"><button type="button" className="is-secondary" onClick={() => setDrawPoints((points) => points.slice(0, -1))} disabled={!drawPoints.length}>Undo point</button><button type="button" className="is-secondary" onClick={() => setDrawPoints([])} disabled={!drawPoints.length}>Clear</button><button type="button" onClick={() => void proposeDrawn()} disabled={busy !== null || drawPoints.length < 3}>{busy === 'draw' ? 'Proposing' : 'Propose drawn boundary'}</button></div>
             </div>}
             {sourcePanel === 'radius' && <form onSubmit={proposePointRadius} role="tabpanel"><label><span>Latitude</span><input aria-label="Latitude" type="number" min="-90" max="90" step="any" required value={coordinates.latitude} onChange={(event) => setCoordinates({ ...coordinates, latitude: event.target.value })} /></label><label><span>Longitude</span><input aria-label="Longitude" type="number" min="-180" max="180" step="any" required value={coordinates.longitude} onChange={(event) => setCoordinates({ ...coordinates, longitude: event.target.value })} /></label><label><span>Radius (metres)</span><div><Ruler size={14} /><input aria-label="Radius in metres" type="number" min="5" max="5000" required value={coordinates.radius} onChange={(event) => setCoordinates({ ...coordinates, radius: event.target.value })} /></div></label><button type="submit" disabled={busy !== null || !coordinates.latitude || !coordinates.longitude}>{busy === 'radius' ? 'Proposing' : 'Propose point-radius boundary'}</button></form>}
-            {selected.has_boundary && selected.boundary_verification !== 'verified' && <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Verify the existing boundary</strong><span>Confirm the rendered boundary encloses the intended operating {placeNoun} before certifying it for runtime use.</span><label><input type="checkbox" checked={visualReviewConfirmed} onChange={(event) => setVisualReviewConfirmed(event.target.checked)} />I inspected the full boundary against the {inspectionTarget}.</label></div><button type="button" onClick={() => void verifyBoundary()} disabled={busy !== null || !visualReviewConfirmed}>{busy === 'verify' ? 'Verifying' : 'Verify boundary'}</button></div>}
+            {selected.has_boundary && selected.boundary_verification !== 'verified' && <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Verify the existing boundary</strong><span>Look at the whole teal shape against the {inspectionTarget} on the map. Verify only if it encloses the place officers actually work.</span></div><button type="button" onClick={() => void verifyBoundary()} disabled={busy !== null}>{busy === 'verify' ? 'Verifying' : 'Checked on the map — verify'}</button></div>}
           </section>
         )}
 

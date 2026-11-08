@@ -29,6 +29,11 @@ test('operations proposes, inspects and verifies a site boundary through the geo
   await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
   await queueFilters.getByRole('button', { name: 'Attention', exact: true }).click();
 
+  // Places with a centre and no shape can be suggested in bulk; the batch only stages proposals.
+  const batch = page.getByRole('region', { name: 'Suggest missing boundaries' });
+  await expect(batch.getByText('nothing is verified automatically')).toBeVisible();
+  await expect(batch.getByRole('button', { name: /Suggest \d+ from LINZ/ })).toBeEnabled();
+
   await page.getByRole('tab', { name: 'Point + radius' }).click();
   const propose = page.getByRole('region', { name: 'Propose a boundary' });
   await propose.getByLabel('Latitude', { exact: true }).fill('-41.2762');
@@ -41,11 +46,13 @@ test('operations proposes, inspects and verifies a site boundary through the geo
   await expect(page.getByText('Open proposals').locator('..').getByText('1')).toBeVisible();
   await expect(page.getByText('Within band')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reject proposal' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Accept boundary' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Accept, verify later' })).toBeEnabled();
 
-  await page.getByText('I inspected the full boundary against the site address.').click();
-  await page.getByRole('button', { name: 'Accept and verify boundary' }).click();
-  await expect(notice).toContainText('verified from visual map review');
+  await page.getByRole('button', { name: 'Checked on the map — accept and verify' }).click();
+  await expect(notice).toContainText('verified from your map check');
+  // The reviewer is moved on to the next place needing attention; reopen the verified site to inspect its record.
+  await queueFilters.getByRole('button', { name: 'All', exact: true }).click();
+  await page.getByRole('button', { name: /North Pavilion/ }).click();
   await expect(page.getByText('Verified boundary')).toBeVisible();
   await expect(page.getByText('provisional provenance')).toBeVisible();
   await expect(page.getByText('Boundary verified via visual map confirmation')).toBeVisible();
@@ -71,5 +78,24 @@ test('operations proposes, inspects and verifies a site boundary through the geo
 
   await page.getByRole('heading', { name: 'Geofence workbench' }).scrollIntoViewIfNeeded();
   await expect(page).toHaveScreenshot('site-boundary-review.png', { fullPage: true });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+test('a reviewer can ask LINZ for every missing boundary at once and still decides each one on the map', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/sites');
+  const batch = page.getByRole('region', { name: 'Suggest missing boundaries' });
+  await batch.getByRole('button', { name: /Suggest \d+ from LINZ/ }).click();
+  await expect(page.locator('.boundary-message.is-success')).toContainText(/LINZ suggested \d+ of \d+ boundaries/);
+  await expect(batch.locator('.workbench-batch-report li.is-ok').first()).toContainText('Proposal staged');
+  await expect(page.getByText('Open proposals').locator('..').getByText(/[1-9]/)).toBeVisible();
+  await page.getByRole('button', { name: /North Pavilion/ }).click();
+  await expect(page.getByText('Proposal awaiting decision')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Checked on the map — accept and verify' })).toBeEnabled();
+  if (process.env.WORKBENCH_SHOTS) {
+    await page.screenshot({ path: `${process.env.WORKBENCH_SHOTS}/workbench-desktop.png`, fullPage: true });
+    await page.getByRole('region', { name: 'Open boundary proposal' }).screenshot({ path: `${process.env.WORKBENCH_SHOTS}/decision-desktop.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('region', { name: 'Open boundary proposal' }).screenshot({ path: `${process.env.WORKBENCH_SHOTS}/decision-mobile.png` });
+  }
   expect(errors, errors.join('\n')).toEqual([]);
 });
