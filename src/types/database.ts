@@ -43972,24 +43972,47 @@ export type Database = {
           status: string
         }[]
       }
-      get_branch_timesheet_queue: {
-        Args: { p_operating_organization_id: string }
-        Returns: {
-          actual_hours: number
-          adjustment_hours: number
-          branch_review_notes: string
-          branch_reviewed_by: string
-          id: string
-          period_end: string
-          period_start: string
-          scheduled_hours: number
-          staff_id: string
-          status: string
-          submitted_at: string
-          work_derived_hours: number
-          work_summary: Json
-        }[]
-      }
+      get_branch_timesheet_queue:
+        | {
+            Args: { p_operating_organization_id: string }
+            Returns: {
+              actual_hours: number
+              adjustment_hours: number
+              branch_review_notes: string
+              branch_reviewed_by: string
+              id: string
+              period_end: string
+              period_start: string
+              scheduled_hours: number
+              staff_id: string
+              status: string
+              submitted_at: string
+              work_derived_hours: number
+              work_summary: Json
+            }[]
+          }
+        | {
+            Args: {
+              p_from?: string
+              p_operating_organization_id: string
+              p_to?: string
+            }
+            Returns: {
+              actual_hours: number
+              adjustment_hours: number
+              branch_review_notes: string
+              branch_reviewed_by: string
+              id: string
+              period_end: string
+              period_start: string
+              scheduled_hours: number
+              staff_id: string
+              status: string
+              submitted_at: string
+              work_derived_hours: number
+              work_summary: Json
+            }[]
+          }
       get_callout_pay_summary: {
         Args: { p_callout_id: string }
         Returns: {
@@ -47571,6 +47594,56 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "service_agreement_continuity_policies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_shift_record: {
+        Args: {
+          p_actual_end?: string
+          p_actual_start?: string
+          p_expected_updated_at: string
+          p_reason?: string
+          p_scheduled_end?: string
+          p_scheduled_start?: string
+          p_service_type?: string
+          p_shift_id: string
+          p_status?: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          completed_stops: number
+          created_at: string
+          ended_reason: string | null
+          external_refs: Json
+          generated_at: string | null
+          id: string
+          location_id: string | null
+          module_key: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          osrm_matrix_cached_at: string | null
+          patrol_route_id: string | null
+          roster_slot_id: string | null
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          shift_health: string | null
+          shift_origin: string
+          status: string
+          superseded_by_shift_id: string | null
+          total_stops: number
+          updated_at: string
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shifts"
           isOneToOne: true
           isSetofReturn: false
         }
