@@ -128,7 +128,7 @@ test('administrator creates a governed operating branch patrol rate rule', async
   await form.getByLabel('Name').fill('Patrol visit - branch standard');
   await form.getByLabel('How it is charged').selectOption('per_visit');
   await form.getByLabel('Amount').fill('42.50');
-  await form.getByLabel('Service type').fill('patrol');
+  await form.getByLabel('Task').selectOption('patrol');
   await expect(form).toHaveScreenshot('operating-branch-rate-rule.png');
   const dialogBounds = await form.boundingBox();
   const viewport = page.viewportSize();

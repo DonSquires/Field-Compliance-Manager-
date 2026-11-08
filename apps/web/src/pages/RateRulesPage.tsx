@@ -6,6 +6,8 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { agreementTermState } from '../lib/agreementTerm';
 import { supabase } from '../lib/supabase';
 import { FuelPriceMedianPanel } from '../components/FuelPriceMedianPanel';
+import { ServiceCodeSelect } from '../components/ServiceCodeSelect';
+import { loadServiceCatalog, serviceLabel, type ServiceCode } from '../lib/payCatalog';
 import './PageStyles.css';
 
 interface RateRule {
@@ -109,6 +111,7 @@ export default function RateRulesPage() {
   const [bandForm, setBandForm] = useState(EMPTY_BAND_FORM);
   const [showPayCodeForm, setShowPayCodeForm] = useState(false);
   const [payCodeForm, setPayCodeForm] = useState({ code: '', name: '' });
+  const [services, setServices] = useState<ServiceCode[]>([]);
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
   const clientAgreements = useMemo(() => agreements.filter((agreement) =>
     agreement.provider_organization_id === operatingBranchId &&
@@ -187,6 +190,7 @@ export default function RateRulesPage() {
       setCompletedJobs(((jobsResponse.data as CompletedDispatchJob[]) ?? []).map((job) => ({ ...job, missing: [...(payByJob.get(job.id) ? [] : ['pay' as const]), ...(chargeByJob.get(job.id) ? [] : ['charge' as const])] })).filter((job) => job.missing.length > 0));
     }
     setLoading(false);
+    loadServiceCatalog(operatingBranchId).then(setServices).catch(() => setServices([]));
   }, [clientAgreements, operatingBranchId, profile?.organizationId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -415,7 +419,8 @@ export default function RateRulesPage() {
       <p>A discount applies only to a completed per-visit charge when recorded arrival is later than the contracted deadline. Dwell time remains service evidence, not an additional charge. No discount is applied unless a band matches.</p>
       <form className="assessment-form" onSubmit={savePatrolBand}>
         <div className="form-row">
-          <label><span>Filter patrol discounts by service (optional)</span><input value={bandForm.serviceType} onChange={(event) => setBandForm({ ...bandForm, serviceType: event.target.value })} placeholder="All patrol service types" /></label>
+          <ServiceCodeSelect label="Filter patrol discounts by service (optional)" codes={services} value={bandForm.serviceType} emptyLabel="All patrol service types" canCreate={false}
+            onChange={(code) => setBandForm((current) => ({ ...current, serviceType: code }))} />
           <label><span>Late by at least (minutes)</span><input type="number" min="0" step="1" required value={bandForm.minimum} onChange={(event) => setBandForm({ ...bandForm, minimum: event.target.value })} /></label>
           <label><span>Late through (minutes, optional)</span><input type="number" min="0" step="1" value={bandForm.maximum} onChange={(event) => setBandForm({ ...bandForm, maximum: event.target.value })} /></label>
           <label><span>Discount (%)</span><input type="number" min="0" max="100" step="0.01" required value={bandForm.discountPercent} onChange={(event) => setBandForm({ ...bandForm, discountPercent: event.target.value })} /></label>
@@ -423,7 +428,7 @@ export default function RateRulesPage() {
         <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : bandForm.id ? 'Save discount band' : 'Add discount band'}</button>
         {bandForm.id && <button type="button" className="btn btn-secondary" onClick={() => setBandForm(EMPTY_BAND_FORM)}>Cancel edit</button>}
       </form>
-      {patrolBands.length === 0 ? <p>No patrol discount bands configured; late visits use the full per-visit charge and remain visible as SLA breaches.</p> : <div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Service type</th><th>Late by</th><th>Discount</th><th>Status</th><th /></tr></thead><tbody>{patrolBands.map((band) => <tr key={band.id}><td>{band.service_type || 'All patrol service types'}</td><td>{band.over_by_minutes_max === null ? `${band.over_by_minutes_min}+ min` : `${band.over_by_minutes_min}–${band.over_by_minutes_max} min`}</td><td>{(Number(band.discount_pct) * 100).toFixed(2).replace(/\.00$/, '')}%</td><td>{band.active ? 'Active' : 'Inactive'}</td><td><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => editPatrolBand(band)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void togglePatrolBand(band)}>{band.active ? 'Deactivate' : 'Reactivate'}</button></td></tr>)}</tbody></table></div>}
+      {patrolBands.length === 0 ? <p>No patrol discount bands configured; late visits use the full per-visit charge and remain visible as SLA breaches.</p> : <div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Service type</th><th>Late by</th><th>Discount</th><th>Status</th><th /></tr></thead><tbody>{patrolBands.map((band) => <tr key={band.id}><td>{band.service_type ? serviceLabel(band.service_type, services) : 'All patrol service types'}</td><td>{band.over_by_minutes_max === null ? `${band.over_by_minutes_min}+ min` : `${band.over_by_minutes_min}–${band.over_by_minutes_max} min`}</td><td>{(Number(band.discount_pct) * 100).toFixed(2).replace(/\.00$/, '')}%</td><td>{band.active ? 'Active' : 'Inactive'}</td><td><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => editPatrolBand(band)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void togglePatrolBand(band)}>{band.active ? 'Deactivate' : 'Reactivate'}</button></td></tr>)}</tbody></table></div>}
     </section>
     {!loading && <FuelPriceMedianPanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
     {!loading && <section className="reports-section"><h2>Finished jobs that still need a pay or charge rule ({completedJobs.length})</h2>{completedJobs.length === 0 ? <div className="empty-state"><p>Every finished job has been priced. New jobs are priced automatically the moment they are completed.</p></div> : <div className="contacts-list">{completedJobs.map((job) => <div className="contact-card" key={job.id}><div className="contact-header"><h3>{job.job_type.replaceAll('_', ' ')}</h3><span className="contact-type-badge">Completed</span></div><div className="contact-details"><p>Completed {job.completed_at ? new Date(job.completed_at).toLocaleString() : 'time unavailable'}</p><p className="contact-meta">Missing: {job.missing.map((kind) => kind === 'pay' ? 'staff pay rule' : 'customer charge rule').join(' and ')} for “{job.job_type.replaceAll('_', ' ')}”. Add it below (set “Job type” to {job.job_type}), then re-check. Nothing is written as $0.</p></div><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void resolveCompletedJob(job)}>{saving ? 'Checking' : 'Re-check'}</button></div>)}</div>}</section>}
@@ -448,7 +453,9 @@ export default function RateRulesPage() {
       </div>}
       <div className="form-row">
         {form.kind === 'pay' ? <label><span>Payroll pay code</span><select required value={form.payCode} onChange={(event) => setForm({ ...form, payCode: event.target.value })}><option value="">Select active pay code</option>{payrollPayCodes.map((code) => <option key={code.id} value={code.code}>{code.code} · {code.name}</option>)}</select></label> : <label><span>Invoice code (optional)</span><input value={form.payCode} onChange={(event) => setForm({ ...form, payCode: event.target.value })} /></label>}
-        <label><span>Service type</span><input value={form.serviceType} onChange={(event) => setForm({ ...form, serviceType: event.target.value })} /></label>
+        <ServiceCodeSelect label="Task" codes={services} value={form.serviceType} emptyLabel="All tasks" canCreate organizationId={operatingBranchId}
+          onChange={(code) => setForm((current) => ({ ...current, serviceType: code }))}
+          onCreated={(code) => setServices((current) => [...current, code].sort((a, b) => a.name.localeCompare(b.name)))} />
         <label><span>Job type</span><input value={form.jobType} onChange={(event) => setForm({ ...form, jobType: event.target.value })} /></label>
       </div>
       {form.kind === 'billing' && <fieldset className="form-row" aria-label="Customer billing scope">
@@ -496,7 +503,7 @@ export default function RateRulesPage() {
             ].filter(Boolean).join(' · ')}</small></td>
             <td>{rule.rule_kind === 'pay' ? 'Staff pay' : 'Customer charge'}</td>
             <td>{rule.rate_type.replaceAll('_', ' ')} · {Number(rule.amount).toFixed(2)}</td>
-            <td>{[rule.client_org_id ? clientNames.get(rule.client_org_id) ?? 'Client account' : null, rule.site_id ? siteNames.get(rule.site_id) ?? 'Site override' : null, rule.zone_id ? zoneNames.get(rule.zone_id) ?? 'Zone override' : null, rule.service_type, rule.job_type, rule.day_category?.replaceAll('_', ' '), rule.effective_from ? `from ${rule.effective_from}` : null, rule.effective_to ? `through ${rule.effective_to}` : null].filter(Boolean).join(' · ') || 'Whole organisation'}</td>
+            <td>{[rule.client_org_id ? clientNames.get(rule.client_org_id) ?? 'Client account' : null, rule.site_id ? siteNames.get(rule.site_id) ?? 'Site override' : null, rule.zone_id ? zoneNames.get(rule.zone_id) ?? 'Zone override' : null, rule.service_type ? serviceLabel(rule.service_type, services) : null, rule.job_type, rule.day_category?.replaceAll('_', ' '), rule.effective_from ? `from ${rule.effective_from}` : null, rule.effective_to ? `through ${rule.effective_to}` : null].filter(Boolean).join(' · ') || 'Whole organisation'}</td>
             <td>{rule.priority}</td>
             <td><span className={`status-badge status-${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Active' : 'Inactive'}</span></td>
             <td><button type="button" className="btn btn-sm btn-secondary" aria-label={`Edit rule ${rule.name}`} disabled={saving} onClick={() => openEdit(rule)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" aria-label={`${rule.active ? 'Deactivate' : 'Reactivate'} rule ${rule.name}`} disabled={saving} onClick={() => void toggle(rule)}>{rule.active ? 'Deactivate' : 'Reactivate'}</button></td>
