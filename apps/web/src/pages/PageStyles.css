@@ -826,6 +826,7 @@
 .reports-table tr.timesheet-mismatch > td,
 .officer-timesheet-entries li.timesheet-mismatch { background: rgba(217, 119, 6, 0.12); }
 .timesheet-mismatch-note { display: block; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+.reports-table .timesheet-mismatch-note:not(:empty) { min-width: 220px; max-width: 320px; }
 .officer-timesheet-entries small { flex-basis: 100%; }
 .officer-timesheet-entries li { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-elevated); font-size: 0.92rem; }
 .officer-timesheet-entries li span:last-child { color: var(--color-text-secondary); white-space: nowrap; }
