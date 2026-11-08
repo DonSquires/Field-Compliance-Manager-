@@ -259,7 +259,7 @@ test('authorized officers see person concerns and housing context without admini
   await page.getByRole('searchbox', { name: 'Name, alias or permit number' }).fill('Synthetic');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Person-of-interest flags' })).toContainText('high');
-  await expect(page.getByRole('note')).toContainText('homelessness status is claiming');
+  await expect(page.getByRole('note').filter({ hasText: 'Welfare:' })).toContainText('homelessness status is claiming');
   await expect(page.getByText('PRIVATE ADMINISTRATOR BASIS')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Person record actions' })).toHaveCount(0);
   expect(state.operationReads).toBe(0);
