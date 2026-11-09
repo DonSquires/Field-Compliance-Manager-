@@ -25,8 +25,7 @@ describe('service relationship operational scope', () => {
     expect(source).toContain('setSelectedPlaceIds({ siteId: null, zoneId })');
     expect(source).toContain('setSelectedPlaceIds({ siteId, zoneId: null })');
     expect(source).toContain("supabase.rpc('resolve_operational_context_authorized'");
-    expect(source).toContain('if (matchedAgreementZone)');
-    expect(source).toContain('if (matchedAgreementSite)');
+    expect(source).toContain('else if (matchesActiveShiftPlace || matchedAgreementZone || matchedAgreementSite)');
     expect(source).not.toContain('setSelectedSiteId');
     expect(source).not.toContain('setSelectedZoneId');
   });

@@ -7,22 +7,23 @@ import { describe, expect, it } from 'vitest';
 const read = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8');
 const manager = read('src/components/OperationalPlaceManager.tsx');
 const houseMap = read('src/components/LocationHouseMap.tsx');
-const workbench = read('src/pages/SiteBoundaryReviewPage.tsx');
 const organizationSetup = read('src/pages/OrganizationSetupPage.tsx');
 const siteDetail = read('src/pages/SiteDetailPage.tsx');
 const zoneDetail = read('src/pages/ZoneDetailPage.tsx');
+const adminShell = read('src/shells/AdminShell.tsx');
 
 describe('human geofence UX policy', () => {
   it('keeps every editable place boundary on a visual map workflow', () => {
     expect(manager).toContain('<LocationHouseMap key={boundaryTarget} data-testid="test-location-house-map"');
     expect(siteDetail).toContain('<LocationHouseMap');
     expect(zoneDetail).toContain('<LocationHouseMap');
-    expect(workbench).toContain('L.map(');
-    expect(workbench).toContain('Click at least three points on the map');
     expect(organizationSetup).toContain('L.map(');
     expect(organizationSetup).toContain('Boundary preview loaded');
     expect(houseMap).toContain('Draw the boundary');
     expect(houseMap).toContain('Confirm this boundary');
+    expect(adminShell).toMatch(/case 'sites':\s*return <LocationsPage \/>;/);
+    expect(siteDetail).not.toContain('editableEntity=');
+    expect(zoneDetail).not.toContain('editableEntity={{');
   });
 
   it('does not expose raw geometry or unexplained closure language in operational setup', () => {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Building2, CalendarClock, CheckCircle2, FileBarChart, Handshake, Layers3, Mail, MapPin, MessageSquarePlus, Phone, Radio, Route, Star, UserPlus, Users, WalletCards, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
-import type { NavigateWithContext } from '../lib/workflowNavigation';
+import { workflowContextQuery, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAgreementSetupDialog } from './CrmAgreementSetupDialog';
 import { agreementTermState, CrmAgreementTerm } from './CrmAgreementTerm';
 import { CrmOnboardingPanel } from './CrmOnboardingPanel';
@@ -10,7 +11,6 @@ import { CrmOperationalWorkPanel } from './CrmOperationalWorkPanel';
 import { CrmRosterHandoffPanel } from './CrmRosterHandoffPanel';
 import { CrmAgreementDeliveryPanel } from './CrmAgreementDeliveryPanel';
 import { CrmSiteDialog } from './CrmSiteDialog';
-import { OperationalPlaceManager } from './OperationalPlaceManager';
 import { GeneratedArtifactActions } from './GeneratedArtifactActions';
 import type { EditableCrmOrganization } from './CrmOrganizationDialog';
 import { isReportPackPdfCurrent } from '../lib/reportPackRenderer';
@@ -148,6 +148,7 @@ async function fileSha256(file: File): Promise<string> {
 }
 
 export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccount, onEditOrganization, onSaveAsClient, onCreateProposal, onOpenQuote, initialView = 'overview' }: { account: CrmWorkspaceAccount; onClose: () => void; onNavigate?: NavigateWithContext; onOpenAccount?: (account: CrmWorkspaceAccount) => void; onEditOrganization?: (organization: EditableCrmOrganization) => void; onSaveAsClient?: () => void; onCreateProposal?: (account: CrmWorkspaceAccount, place: { siteId?: string; zoneId?: string; name: string }) => void; onOpenQuote?: (account: CrmWorkspaceAccount, quote: QuoteRow) => void; initialView?: 'overview' | 'structure' | 'contacts' | 'activity' | 'agreements' | 'sites' | 'modules' | 'operations' | 'jobs' | 'reports' | 'finance' }) {
+  const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [agreements, setAgreements] = useState<AgreementRow[]>([]);
@@ -175,7 +176,13 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const [organizationDetails, setOrganizationDetails] = useState<EditableCrmOrganization | null>(null);
     const [siteDialogOpen, setSiteDialogOpen] = useState(false);
     const [siteDialogLocationId, setSiteDialogLocationId] = useState<string | null>(null);
-    const [managedLocationId, setManagedLocationId] = useState<string | null>(null);
+    const setManagedLocationId = (locationId: string | null) => {
+      if (!locationId) return;
+      const params = new URLSearchParams(workflowContextQuery({ accountId: account.id, locationId }));
+      params.set('manage', 'geofences');
+      onClose();
+      navigate(`/admin/locations?${params.toString()}`);
+    };
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [locationStage, setLocationStage] = useState<'search' | 'create'>('search');
   const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
@@ -606,7 +613,6 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
             </footer>
           </form>
         )}
-        {managedLocationId && <OperationalPlaceManager locationId={managedLocationId} onClose={() => { setManagedLocationId(null); void loadWorkspace(); }} onSaved={() => void loadWorkspace()} />}
       {view === 'sites' && <section className="crm-location-finance"><header><div><span>Location house 360</span><strong>Agreements and finance by place</strong><p>Commercial authority is held at the Site or Zone under this physical house.</p></div></header>{locations.map((location) => { const siteIdsAtLocation = sites.filter((site) => site.location_id === location.id).map((site) => site.id); const zoneIdsAtLocation = zones.filter((zone) => zone.location_id === location.id).map((zone) => zone.id); const agreementsAtLocation = locationAgreements.filter((link) => (link.site_id !== null && siteIdsAtLocation.includes(link.site_id)) || (link.zone_id !== null && zoneIdsAtLocation.includes(link.zone_id))); const financeAtLocation = locationFinance.filter((finance) => (finance.site_id !== null && siteIdsAtLocation.includes(finance.site_id)) || (finance.zone_id !== null && zoneIdsAtLocation.includes(finance.zone_id))); return <article key={location.id}><div className="crm-location-finance-heading"><strong>{location.name}</strong><span>{agreementsAtLocation.length} agreement link{agreementsAtLocation.length === 1 ? '' : 's'} · {financeAtLocation.length} finance record{financeAtLocation.length === 1 ? '' : 's'}</span></div>{agreementsAtLocation.length > 0 ? <div className="crm-location-agreements">{agreementsAtLocation.map((link) => <div key={link.id}><strong>{link.agreement?.name ?? 'Service agreement'}</strong><span>{link.agreement?.agreement_type ?? 'operational'} · {link.status} · contract price {link.share_contract_price ? 'shared' : 'private'} · actual cost {link.share_actual_cost ? 'shared' : 'private'}</span></div>)}</div> : <p className="crm-workspace-subtle">No service agreement is anchored to this house yet.</p>}{financeAtLocation.length > 0 && <div className="crm-location-finance-grid">{financeAtLocation.map((finance) => <div key={finance.id}><span>{finance.billing_model.replaceAll('_', ' ')}</span>{finance.hourly_rate != null && <strong>NZ${Number(finance.hourly_rate).toFixed(2)}/hr</strong>}{finance.per_visit_rate != null && <strong>NZ${Number(finance.per_visit_rate).toFixed(2)}/visit</strong>}{finance.flat_rate_monthly != null && <strong>NZ${Number(finance.flat_rate_monthly).toFixed(2)}/month</strong>}<small>{finance.payment_terms_days} day payment terms</small></div>)}</div>}</article>; })}</section>}
       {setupAgreement && <CrmAgreementSetupDialog agreement={{ id: setupAgreement.id, name: setupAgreement.name, clientName: account.name, invitationStatus: setupAgreement.invitation_status }} onClose={() => { setSetupAgreement(null); void loadWorkspace(); }} />}
     </section>

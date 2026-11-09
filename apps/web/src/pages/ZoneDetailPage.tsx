@@ -8,9 +8,9 @@ import {
   type HouseMapSite,
   type HouseMapZone,
 } from "../components/LocationHouseMap";
-import { OperationalPlaceManager } from "../components/OperationalPlaceManager";
 import { ZoneScheduleEditor } from "../components/ZoneScheduleEditor";
 import { parseZoneSchedule, zoneScheduleWords } from "../lib/zoneSchedule";
+import { workflowContextQuery } from "../lib/workflowNavigation";
 import "./PageStyles.css";
 import "./GeographyPages.css";
 import "./ZoneDetailPage.css";
@@ -101,9 +101,6 @@ export default function ZoneDetailPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [managing, setManaging] = useState(false);
-  const [managerDirty, setManagerDirty] = useState(false);
-  const [refreshRevision, setRefreshRevision] = useState(0);
   const [complianceForm, setComplianceForm] = useState({ nightly_limit_consecutive: '', nightly_limit_monthly: '', scv_required: false });
   const [savingCompliance, setSavingCompliance] = useState(false);
   const [parkingForm, setParkingForm] = useState({ time_limit_minutes: '', disabled_multiplier: '2' });
@@ -153,7 +150,7 @@ export default function ZoneDetailPage() {
       setLoading(false);
     };
     void load();
-  }, [profile?.organizationId, location.search, refreshRevision]);
+  }, [profile?.organizationId, location.search]);
 
   const loadContext = async (
     zone: ZoneRow,
@@ -389,18 +386,18 @@ export default function ZoneDetailPage() {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setManaging(true)}
+              onClick={() => { if (!selected?.location_id) return; const params = new URLSearchParams(workflowContextQuery({ accountId: selected.organization_id, locationId: selected.location_id, zoneId: selected.id })); params.set('manage', 'geofences'); navigate(`/admin/locations?${params.toString()}`); }}
             >
-              Manage selected zone
+              Manage in Location House
             </button>
           )}
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate(selected ? `/admin/sites?place=location_zone:${selected.id}` : "/admin/sites")}
+            onClick={() => { if (!selected?.location_id) return; const params = new URLSearchParams(workflowContextQuery({ accountId: selected.organization_id, locationId: selected.location_id, zoneId: selected.id })); params.set('manage', 'geofences'); navigate(`/admin/locations?${params.toString()}`); }}
           >
             <LandPlot size={15} />
-            Boundary review
+            Open geofences
           </button>
         </div>
       </header>
@@ -450,15 +447,6 @@ export default function ZoneDetailPage() {
               house={house}
               sites={sites}
               zones={[selected]}
-              editableEntity={{
-                type: "location_zone",
-                id: selected.id,
-                organizationId: selected.organization_id,
-                zoneType: selected.zone_type,
-                centerLat: selected.center_point?.coordinates?.[1] ?? null,
-                centerLng: selected.center_point?.coordinates?.[0] ?? null,
-                onSaved: () => setRefreshRevision((revision) => revision + 1),
-              }}
             />
             <section className="zone-facts">
               <article>
@@ -755,14 +743,6 @@ export default function ZoneDetailPage() {
           </main>
         )}
       </div>
-      {managing && selected?.location_id && (
-        <OperationalPlaceManager
-          locationId={selected.location_id}
-          initialZoneId={selected.id}
-          onClose={() => { setManaging(false); if (managerDirty) { setManagerDirty(false); setRefreshRevision((revision) => revision + 1); } }}
-          onSaved={() => setManagerDirty(true)}
-        />
-      )}
     </div>
   );
 }

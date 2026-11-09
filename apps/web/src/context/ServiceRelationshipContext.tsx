@@ -27,6 +27,7 @@ export interface ServiceLocationSite {
   id: string;
   name: string;
   address: string | null;
+  location_id?: string | null;
   site_type: string | null;
   client_organization_id: string | null;
   service_agreement_id: string | null;
@@ -40,13 +41,24 @@ export interface ServiceLocationZone {
   location_id: string | null;
   organization_id: string | null;
   is_active: boolean;
+  module_key?: string | null;
   service_agreement_id: string | null;
 }
 
 interface ServiceAgreementLocationLink {
+  id: string;
   service_agreement_id: string;
   site_id: string | null;
   zone_id: string | null;
+}
+
+export interface ActiveShiftLocationContext {
+  organizationId: string;
+  moduleKey: string | null;
+  locationId: string | null;
+  serviceAgreementLocationId: string | null;
+  siteIds: string[];
+  zoneIds: string[];
 }
 
 interface ServiceRelationshipContextValue {
@@ -73,9 +85,15 @@ interface ServiceRelationshipContextValue {
   refetch: () => Promise<void>;
   setLocationMode: (mode: 'manual' | 'gps') => void;
   selectAgreement: (agreementId: string | null) => void;
+  selectAgreementLocation: (locationId: string | null) => void;
+  setActiveShiftLocationContext: (context: ActiveShiftLocationContext | null) => void;
   selectSite: (siteId: string | null) => void;
   selectZone: (zoneId: string | null) => void;
 }
+
+const LOCATION_REFRESH_MS = 30_000;
+const ADDRESS_REFRESH_MS = 30_000;
+const GEOFENCE_RESOLUTION_TIMEOUT_MS = 15_000;
 
 const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue>({
   agreements: [],
@@ -101,6 +119,8 @@ const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue
   refetch: async () => undefined,
   setLocationMode: () => undefined,
   selectAgreement: () => undefined,
+  selectAgreementLocation: () => undefined,
+  setActiveShiftLocationContext: () => undefined,
   selectSite: () => undefined,
   selectZone: () => undefined,
 });
@@ -112,6 +132,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const [zones, setZones] = useState<ServiceLocationZone[]>([]);
   const [agreementLocationLinks, setAgreementLocationLinks] = useState<ServiceAgreementLocationLink[]>([]);
   const [selectedAgreementId, setSelectedAgreementId] = useState<string | null>(null);
+  const [activeShiftLocationContext, setActiveShiftLocationContextState] = useState<ActiveShiftLocationContext | null>(null);
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<{ siteId: string | null; zoneId: string | null }>({ siteId: null, zoneId: null });
   const selectedSiteId = selectedPlaceIds.siteId;
   const selectedZoneId = selectedPlaceIds.zoneId;
@@ -194,7 +215,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       if (agreementIds.length > 0) {
         const { data: links, error: linksError } = await supabase
           .from('service_agreement_locations')
-          .select('service_agreement_id, site_id, zone_id')
+          .select('id, service_agreement_id, site_id, zone_id')
           .in('service_agreement_id', agreementIds)
           .eq('status', 'active');
 
@@ -209,7 +230,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         if (siteIds.length > 0) {
           const { data: siteData, error: siteError } = await supabase
             .from('client_sites')
-            .select('id, name, address, site_type, client_organization_id, service_agreement_id, active')
+            .select('id, name, address, site_type, location_id, client_organization_id, service_agreement_id, active')
             .in('id', siteIds);
 
           if (siteError) throw siteError;
@@ -218,6 +239,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
             name: site.name,
             address: site.address ?? null,
             site_type: site.site_type ?? null,
+            location_id: site.location_id ?? null,
             client_organization_id: site.client_organization_id ?? null,
             service_agreement_id: site.service_agreement_id ?? null,
             active: Boolean(site.active),
@@ -227,7 +249,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         if (zoneIds.length > 0) {
           const { data: zoneData, error: zoneError } = await supabase
             .from('location_zones')
-            .select('id, name, zone_type, location_id, organization_id, is_active')
+            .select('id, name, zone_type, location_id, organization_id, is_active, module_key')
             .in('id', zoneIds);
 
           if (zoneError) throw zoneError;
@@ -238,6 +260,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
             location_id: zone.location_id ?? null,
             organization_id: zone.organization_id ?? null,
             is_active: Boolean(zone.is_active),
+            module_key: zone.module_key ?? null,
             service_agreement_id: (links ?? []).find((link) => link.zone_id === zone.id)?.service_agreement_id ?? null,
           }));
         }
@@ -319,9 +342,36 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     () => zones.filter((zone) => selectedAgreementZoneIds.has(zone.id)),
     [zones, selectedAgreementZoneIds]
   );
+  const locationScopeRef = useRef({ agreementLocationLinks, selectedAgreementSites, selectedAgreementZones, sites, zones });
+  locationScopeRef.current = { agreementLocationLinks, selectedAgreementSites, selectedAgreementZones, sites, zones };
 
   useEffect(() => {
-    const organizationId = profile?.organizationId;
+    if (!activeShiftLocationContext) return;
+    const link = activeShiftLocationContext.serviceAgreementLocationId
+      ? agreementLocationLinks.find((item) => item.id === activeShiftLocationContext.serviceAgreementLocationId)
+      : null;
+    if (activeShiftLocationContext.serviceAgreementLocationId && !link) return;
+    if (link) {
+      setSelectedAgreementId((current) => current === link.service_agreement_id ? current : link.service_agreement_id);
+      setSelectedPlaceIds((current) => current.siteId === link.site_id && current.zoneId === link.zone_id
+        ? current
+        : { siteId: link.site_id, zoneId: link.zone_id });
+    } else if (activeShiftLocationContext.siteIds.length || activeShiftLocationContext.zoneIds.length) {
+      const siteId = activeShiftLocationContext.siteIds[0] ?? null;
+      const zoneId = activeShiftLocationContext.zoneIds[0] ?? null;
+      setSelectedPlaceIds((current) => current.siteId === siteId && current.zoneId === zoneId
+        ? current
+        : { siteId, zoneId });
+    }
+  }, [activeShiftLocationContext, agreementLocationLinks]);
+
+  const setActiveShiftLocationContext = useCallback((context: ActiveShiftLocationContext | null) => {
+    setActiveShiftLocationContextState(context);
+  }, []);
+
+  useEffect(() => {
+    const organizationId = activeShiftLocationContext?.organizationId ?? profile?.organizationId;
+    const moduleKey = activeShiftLocationContext?.moduleKey ?? null;
     // Admin selection is deliberate. Only field/scan shells opt into GPS resolution.
     if (locationMode !== 'gps' || !organizationId || profile?.role.startsWith('client_')) {
       setLocationStatus('idle');
@@ -336,70 +386,164 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setLocationError('This device does not provide location services.');
       return undefined;
     }
+    if (activeShiftLocationContext && !moduleKey) {
+      setLocationStatus('unavailable');
+      setLocationError('The active shift service module could not be confirmed.');
+      return undefined;
+    }
 
-    setLocationStatus('locating');
-    const watchId = navigator.geolocation.watchPosition(async (position) => {
-      const requestId = locationRequestRef.current + 1;
-      locationRequestRef.current = requestId;
-      const coordinates = { lat: position.coords.latitude, lng: position.coords.longitude };
-      setCurrentCoordinates(coordinates);
-      setCurrentAddress(null);
-      setLocationStatus('locating');
-      setLocationError(null);
+    let active = true;
+    let hasResolution = false;
+    let geofenceRequestInFlight = false;
+    let addressRequestInFlight = false;
+    let latestCoordinates: { lat: number; lng: number } | null = null;
+    let addressRefreshTimer: number | null = null;
+    let geofenceTimeoutId: number | null = null;
 
-      void resolveAddressForCoordinates(coordinates.lat, coordinates.lng)
-        .then((address) => {
-          if (requestId === locationRequestRef.current) setCurrentAddress(address?.label ?? null);
-        })
-        .catch(() => undefined);
+    const scheduleAddressRefresh = () => {
+      if (!active || addressRefreshTimer !== null) return;
+      addressRefreshTimer = window.setTimeout(() => {
+        addressRefreshTimer = null;
+        if (!active || !latestCoordinates || addressRequestInFlight) return;
+        addressRequestInFlight = true;
+        const coordinates = latestCoordinates;
+        void resolveAddressForCoordinates(coordinates.lat, coordinates.lng)
+          .then((address) => {
+            if (active) setCurrentAddress(address?.label ?? null);
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            addressRequestInFlight = false;
+            scheduleAddressRefresh();
+          });
+      }, ADDRESS_REFRESH_MS);
+    };
 
+    const resolveGeofence = async (coordinates: { lat: number; lng: number }, requestId: number) => {
       try {
-        const { data, error: resolutionError } = await supabase.rpc('resolve_operational_context_authorized', {
+        const resolution = supabase.rpc('resolve_operational_context_authorized', {
           p_lat: coordinates.lat,
           p_lng: coordinates.lng,
           p_org_id: organizationId,
-          p_module_key: null,
+          p_module_key: moduleKey,
         });
-        if (requestId !== locationRequestRef.current) return;
+        const response = await Promise.race([
+          resolution,
+          new Promise<never>((_, reject) => {
+            geofenceTimeoutId = window.setTimeout(() => reject(new Error('Geofence lookup timed out.')), GEOFENCE_RESOLUTION_TIMEOUT_MS);
+          }),
+        ]);
+        const { data, error: resolutionError } = response;
+        if (!active || requestId !== locationRequestRef.current) return;
         if (resolutionError) throw resolutionError;
         const row = Array.isArray(data) ? data[0] : data;
         if (!row || !row.resolution_status || row.resolution_status === 'unavailable') {
           setSelectedPlaceIds({ siteId: null, zoneId: null });
           setGeofenceResolution({ resolutionStatus: 'unavailable', siteId: null, zoneId: null });
-          throw new Error('The service geofence response was not confirmed.');
+          hasResolution = true;
+          setLocationStatus('unavailable');
+          setLocationError('The service geofence response was not confirmed.');
+          return;
         }
-        const zoneId = row?.matched_zone_id ?? null;
-        const siteId = row?.site_id ?? null;
-        const matchedAgreementZone = zoneId && selectedAgreementZones.some((zone) => zone.id === zoneId);
-        const matchedAgreementSite = siteId && selectedAgreementSites.some((site) => site.id === siteId);
-        // P1: an absent resolver row is 'unavailable', never a fabricated "outside all geofences".
-        setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'unavailable', siteId, zoneId });
-        if (matchedAgreementZone) {
-          setSelectedPlaceIds({ siteId: null, zoneId });
-          setLocationStatus('resolved');
-        } else if (matchedAgreementSite) {
-          setSelectedPlaceIds({ siteId, zoneId: null });
+        const zoneId = row.matched_zone_id ?? null;
+        const siteId = row.site_id ?? null;
+        const { agreementLocationLinks: currentLinks, selectedAgreementSites: currentSites, selectedAgreementZones: currentZones, sites: currentAllSites, zones: currentAllZones } = locationScopeRef.current;
+        const activeLink = activeShiftLocationContext?.serviceAgreementLocationId
+          ? currentLinks.find((item) => item.id === activeShiftLocationContext.serviceAgreementLocationId) ?? null
+          : null;
+        const matchedAgreementZone = zoneId && currentZones.some((zone) => zone.id === zoneId);
+        const matchedAgreementSite = siteId && currentSites.some((site) => site.id === siteId);
+        const matchesActiveShiftPlace = activeShiftLocationContext
+          ? activeLink
+            ? activeLink.site_id ? activeLink.site_id === siteId : activeLink.zone_id === zoneId
+            : Boolean(siteId && activeShiftLocationContext.siteIds.includes(siteId))
+              || Boolean(zoneId && activeShiftLocationContext.zoneIds.includes(zoneId))
+          : null;
+        setGeofenceResolution({ resolutionStatus: row.resolution_status, siteId, zoneId });
+        hasResolution = true;
+        if (activeShiftLocationContext && !matchesActiveShiftPlace) {
+          setSelectedPlaceIds({ siteId: null, zoneId: null });
+          setLocationStatus(row.resolution_status === 'outside_all_geofences' ? 'outside_geofence' : 'unavailable');
+          setLocationError('The resolved place does not match the active shift location.');
+        } else if (matchesActiveShiftPlace || matchedAgreementZone || matchedAgreementSite) {
+          setSelectedPlaceIds({ siteId, zoneId });
           setLocationStatus('resolved');
         } else {
           setSelectedPlaceIds({ siteId: null, zoneId: null });
           setLocationStatus('outside_geofence');
         }
+        if (zoneId && !currentAllZones.some((zone) => zone.id === zoneId)) {
+          void supabase.from('location_zones')
+            .select('id,name,zone_type,location_id,organization_id,is_active,module_key')
+            .eq('id', zoneId)
+            .maybeSingle()
+            .then(({ data: zone, error }) => {
+              if (!active || requestId !== locationRequestRef.current || error || !zone) return;
+              const site = currentAllSites.find((item) => item.id === siteId);
+              if (site?.location_id && site.location_id !== zone.location_id) return;
+              if (moduleKey && zone.module_key !== moduleKey) return;
+              setZones((current) => current.some((item) => item.id === zone.id) ? current : [...current, {
+                id: zone.id,
+                name: zone.name,
+                zone_type: zone.zone_type ?? null,
+                location_id: zone.location_id ?? null,
+                organization_id: zone.organization_id ?? null,
+                is_active: Boolean(zone.is_active),
+                module_key: zone.module_key ?? null,
+                service_agreement_id: activeLink?.service_agreement_id ?? null,
+              }]);
+            });
+        }
       } catch (locationLoadError) {
-        if (requestId !== locationRequestRef.current) return;
+        if (!active || requestId !== locationRequestRef.current) return;
+        hasResolution = true;
         setLocationStatus('unavailable');
         setLocationError(locationLoadError instanceof Error ? locationLoadError.message : 'Geofence location could not be resolved.');
+      } finally {
+        if (geofenceTimeoutId !== null) {
+          window.clearTimeout(geofenceTimeoutId);
+          geofenceTimeoutId = null;
+        }
+        if (requestId === locationRequestRef.current) geofenceRequestInFlight = false;
       }
-    }, (positionError) => {
-      locationRequestRef.current += 1;
-      setLocationStatus('unavailable');
-      setLocationError(positionError.message || 'Location permission was not granted.');
-    }, { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 });
-
-    return () => {
-      locationRequestRef.current += 1;
-      navigator.geolocation.clearWatch(watchId);
     };
-  }, [locationMode, profile?.organizationId, profile?.role, selectedAgreementSites, selectedAgreementZones]);
+
+    const requestCurrentLocation = () => {
+      if (!active || geofenceRequestInFlight) return;
+      geofenceRequestInFlight = true;
+      if (!hasResolution) setLocationStatus('locating');
+      const requestId = locationRequestRef.current + 1;
+      locationRequestRef.current = requestId;
+      navigator.geolocation.getCurrentPosition((position) => {
+        if (!active || requestId !== locationRequestRef.current) {
+          geofenceRequestInFlight = false;
+          return;
+        }
+        const coordinates = { lat: position.coords.latitude, lng: position.coords.longitude };
+        latestCoordinates = coordinates;
+        setCurrentCoordinates(coordinates);
+        setLocationError(null);
+        scheduleAddressRefresh();
+        void resolveGeofence(coordinates, requestId);
+      }, (positionError) => {
+        if (!active || requestId !== locationRequestRef.current) return;
+        geofenceRequestInFlight = false;
+        hasResolution = true;
+        setLocationStatus('unavailable');
+        setLocationError(positionError.message || 'Location permission was not granted.');
+      }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 });
+    };
+
+    requestCurrentLocation();
+    const refreshTimer = window.setInterval(requestCurrentLocation, LOCATION_REFRESH_MS);
+    return () => {
+      active = false;
+      locationRequestRef.current += 1;
+      window.clearInterval(refreshTimer);
+      if (geofenceTimeoutId !== null) window.clearTimeout(geofenceTimeoutId);
+      if (addressRefreshTimer !== null) window.clearTimeout(addressRefreshTimer);
+    };
+  }, [activeShiftLocationContext, locationMode, profile?.organizationId, profile?.role]);
 
   const value = useMemo<ServiceRelationshipContextValue>(() => ({
     agreements,
@@ -424,6 +568,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     locationMode,
     refetch,
     setLocationMode,
+    setActiveShiftLocationContext,
     selectAgreement: (agreementId) => {
       setSelectedAgreementId(agreementId);
       const links = agreementLocationLinks.filter((link) => link.service_agreement_id === agreementId);
@@ -434,13 +579,21 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         ? { siteId: null, zoneId }
         : { siteId: sites.find((site) => siteIds.has(site.id))?.id ?? null, zoneId: null });
     },
+    selectAgreementLocation: (locationId) => {
+      const link = agreementLocationLinks.find((item) => item.id === locationId);
+      if (!link) return;
+      setSelectedAgreementId(link.service_agreement_id);
+      setSelectedPlaceIds(link.zone_id
+        ? { siteId: null, zoneId: link.zone_id }
+        : { siteId: link.site_id, zoneId: null });
+    },
     selectSite: (siteId) => {
       setSelectedPlaceIds({ siteId, zoneId: null });
     },
     selectZone: (zoneId) => {
       setSelectedPlaceIds({ siteId: null, zoneId });
     },
-  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, loadedOrganizationId, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, locationMode, refetch]);
+  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, loadedOrganizationId, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, locationMode, refetch, setActiveShiftLocationContext]);
 
   return <ServiceRelationshipContext.Provider value={value}>{children}</ServiceRelationshipContext.Provider>;
 }

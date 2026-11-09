@@ -28,8 +28,12 @@ export interface ActiveShift {
   shift_type: 'patrol' | 'static' | 'mobile' | 'rostered' | string;
   vehicle_id?: string;
   route_id?: string;
+  location_id?: string | null;
+  zone_id?: string | null;
+  service_agreement_module_key?: string | null;
   stops: ShiftStop[];
   status: 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
+  service_agreement_location_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,8 +69,12 @@ export function useActiveShift(userId: string, organizationId: string) {
           scheduled_start,
           scheduled_end,
           status,
-          patrol_route_id,
+          location_id,
           zone_id,
+          service_agreement_location_id,
+          service_agreement_module_id,
+          service_agreement_module:service_agreement_modules!shifts_service_agreement_module_id_fkey ( module_key ),
+          patrol_route_id,
           created_at,
           updated_at,
           shift_stops (
@@ -97,6 +105,9 @@ export function useActiveShift(userId: string, organizationId: string) {
         ?? rows.find((candidate) => Date.parse(candidate.scheduled_start) > now.getTime());
       if (row) {
         const data = row;
+        const agreementModule = Array.isArray(data.service_agreement_module)
+          ? data.service_agreement_module[0]
+          : data.service_agreement_module;
         const shift: ActiveShift = {
           id: data.id,
           organization_id: data.organization_id,
@@ -107,7 +118,11 @@ export function useActiveShift(userId: string, organizationId: string) {
           shift_type: data.service_type ?? 'patrol',
           vehicle_id: undefined,
           route_id: data.patrol_route_id,
+          location_id: data.location_id ?? null,
+          zone_id: data.zone_id ?? null,
+          service_agreement_module_key: agreementModule?.module_key ?? null,
           status: data.status,
+          service_agreement_location_id: data.service_agreement_location_id ?? null,
           created_at: data.created_at,
           updated_at: data.updated_at ?? data.created_at,
           stops: (data.shift_stops || []).map((stop: any) => ({

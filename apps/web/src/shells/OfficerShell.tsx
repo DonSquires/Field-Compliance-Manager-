@@ -165,7 +165,7 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
   const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
-  const { selectedAgreement, selectedSite, selectedZone, setLocationMode } = useServiceRelationships();
+  const { selectedAgreement, selectedSite, selectedZone, setLocationMode, setActiveShiftLocationContext } = useServiceRelationships();
   const [activeModule, setActiveModule] = useState<ActiveModule>(null);
 
   const getGps = useCallback(async () => {
@@ -209,6 +209,22 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
     || window.confirm('You have unsubmitted field work. Leave and lose the unsaved entries?'), []);
 
   useEffect(() => { setLocationMode('gps'); }, [setLocationMode]);
+  useEffect(() => {
+    setActiveShiftLocationContext(activeShift ? {
+      organizationId: activeShift.organization_id,
+      moduleKey: activeShift.service_agreement_module_key ?? null,
+      locationId: activeShift.location_id ?? null,
+      serviceAgreementLocationId: activeShift.service_agreement_location_id ?? null,
+      siteIds: [...new Set([
+        ...(activeShift.stops.map((stop) => stop.client_site_id).filter(Boolean) as string[]),
+        ...(activeShift.location_id ? selectedSite?.location_id === activeShift.location_id ? [selectedSite.id] : [] : []),
+      ])],
+      zoneIds: [...new Set([
+        ...(activeShift.zone_id ? [activeShift.zone_id] : []),
+        ...activeShift.stops.map((stop) => stop.zone_id).filter(Boolean) as string[],
+      ])],
+    } : null);
+  }, [activeShift, selectedSite?.id, selectedSite?.location_id, setActiveShiftLocationContext]);
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; setMoreToolsOpen(false); }, [location.pathname]);
   useEffect(() => {
     if (!moreToolsOpen) return;

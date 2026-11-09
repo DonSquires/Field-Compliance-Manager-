@@ -29,6 +29,16 @@ export interface HouseMapZone {
   boundary_verification: string;
 }
 
+export interface HouseMapCheckpoint {
+  id: string;
+  name: string;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  radius_meters: number;
+  checkpoint_verification: string;
+  active: boolean;
+}
+
 interface LinzPreview {
   address: string;
   source: string;
@@ -106,7 +116,7 @@ const RESOLUTION_LABEL: Record<string, string> = {
   unresolved_invalid: 'Boundary shape needs repair',
 };
 
-export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary, onSelectFacet }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null; onSelectFacet?: (facet: { type: EditableEntity['type']; id: string }) => void }) {
+export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary, onSelectFacet, checkpoints = [], checkpointDraftPoint, checkpointPlacement = false, onCheckpointPosition }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null; onSelectFacet?: (facet: { type: EditableEntity['type']; id: string }) => void; checkpoints?: HouseMapCheckpoint[]; checkpointDraftPoint?: { lat: number; lng: number } | null; checkpointPlacement?: boolean; onCheckpointPosition?: (point: { lat: number; lng: number }) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
@@ -126,6 +136,10 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
   // The map's click handler is registered once, so it reads the current mode from a ref rather than a stale closure.
   const drawingRef = useRef(false);
   drawingRef.current = drawing;
+  const checkpointPlacementRef = useRef(checkpointPlacement);
+  checkpointPlacementRef.current = checkpointPlacement;
+  const checkpointPositionRef = useRef(onCheckpointPosition);
+  checkpointPositionRef.current = onCheckpointPosition;
   // One map per house: a probe click, a LINZ preview or a resolution result must not rebuild it and lose the person's zoom, position or base layer.
   const viewKey = `house:${organizationId}:${house.name}`;
 
@@ -139,6 +153,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     rememberViewport(map, viewKey);
     map.on('click', ({ latlng }) => {
       if (drawingRef.current) { setDrawPoints((points) => [...points, [Number(latlng.lng.toFixed(7)), Number(latlng.lat.toFixed(7))]]); return; }
+      if (checkpointPlacementRef.current) { checkpointPositionRef.current?.({ lat: latlng.lat, lng: latlng.lng }); return; }
       setProbePoint({ lat: latlng.lat, lng: latlng.lng }); setResolution(null); setClosure(null);
     });
     framedRef.current = '';
@@ -175,6 +190,25 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         bounds.extend(point.getLatLng());
       }
     });
+    checkpoints.forEach((checkpoint) => {
+      if (checkpoint.gps_lat == null || checkpoint.gps_lng == null) return;
+      const verified = checkpoint.checkpoint_verification === 'verified';
+      const circle = L.circle([checkpoint.gps_lat, checkpoint.gps_lng], {
+        radius: checkpoint.radius_meters,
+        color: checkpoint.active ? (verified ? '#4cc38a' : '#e5aa45') : '#879aaa',
+        weight: 2,
+        fillOpacity: checkpoint.active ? 0.18 : 0.08,
+        interactive: !drawing,
+      }).bindTooltip(`Checkpoint: ${checkpoint.name} · ${verified ? 'verified' : 'unverified'}${checkpoint.active ? '' : ' · inactive'}`);
+      circle.addTo(overlay);
+      bounds.extend([checkpoint.gps_lat, checkpoint.gps_lng]);
+    });
+    if (checkpointDraftPoint) {
+      const marker = L.circleMarker([checkpointDraftPoint.lat, checkpointDraftPoint.lng], {
+        radius: 8, color: '#edf2f7', weight: 2, fillColor: '#4c8f84', fillOpacity: 1, interactive: false,
+      }).bindTooltip('Checkpoint position being edited').addTo(overlay);
+      bounds.extend(marker.getLatLng());
+    }
     if (linzPreview) addBoundary(linzPreview.geometry, { color: '#5da9ff', weight: 3, dashArray: '3 5', fillColor: '#5da9ff', fillOpacity: 0.08 }, `LINZ preview: ${linzPreview.address}`);
     if (drawPoints.length) {
       const latlngs = drawPoints.map(([lng, lat]) => L.latLng(lat, lng));
@@ -194,7 +228,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         else map.setView([-41.2, 172.5], 5);
       });
     }
-  }, [sites, zones, linzPreview, probePoint, resolution, drawPoints, drawing, viewKey]);
+  }, [sites, zones, checkpoints, checkpointDraftPoint, linzPreview, probePoint, resolution, drawPoints, drawing, viewKey]);
 
   useEffect(() => {
     if (!probePoint || !organizationId) return;

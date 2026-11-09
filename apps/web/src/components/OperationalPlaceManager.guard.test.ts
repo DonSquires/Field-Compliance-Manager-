@@ -8,20 +8,29 @@ const manager = readFileSync(resolve(process.cwd(), 'src/components/OperationalP
 const houseMap = readFileSync(resolve(process.cwd(), 'src/components/LocationHouseMap.tsx'), 'utf8');
 const locations = readFileSync(resolve(process.cwd(), 'src/pages/LocationsPage.tsx'), 'utf8');
 const zones = readFileSync(resolve(process.cwd(), 'src/pages/ZoneDetailPage.tsx'), 'utf8');
+const site = readFileSync(resolve(process.cwd(), 'src/pages/SiteDetailPage.tsx'), 'utf8');
 const users = readFileSync(resolve(process.cwd(), 'src/pages/UserManagementPage.tsx'), 'utf8');
 
 describe('human operational controls', () => {
-  it('exposes one guided manager from locations and zones', () => {
+  it('keeps geofence authoring in Location House and links facet pages there', () => {
     expect(locations).toContain('Manage location');
-    expect(zones).toContain('Manage selected zone');
     expect(locations).toContain('<OperationalPlaceManager');
-    expect(zones).toContain('<OperationalPlaceManager');
+    expect(site).toContain('Manage geofences in Location House');
+    expect(zones).toContain('Manage in Location House');
+    expect(site).not.toContain('editableEntity=');
+    expect(zones).not.toContain('editableEntity={{');
+    expect(zones).not.toContain('<OperationalPlaceManager');
   });
 
   it('uses plain-language steps and explains temporary restrictions', () => {
-    for (const label of ['1. Site briefing', '2. Work areas', '3. Map boundaries', '4. Temporary restrictions', 'Save site briefing', 'Add work area', 'Schedule restriction', 'End restriction now']) {
+    for (const label of ['1. Site briefing', '2. Work areas', '3. Map boundaries', '4. Checkpoints', '5. Temporary restrictions', 'Save site briefing', 'Add work area', 'Schedule restriction', 'End restriction now']) {
       expect(manager).toContain(label);
     }
+    expect(manager).toContain("supabase.rpc('get_location_patrol_checkpoints'");
+    expect(manager).toContain("supabase.rpc('manage_location_patrol_checkpoint'");
+    expect(manager).toContain("p_entity_type: 'patrol_checkpoint'");
+    expect(manager).toContain('checkpointReviewed !== selectedCheckpoint.id');
+    expect(manager).not.toMatch(/supabase\.from\(/);
     expect(manager).toContain('storm, fire risk, event, maintenance, or temporary client instruction');
     expect(manager).toContain('Officers see the restriction when GPS matches this area.');
     expect(manager).not.toContain('Create closure');

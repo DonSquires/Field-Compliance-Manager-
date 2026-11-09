@@ -9,10 +9,11 @@ const retirement = readFileSync(
 );
 const schema = readFileSync(resolve(root, 'supabase/schema.sql'), 'utf8');
 const databaseTypes = readFileSync(resolve(root, 'src/types/database.ts'), 'utf8');
-const workbench = readFileSync(
-  resolve(root, 'apps/web/src/pages/SiteBoundaryReviewPage.tsx'),
+const houseMap = readFileSync(
+  resolve(root, 'apps/web/src/components/LocationHouseMap.tsx'),
   'utf8',
 );
+const adminShell = readFileSync(resolve(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
 
 describe('superseded CRM boundary review retirement', () => {
   it('removes the CRM-only queue and direct boundary mutator', () => {
@@ -32,20 +33,19 @@ describe('superseded CRM boundary review retirement', () => {
     expect(databaseTypes).not.toMatch(/\n      get_crm_site_boundary_queue:/);
   });
 
-  it('keeps the unified cross-entity review queue', () => {
+  it('keeps the unified review data contract while retiring the standalone route', () => {
     expect(schema).toMatch(
       /CREATE (OR REPLACE )?FUNCTION "public"\."get_geofence_review_queue"/,
     );
     expect(databaseTypes).toMatch(/\n      get_geofence_review_queue:/);
-    expect(workbench).toContain("supabase.rpc('get_geofence_review_queue'");
-    expect(workbench).not.toContain("supabase.rpc('get_crm_site_boundary_queue'");
+    expect(adminShell).toMatch(/case 'sites':\s*return <LocationsPage \/>;/);
+    expect(adminShell).not.toContain('SiteBoundaryReviewPage');
   });
 
-  it('keeps all human changes on the proposal decision path', () => {
-    expect(workbench).toContain("supabase.rpc('propose_boundary'");
-    expect(workbench).toContain("supabase.rpc('accept_boundary_proposal'");
-    expect(workbench).toContain("supabase.rpc('reject_boundary_proposal'");
-    expect(workbench).toContain("supabase.rpc('verify_boundary'");
-    expect(workbench).not.toContain("supabase.rpc('manage_crm_site_boundary'");
+  it('keeps House boundary proposals on the governed decision path', () => {
+    expect(houseMap).toContain("supabase.rpc('propose_boundary'");
+    expect(houseMap).toContain("supabase.rpc('accept_boundary_proposal'");
+    expect(houseMap).toContain("supabase.rpc('verify_boundary'");
+    expect(houseMap).not.toContain("supabase.rpc('manage_crm_site_boundary'");
   });
 });
