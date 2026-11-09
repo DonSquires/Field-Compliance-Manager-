@@ -29976,6 +29976,67 @@ export type Database = {
           },
         ]
       }
+      shift_admin_attendance_events: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          event_type: string
+          id: string
+          organization_id: string
+          reason: string
+          recorded_at: string
+          request_fingerprint: Json
+          shift_id: string
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by: string
+          event_type: string
+          id?: string
+          organization_id: string
+          reason: string
+          recorded_at: string
+          request_fingerprint: Json
+          shift_id: string
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string
+          event_type?: string
+          id?: string
+          organization_id?: string
+          reason?: string
+          recorded_at?: string
+          request_fingerprint?: Json
+          shift_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_admin_attendance_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_admin_attendance_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_admin_attendance_events_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shift_assets: {
         Row: {
           asset_id: string
@@ -44909,6 +44970,18 @@ export type Database = {
         Args: { p_pack_id: string }
         Returns: Json
       }
+      get_roster_admin_attendance: {
+        Args: { p_organization_id: string; p_shift_ids: string[] }
+        Returns: {
+          admin_finish: string
+          admin_finish_by: string
+          admin_finish_reason: string
+          admin_start: string
+          admin_start_by: string
+          admin_start_reason: string
+          shift_id: string
+        }[]
+      }
       get_roster_attendance_exceptions: {
         Args: {
           p_from?: string
@@ -45094,6 +45167,21 @@ export type Database = {
           period_start: string
           staff_id: string
           timesheet_id: string
+        }[]
+      }
+      get_timesheet_provenance: {
+        Args: { p_operating_organization_id: string; p_timesheet_ids: string[] }
+        Returns: {
+          location_name: string
+          operating_organization_id: string
+          operating_organization_name: string
+          organization_id: string
+          organization_name: string
+          service_type: string
+          shift_id: string
+          timesheet_id: string
+          work_unit_name: string
+          zone_name: string
         }[]
       }
       get_timesheet_shift_rows: {
@@ -49394,6 +49482,17 @@ export type Database = {
         Args: { p_access_control_event_id: string }
         Returns: Json
       }
+      record_admin_shift_attendance: {
+        Args: {
+          p_client_request_id: string
+          p_event_type: string
+          p_expected_updated_at: string
+          p_reason: string
+          p_recorded_at: string
+          p_shift_id: string
+        }
+        Returns: Json
+      }
       record_akahu_import: {
         Args: {
           p_accounts?: Json
@@ -50765,6 +50864,52 @@ export type Database = {
           verified: boolean
           verified_at: string
         }[]
+      }
+      reopen_approved_timesheet: {
+        Args: {
+          p_expected_revision: number
+          p_reason: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          hourly_rate_override: number | null
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          pay_code_override: string | null
+          pay_override_reason: string | null
+          payroll_export_batch_id: string | null
+          payroll_snapshot: Json | null
+          period_end: string
+          period_start: string
+          recovery_request: Json | null
+          review_notes: string | null
+          revision: number
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       repeat_roster_slot_range: {
         Args: {
