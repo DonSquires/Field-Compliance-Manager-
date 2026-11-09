@@ -88,9 +88,9 @@ async function loadSafetyWarnings(supabase, vehicleId, orgId) {
 const GEOFENCE_NOTICE = {
   resolved: null,
   outside_all_geofences: 'Outside all verified geofences for this organisation. Evidence recorded; no zone rules were applied.',
-  unresolved_no_geofence: 'No geofence is configured where this scan was taken. Evidence recorded; no zone rules were applied. An administrator must configure and verify the boundary in the Geofence workbench before enforcement can rely on it.',
-  unresolved_unverified: 'A boundary exists here but has not been visually verified on the map. Evidence recorded; no zone rules were applied until it is verified in the Geofence workbench.',
-  unresolved_invalid: 'The boundary here has invalid geometry. Evidence recorded; no zone rules were applied until it is redrawn or re-imported in the Geofence workbench.',
+  unresolved_no_geofence: 'No geofence is configured where this scan was taken. Evidence recorded; no zone rules were applied. An administrator must configure and verify the boundary in Location House before enforcement can rely on it.',
+  unresolved_unverified: 'A boundary exists here but has not been visually verified on the map. Evidence recorded; no zone rules were applied until it is verified in Location House.',
+  unresolved_invalid: 'The boundary here has invalid geometry. Evidence recorded; no zone rules were applied until it is redrawn or re-imported in Location House.',
   not_evaluated: 'No GPS fix was supplied, so no geofence could be evaluated. Evidence recorded without place resolution.'
 };
 function normalizePlateNumber(value) {

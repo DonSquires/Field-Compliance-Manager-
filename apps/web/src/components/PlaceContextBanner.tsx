@@ -23,9 +23,9 @@ export function PlaceContextBanner({ compact = false, organizationWide = false, 
   };
   const resolutionMessage: Record<string, string> = {
     outside_all_geofences: 'GPS is outside every verified Site and Zone for the selected agreement.',
-    unresolved_no_geofence: 'An administrator must configure this Site or Zone in the Geofence Workbench.',
-    unresolved_unverified: 'An administrator must visually verify this Site or Zone in the Geofence Workbench before it can auto-select.',
-    unresolved_invalid: 'An administrator must redraw or re-import this Site or Zone boundary in the Geofence Workbench.',
+    unresolved_no_geofence: 'An administrator must configure this Site or Zone in Location House.',
+    unresolved_unverified: 'An administrator must visually verify this Site or Zone in Location House before it can auto-select.',
+    unresolved_invalid: 'An administrator must redraw or re-import this Site or Zone boundary in Location House.',
   };
   const heading = locationMode === 'manual'
     ? selectedSite || selectedZone ? 'Selected service place' : 'Select a service place'

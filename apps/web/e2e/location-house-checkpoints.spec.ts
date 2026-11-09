@@ -45,6 +45,32 @@ test('legacy Sites entry places and verifies a Site checkpoint in Location House
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('Location House edits a boundary as an unverified proposal before explicit confirmation', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/sites');
+  await page.getByRole('button', { name: 'Manage location' }).click();
+  const manager = page.getByRole('dialog', { name: 'Manage Civic Events House' });
+  await manager.getByRole('button', { name: /3\. Map boundaries/ }).click();
+  const map = manager.getByRole('region', { name: 'Map for Civic Events House' });
+  await expect(map.getByRole('button', { name: 'Adjust current boundary' })).toBeVisible();
+  await map.getByRole('button', { name: 'Adjust current boundary' }).click();
+
+  const vertex = map.locator('.leaflet-marker-icon.house-map-vertex:not(.is-midpoint)').first();
+  const bounds = await vertex.boundingBox();
+  if (!bounds) throw new Error('The selected boundary vertex is not visible on the map.');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 14, bounds.y + bounds.height / 2 + 9, { steps: 3 });
+  await page.mouse.up();
+
+  await map.getByRole('button', { name: 'Save boundary edit' }).click();
+  await expect(map.getByRole('button', { name: 'Confirm this boundary' })).toBeVisible();
+  await expect(map.getByRole('status')).toContainText('Review and confirm the revised shape');
+  await map.getByRole('button', { name: 'Confirm this boundary' }).click();
+  await expect(map.getByRole('status')).toContainText('Boundary confirmed. Officers can now use it for runtime location checks.');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('Location House manages a Zone checkpoint on mobile and resets verification when it moves', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const errors = monitorBrowserErrors(page);

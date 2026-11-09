@@ -6,9 +6,30 @@ import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
 import './LocationHouseMap.css';
 import './LocationHouseMapSpine.css';
+import './LocationHouseMapEditing.css';
+import './LocationHouseMapEditing.css';
 
 // ATLAS INVOKES: linz-map-tile
 type Boundary = GeoJSON.GeoJsonObject | null;
+type Ring = Array<[number, number]>;
+
+function editableRing(geometry: Boundary): Ring | null {
+  if (!geometry) return null;
+  const shape = geometry.type === 'Feature' ? (geometry as GeoJSON.Feature).geometry : geometry as GeoJSON.Geometry;
+  if (!shape) return null;
+  const rings = shape.type === 'Polygon'
+    ? shape.coordinates.length === 1 ? shape.coordinates : null
+    : shape.type === 'MultiPolygon' && shape.coordinates.length === 1 && shape.coordinates[0].length === 1
+      ? shape.coordinates[0]
+      : null;
+  const coordinates = rings?.[0];
+  if (!coordinates || coordinates.length < 4) return null;
+  const points = coordinates.map(([lng, lat]) => [Number(lng), Number(lat)] as [number, number]);
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) points.pop();
+  return points.length >= 3 ? points : null;
+}
 
 export interface HouseMapSite {
   id: string;
@@ -88,6 +109,13 @@ function drawnPolygon(points: Array<[number, number]>): GeoJSON.Polygon {
   return { type: 'Polygon', coordinates: [[...points, points[0]]] };
 }
 
+function ringMidpoints(points: Ring): Ring {
+  return points.map(([lng, lat], index) => {
+    const [nextLng, nextLat] = points[(index + 1) % points.length];
+    return [Number(((lng + nextLng) / 2).toFixed(7)), Number(((lat + nextLat) / 2).toFixed(7))];
+  });
+}
+
 interface GeofenceResolution {
   in_operating_bounds: boolean;
   out_of_bounds_district: string | null;
@@ -133,9 +161,12 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
   const [boundaryNotice, setBoundaryNotice] = useState<string | null>(null);
   const [drawing, setDrawing] = useState(false);
   const [drawPoints, setDrawPoints] = useState<Array<[number, number]>>([]);
+  const [editBoundaryPoints, setEditBoundaryPoints] = useState<Ring | null>(null);
   // The map's click handler is registered once, so it reads the current mode from a ref rather than a stale closure.
   const drawingRef = useRef(false);
   drawingRef.current = drawing;
+  const editingBoundaryRef = useRef(false);
+  editingBoundaryRef.current = editBoundaryPoints !== null;
   const checkpointPlacementRef = useRef(checkpointPlacement);
   checkpointPlacementRef.current = checkpointPlacement;
   const checkpointPositionRef = useRef(onCheckpointPosition);
@@ -153,6 +184,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     rememberViewport(map, viewKey);
     map.on('click', ({ latlng }) => {
       if (drawingRef.current) { setDrawPoints((points) => [...points, [Number(latlng.lng.toFixed(7)), Number(latlng.lat.toFixed(7))]]); return; }
+      if (editingBoundaryRef.current) return;
       if (checkpointPlacementRef.current) { checkpointPositionRef.current?.({ lat: latlng.lat, lng: latlng.lng }); return; }
       setProbePoint({ lat: latlng.lat, lng: latlng.lng }); setResolution(null); setClosure(null);
     });
@@ -167,7 +199,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     overlay.clearLayers();
     const bounds = L.latLngBounds([]);
     // While the boundary is being drawn every corner click must reach the map, so nothing already drawn may intercept it.
-    const interactive = !drawing;
+    const interactive = !drawing && !checkpointPlacement && !editBoundaryPoints;
     const addBoundary = (geometry: GeoJSON.GeoJsonObject, style: L.PathOptions, label: string) => {
       const layer = L.geoJSON(geometry, { style, interactive }).bindTooltip(label);
       layer.addTo(overlay);
@@ -190,6 +222,27 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         bounds.extend(point.getLatLng());
       }
     });
+    if (editBoundaryPoints) {
+      addBoundary(drawnPolygon(editBoundaryPoints), { color: '#f0b35a', weight: 3, dashArray: '7 5', fillColor: '#f0b35a', fillOpacity: 0.1 }, 'Boundary adjustment preview');
+      editBoundaryPoints.forEach(([lng, lat], index) => {
+        const marker = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ className: 'house-map-vertex', iconSize: [14, 14] }), title: `Vertex ${index + 1}: drag to move or right-click to remove` }).addTo(overlay);
+        marker.on('dragend', () => {
+          const position = marker.getLatLng();
+          setEditBoundaryPoints((points) => points ? points.map((point, pointIndex) => pointIndex === index ? [Number(position.lng.toFixed(7)), Number(position.lat.toFixed(7))] : point) : points);
+        });
+        marker.on('contextmenu', (event) => {
+          L.DomEvent.stop(event);
+          setEditBoundaryPoints((points) => points && points.length > 3 ? points.filter((_, pointIndex) => pointIndex !== index) : points);
+        });
+      });
+      ringMidpoints(editBoundaryPoints).forEach(([lng, lat], index) => {
+        const marker = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ className: 'house-map-vertex is-midpoint', iconSize: [10, 10] }), title: 'Drag to add a boundary vertex' }).addTo(overlay);
+        marker.on('dragend', () => {
+          const position = marker.getLatLng();
+          setEditBoundaryPoints((points) => points ? [...points.slice(0, index + 1), [Number(position.lng.toFixed(7)), Number(position.lat.toFixed(7))], ...points.slice(index + 1)] : points);
+        });
+      });
+    }
     checkpoints.forEach((checkpoint) => {
       if (checkpoint.gps_lat == null || checkpoint.gps_lng == null) return;
       const verified = checkpoint.checkpoint_verification === 'verified';
@@ -198,7 +251,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         color: checkpoint.active ? (verified ? '#4cc38a' : '#e5aa45') : '#879aaa',
         weight: 2,
         fillOpacity: checkpoint.active ? 0.18 : 0.08,
-        interactive: !drawing,
+        interactive,
       }).bindTooltip(`Checkpoint: ${checkpoint.name} · ${verified ? 'verified' : 'unverified'}${checkpoint.active ? '' : ' · inactive'}`);
       circle.addTo(overlay);
       bounds.extend([checkpoint.gps_lat, checkpoint.gps_lng]);
@@ -228,7 +281,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         else map.setView([-41.2, 172.5], 5);
       });
     }
-  }, [sites, zones, checkpoints, checkpointDraftPoint, linzPreview, probePoint, resolution, drawPoints, drawing, viewKey]);
+  }, [sites, zones, checkpoints, checkpointDraftPoint, linzPreview, probePoint, resolution, drawPoints, drawing, editBoundaryPoints, checkpointPlacement, viewKey]);
 
   useEffect(() => {
     if (!probePoint || !organizationId) return;
@@ -345,6 +398,23 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     })();
   };
 
+  const editableFacet = editableEntity ? [...sites, ...zones].find((facet) => facet.id === editableEntity.id) : null;
+  const currentBoundaryRing = editableRing(editableFacet?.boundary ?? null);
+  const saveEditedBoundary = () => {
+    if (!editableEntity || !editBoundaryPoints || editBoundaryPoints.length < 3) return;
+    void (async () => {
+      setSavingBoundary('drawn'); setError(null); setBoundaryNotice(null);
+      try {
+        await proposeAndAccept(drawnPolygon(editBoundaryPoints), 'user_drawn', { adjusted_from: 'current_boundary', vertices: editBoundaryPoints.length }, false);
+        setEditBoundaryPoints(null);
+        setBoundaryNotice('Boundary updated. Review and confirm the revised shape before officers use it.');
+        editableEntity.onSaved?.(false);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
+      } finally { setSavingBoundary(null); }
+    })();
+  };
+
   const confirmExistingBoundary = () => {
     if (!editableEntity) return;
     void (async () => {
@@ -382,7 +452,6 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     ...zones.map((facet) => ({ facet, type: 'location_zone' as const, kind: 'Work area' })),
   ].filter(({ facet }) => !facet.boundary || facet.boundary_verification !== 'verified');
   const unresolvedFacets = reviewFacets.length;
-  const editableFacet = editableEntity ? [...sites, ...zones].find((facet) => facet.id === editableEntity.id) : null;
   return <section className="house-map" aria-label={`Map for ${house.name}`}>
     <header><div><span>Place boundary map</span><h3>{house.name}</h3><p>{house.address ?? 'Address not recorded'}</p></div><button type="button" onClick={() => void previewLinzBoundary()} disabled={resolving || (!house.address && !house.name)}>{resolving ? <LoaderCircle size={15} className="is-spinning" /> : <LandPlot size={15} />}{resolving ? 'Finding LINZ boundary' : 'Find LINZ boundary'}</button></header>
     <div className="house-map-gates"><span className={verifiedPlaces ? 'is-ready' : 'is-blocked'}><ShieldCheck size={14} /><strong>{verifiedPlaces}</strong> verified place boundar{verifiedPlaces === 1 ? 'y' : 'ies'}</span><span className={unresolvedFacets ? 'is-blocked' : 'is-ready'}><AlertTriangle size={14} /><strong>{unresolvedFacets}</strong> Site or work area{unresolvedFacets === 1 ? '' : 's'} need review</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Checking this point' : 'Click the map to check a location'}</span></div>
@@ -394,16 +463,18 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     {editableEntity && <div className="house-map-editable">
       <span>{drawing ? 'Click each corner of the place on the map, then save the shape. Switch the map to Satellite to see what is actually there.' : 'Set the boundary right here — no separate workbench needed.'}</span>
       <div className="house-map-editable-actions">
-        {editableFacet?.boundary && editableFacet.boundary_verification !== 'verified' && !drawing && <button type="button" onClick={confirmExistingBoundary} disabled={savingBoundary !== null}><CheckCircle2 size={14} />{savingBoundary === 'linz' ? 'Confirming' : 'Confirm this boundary'}</button>}
-        {linzPreview && !drawing && <button type="button" onClick={() => saveLinzBoundary()} disabled={savingBoundary !== null}><LandPlot size={14} />{savingBoundary === 'linz' ? 'Saving' : editableFacet?.boundary ? `Replace with this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary` : `Use this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary`}</button>}
-        {!drawing && <button type="button" onClick={() => { setDrawing(true); setDrawPoints([]); setProbePoint(null); setResolution(null); setClosure(null); }} disabled={savingBoundary !== null}><PenTool size={14} />Draw the boundary</button>}
+        {editableFacet?.boundary && editableFacet.boundary_verification !== 'verified' && !drawing && !editBoundaryPoints && <button type="button" onClick={confirmExistingBoundary} disabled={savingBoundary !== null}><CheckCircle2 size={14} />{savingBoundary === 'linz' ? 'Confirming' : 'Confirm this boundary'}</button>}
+        {currentBoundaryRing && !drawing && !editBoundaryPoints && <button type="button" onClick={() => setEditBoundaryPoints(currentBoundaryRing)} disabled={savingBoundary !== null}>Adjust current boundary</button>}
+        {editBoundaryPoints && <><button type="button" onClick={() => setEditBoundaryPoints(currentBoundaryRing)} disabled={savingBoundary !== null}><Undo2 size={14} />Undo edits</button><button type="button" onClick={() => setEditBoundaryPoints(null)} disabled={savingBoundary !== null}><X size={14} />Cancel edit</button><button type="button" onClick={saveEditedBoundary} disabled={savingBoundary !== null}>{savingBoundary === 'drawn' ? 'Saving' : 'Save boundary edit'}</button></>}
+        {linzPreview && !drawing && !editBoundaryPoints && <button type="button" onClick={() => saveLinzBoundary()} disabled={savingBoundary !== null}><LandPlot size={14} />{savingBoundary === 'linz' ? 'Saving' : editableFacet?.boundary ? `Replace with this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary` : `Use this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary`}</button>}
+        {!drawing && !editBoundaryPoints && <button type="button" onClick={() => { setDrawing(true); setDrawPoints([]); setProbePoint(null); setResolution(null); setClosure(null); }} disabled={savingBoundary !== null}><PenTool size={14} />Draw the boundary</button>}
         {drawing && <>
           <strong className="house-map-draw-count">{drawPoints.length} corner{drawPoints.length === 1 ? '' : 's'} placed{drawPoints.length < 3 ? ` · ${3 - drawPoints.length} more needed` : ''}</strong>
           <button type="button" onClick={() => setDrawPoints((points) => points.slice(0, -1))} disabled={!drawPoints.length}><Undo2 size={14} />Undo corner</button>
           <button type="button" onClick={() => { setDrawing(false); setDrawPoints([]); }}><X size={14} />Stop drawing</button>
           <button type="button" onClick={saveDrawnBoundary} disabled={savingBoundary !== null || drawPoints.length < 3}><PenTool size={14} />{savingBoundary === 'drawn' ? 'Saving' : 'Save this shape'}</button>
         </>}
-        {!drawing && <><label><span>Or a simple radius (m)</span><input type="number" min="5" max="5000" value={radiusMeters} onChange={(event) => setRadiusMeters(event.target.value)} /></label><button type="button" onClick={saveRadiusBoundary} disabled={savingBoundary !== null || (linzPreview?.lat == null && editableEntity.centerLat == null)}><Crosshair size={14} />{savingBoundary === 'radius' ? 'Saving' : 'Save as point + radius'}</button></>}
+        {!drawing && !editBoundaryPoints && <><label><span>Or a simple radius (m)</span><input type="number" min="5" max="5000" value={radiusMeters} onChange={(event) => setRadiusMeters(event.target.value)} /></label><button type="button" onClick={saveRadiusBoundary} disabled={savingBoundary !== null || (linzPreview?.lat == null && editableEntity.centerLat == null)}><Crosshair size={14} />{savingBoundary === 'radius' ? 'Saving' : 'Save as point + radius'}</button></>}
       </div>
     </div>}
     <div className="house-map-canvas" ref={containerRef} />
