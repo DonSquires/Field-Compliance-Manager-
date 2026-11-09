@@ -14,7 +14,7 @@ export function normalizePlate(value) {
   return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function normalizePlace(value) {
+export function normalizePlace(value) {
   return String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
