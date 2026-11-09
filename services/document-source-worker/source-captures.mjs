@@ -11,6 +11,8 @@ const CODE = /^[A-Z0-9_-]{1,40}$/;
 export const CAPTURE_FIELDS = ['job', 'patroller', 'date', 'time', 'location', 'source', 'subject', 'issue', 'comments', 'registration'];
 export const MAX_CAPTURE_BATCHES = 200;
 
+const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 const tokenOk = token => typeof token === 'string' && normalizePlace(token).length > 0 && token.length <= 40;
 
 export function validatePhotoCaptures(config, sheetsByCode) {
@@ -34,6 +36,9 @@ export function validatePhotoCaptures(config, sheetsByCode) {
     if (typeof config.values?.[field] !== 'string' || !config.values[field].trim()) throw new Error(`photo_captures.values.${field} is required`);
   }
   if (typeof config.values.comment_prefix !== 'string') throw new Error('photo_captures.values.comment_prefix is required');
+  if (config.earliest_capture_date !== undefined && !validDate(config.earliest_capture_date)) {
+    throw new Error('photo_captures.earliest_capture_date must be YYYY-MM-DD');
+  }
   if (!Array.isArray(config.hold_label_tokens) || !config.hold_label_tokens.every(tokenOk)) {
     throw new Error('photo_captures.hold_label_tokens must be short words');
   }
@@ -102,7 +107,14 @@ function logNumber(code, placeKey, minuteKey) {
 export function buildCaptureGroups(photos, config, { minuteOrganizations = () => new Set() } = {}) {
   const groups = new Map();
   const holds = [];
+  let ignored = 0;
   for (const photo of photos) {
+    // Owner ruling 2026-11-10: photos older than the configured floor carry camera clock or name
+    // errors and are ignored rather than captured or queued for review.
+    if (config.earliest_capture_date && photo.parsed?.minuteKey && photo.parsed.minuteKey < config.earliest_capture_date) {
+      ignored += 1;
+      continue;
+    }
     const resolved = resolveCaptureClient(photo.relative_path, config);
     if (resolved.held) {
       holds.push({ source_relative_path: photo.relative_path, reason: resolved.held });
@@ -132,7 +144,7 @@ export function buildCaptureGroups(photos, config, { minuteOrganizations = () =>
   }
   const ordered = [...groups.values()].sort((a, b) => a.capture_code.localeCompare(b.capture_code)
     || a.minute_key.localeCompare(b.minute_key) || a.log_number.localeCompare(b.log_number));
-  return { groups: ordered, holds };
+  return { groups: ordered, holds, ignored };
 }
 
 const csvCell = value => (/[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value);

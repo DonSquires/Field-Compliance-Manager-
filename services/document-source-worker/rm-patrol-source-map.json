@@ -9,6 +9,8 @@
   "photo_captures": {
     "enabled": true,
     "notes": "Owner ruling 2026-11-09: a structured camera photo that matches no logged entry becomes a camera-capture row at its folder's place, for all history, without a review gate. A folder's last ' - ' segment names the client by these label tokens; no client, several clients or a hold token keeps the photo held. Each client's reviewed sheet (profile_code) supplies its organisation, zone map and place suffix; captures use their own namespace.",
+    "earliest_capture_date": "2019-01-01",
+    "earliest_capture_date_notes": "Owner ruling 2026-11-10: photos stamped before this date carry camera clock or file-name errors and are ignored.",
     "max_rows_per_batch": 250,
     "max_batches_per_run": 4,
     "source_label_prefix": "Photos camera captures",

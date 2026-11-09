@@ -4,9 +4,27 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  promotePhotos, promoteWorkbookVersion, recordOutcomes, runPromotion, serverRefusal, validateSourceMap, importActorRpc,
+  acquireSourceLock, promotePhotos, promoteWorkbookVersion, recordOutcomes, runPromotion, serverRefusal, validateSourceMap, importActorRpc,
 } from '../services/document-source-worker/source-promote.mjs';
 import { loadSyncState } from '../services/document-source-worker/source-sync.mjs';
+
+test('a source lock left by a dead run is reclaimed; a live or fresh lock still blocks', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'fcm-lock-'));
+  const lockPath = path.join(dir, 'state.json.lock');
+  try {
+    await writeFile(lockPath, '424242');
+    await assert.rejects(acquireSourceLock(lockPath, { isAlive: () => true }), /holds the source lock/);
+    const reclaimed = await acquireSourceLock(lockPath, { isAlive: () => false });
+    await reclaimed.close();
+    assert.equal(await readFile(lockPath, 'utf8'), String(process.pid));
+    await writeFile(lockPath, '');
+    await assert.rejects(acquireSourceLock(lockPath), /holds the source lock/, 'an empty lock may be a run still starting');
+    const later = await acquireSourceLock(lockPath, { now: () => Date.now() + 11 * 60 * 1000 });
+    await later.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 const PROVIDER = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13';
 const CLIENT = 'ff87e028-9b8e-4138-baf2-7aef54386442';
