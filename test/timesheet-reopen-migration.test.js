@@ -16,7 +16,7 @@ test('reopening requires payroll authority, current revision, a reason and an un
   assert.match(sql, /v_sheet\.status <> 'approved' OR v_sheet\.payroll_export_batch_id IS NOT NULL OR v_sheet\.payroll_snapshot IS NOT NULL/);
   assert.match(sql, /SET status = 'submitted'[\s\S]*approved_by = NULL[\s\S]*branch_reviewed_by = NULL/);
   assert.match(sql, /'timesheet_reopened'/);
-  assert.match(sql, /'reason', v_reason[\s\S]*'previous_status', 'approved'[\s\S]*'previous_revision', p_expected_revision/);
+  assert.match(sql, /'reason', v_reason[\s\S]*'previous_status', 'approved'[\s\S]*'previous_revision', p_expected_revision[\s\S]*'previous_branch_reviewed_by', v_previous_branch_reviewed_by[\s\S]*'previous_branch_review_notes', v_previous_branch_review_notes/);
   assert.match(sql, /REVOKE ALL ON FUNCTION public\.reopen_approved_timesheet\(uuid, integer, text\) FROM PUBLIC, anon, service_role/);
 });
 
@@ -76,7 +76,7 @@ test('reopen authorization, export locks and audit behavior run in disposable Po
     fails(`BEGIN; ${as(admin)} SELECT public.reopen_approved_timesheet('${sheet}',7,' '); COMMIT;`, /reason of 1 to 2000 characters/);
     fails(`BEGIN; ${as(admin)} SELECT public.reopen_approved_timesheet('${exported}',2,'Correction needed'); COMMIT;`, /Only approved, unexported/);
     assert.equal(sql(`BEGIN; ${as(admin)} SELECT status||'|'||revision||'|'||(approved_by IS NULL)::text||'|'||(branch_reviewed_by IS NULL)::text FROM public.reopen_approved_timesheet('${sheet}',7,'Correcting approved hours'); COMMIT;`).trim(), 'submitted|8|true|true');
-    assert.equal(sql(`SELECT action||'|'||(metadata->>'reason')||'|'||(metadata->>'previous_revision')||'|'||(metadata->>'previous_approved_by') FROM public.audit_log WHERE target_id='${sheet}'`).trim(), `timesheet_reopened|Correcting approved hours|7|${admin}`);
+    assert.equal(sql(`SELECT action||'|'||(metadata->>'reason')||'|'||(metadata->>'previous_revision')||'|'||(metadata->>'previous_approved_by')||'|'||(metadata->>'previous_branch_reviewed_by')||'|'||(metadata->>'previous_branch_review_notes')||'|'||(metadata->>'previous_branch_reviewed_organization_id') FROM public.audit_log WHERE target_id='${sheet}'`).trim(), `timesheet_reopened|Correcting approved hours|7|${admin}|${officer}|Checked|${org}`);
     assert.equal(sql(`SELECT category||'|'||recipient_user_id||'|'||title FROM public.notifications WHERE recipient_user_id='${officer}'`).trim(), `timesheet_decision|${officer}|Timesheet returned for review`);
     assert.equal(sql("SELECT has_function_privilege('authenticated','public.reopen_approved_timesheet(uuid,integer,text)','EXECUTE')").trim(), 't');
     assert.equal(sql("SELECT has_function_privilege('anon','public.reopen_approved_timesheet(uuid,integer,text)','EXECUTE')").trim(), 'f');
