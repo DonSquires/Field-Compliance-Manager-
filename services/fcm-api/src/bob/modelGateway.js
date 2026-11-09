@@ -85,18 +85,45 @@ function createGatewayConfig(env = process.env) {
         synthesis: env.BOB_OLLAMA_PLAN_MODEL || '',
       },
     },
+    // Anthropic Claude via its OpenAI-compatible endpoint (owner direction 2026-11-10).
+    anthropic: {
+      kind: 'openai',
+      baseUrl: trimSlash(env.ANTHROPIC_OPENAI_BASE_URL || 'https://api.anthropic.com/v1'),
+      apiKey: env.ANTHROPIC_API_KEY || '',
+      models: {
+        planner: env.ANTHROPIC_PLAN_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+        verifier: env.ANTHROPIC_VERIFY_MODEL || env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
+        subagent: env.ANTHROPIC_SUBAGENT_MODEL || env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
+        synthesis: env.ANTHROPIC_PLAN_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+      },
+    },
+    // OmniRoute: owner-run OpenAI-compatible gateway; inert until OMNIROUTE_BASE_URL is set and only
+    // used when a BOB_ROUTE_* chain names it. A self-hosted instance may run without a key.
+    omniroute: {
+      kind: 'gateway',
+      baseUrl: trimSlash(env.OMNIROUTE_BASE_URL),
+      apiKey: env.OMNIROUTE_API_KEY || 'none',
+      models: {
+        planner: env.OMNIROUTE_PLAN_MODEL || env.OMNIROUTE_MODEL || 'auto',
+        verifier: env.OMNIROUTE_MODEL || 'auto',
+        subagent: env.OMNIROUTE_MODEL || 'auto',
+        synthesis: env.OMNIROUTE_PLAN_MODEL || env.OMNIROUTE_MODEL || 'auto',
+      },
+    },
   };
+  const defaultChain = ['gpu_workstation', 'openai', ...(providers.anthropic.apiKey ? ['anthropic'] : [])];
   return {
     providers,
     // In-house first (owner ruling 2026-09-26): every role tries the laptop GPU when the link is
     // up, then OpenAI. The VPS Ollama is CPU-only and too slow for the chat turn budget, so it
     // joins a chat chain only when configured explicitly (BOB_ROUTE_*). plan.js escalates to the
-    // next provider when a local author's plan is unparseable or the verifier blocks it.
+    // next provider when a local author's plan is unparseable or the verifier blocks it. Claude is the
+    // last resort (owner direction 2026-11-10): an empty OpenAI balance degrades to it, not to failure.
     chains: {
-      planner: parseChain(env.BOB_ROUTE_PLANNER, ['gpu_workstation', 'openai']),
-      verifier: parseChain(env.BOB_ROUTE_VERIFIER, ['gpu_workstation', 'openai']),
-      subagent: parseChain(env.BOB_ROUTE_SUBAGENT, ['gpu_workstation', 'openai']),
-      synthesis: parseChain(env.BOB_ROUTE_SYNTHESIS, ['gpu_workstation', 'openai']),
+      planner: parseChain(env.BOB_ROUTE_PLANNER, defaultChain),
+      verifier: parseChain(env.BOB_ROUTE_VERIFIER, defaultChain),
+      subagent: parseChain(env.BOB_ROUTE_SUBAGENT, defaultChain),
+      synthesis: parseChain(env.BOB_ROUTE_SYNTHESIS, defaultChain),
     },
     timeoutMs: Math.max(5000, Number(env.BOB_MODEL_TIMEOUT_MS || env.OPENAI_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)),
     temperature: Number.isFinite(Number.parseFloat(env.BOB_PLAN_TEMPERATURE)) ? Number.parseFloat(env.BOB_PLAN_TEMPERATURE) : 0.6,

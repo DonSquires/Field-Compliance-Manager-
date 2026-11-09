@@ -4,7 +4,9 @@ const PROVIDERS = Object.freeze({
   OPENAI: 'openai',
   OLLAMA: 'ollama',
   GPU_WORKSTATION: 'gpu_workstation',
-  OLLAMA_CLOUD: 'ollama_cloud'
+  OLLAMA_CLOUD: 'ollama_cloud',
+  ANTHROPIC: 'anthropic',
+  OMNIROUTE: 'omniroute'
 });
 
 const LOCAL_WORKLOADS = new Set([
@@ -15,7 +17,9 @@ const LOCAL_WORKLOADS = new Set([
 ]);
 const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementation', 'frontend_repair', 'vibe_implementation']);
 const REVIEW_WORKLOADS = new Set(['independent_code_review']);
+const SECURITY_WORKLOADS = new Set(['security_review']);
 const LOCAL_PROVIDERS = new Set([PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]);
+const HOSTED_LONG_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
 
 // OpenAI answers within the 90 s that suits an edge-style caller; an in-house model may need
 // ~100 s just to load cold on the VPS CPU (llama3.1:8b, job 73560f1c timed out at 90 s) and then
@@ -38,7 +42,7 @@ function gatewayTimeoutFor(provider, gateway = {}, env = process.env, request = 
     const configured = Number(env?.BOB_LOCAL_MODEL_TIMEOUT_MS);
     return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS;
   }
-  if (provider === PROVIDERS.OLLAMA_CLOUD) {
+  if (HOSTED_LONG_PROVIDERS.has(provider)) {
     const configured = Number(env?.BOB_CLOUD_MODEL_TIMEOUT_MS);
     return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CLOUD_GATEWAY_TIMEOUT_MS;
   }
@@ -67,8 +71,14 @@ function parseChain(raw, fallback) {
 // last. The VPS CPU now serves restricted-data runs and knowledge embeddings. Parallelism comes from the
 // gateway's one-request-per-local-provider guard: a busy GPU answers 429, which escalates, so concurrent
 // stages spread across the GPU and Ollama Cloud instead of queueing.
-const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
-const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+// Owner direction 2026-11-10: Anthropic Claude is an implementation and security-review engine. It
+// joins the unrestricted chains after the flat-rate Ollama Cloud subscription and before per-call
+// OpenAI, and leads the independent (security) review chains. An unconfigured provider is skipped by health, so
+// these defaults are inert until ANTHROPIC_API_KEY is set. OmniRoute (which can reach free
+// third-party tiers) joins a chain only when BOB_BUILDER_ROUTE_* names it.
+const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OPENAI]);
+const SECURITY_FIRST = Object.freeze([PROVIDERS.ANTHROPIC, PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
 
 function localOnly(chain) {
   const local = chain.filter(provider => !EXTERNAL_PROVIDERS.has(provider));
@@ -81,7 +91,8 @@ function routingChains(env = process.env) {
     restricted: localOnly(parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION])),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [...IN_HOUSE_FIRST]),
     author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [...IN_HOUSE_FIRST]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...IN_HOUSE_FIRST]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...SECURITY_FIRST]),
+    security: parseChain(env.BOB_BUILDER_ROUTE_SECURITY, [...SECURITY_FIRST]),
     analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [...IN_HOUSE_FIRST])
   };
 }
@@ -108,7 +119,8 @@ function routeBuilderModel({ workloadKind, containsRestrictedData = false, env =
   if (containsRestrictedData) { chain = chains.restricted; reason = 'restricted_data_local_only'; }
   else if (LOCAL_WORKLOADS.has(workloadKind)) { chain = chains.local; reason = 'low_risk_local_workload'; }
   else if (AUTHOR_WORKLOADS.has(workloadKind)) { chain = chains.author; reason = 'in_house_first_author'; }
-  else if (REVIEW_WORKLOADS.has(workloadKind)) { chain = chains.review; reason = 'in_house_first_review'; }
+  else if (REVIEW_WORKLOADS.has(workloadKind)) { chain = chains.review; reason = 'security_review_engine_first'; }
+  else if (SECURITY_WORKLOADS.has(workloadKind)) { chain = chains.security; reason = 'security_review_engine_first'; }
   else { chain = chains.analysis; reason = 'in_house_first_analysis'; }
   return { provider: chain[0], chain, reason };
 }
@@ -501,6 +513,7 @@ module.exports = {
   LOCAL_WORKLOADS,
   AUTHOR_WORKLOADS,
   REVIEW_WORKLOADS,
+  SECURITY_WORKLOADS,
   routingChains,
   stableSerialize,
   routeBuilderModel,

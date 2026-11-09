@@ -234,9 +234,14 @@ under these egress controls:
 - Ollama Cloud receives structured JSON requests, never native tool
   definitions, and each escalation posts a session status with
   `external_egress: true`.
-- OpenAI and every other hosted provider remain forbidden for Vibe prompts and
-  tool results. The Ollama Cloud key's presence alone does not authorize egress;
-  the flag and these controls do.
+- OpenAI remains forbidden for Vibe prompts and tool results. Owner direction
+  2026-11-10 approves Anthropic Claude and OmniRoute as further external Vibe
+  escalations, but only when the control plane lists them in
+  `BOB_VIBE_EXTERNAL_PROVIDERS` (escalation order, e.g.
+  `ollama_cloud,anthropic`); each one is held to every control above (after the
+  private candidates, JSON requests only, attachment withholding, per-model
+  egress receipts with `external_egress: true`). A provider key's presence
+  alone does not authorize egress; the flag or list and these controls do.
 
 Vibe file attachments are stored in the private `bob-uploads` bucket under the
 owner's `desktop/{user_id}/vibe/{session_id}/` path and are registered against
@@ -323,6 +328,8 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 | `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling; the control plane's production-deployment resolver, which checks the serving SHA before and after every live Dr Bob walk | Inspect approved Vercel deployment state and the SHA serving the production alias | Supabase, database migrations, browser contexts, Dr Bob worker containers (they receive only the verified SHA), unmerged branch commits, Dr Bob receipts |
 | VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
 | `OLLAMA_API_TOKEN` (Ollama Cloud key; also accepted as `OLLAMA_API_KEY`) | VPS control-plane model gateway only (`/var/lib/bob/control-plane.env`), sent as a Bearer header to `https://ollama.com` | Bob Builder's subscription model tier for unrestricted work, after the laptop GPU and VPS Ollama and before paid OpenAI | Restricted/local-only work (the router strips it), local Ollama hosts, browser, Bob prompts, logs, health output, issue text |
+| `ANTHROPIC_API_KEY` (Anthropic Claude workspace key; owner direction 2026-11-10) | VPS control-plane model gateway (`/var/lib/bob/control-plane.env`) and the in-app Bob API (`/opt/fcm/.env`), sent as a bearer token to Anthropic's OpenAI-compatible endpoint (`ANTHROPIC_OPENAI_BASE_URL`, default `https://api.anthropic.com/v1`); the owner's laptop Claude Code/VS Code setup | Builder implementation tier after Ollama Cloud and before OpenAI; first engine of the independent (security) code review; in-app Bob last resort after OpenAI; Vibe only when listed in `BOB_VIBE_EXTERNAL_PROVIDERS` | Restricted/local-only work (the router strips it), browser, Bob prompts, logs, health output, issue text, repository files |
+| `OMNIROUTE_BASE_URL` / `OMNIROUTE_API_KEY` (owner-run OmniRoute OpenAI-compatible router; key optional for a self-hosted instance) | VPS control-plane model gateway and in-app Bob API, only when a `BOB_BUILDER_ROUTE_*`, `BOB_ROUTE_*` or `BOB_VIBE_EXTERNAL_PROVIDERS` value names `omniroute`; the owner's laptop | Owner-approved access to free and subscription tiers behind one endpoint | Restricted/local-only work, default chains (it is opt-in only), browser, logs, issue text; routing personal, HR, legal, GPS or financial records to a free tier |
 | `BASE44_RAMS_READ_TOKEN` (Base44 personal access token "FCM read-only sync (RAMS OFO)", read-only, scoped to the RAMS (OFO) app; owner-issued 2026-11-03) | VPS sync timer (`/var/lib/bob/base44-rams-read-token`, root `600`); repository Codespaces secret of the same name; laptop fallback file `%LOCALAPPDATA%\FCM\base44\rams-read-token` | GET-only Base44 reads by `scripts/sync-base44-rams.mjs` (see `deploy/base44-rams/README.md`) | Any Base44 write, other Base44 apps, browser, Bob prompts, logs, reports, issue text |
 | Bob laptop SSH key (`/var/lib/bob/laptop/id_ed25519`, VPS only) | `bob-laptop-shell.js` in the control plane, over Tailscale, to the owner's laptop only, while the owner's `laptop-tailscale.ps1 -Allow` switch is on | Owner-confirmed PowerShell commands (read files, check the GPU link, setup the owner asked for) | Any other host, unattended or unconfirmed commands, destructive/privilege/credential/firewall changes (refused by the deny list), copying the key anywhere |
 | Host docker socket → VPS firewall (owner ruling 2026-10-21: Bob changes the firewall directly) | `bob-firewall.js` in the control plane, via `/api/bob/firewall/*` (control-room actions `firewall_status`/`firewall_change`, grand master only) and Vibe Builder's `firewall_status`/`firewall_change` tools | Structured allow/deny rules in the Bob-owned `BOB-INPUT` (from `INPUT`) and `BOB-WORKER-EGRESS` (from `DOCKER-USER`, worker subnet `172.31.250.0/24`) chains; persisted in `/var/lib/bob/firewall/rules.json` and re-applied at control-plane start; every change audited (`firewall.change`) | Free-form shell, other chains, UFW/Docker/Tailscale rules, denies that lock out SSH (22), the public app (80/443) or Tailscale (udp 41641) — refused; laptop firewall (still owner-only) |

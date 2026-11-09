@@ -17,7 +17,7 @@ const { ATLAS_RESEARCH_GUIDANCE, createTools, parseToolCall, compactMessages, re
 const { humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
-const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
+const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
 const PROMPT_VERSION = 'vibe-v22';
 const VIBE_LIMITS = Object.freeze({
@@ -141,17 +141,36 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
 
 // Owner ruling 2026-10-22: Vibe may escalate to Ollama Cloud after private models when the
 // operator enables BOB_VIBE_ALLOW_OLLAMA_CLOUD. Turns carrying attachment evidence stay local.
-function vibeCloudAllowed(env = process.env) {
-  return /^(1|true|yes)$/i.test(String(env.BOB_VIBE_ALLOW_OLLAMA_CLOUD || ''));
+// Owner direction 2026-11-10: the external tier is configuration, not code. BOB_VIBE_EXTERNAL_PROVIDERS
+// lists the approved external providers in escalation order (e.g. "ollama_cloud,anthropic,omniroute");
+// each one receives the same egress receipts, structured-JSON transport and attachment withholding.
+const VIBE_PRIVATE_PROVIDERS = Object.freeze(['gpu_workstation', 'ollama']);
+const VIBE_EXTERNAL_LABELS = Object.freeze({ ollama_cloud: 'Ollama Cloud', anthropic: 'Anthropic Claude', omniroute: 'OmniRoute' });
+const isVibeExternal = provider => EXTERNAL_PROVIDERS.has(provider);
+const externalLabel = provider => VIBE_EXTERNAL_LABELS[provider] || provider;
+const providerTier = provider => (isVibeExternal(provider) ? `owner-approved ${externalLabel(provider)}` : 'local');
+
+function vibeExternalProviders(env = process.env) {
+  const listed = String(env.BOB_VIBE_EXTERNAL_PROVIDERS || '').split(',').map(item => item.trim())
+    .filter(item => isVibeExternal(item) && item !== 'openai');
+  if (/^(1|true|yes)$/i.test(String(env.BOB_VIBE_ALLOW_OLLAMA_CLOUD || '')) && !listed.includes('ollama_cloud')) listed.unshift('ollama_cloud');
+  return [...new Set(listed)];
 }
 
-function applyVibeRouting(modelRequest, { allowCloud = false } = {}) {
-  const chain = allowCloud ? ['gpu_workstation', 'ollama', 'ollama_cloud'] : ['gpu_workstation', 'ollama'];
-  return { ...modelRequest, provider: chain[0], chain, routing_reason: allowCloud ? 'private_first_owner_approved_ollama_cloud' : 'private_repository_local_only' };
+function vibeCloudAllowed(env = process.env) {
+  return vibeExternalProviders(env).length > 0;
+}
+
+function applyVibeRouting(modelRequest, { allowCloud = false, externals = null } = {}) {
+  const external = allowCloud ? (Array.isArray(externals) && externals.length ? externals : ['ollama_cloud']) : [];
+  const chain = [...VIBE_PRIVATE_PROVIDERS, ...external];
+  const reason = !external.length ? 'private_repository_local_only'
+    : external.length === 1 && external[0] === 'ollama_cloud' ? 'private_first_owner_approved_ollama_cloud' : 'private_first_owner_approved_external';
+  return { ...modelRequest, provider: chain[0], chain, routing_reason: reason };
 }
 
 function vibeProviderCandidates(modelRequest, health) {
-  const allowed = new Set(['gpu_workstation', 'ollama', 'ollama_cloud']);
+  const allowed = new Set([...VIBE_PRIVATE_PROVIDERS, ...Object.keys(VIBE_EXTERNAL_LABELS)]);
   const routed = modelRequest.chain ? { ...modelRequest, chain: modelRequest.chain.filter(provider => allowed.has(provider)) } : applyVibeRouting(modelRequest);
   const primary = selectProviders(routed, { health });
   const candidates = [];
@@ -817,7 +836,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   if (deps.humanTest) {
     tools.human_test = async args => (await runHumanTest({
       reason: String(args?.reason || 'requested by Bob'), automatic: false, rerun: args?.rerun === true,
-      external: candidates[active]?.provider === 'ollama_cloud',
+      external: isVibeExternal(candidates[active]?.provider),
     })).result;
     tools.browser_test = args => runBrowserTest(args);
   }
@@ -918,7 +937,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task,
     outputSchema: vibeToolSchema(tools),
   });
-  const modelRequest = applyVibeRouting(baseRequest, { allowCloud: cloudPermitted });
+  const modelRequest = applyVibeRouting(baseRequest, { allowCloud: cloudPermitted, externals: deps.externalProviders ?? vibeExternalProviders() });
   const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
@@ -967,7 +986,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
   const nextCandidate = () => {
-    const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
+    const cloudIndex = candidates.findIndex((entry, index) => index > active && isVibeExternal(entry.provider));
     const next = cloudIndex > active ? cloudIndex : active + 1;
     return candidates[next]?.model && candidates[next].model !== candidates[active].model ? next : -1;
   };
@@ -1390,25 +1409,25 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const numCtx = Number.isFinite(rawContext) && rawContext > 0 ? Math.floor(rawContext) : null;
     const rawOutput = Number(status.max_output_tokens);
     const maxOutput = Math.min(Number.isFinite(rawOutput) && rawOutput > 0 ? rawOutput : 8192, 16384, numCtx ? Math.floor(numCtx / 2) : 8192);
-    const toolChars = candidate.provider === 'ollama_cloud' ? 0 : JSON.stringify(nativeTools).length;
+    const toolChars = isVibeExternal(candidate.provider) ? 0 : JSON.stringify(nativeTools).length;
     const promptBudget = numCtx ? Math.floor((numCtx - maxOutput - 512) * 3.5) - toolChars - 16 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
-    if (candidate.provider === 'ollama_cloud' && historyHasAttachments && cloudStartIndex === null) cloudStartIndex = messages.length;
+    if (isVibeExternal(candidate.provider) && historyHasAttachments && cloudStartIndex === null) cloudStartIndex = messages.length;
     const failures = [...failedVerifications.values()];
     const privateTask = failures.length ? `${task}\n\nOUTSTANDING VERIFICATION FAILURES:\n${failureSummary(failures)}` : task;
     const cloudRequestTask = !failures.length ? cloudTask : historyHasAttachments
       ? `${cloudTask}\n\nOUTSTANDING VERIFICATION TYPES (arguments and earlier output withheld from external models):\n${failures.map(item => cloudSafeCommand(item.command)).join('\n')}`
       : `${cloudTask}\n\nOUTSTANDING VERIFICATION FAILURES:\n${failureSummary(failures)}`;
-    const providerMessages = (candidate.provider !== 'ollama_cloud'
+    const providerMessages = (!isVibeExternal(candidate.provider)
       ? messages.map((entry, index) => index === 1 ? { ...entry, content: privateTask } : entry)
       : cloudStartIndex !== null ? [messages[0], { role: 'user', content: cloudRequestTask }, ...messages.slice(cloudStartIndex)]
         : messages.map((entry, index) => index === 1 ? { ...entry, content: cloudRequestTask } : entry))
-      .map(({ cloudContent, ...entry }) => candidate.provider === 'ollama_cloud' && cloudContent !== undefined ? { ...entry, content: cloudContent } : entry);
+      .map(({ cloudContent, ...entry }) => isVibeExternal(candidate.provider) && cloudContent !== undefined ? { ...entry, content: cloudContent } : entry);
     const availableTask = promptBudget - String(providerMessages[0].content || '').length;
     const reserve = Number.isFinite(availableTask) ? Math.min(4000, Math.max(0, Math.floor(availableTask * 0.1))) : 0;
     const originalTask = providerMessages[1].content;
-    const fittedTask = compactOpening(originalTask, availableTask - reserve, candidate.provider === 'ollama_cloud')
-      ?? compactOpening(originalTask, availableTask, candidate.provider === 'ollama_cloud');
+    const fittedTask = compactOpening(originalTask, availableTask - reserve, isVibeExternal(candidate.provider))
+      ?? compactOpening(originalTask, availableTask, isVibeExternal(candidate.provider));
     if (fittedTask === null) {
       if (active + 1 < candidates.length) {
         await store.post(session.id, {
@@ -1434,11 +1453,11 @@ async function runConversation({ store, session, message, workspacePath, branch,
       if (active + 1 < candidates.length) { active++; turn--; continue; }
       return { reply: 'The model context cannot fit the current request and tool history. The existing branch is preserved; use a larger private model or start a shorter continuation.', error: true, tools };
     }
-    const request = { ...base, idempotency_key: `${base.idempotency_key}${resuming ? `::restart-${message.payload.restart_retries}` : ''}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
-    if (candidate.provider === 'ollama_cloud' && !cloudEgressReceipts.has(candidate.model)) {
+    const request = { ...base, idempotency_key: `${base.idempotency_key}${resuming ? `::restart-${message.payload.restart_retries}` : ''}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(isVibeExternal(candidate.provider) ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
+    if (isVibeExternal(candidate.provider) && !cloudEgressReceipts.has(candidate.model)) {
       await store.post(session.id, {
         role: 'system', kind: 'status',
-        content: `Sending a request to owner-approved Ollama Cloud ${candidate.model}${attachmentCloudConsent && attachmentContext.length ? ' with this message’s approved non-sensitive attachment context' : ' without attachment context'}. Raw attachment files stay private.`,
+        content: `Sending a request to owner-approved ${externalLabel(candidate.provider)} ${candidate.model}${attachmentCloudConsent && attachmentContext.length ? ' with this message’s approved non-sensitive attachment context' : ' without attachment context'}. Raw attachment files stay private.`,
         payload: {
           message_id: message.id, provider: candidate.provider, model: candidate.model,
           stage: 'external_egress', external_egress: true,
@@ -1498,7 +1517,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         await store.post(session.id, {
           role: 'system', kind: 'status',
           content: `${previous.provider}/${previous.model} ${timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`}; switching to ${candidates[active].provider}/${candidates[active].model}.`,
-          payload: { message_id: message.id, reason: timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          payload: { message_id: message.id, reason: timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: isVibeExternal(candidates[active].provider) },
         });
         continue;
       }
@@ -1508,19 +1527,19 @@ async function runConversation({ store, session, message, workspacePath, branch,
       continue;
     }
     unavailable = 0;
-    const protocol = response.data?.tool_protocol || (candidate.provider === 'ollama_cloud' ? 'json' : undefined);
+    const protocol = response.data?.tool_protocol || (isVibeExternal(candidate.provider) ? 'json' : undefined);
     const protocolKey = `${candidate.provider}:${candidate.model}:${protocol}`;
     if (protocol && !reportedProtocols.has(protocolKey)) {
       reportedProtocols.add(protocolKey);
       await store.post(session.id, {
         role: 'system', kind: 'status',
         content: protocol === 'native' ? `Using native function calls on private ${candidate.provider}/${candidate.model}.`
-          : candidate.provider === 'ollama_cloud' ? `Using owner-approved Ollama Cloud ${candidate.model} with structured JSON calls${attachmentCloudConsent && attachmentContext.length ? ' and owner-approved non-sensitive attachment context' : ''}.`
+          : isVibeExternal(candidate.provider) ? `Using owner-approved ${externalLabel(candidate.provider)} ${candidate.model} with structured JSON calls${attachmentCloudConsent && attachmentContext.length ? ' and owner-approved non-sensitive attachment context' : ''}.`
             : `Using structured JSON calls: ${response.data.tool_protocol_reason || 'native calls unavailable'}.`,
         payload: {
           message_id: message.id, provider: candidate.provider, model: candidate.model, tool_protocol: protocol,
-          external_egress: candidate.provider === 'ollama_cloud',
-          ...(candidate.provider === 'ollama_cloud' ? {
+          external_egress: isVibeExternal(candidate.provider),
+          ...(isVibeExternal(candidate.provider) ? {
             attachment_context_ids: attachmentCloudConsent ? attachmentContext.map(item => item.id) : [],
             raw_attachments_sent: false,
             earlier_attachment_history_withheld: historyHasAttachments,
@@ -1549,8 +1568,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
         unparseable = 0;
         await store.post(session.id, {
           role: 'system', kind: 'status',
-          content: `${previous.model} answered in prose without acting; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
-          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'prose_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          content: `${previous.model} answered in prose without acting; continuing with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model}.`,
+          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'prose_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: isVibeExternal(candidates[active].provider) },
         });
         continue;
       }
@@ -1573,8 +1592,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
           active = next;
           await store.post(session.id, {
             role: 'system', kind: 'status',
-            content: `${previous.model} replied without doing any work; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
-            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'reply_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+            content: `${previous.model} replied without doing any work; continuing with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'reply_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: isVibeExternal(candidates[active].provider) },
           });
         }
         continue;
@@ -1604,8 +1623,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
           active = next;
           await store.post(session.id, {
             role: 'system', kind: 'status',
-            content: `${previous.model} tried to finish with failed edits outstanding; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
-            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'failed_edits_outstanding', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+            content: `${previous.model} tried to finish with failed edits outstanding; continuing with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'failed_edits_outstanding', previous_provider: previous.provider, previous_model: previous.model, external_egress: isVibeExternal(candidates[active].provider) },
           });
         }
         continue;
@@ -1735,8 +1754,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
           : null);
         await store.post(session.id, {
           role: 'system', kind: 'status',
-          content: `Repeated tool call blocked; recovering once with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model || 'configured model'}. Existing work and evidence are retained.`,
-          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'repeated_tool_call', previous_provider: candidate.provider, previous_model: candidate.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          content: `Repeated tool call blocked; recovering once with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model || 'configured model'}. Existing work and evidence are retained.`,
+          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'repeated_tool_call', previous_provider: candidate.provider, previous_model: candidate.model, external_egress: isVibeExternal(candidates[active].provider) },
         });
         continue;
       }
@@ -1972,4 +1991,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, vibeExternalProviders, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
