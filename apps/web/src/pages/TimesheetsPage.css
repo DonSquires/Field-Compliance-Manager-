@@ -104,6 +104,9 @@
 .timesheet-ref { display:flex; flex-direction:column; gap:2px; min-width:200px; }
 .timesheet-ref strong { color:#e7eef5; font-size:13px; }
 .timesheet-ref small { color:#8fa3b8; font-size:11px; }
+.timesheets-table td.timesheet-provenance { display:flex; flex-direction:column; gap:3px; min-width:190px; white-space:normal; }
+.timesheet-provenance strong { color:#e7eef5; font-size:12px; }
+.timesheet-provenance small { color:#8fa3b8; font-size:11px; }
 .commercial-table td { vertical-align:top; }
 .readiness-fix { display:flex; align-items:center; gap:4px; margin-top:6px; padding:0; border:0; background:none; color:#7dd3fc; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap; }
 .readiness-fix:hover, .readiness-fix:focus-visible { color:#bae6fd; text-decoration:underline; }
@@ -114,3 +117,14 @@
 .timesheet-dialog .pay-code-select { flex:1; min-width:180px; }
 .timesheet-dialog .pay-code-select > label { min-width:0; flex:none; }
 .timesheet-dialog .pay-code-new input { min-width:0; }
+
+@media print {
+  @page { size:A4; margin:16mm; }
+  html, body, #root { height:auto !important; overflow:visible !important; background:#fff !important; }
+  .timesheets-page { display:block !important; height:auto !important; overflow:visible !important; color:#111 !important; background:#fff !important; }
+  .timesheets-page > * { display:none !important; }
+  .timesheets-page > .timesheet-print-backdrop { display:block !important; position:static !important; padding:0 !important; background:#fff !important; }
+  .timesheet-print-dialog { display:block !important; width:auto !important; max-height:none !important; overflow:visible !important; border:0 !important; border-radius:0 !important; box-shadow:none !important; color:#111 !important; background:#fff !important; }
+  .timesheet-print-dialog, .timesheet-print-dialog * { color:#111 !important; background:transparent !important; border-color:#bbb !important; }
+  .timesheet-print-dialog .no-print { display:none !important; }
+}

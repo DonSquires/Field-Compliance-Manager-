@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Filter, Plus, RefreshCw, Search, ShieldCheck, UserCheck, Users, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Filter, Plus, RefreshCw, Save, Search, ShieldCheck, UserCheck, Users, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, type RosterHorizon } from '../lib/rosterCalendar';
@@ -89,7 +89,9 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
   if (person.credentialRisk === 'expiring') return `Credential expires ${person.credentialExpiry ? dayWords(person.credentialExpiry) : 'soon'}`;
   return 'Recorded credentials verified';
 };
-interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
+interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; updated_at: string; admin_start?: string | null; admin_start_reason?: string | null; admin_start_by?: string | null; admin_finish?: string | null; admin_finish_reason?: string | null; admin_finish_by?: string | null; }
+interface AdminAttendanceTimes { shift_id: string; admin_start: string | null; admin_start_reason: string | null; admin_start_by: string | null; admin_finish: string | null; admin_finish_reason: string | null; admin_finish_by: string | null; }
+interface AdminAttendanceDialog { shift: Shift; eventType: 'admin_start' | 'admin_finish'; recordedAt: string; reason: string; clientRequestId: string; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; patrol_route?: { primary_staff_id: string | null } | { primary_staff_id: string | null }[] | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
 interface RosterContact { contact_name: string | null; contact_phone: string | null; version: string; }
 interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; planned_break_minutes: number; break_unpaid: boolean; contact?: RosterContact | RosterContact[] | null; external_refs?: ImportedLabourRefs | null; }
@@ -183,6 +185,7 @@ const RosterOperationsPage: React.FC = () => {
   const [labourCost, setLabourCost] = useState<LabourCost[]>([]);
   const [attendanceExceptions, setAttendanceExceptions] = useState<AttendanceException[]>([]);
   const [attendanceAction, setAttendanceAction] = useState<{ item: AttendanceException; notes: string } | null>(null);
+  const [adminAttendanceDialog, setAdminAttendanceDialog] = useState<AdminAttendanceDialog | null>(null);
   const [availabilityDialog, setAvailabilityDialog] = useState<AvailabilityDialog | null>(null);
   const [templateDialog, setTemplateDialog] = useState<TemplatePreview | 'loading' | null>(null);
   const [publishDialog, setPublishDialog] = useState<BatchPublishPreview | 'loading' | null>(null);
@@ -241,6 +244,20 @@ const RosterOperationsPage: React.FC = () => {
   }, [showCreate, form.officerId, form.start, form.end, staff]);
   const holidays = useMemo(() => nzRosterHolidays(weekStart, weekEnd, calendarRegion), [calendarRegion, weekEnd, weekStart]);
 
+  const attachAdminAttendance = useCallback(async (organizationId: string, rosterShifts: Shift[]): Promise<Shift[]> => {
+    if (!rosterShifts.length) return rosterShifts;
+    const { data, error: attendanceError } = await supabase.rpc('get_roster_admin_attendance', {
+      p_organization_id: organizationId,
+      p_shift_ids: rosterShifts.map((shift) => shift.id),
+    });
+    if (attendanceError) {
+      setError(`Admin-recorded shift times are unavailable: ${attendanceError.message}`);
+      return rosterShifts;
+    }
+    const byShift = new Map(((data as AdminAttendanceTimes[] | null) ?? []).map((row) => [row.shift_id, row]));
+    return rosterShifts.map((shift) => ({ ...shift, ...(byShift.get(shift.id) ?? {}) }));
+  }, []);
+
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
     setRosterDataReady(false);
@@ -272,7 +289,7 @@ const RosterOperationsPage: React.FC = () => {
       canLoadBranchStaff
         ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })
         : Promise.resolve({ data: [], error: null }),
-      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason,updated_at').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs,patrol_route:patrol_routes!roster_work_units_patrol_route_id_fkey(primary_staff_id)').eq('organization_id', org).eq('active', true).order('name'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
@@ -296,25 +313,59 @@ const RosterOperationsPage: React.FC = () => {
       else if (user.credential_expiry && new Date(user.credential_expiry).getTime() - now < 30 * 86_400_000) credentialRisk = 'expiring';
       return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk, credentialExpiry: user.credential_expiry ?? null };
     }));
-    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setRosterDataReady(![rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes].some((response) => response.error) && canLoadBranchStaff); setLoading(false);
-  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
+    const shiftsWithAdminAttendance = await attachAdminAttendance(org, (shiftRes.data as Shift[]) ?? []);
+    if (version !== loadVersion.current) return;
+    setShifts(shiftsWithAdminAttendance); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setRosterDataReady(![rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes].some((response) => response.error) && canLoadBranchStaff); setLoading(false);
+  }, [attachAdminAttendance, operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
   useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [load]);
   const syncOfficerResponses = useCallback(async () => {
     const version = loadVersion.current;
     const org = operatingOrganizationId ?? profile?.organizationId;
     if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
-      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason,updated_at').eq('organization_id', org).or(scope.userId ? `officer_user_id.eq.${scope.userId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs,planned_break_minutes,break_unpaid,contact:roster_slot_contacts(contact_name,contact_phone,version)').eq('organization_id', org).or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null').gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (version !== loadVersion.current) return;
-    if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
+    if (!shiftResponse.error) setShifts(await attachAdminAttendance(org, (shiftResponse.data as Shift[]) ?? []));
     if (!slotResponse.error) setSlots((slotResponse.data as RosterSlot[]) ?? []);
-  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
+  }, [attachAdminAttendance, operatingOrganizationId, profile?.organizationId, weekEnd, weekStart, scope.staffId, scope.userId]);
   useEffect(() => {
     const interval = window.setInterval(() => void syncOfficerResponses(), 15_000);
     return () => window.clearInterval(interval);
   }, [syncOfficerResponses]);
+
+  const saveAdminAttendance = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!adminAttendanceDialog || saving) return;
+    const recordedAt = new Date(adminAttendanceDialog.recordedAt);
+    if (Number.isNaN(recordedAt.getTime())) { setError('Enter a valid administrative time.'); return; }
+    const recordedStart = adminAttendanceDialog.shift.admin_start ?? adminAttendanceDialog.shift.actual_start;
+    if (adminAttendanceDialog.eventType === 'admin_finish' && recordedStart && recordedAt <= new Date(recordedStart)) {
+      setError('The admin-recorded finish must be after the recorded start.'); return;
+    }
+    setSaving(true); setError(null);
+    try {
+      const { data, error: recordError } = await supabase.rpc('record_admin_shift_attendance', {
+        p_client_request_id: adminAttendanceDialog.clientRequestId,
+        p_shift_id: adminAttendanceDialog.shift.id,
+        p_expected_updated_at: adminAttendanceDialog.shift.updated_at,
+        p_event_type: adminAttendanceDialog.eventType,
+        p_recorded_at: recordedAt.toISOString(),
+        p_reason: adminAttendanceDialog.reason.trim(),
+      });
+      if (recordError) throw recordError;
+      const receipt = data as { shift_id?: string; event_type?: string; source?: string } | null;
+      if (receipt?.shift_id !== adminAttendanceDialog.shift.id || receipt.event_type !== adminAttendanceDialog.eventType || receipt.source !== 'admin_recorded_not_officer_attendance') {
+        throw new Error('Admin attendance receipt was not confirmed. Reload before trying again.');
+      }
+      setNotice(`Admin-recorded ${adminAttendanceDialog.eventType === 'admin_start' ? 'start' : 'finish'} saved separately. Officer attendance and payable hours were not changed.`);
+      setAdminAttendanceDialog(null);
+      void load();
+    } catch (recordFailure) {
+      setError(recordFailure instanceof Error ? recordFailure.message : 'The admin-recorded time could not be saved.');
+    } finally { setSaving(false); }
+  };
 
   const visibleStaff = staff.filter((person) => (!scope.staffId || person.staffId === scope.staffId) && (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
   const scheduleStaff = visibleStaff.filter((person) => !selectedStaffId || person.staffId === selectedStaffId);
@@ -324,6 +375,13 @@ const RosterOperationsPage: React.FC = () => {
     && staff.find((person) => person.staffId === slot.staff_id)?.id === assignment.officer_id
     && isoDate(new Date(slot.scheduled_start)) === assignment.specific_date));
   const selectedShift = shifts.find((shift) => shift.id === selectedShiftId) ?? null;
+  const canRecordAdminStart = Boolean(['grand_master', 'master', 'admin', 'admin_officer'].includes(profile?.role ?? '')
+    && selectedShift && !selectedShift.actual_start && !selectedShift.admin_start && !selectedShift.actual_end
+    && !selectedShift.admin_finish && !['completed', 'cancelled', 'declined', 'missed'].includes(selectedShift.status));
+  const canRecordAdminFinish = Boolean(['grand_master', 'master', 'admin', 'admin_officer'].includes(profile?.role ?? '')
+    && selectedShift && !selectedShift.actual_end && !selectedShift.admin_finish
+    && (selectedShift.actual_start || selectedShift.admin_start)
+    && !['completed', 'cancelled', 'declined', 'missed'].includes(selectedShift.status));
   const selectedSlot = slots.find((slot) => slot.id === selectedSlotId) ?? null;
   const selectedSlotUnit = selectedSlot ? workUnits.find((unit) => unit.id === selectedSlot.work_unit_id) ?? null : null;
   const selectedSlotStaff = selectedSlot ? staff.find((person) => person.staffId === selectedSlot.staff_id) ?? null : null;
@@ -336,7 +394,7 @@ const RosterOperationsPage: React.FC = () => {
   useEffect(() => {
     setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
     setSelectedSourceAssignment(null);
-    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setContactDialog(null); setAttendanceAction(null);
+    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setContactDialog(null); setAttendanceAction(null); setAdminAttendanceDialog(null);
     setNotice(null);
   }, [operatingOrganizationId]);
   const periodLabel = `${weekStart.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} – ${addDays(weekEnd, -1).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -751,6 +809,7 @@ const RosterOperationsPage: React.FC = () => {
     {publishDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void batchPublishPeriod(); }} role="dialog" aria-modal="true" aria-labelledby="publish-period-title"><header><div><span>Publish</span><h2 id="publish-period-title">Publish {plural(draftCount, 'draft shift')}?</h2></div><button type="button" onClick={() => setPublishDialog(null)}><X /></button></header>{publishDialog === 'loading' ? <p className="roster-dialog-note">Checking the drafts in {periodLabel}…</p> : <ul className="roster-dialog-facts"><li><strong>{publishDialog.draft_count}</strong><span>draft shift{publishDialog.draft_count === 1 ? '' : 's'} in {periodLabel} will be published. Officers see them on their schedule and can accept or decline.</span></li>{publishDialog.leave_conflict_count > 0 && <li className="is-warning"><strong>{publishDialog.leave_conflict_count}</strong><span>clash with approved leave and will be skipped. Reassign them first.</span></li>}{publishDialog.unassigned_count > 0 && <li className="is-warning"><strong>{publishDialog.unassigned_count}</strong><span>have nobody assigned yet. They are published as open shifts for you to fill – assign someone or offer overtime.</span></li>}<li><strong>{publishDialog.field_shift_count}</strong><span>{publishDialog.field_shift_count === 1 ? 'is' : 'are'} field work (patrol run or static post) and get a shift record the officer can start. The rest are office or internal work.</span></li></ul>}<footer><button type="button" onClick={() => setPublishDialog(null)}>Back</button><button type="submit" disabled={saving || publishDialog === 'loading' || publishDialog.draft_count === 0}>Publish now</button></footer></form></div>}
     {templateDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void generateFromTemplates(); }} role="dialog" aria-modal="true" aria-labelledby="template-fill-title"><header><div><span>Templates</span><h2 id="template-fill-title">Fill {periodLabel} from templates?</h2></div><button type="button" onClick={() => setTemplateDialog(null)}><X /></button></header>{templateDialog === 'loading' ? <p className="roster-dialog-note">Checking your shift templates…</p> : <ul className="roster-dialog-facts"><li><strong>{templateDialog.new_slots}</strong><span>new draft shift{templateDialog.new_slots === 1 ? '' : 's'} will be created from {plural(templateDialog.templates_applied, 'active template')}. Nobody is assigned yet – assign staff, then publish.</span></li><li><strong>{templateDialog.existing_slots}</strong><span>already exist for these times and will not be duplicated.</span></li></ul>}<footer><button type="button" onClick={() => setTemplateDialog(null)}>Back</button><button type="submit" disabled={saving || templateDialog === 'loading' || templateDialog.new_slots === 0}>Create drafts</button></footer></form></div>}
     {attendanceAction && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={acknowledgeAttendance} role="dialog" aria-modal="true" aria-labelledby="attendance-action-title"><header><div><span>Attendance control</span><h2 id="attendance-action-title">Acknowledge exception</h2></div><button type="button" onClick={() => setAttendanceAction(null)}><X /></button></header><p>Record the supervisor decision for this {attendanceAction.item.exception_type.replaceAll('_', ' ')} exception.</p><label><span>Action notes</span><textarea required rows={4} value={attendanceAction.notes} onChange={(event) => setAttendanceAction({ ...attendanceAction, notes: event.target.value })} /></label><footer><button type="button" onClick={() => setAttendanceAction(null)}>Cancel</button><button type="submit" disabled={saving || !attendanceAction.notes.trim()}>Acknowledge exception</button></footer></form></div>}
+    {adminAttendanceDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={saveAdminAttendance} role="dialog" aria-modal="true" aria-labelledby="admin-attendance-title"><header><div><span>Administrative time report</span><h2 id="admin-attendance-title">Record admin {adminAttendanceDialog.eventType === 'admin_start' ? 'start' : 'finish'}</h2></div><button type="button" onClick={() => setAdminAttendanceDialog(null)} aria-label="Close"><X /></button></header><p className="roster-dialog-note">This records a time reported to an administrator. It does not create officer attendance, GPS, site arrival/departure, or payable hours.</p><label><span>Admin-recorded time</span><input type="datetime-local" required value={adminAttendanceDialog.recordedAt} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, recordedAt: event.target.value, clientRequestId: crypto.randomUUID() })} /></label><label><span>Reason (required, kept in the audit trail)</span><textarea required minLength={5} maxLength={1000} rows={4} value={adminAttendanceDialog.reason} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, reason: event.target.value, clientRequestId: crypto.randomUUID() })} /></label>{error && <p className="roster-dialog-error" role="alert">{error}</p>}<footer><button type="button" onClick={() => setAdminAttendanceDialog(null)} disabled={saving}>Cancel</button><button type="submit" disabled={saving || adminAttendanceDialog.reason.trim().length < 5}><Save size={15} />{saving ? 'Saving…' : 'Save admin time'}</button></footer></form></div>}
     {error && <div className="roster-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}{notice && <div className="roster-message is-success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
     {showCreate && staff.some((person) => person.workReady && person.credentialRisk !== 'clear') && <div className="roster-message is-warning" role="status"><AlertTriangle size={17} /><span>Credential-risk staff remain visible for planning context, but only credential-clear officers can be submitted for a new assignment.</span></div>}
     {!loading && rosterDataReady && workUnits.length === 0 && <section className="roster-context-banner roster-setup-banner" role="status"><div><span>Before you roster</span><strong>Nothing to roster against yet</strong><p>Every shift covers a work unit. Build a patrol run from a client agreement in Client Portfolios, or set up a static post or office work unit.{staff.length === 0 ? ' Add rosterable staff in People as well.' : ` ${plural(staff.length, 'staff member')} will be ready to schedule once a work unit exists.`}</p></div><div><button type="button" onClick={() => navigate('/admin/crm')}>Client Portfolios</button><button type="button" onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{staff.length === 0 && <button type="button" onClick={() => navigate('/admin/people-hr')}>People</button>}</div></section>}
@@ -851,7 +910,26 @@ const RosterOperationsPage: React.FC = () => {
       <dl><div><dt>Work date</dt><dd>{selectedSourceAssignment.specific_date}</dd></div><div><dt>Source entries</dt><dd>{selectedSourceAssignment.external_refs?.source_event_count ?? 'Not recorded'}</dd></div><div><dt>Beats</dt><dd>{selectedSourceAssignment.external_refs?.beat_names?.join(', ') || 'Not recorded'}</dd></div></dl>
       <p>The recorded time range is source evidence, not payable hours or verified attendance. Labour is posted separately from summed job hours through the governed roster import.</p>
     </aside>}
-    {selectedShift && <aside className="roster-inspector"><header><div><span>Assignment</span><h2>{selectedOfficer?.name ?? 'Officer'}</h2></div><button onClick={() => setSelectedShiftId(null)} aria-label="Close"><X /></button></header><dl><div><dt>Service</dt><dd>{plainWords(selectedShift.service_type)}</dd></div><div><dt>Status</dt><dd>{shiftStatusLabel(selectedShift.status)}</dd></div><div><dt>Rostered</dt><dd>{new Date(selectedShift.scheduled_start).toLocaleString('en-NZ')} – {new Date(selectedShift.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</dd></div>{selectedShift.actual_start && <div><dt>Worked</dt><dd>{workedWords(selectedShift)}</dd></div>}{selectedShift.status === 'completed' && <div><dt>How it ended</dt><dd>{endedWords(selectedShift.ended_reason)}</dd></div>}<div><dt>Stops</dt><dd>{selectedShift.total_stops === 0 ? 'None on this shift' : `${selectedShift.completed_stops ?? 0} of ${selectedShift.total_stops} done`}</dd></div><div><dt>Health</dt><dd>{plainWords(selectedShift.shift_health, 'Not calculated yet')}</dd></div></dl>{selectedShift.notes && <p>{selectedShift.notes}</p>}</aside>}
+    {selectedShift && <aside className="roster-inspector">
+      <header><div><span>Assignment</span><h2>{selectedOfficer?.name ?? 'Officer'}</h2></div><button type="button" onClick={() => setSelectedShiftId(null)} aria-label="Close"><X /></button></header>
+      <dl>
+        <div><dt>Service</dt><dd>{plainWords(selectedShift.service_type)}</dd></div>
+        <div><dt>Status</dt><dd>{shiftStatusLabel(selectedShift.status)}</dd></div>
+        <div><dt>Rostered</dt><dd>{new Date(selectedShift.scheduled_start).toLocaleString('en-NZ')} – {new Date(selectedShift.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</dd></div>
+        {selectedShift.actual_start && <div><dt>Officer attendance</dt><dd>{workedWords(selectedShift)}</dd></div>}
+        {selectedShift.admin_start && <div><dt>Admin-recorded start</dt><dd>{new Date(selectedShift.admin_start).toLocaleString('en-NZ')} · {selectedShift.admin_start_by ?? 'Administrator'}{selectedShift.admin_start_reason && <small>{selectedShift.admin_start_reason}</small>}</dd></div>}
+        {selectedShift.admin_finish && <div><dt>Admin-recorded finish</dt><dd>{new Date(selectedShift.admin_finish).toLocaleString('en-NZ')} · {selectedShift.admin_finish_by ?? 'Administrator'}{selectedShift.admin_finish_reason && <small>{selectedShift.admin_finish_reason}</small>}</dd></div>}
+        {selectedShift.status === 'completed' && <div><dt>How it ended</dt><dd>{endedWords(selectedShift.ended_reason)}</dd></div>}
+        <div><dt>Stops</dt><dd>{selectedShift.total_stops === 0 ? 'None on this shift' : `${selectedShift.completed_stops ?? 0} of ${selectedShift.total_stops} done`}</dd></div>
+        <div><dt>Health</dt><dd>{plainWords(selectedShift.shift_health, 'Not calculated yet')}</dd></div>
+      </dl>
+      {(selectedShift.admin_start || selectedShift.admin_finish) && <p className="roster-dialog-note">Administrative time reports are not officer attendance, GPS, site arrival/departure, or payable-hour evidence.</p>}
+      {selectedShift.notes && <p>{selectedShift.notes}</p>}
+      <footer>
+        {canRecordAdminStart && <button type="button" onClick={() => setAdminAttendanceDialog({ shift: selectedShift, eventType: 'admin_start', recordedAt: localInput(new Date()), reason: '', clientRequestId: crypto.randomUUID() })}>Record admin start</button>}
+        {canRecordAdminFinish && <button type="button" onClick={() => setAdminAttendanceDialog({ shift: selectedShift, eventType: 'admin_finish', recordedAt: localInput(new Date()), reason: '', clientRequestId: crypto.randomUUID() })}>Record admin finish</button>}
+      </footer>
+    </aside>}
     {selectedSlot && <aside className="roster-inspector roster-slot-inspector">
       <header><div><span>Roster slot</span><h2>{selectedSlotUnit?.name ?? 'Typed assignment'}</h2></div><button onClick={() => setSelectedSlotId(null)} aria-label="Close"><X /></button></header>
       <dl>
