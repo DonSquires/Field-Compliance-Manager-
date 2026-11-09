@@ -80,6 +80,56 @@ test('roster directory never invents licences and timesheet read failures stay u
   await expect(page.getByRole('button', { name: '— timesheet approvals' })).toBeVisible();
 });
 
+test('roster admin start and finish are stored as separate reported times, not officer attendance', async ({ page }) => {
+        const shiftId = '12121212-1212-4212-8212-121212121212';
+        const events: Array<Record<string, unknown>> = [];
+        const requests: Array<Record<string, unknown>> = [];
+        await page.route('**/rest/v1/shifts*', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+                { id: shiftId, officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'patrol', scheduled_start: '2026-08-30T20:00:00.000Z', scheduled_end: '2026-08-31T04:00:00.000Z', status: 'accepted', shift_health: null, total_stops: 0, notes: null, actual_start: null, actual_end: null, updated_at: '2026-08-30T19:00:00.000Z' },
+        ]) }));
+        await page.route('**/rest/v1/rpc/get_roster_admin_attendance', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(events) }));
+        await page.route('**/rest/v1/rpc/record_admin_shift_attendance', async (route) => {
+                const request = route.request().postDataJSON();
+                requests.push(request);
+                const event = {
+                        shift_id: shiftId,
+                        admin_start: request.p_event_type === 'admin_start' ? request.p_recorded_at : null,
+                        admin_start_reason: request.p_event_type === 'admin_start' ? request.p_reason : null,
+                        admin_start_by: request.p_event_type === 'admin_start' ? 'Morgan Reed' : null,
+                        admin_finish: request.p_event_type === 'admin_finish' ? request.p_recorded_at : null,
+                        admin_finish_reason: request.p_event_type === 'admin_finish' ? request.p_reason : null,
+                        admin_finish_by: request.p_event_type === 'admin_finish' ? 'Morgan Reed' : null,
+                };
+                const previous = events[0] ?? { shift_id: shiftId };
+                events.splice(0, events.length, { ...previous, ...Object.fromEntries(Object.entries(event).filter(([, value]) => value !== null)) });
+                await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ event_id: `admin-event-${requests.length}`, shift_id: shiftId, event_type: request.p_event_type, recorded_at: request.p_recorded_at, source: 'admin_recorded_not_officer_attendance' }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-board .roster-shift').filter({ hasText: 'patrol' }).first().click();
+        const inspector = page.locator('.roster-inspector').filter({ hasText: 'Assignment' });
+        await inspector.getByRole('button', { name: 'Record admin start' }).click();
+        const startDialog = page.getByRole('dialog', { name: 'Record admin start' });
+        await expect(startDialog).toContainText('does not create officer attendance');
+        await startDialog.getByLabel('Admin-recorded time').fill('2026-08-31T08:00');
+        await startDialog.getByLabel('Reason (required, kept in the audit trail)').fill('Officer reported starting after the device lost power.');
+        await startDialog.getByRole('button', { name: 'Save admin time' }).click();
+        await expect.poll(() => requests.length).toBe(1);
+        expect(requests[0]).toMatchObject({ p_event_type: 'admin_start', p_reason: 'Officer reported starting after the device lost power.' });
+        expect(requests[0]).not.toHaveProperty('p_actual_start');
+        await expect(inspector.getByText('Admin-recorded start')).toBeVisible();
+        await expect(inspector.getByRole('button', { name: 'Record admin finish' })).toBeVisible();
+        await inspector.getByRole('button', { name: 'Record admin finish' }).click();
+        const finishDialog = page.getByRole('dialog', { name: 'Record admin finish' });
+        await finishDialog.getByLabel('Admin-recorded time').fill('2026-08-31T09:00');
+        await finishDialog.getByLabel('Reason (required, kept in the audit trail)').fill('Officer reported finishing after the device was restored.');
+        await finishDialog.getByRole('button', { name: 'Save admin time' }).click();
+        await expect.poll(() => requests.length).toBe(2);
+        expect(requests[1]).toMatchObject({ p_event_type: 'admin_finish', p_reason: 'Officer reported finishing after the device was restored.' });
+        expect(requests[1]).not.toHaveProperty('p_actual_end');
+        await expect(inspector.getByText('Admin-recorded finish')).toBeVisible();
+        await expect(inspector).toContainText('not officer attendance, GPS, site arrival/departure, or payable-hour evidence');
+});
+
 test('enterprise roster week board is operational and visually stable', async ({ page }) => {
  test.setTimeout(90_000);
  const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');

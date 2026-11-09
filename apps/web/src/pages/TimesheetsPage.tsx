@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, Clock3, DollarSign, Edit3, ExternalLink, Filter, RefreshCw, Save, Search, ShieldCheck, X, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, Clock3, DollarSign, Download, Edit3, ExternalLink, Filter, Printer, RefreshCw, Save, Search, ShieldCheck, X, XCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -23,6 +23,7 @@ import './TimesheetsPage.css';
 type TimesheetTab = 'timesheets' | 'commercial' | 'attendance';
 type TimesheetDecision = 'branch_checked' | 'approved' | 'rejected';
 const TABS: TimesheetTab[] = ['timesheets', 'commercial', 'attendance'];
+interface PayrollExportForm { from: string; to: string; notes: string }
 
 interface TimesheetRow {
   id: string;
@@ -43,8 +44,22 @@ interface TimesheetRow {
   review_notes?: string | null;
   submitted_at: string | null;
   payroll_export_batch_id?: string | null;
+  payroll_snapshot?: Record<string, unknown> | null;
   revision?: number;
   shift?: { service_type: string | null } | null;
+}
+
+interface TimesheetProvenance {
+  timesheet_id: string;
+  organization_id: string;
+  organization_name: string;
+  operating_organization_id: string | null;
+  operating_organization_name: string | null;
+  shift_id: string | null;
+  service_type: string | null;
+  work_unit_name: string | null;
+  location_name: string | null;
+  zone_name: string | null;
 }
 
 interface CommercialReadinessRow {
@@ -177,6 +192,8 @@ const TimesheetsPage: React.FC = () => {
   const workingInBranch = !!operatingOrganizationId && operatingOrganizationId !== homeOrganizationId;
   const isAdmin = ['grand_master', 'master', 'admin', 'admin_officer'].includes(profile?.role ?? '');
   const branchName = operatingOrganizations.find((o) => o.organizationId === branchId)?.organizationName;
+  const corporatePayrollReviewer = Boolean(!workingInBranch && profile?.organizationId
+    && profile.employerOrganizationId === profile.organizationId && isAdmin);
 
   const requestedTab = params.get('tab');
   const [tab, setTab] = useState<TimesheetTab>(TABS.includes(requestedTab as TimesheetTab) ? requestedTab as TimesheetTab : 'timesheets');
@@ -192,6 +209,8 @@ const TimesheetsPage: React.FC = () => {
   const setRangeEnd = (to: string) => setScope({ ...scope, to });
 
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
+  const [timesheetProvenance, setTimesheetProvenance] = useState<Record<string, TimesheetProvenance[]>>({});
+  const [provenanceError, setProvenanceError] = useState(false);
   const [timesheetView, setTimesheetView] = useState<'shifts' | 'periods'>('shifts');
   const [shiftHoursRows, setShiftHoursRows] = useState<ShiftHoursRow[]>([]);
   const [shiftHoursStaff, setShiftHoursStaff] = useState<ShiftHoursStaff[]>([]);
@@ -207,11 +226,16 @@ const TimesheetsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [saving, setSaving] = useState(false);
   const [editingTimesheet, setEditingTimesheet] = useState<TimesheetRow | null>(null);
-  const [rejecting, setRejecting] = useState<{ row: TimesheetRow; notes: string } | null>(null);
+  const [reviewing, setReviewing] = useState<{ row: TimesheetRow; decision: 'approved' | 'rejected'; notes: string } | null>(null);
+  const [reopening, setReopening] = useState<{ row: TimesheetRow; reason: string } | null>(null);
+  const [printingTimesheet, setPrintingTimesheet] = useState<TimesheetRow | null>(null);
   const [editForm, setEditForm] = useState({ actualHours: '', overtimeHours: '', payCode: '', hourlyRate: '', reason: '' });
   const [effectivePay, setEffectivePay] = useState<EffectivePay | null>(null);
   const [payCodes, setPayCodes] = useState<PayCode[]>([]);
   const [payRequestId, setPayRequestId] = useState(() => crypto.randomUUID());
+  const [payrollExport, setPayrollExport] = useState<PayrollExportForm | null>(null);
+  const [lastPayrollBatchId, setLastPayrollBatchId] = useState<string | null>(null);
+  const payrollExportAttempt = useRef<{ key: string; id: string } | null>(null);
 
   const [commercialRows, setCommercialRows] = useState<CommercialReadinessRow[]>([]);
   const [commercialFilter, setCommercialFilter] = useState<'exceptions' | 'all' | ReadinessDimension>('exceptions');
@@ -268,7 +292,7 @@ const TimesheetsPage: React.FC = () => {
         rows = (data as TimesheetRow[] | null) ?? [];
       } else {
         const { data, error: dbError } = await supabase.from('timesheets')
-          .select('id,organization_id,staff_id,shift_id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,work_derived_hours,work_summary,status,pay_code_override,hourly_rate_override,review_notes,submitted_at,payroll_export_batch_id,revision,shift:shifts(service_type)')
+          .select('id,organization_id,staff_id,shift_id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,work_derived_hours,work_summary,status,pay_code_override,hourly_rate_override,review_notes,submitted_at,payroll_export_batch_id,payroll_snapshot,revision,shift:shifts(service_type)')
           .eq('organization_id', homeOrganizationId)
           .or(scope.staffId ? `staff_id.eq.${scope.staffId}` : 'id.not.is.null')
           .lte('period_start', rangeEnd)
@@ -278,6 +302,22 @@ const TimesheetsPage: React.FC = () => {
         rows = (data as unknown as TimesheetRow[] | null) ?? [];
       }
       if (version !== generation.current) return;
+      if (rows.length) {
+        const { data: provenanceData, error: provenanceLoadError } = await supabase.rpc('get_timesheet_provenance', {
+          p_timesheet_ids: rows.map((row) => row.id),
+          p_operating_organization_id: branchId,
+        });
+        if (version !== generation.current) return;
+        setProvenanceError(Boolean(provenanceLoadError));
+        const grouped: Record<string, TimesheetProvenance[]> = {};
+        for (const source of (provenanceData as TimesheetProvenance[] | null) ?? []) {
+          (grouped[source.timesheet_id] ??= []).push(source);
+        }
+        setTimesheetProvenance(grouped);
+      } else {
+        setProvenanceError(false);
+        setTimesheetProvenance({});
+      }
       setTimesheets(rows);
       await resolveNames(rows.map((r) => r.staff_id), []);
     } catch (err) {
@@ -402,13 +442,91 @@ const TimesheetsPage: React.FC = () => {
         : await supabase.rpc('review_timesheet', { p_timesheet_id: item.id, p_expected_status: item.status, p_decision: decision, p_review_notes: notes ?? null });
       if (result.error) throw result.error;
       setNotice(`${decisionLabel(decision)} recorded for ${names[item.staff_id] ?? 'this timesheet'}.`);
-      setRejecting(null);
+      setReviewing(null);
       await loadTimesheets();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The review could not be saved.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const reopenApprovedTimesheet = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reopening || !corporatePayrollReviewer || reopening.reason.trim().length < 5 || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { data, error: reopenError } = await supabase.rpc('reopen_approved_timesheet', {
+        p_timesheet_id: reopening.row.id,
+        p_expected_revision: reopening.row.revision ?? 1,
+        p_reason: reopening.reason.trim(),
+      });
+      if (reopenError) throw reopenError;
+      const receipt = (Array.isArray(data) ? data[0] : data) as TimesheetRow | null;
+      if (!receipt || receipt.id !== reopening.row.id || receipt.status !== 'submitted') {
+        throw new Error('Reopen receipt was not confirmed. Reload before trying again.');
+      }
+      setNotice(`Timesheet for ${names[reopening.row.staff_id] ?? 'this person'} returned to submitted review.`);
+      setReopening(null);
+      await loadTimesheets();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The approved timesheet could not be reopened.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const downloadPayrollBatch = async (batchId: string): Promise<boolean> => {
+    const { data, error: downloadError } = await supabase.rpc('get_timesheet_payroll_export', { p_batch_id: batchId });
+    if (downloadError || !Array.isArray(data)) {
+      setError(`Payroll batch ${batchId} was saved, but its download could not be confirmed. Retry downloading this batch; do not create another.`);
+      return false;
+    }
+    const csvCell = (value: unknown) => {
+      const text = String(value ?? '');
+      return `"${(/^[=+\-@\t\r]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`;
+    };
+    const header = ['timesheet_id', 'staff_id', 'period_start', 'period_end', 'pay_code', 'hours', 'overtime_hours', 'hourly_rate', 'gross_amount', 'evidence_kind'];
+    const csv = [header, ...data.map((row: any) => [row.timesheet_id, row.staff_id, row.period_start, row.period_end,
+      ...header.slice(4).map((key) => row.payroll_snapshot?.[key])])].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `payroll-${batchId}.csv`; link.click();
+    URL.revokeObjectURL(url);
+    return true;
+  };
+
+  const createPayrollExport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!corporatePayrollReviewer || !homeOrganizationId || !payrollExport || saving) return;
+    const form = payrollExport;
+    const fingerprint = JSON.stringify([profile?.id, homeOrganizationId, form.from, form.to, form.notes.trim(), 'csv']);
+    if (payrollExportAttempt.current?.key !== fingerprint) payrollExportAttempt.current = { key: fingerprint, id: crypto.randomUUID() };
+    setSaving(true); setError(null); setNotice(null);
+    try {
+      const { data, error: exportError } = await supabase.rpc('create_payroll_export_batch', {
+        p_client_request_id: payrollExportAttempt.current.id,
+        p_organization_id: homeOrganizationId,
+        p_period_from: form.from,
+        p_period_to: form.to,
+        p_format: 'csv',
+        p_notes: form.notes.trim() || null,
+      });
+      if (exportError) throw exportError;
+      const receipt = Array.isArray(data) ? data.length === 1 ? data[0] : null : data;
+      if (!receipt || typeof receipt.batch_id !== 'string' || !Number.isInteger(receipt.timesheet_count)
+        || receipt.timesheet_count <= 0 || !Number.isFinite(Number(receipt.total_hours))) {
+        throw new Error('Payroll batch receipt was not confirmed.');
+      }
+      setLastPayrollBatchId(receipt.batch_id);
+      payrollExportAttempt.current = null;
+      setPayrollExport(null);
+      setNotice(`Payroll batch recorded: ${receipt.timesheet_count} timesheets, ${Number(receipt.total_hours).toFixed(2)} hours · receipt ${receipt.batch_id.slice(0, 8)}.`);
+      const downloaded = await downloadPayrollBatch(receipt.batch_id);
+      if (downloaded) await loadTimesheets();
+    } catch (failure) {
+      setError(`${failure instanceof Error ? failure.message : 'Payroll export failed.'} Retry the same period to recover a saved batch receipt.`);
+    } finally { setSaving(false); }
   };
 
   const openTimesheetEdit = async (item: TimesheetRow) => {
@@ -641,7 +759,12 @@ const TimesheetsPage: React.FC = () => {
                 {statusOptions.map((status) => <option key={status} value={status}>{plainWords(status)} ({timesheets.filter((r) => r.status === status).length})</option>)}
               </select>
             </label>
+            {corporatePayrollReviewer && <>
+              <button type="button" className="btn btn-primary" onClick={() => setPayrollExport({ from: rangeStart, to: rangeEnd, notes: '' })} disabled={saving || Boolean(scope.staffId)} title={scope.staffId ? 'Clear the staff filter; payroll batches export all approved staff in this organization and period.' : 'Create and download a payroll batch from approved timesheets'}><Download size={15} /> Export approved to payroll</button>
+              {lastPayrollBatchId && <button type="button" className="btn btn-secondary" onClick={() => void downloadPayrollBatch(lastPayrollBatchId)}><Download size={15} /> Download last batch</button>}
+            </>}
           </div>
+          {corporatePayrollReviewer && scope.staffId && <p className="timesheet-dialog-note" role="note">Clear the staff filter before exporting: the payroll batch includes all approved timesheets for the selected organization and dates.</p>}
 
           {loading && timesheets.length === 0 ? <div className="timesheets-empty">Loading timesheets…</div>
             : filteredTimesheets.length === 0 ? (
@@ -653,11 +776,16 @@ const TimesheetsPage: React.FC = () => {
               <div className="reports-table-wrapper">
                 <table className="reports-table timesheets-table">
                   <caption className="sr-only">Timesheet reconciliation and approval queue</caption>
-                  <thead><tr><th scope="col">Staff</th><th scope="col">Period</th><th scope="col">Service</th><th scope="col">Scheduled</th><th scope="col">Worked</th><th scope="col">Overtime</th><th scope="col">Adjustment</th><th scope="col">Pay</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                  <thead><tr><th scope="col">Staff</th><th scope="col">Organization / place</th><th scope="col">Period</th><th scope="col">Service</th><th scope="col">Scheduled</th><th scope="col">Worked</th><th scope="col">Overtime</th><th scope="col">Adjustment</th><th scope="col">Pay</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
                   <tbody>
                     {filteredTimesheets.map((row) => (
                       <tr key={row.id} className={timesheetSummaryMismatchReasons(row.work_summary).length ? 'timesheet-mismatch' : undefined}>
                         <td>{isAdmin ? <button type="button" className="link-button" onClick={() => navigate(staffLink(row.staff_id))} title="Open staff profile, employment and pay">{names[row.staff_id] ?? 'Staff member'}</button> : names[row.staff_id] ?? 'Staff member'}</td>
+                        <td className="timesheet-provenance"><strong>{timesheetProvenance[row.id]?.[0]?.organization_name ?? (provenanceError ? 'Organization details unavailable' : 'Organization pending')}</strong>
+                          {workingInBranch && <small>Operating: {timesheetProvenance[row.id]?.[0]?.operating_organization_name ?? branchName ?? 'Branch unavailable'}</small>}
+                          {[...new Set((timesheetProvenance[row.id] ?? []).flatMap((source) => [source.location_name, source.zone_name].filter((value): value is string => Boolean(value))))].map((place) => <small key={place}>{place}</small>)}
+                          {!timesheetProvenance[row.id]?.some((source) => source.location_name || source.zone_name) && <small>{provenanceError ? 'Place details unavailable' : 'No linked shift place'}</small>}
+                        </td>
                         <td>{row.period_start === row.period_end ? dayText(row.period_start) : `${dayText(row.period_start)} – ${dayText(row.period_end)}`}<small className="timesheet-mismatch-note">{timesheetSummaryMismatchReasons(row.work_summary).join('; ')}</small></td>
                         <td>{row.shift?.service_type ? serviceLabel(row.shift.service_type) : '—'}</td>
                         <td>{hours(row.scheduled_hours)}</td>
@@ -667,10 +795,12 @@ const TimesheetsPage: React.FC = () => {
                         <td>{row.pay_code_override || row.hourly_rate_override != null ? <span title="Pay override on this timesheet only">{row.pay_code_override ?? 'Rule code'}{row.hourly_rate_override != null ? ` · $${Number(row.hourly_rate_override).toFixed(2)}` : ''}</span> : 'From pay rate'}</td>
                         <td><span className={statusBadge(row.status)}>{plainWords(row.status)}</span></td>
                         <td className="row-actions">
-                          {isAdmin && <button type="button" className="icon-btn" title={EDITABLE_TIMESHEET.has(row.status) ? 'Correct timesheet' : 'View timesheet'} aria-label={`Open timesheet for ${names[row.staff_id] ?? 'staff member'}`} onClick={() => void openTimesheetEdit(row)}><Edit3 size={16} /></button>}
+                          {isAdmin && <button type="button" className="icon-btn" title={EDITABLE_TIMESHEET.has(row.status) ? 'Edit timesheet' : 'View timesheet'} aria-label={`${EDITABLE_TIMESHEET.has(row.status) ? 'Edit' : 'View'} timesheet for ${names[row.staff_id] ?? 'staff member'}`} onClick={() => void openTimesheetEdit(row)}><Edit3 size={16} /></button>}
+                          <button type="button" className="btn btn-sm btn-secondary" onClick={() => setPrintingTimesheet(row)}><Printer size={14} /> Print / Save PDF</button>
                           {row.status === 'submitted' && workingInBranch && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleReview(row, 'branch_checked')} disabled={saving}><ShieldCheck size={14} /> Branch check</button>}
-                          {!workingInBranch && isAdmin && EDITABLE_TIMESHEET.has(row.status) && <button type="button" className="btn btn-sm btn-primary" onClick={() => void handleReview(row, 'approved')} disabled={saving}><CheckCircle2 size={14} /> Approve</button>}
-                          {isAdmin && (workingInBranch ? row.status === 'submitted' : EDITABLE_TIMESHEET.has(row.status)) && <button type="button" className="btn btn-sm btn-danger" onClick={() => setRejecting({ row, notes: '' })} disabled={saving}><XCircle size={14} /> {workingInBranch ? 'Return' : 'Reject'}</button>}
+                          {!workingInBranch && isAdmin && EDITABLE_TIMESHEET.has(row.status) && <button type="button" className="btn btn-sm btn-primary" onClick={() => setReviewing({ row, decision: 'approved', notes: '' })} disabled={saving}><CheckCircle2 size={14} /> Approve</button>}
+                          {isAdmin && (workingInBranch ? row.status === 'submitted' : EDITABLE_TIMESHEET.has(row.status)) && <button type="button" className="btn btn-sm btn-danger" onClick={() => setReviewing({ row, decision: 'rejected', notes: '' })} disabled={saving}><XCircle size={14} /> {workingInBranch ? 'Return' : 'Reject'}</button>}
+                          {corporatePayrollReviewer && row.status === 'approved' && !row.payroll_export_batch_id && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setReopening({ row, reason: '' })} disabled={saving}><RefreshCw size={14} /> Unapprove</button>}
                         </td>
                       </tr>
                     ))}
@@ -788,6 +918,7 @@ const TimesheetsPage: React.FC = () => {
               <button type="button" onClick={() => setEditingTimesheet(null)} aria-label="Close"><X size={18} /></button>
             </header>
             <div className="dialog-body">
+              <p className="timesheet-dialog-note">Organization: {timesheetProvenance[editingTimesheet.id]?.[0]?.organization_name ?? 'Unavailable'}{workingInBranch ? ` · Operating: ${timesheetProvenance[editingTimesheet.id]?.[0]?.operating_organization_name ?? branchName ?? 'Unavailable'}` : ''}. Places: {[...new Set((timesheetProvenance[editingTimesheet.id] ?? []).flatMap((source) => [source.location_name, source.zone_name].filter((value): value is string => Boolean(value))))].join(', ') || (provenanceError ? 'Unavailable' : 'No linked shift place')}.</p>
               {!editable && <p className="timesheet-dialog-note">{workingInBranch ? 'Branch reviewers check or return timesheets; the employer payroll team makes corrections.' : `Only submitted or branch-checked timesheets that are not yet exported can be corrected. This one is ${plainWords(editingTimesheet.status).toLowerCase()}.`}</p>}
               <div className="form-row">
                 <label><span>Worked hours</span><input type="number" min="0" max="744" step="0.01" value={editForm.actualHours} disabled={!editable} onChange={(e) => setEditForm({ ...editForm, actualHours: e.target.value })} required /></label>
@@ -814,20 +945,80 @@ const TimesheetsPage: React.FC = () => {
         </div>
       )}
 
-      {rejecting && (
+      {printingTimesheet && (
+        <div className="timesheet-dialog-backdrop timesheet-print-backdrop">
+          <section className="timesheet-dialog timesheet-print-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-print-title">
+            <header><div><span>Timesheet record · {plainWords(printingTimesheet.status)}</span><h2 id="timesheet-print-title">{names[printingTimesheet.staff_id] ?? 'Staff member'} · {dayText(printingTimesheet.period_start)}</h2></div><button className="no-print" type="button" onClick={() => setPrintingTimesheet(null)} aria-label="Close PDF preview"><X size={18} /></button></header>
+            <div className="dialog-body">
+              <p><strong>Employer organization:</strong> {timesheetProvenance[printingTimesheet.id]?.[0]?.organization_name ?? 'Unavailable'}</p>
+              {workingInBranch && <p><strong>Operating organization:</strong> {timesheetProvenance[printingTimesheet.id]?.[0]?.operating_organization_name ?? branchName ?? 'Unavailable'}</p>}
+              <p><strong>Period:</strong> {dayText(printingTimesheet.period_start)}{printingTimesheet.period_end !== printingTimesheet.period_start ? ` to ${dayText(printingTimesheet.period_end)}` : ''}</p>
+              <p><strong>Work:</strong> {printingTimesheet.shift?.service_type ? serviceLabel(printingTimesheet.shift.service_type) : 'Recorded work'}{printingTimesheet.shift_id ? ` · shift ${printingTimesheet.shift_id}` : ''}</p>
+              <p><strong>Places:</strong></p>
+              <ul>{(timesheetProvenance[printingTimesheet.id] ?? []).filter((source) => source.location_name || source.zone_name || source.work_unit_name).map((source, index) => <li key={`${source.shift_id ?? 'source'}-${index}`}>{[source.work_unit_name, source.location_name, source.zone_name, source.service_type ? serviceLabel(source.service_type) : null].filter(Boolean).join(' · ')}</li>)}</ul>
+              {!(timesheetProvenance[printingTimesheet.id] ?? []).some((source) => source.location_name || source.zone_name) && <p>{provenanceError ? 'Place details were unavailable when this snapshot was created.' : 'No linked shift place was returned for this timesheet.'}</p>}
+              <p><strong>Hours:</strong> {hours(printingTimesheet.actual_hours)} worked · {hours(printingTimesheet.overtime_hours)} overtime · {hours(printingTimesheet.adjustment_hours)} adjustment</p>
+              {printingTimesheet.payroll_snapshot && <p><strong>Payroll snapshot:</strong> {String(printingTimesheet.payroll_snapshot.pay_code ?? 'No pay code')} · {hours(Number(printingTimesheet.payroll_snapshot.hours))} hours · ${Number(printingTimesheet.payroll_snapshot.hourly_rate ?? 0).toFixed(2)}/h · ${Number(printingTimesheet.payroll_snapshot.gross_amount ?? 0).toFixed(2)} gross</p>}
+              {printingTimesheet.review_notes && <p><strong>Review note:</strong> {printingTimesheet.review_notes}</p>}
+              <p className="timesheet-dialog-note">This is a printable snapshot of recorded timesheet and linked work data. Administrative payable corrections do not verify physical attendance.</p>
+            </div>
+            <footer className="no-print"><button type="button" className="btn btn-secondary" onClick={() => setPrintingTimesheet(null)}>Close</button><button type="button" className="btn btn-primary" onClick={() => window.print()}><Printer size={15} /> Print / Save PDF</button></footer>
+          </section>
+        </div>
+      )}
+
+      {payrollExport && <div className="timesheet-dialog-backdrop">
+        <form className="timesheet-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-export-title" onSubmit={createPayrollExport}>
+          <header><div><span>Employer payroll</span><h2 id="payroll-export-title">Create payroll batch</h2></div><button type="button" onClick={() => setPayrollExport(null)} aria-label="Close payroll export"><X size={18} /></button></header>
+          <div className="dialog-body">
+            <p className="timesheet-dialog-note">Only approved, unexported timesheets in this organization and date range are included. The server will block unresolved pay or dispatch review items. Exported values become immutable payroll evidence.</p>
+            <div className="form-row">
+              <label><span>Period from</span><input type="date" required value={payrollExport.from} onChange={(event) => setPayrollExport({ ...payrollExport, from: event.target.value })} /></label>
+              <label><span>Period to</span><input type="date" min={payrollExport.from} required value={payrollExport.to} onChange={(event) => setPayrollExport({ ...payrollExport, to: event.target.value })} /></label>
+            </div>
+            <label><span>Batch notes (optional)</span><textarea value={payrollExport.notes} onChange={(event) => setPayrollExport({ ...payrollExport, notes: event.target.value })} maxLength={2000} /></label>
+            {error && <p role="alert">{error}</p>}
+          </div>
+          <footer><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setPayrollExport(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || payrollExport.to < payrollExport.from}><Download size={15} /> {saving ? 'Creating batch…' : 'Create payroll batch'}</button></footer>
+        </form>
+      </div>}
+
+      {reviewing && (
         <div className="timesheet-dialog-backdrop">
-          <form className="timesheet-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-reject-title" onSubmit={(event) => { event.preventDefault(); void handleReview(rejecting.row, 'rejected', rejecting.notes.trim()); }}>
+          <form className="timesheet-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-review-title" onSubmit={(event) => { event.preventDefault(); void handleReview(reviewing.row, reviewing.decision, reviewing.notes.trim() || undefined); }}>
             <header>
-              <div><span>{workingInBranch ? 'Return for correction' : 'Reject timesheet'}</span><h2 id="timesheet-reject-title">{names[rejecting.row.staff_id] ?? 'Staff member'} · {dayText(rejecting.row.period_start)}</h2></div>
-              <button type="button" onClick={() => setRejecting(null)} aria-label="Close"><X size={18} /></button>
+              <div><span>{reviewing.decision === 'approved' ? 'Final payroll review' : workingInBranch ? 'Return for correction' : 'Reject timesheet'}</span><h2 id="timesheet-review-title">{names[reviewing.row.staff_id] ?? 'Staff member'} · {dayText(reviewing.row.period_start)}</h2></div>
+              <button type="button" onClick={() => setReviewing(null)} aria-label="Close"><X size={18} /></button>
             </header>
             <div className="dialog-body">
-              <p className="timesheet-dialog-note">The officer is notified and must correct and resubmit. If you can fix it yourself, cancel and use Correct timesheet instead.</p>
-              <label><span>What needs to change (sent to the officer)</span><textarea value={rejecting.notes} onChange={(e) => setRejecting({ ...rejecting, notes: e.target.value })} required minLength={5} autoFocus /></label>
+              {reviewing.decision === 'approved'
+                ? <p className="timesheet-dialog-note">Approval is recorded for this submitted timesheet. Export to payroll remains a separate employer-admin action.</p>
+                : <p className="timesheet-dialog-note">The officer is notified and must correct and resubmit. If you can fix it yourself, cancel and use Correct timesheet instead.</p>}
+              <label><span>{reviewing.decision === 'approved' ? 'Approval note (optional)' : 'What needs to change (sent to the officer)'}</span><textarea value={reviewing.notes} onChange={(e) => setReviewing({ ...reviewing, notes: e.target.value })} required={reviewing.decision === 'rejected'} minLength={reviewing.decision === 'rejected' ? 5 : undefined} autoFocus /></label>
             </div>
             <footer>
-              <button type="button" className="btn btn-secondary" onClick={() => setRejecting(null)}>Cancel</button>
-              <button type="submit" className="btn btn-danger" disabled={saving || rejecting.notes.trim().length < 5}><XCircle size={16} /> {saving ? 'Saving…' : workingInBranch ? 'Return timesheet' : 'Reject timesheet'}</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setReviewing(null)}>Cancel</button>
+              <button type="submit" className={`btn ${reviewing.decision === 'approved' ? 'btn-primary' : 'btn-danger'}`} disabled={saving || (reviewing.decision === 'rejected' && reviewing.notes.trim().length < 5)}>{reviewing.decision === 'approved' ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {saving ? 'Saving…' : reviewing.decision === 'approved' ? 'Approve timesheet' : workingInBranch ? 'Return timesheet' : 'Reject timesheet'}</button>
+            </footer>
+          </form>
+        </div>
+      )}
+
+      {reopening && (
+        <div className="timesheet-dialog-backdrop">
+          <form className="timesheet-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-reopen-title" onSubmit={reopenApprovedTimesheet}>
+            <header>
+              <div><span>Employer payroll review</span><h2 id="timesheet-reopen-title">Unapprove timesheet</h2></div>
+              <button type="button" onClick={() => setReopening(null)} aria-label="Close"><X size={18} /></button>
+            </header>
+            <div className="dialog-body">
+              <p className="timesheet-dialog-note">This returns the sheet to submitted status and clears its approval and branch check. It cannot be undone after payroll export.</p>
+              <label><span>Reason for reopening (kept in the audit trail)</span><textarea value={reopening.reason} onChange={(event) => setReopening({ ...reopening, reason: event.target.value })} required minLength={5} autoFocus /></label>
+              {error && <p role="alert">{error}</p>}
+            </div>
+            <footer>
+              <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setReopening(null)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={saving || reopening.reason.trim().length < 5}><RefreshCw size={16} /> {saving ? 'Reopening…' : 'Reopen for review'}</button>
             </footer>
           </form>
         </div>
