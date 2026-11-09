@@ -392,7 +392,7 @@ test('Product Analyst routes complex analysis through the governed model runner'
     completeAnalysis: async (_supabase, input) => ({ success: true, approval: { id: 'approval-1', ...input } })
   });
 
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'openai']);
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, PRODUCT_ANALYST_PROMPT_VERSION);
   assert.deepEqual(captured.validateOutput(JSON.stringify(specification)), specification);
