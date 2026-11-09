@@ -126,6 +126,50 @@ test('registration wildcards show selectable identities before history or flag a
   expect(errors).toEqual([]);
 });
 
+test('admin vehicle search shows supplementary vehicle signals with their own review states', async ({ page }, testInfo) => {
+  const errors = monitorBrowserErrors(page);
+  const vehicleId = 'c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1';
+  await page.route('**/rest/v1/rpc/search_vehicle_registrations', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: vehicleId, plate_number: 'SIG123', make: 'Fixture', model: 'Van' }]) }));
+  await page.route('**/rest/v1/canonical_vehicle_public**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+    id: vehicleId, plate_number: 'SIG123', make: 'Fixture', model: 'Van', homeless_status: 'none',
+    wof_status: 'current', cof_status: 'expired', wof_expiry: '2027-01-01', cof_expiry: '2026-01-01', last_seen_at: '2026-11-08T08:00:00Z',
+  }) }));
+  await page.route('**/rest/v1/canonical_scv_public**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/rpc/read_person_permits_fieldwork**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/observations**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/breach_alerts**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/entity_flags**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/parking_chalk_records**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'chalk-1', chalked_at: '2026-11-08T08:00:00Z', return_by: '2026-11-08T10:00:00Z', status: 'active', movement_detected: null, bob_classification: 'review_required', bob_confidence: 0.6, sign_confidence: 0.8, effective_time_limit_minutes: 120, vehicle_compliance_flags: ['expired_wof'], rego_status: 'current', wof_status: 'expired', cof_status: 'current', zone: { name: 'Central' } }]) }));
+  await page.route('**/rest/v1/parking_infringement_notices**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'pin-1', notice_number: 'P-123', status: 'issued', issued_at: '2026-11-08T11:00:00Z', zone_name: 'Central' }]) }));
+  await page.route('**/rest/v1/infringement_notices**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/notices_to_vacate**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/vehicle_overnight_sessions**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'overnight-1', overnight_date: '2026-11-07', verification_status: 'candidate_evening', movement_decision: null, evidence_strength: 'pending', observation_count: 1, manual_review_required: true, evening_seen_at: '2026-11-07T20:00:00Z', morning_seen_at: null, site: null, zone: { name: 'Central' } }]) }));
+  await page.route('**/rest/v1/cctv_entity_observations**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'cctv-1', observed_at: '2026-11-08T09:00:00Z', review_state: 'unreviewed', candidate_plate: 'SIG123', site: { name: 'Gate' }, zone: null }]) }));
+  await page.route('**/rest/v1/rpc/get_vehicle_enrichment_receipts**', async route => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ source_name: 'licensed_registry', source_location: 'NZ', retrieved_at: '2026-11-01T10:00:00Z', response_sha256: '1234567890abcdef' }]) }));
+  await page.route('**/rest/v1/rpc/get_safety_warnings**', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/rpc/is_admin_for_org**', async route => route.fulfill({ contentType: 'application/json', body: 'true' }));
+  await page.route('**/rest/v1/vehicle_profile_photos**', async route => route.fulfill({ contentType: 'application/json', body: 'null' }));
+
+  await signInAsAdmin(page, '/admin/field-ops?area=vehicle-search');
+  await page.getByLabel('Registration search').fill('SIG123');
+  await page.getByRole('button', { name: 'Search Plate' }).click();
+  await expect(page.getByRole('heading', { name: 'Additional vehicle signals' })).toBeVisible();
+  const signals = page.getByRole('region', { name: 'Additional vehicle signals' });
+  await expect(signals).toContainText('active');
+  await expect(signals).toContainText('candidate evening');
+  await expect(signals).toContainText('manual review required');
+  await expect(signals).toContainText('120 min');
+  await expect(signals).toContainText('Parking infringement P-123 · issued');
+  await expect(signals).toContainText('unreviewed');
+  await expect(signals).toContainText('licensed_registry');
+  await expect(page.getByText('WoF: CURRENT')).toBeVisible();
+  await expect(page.getByText('CoF: EXPIRED')).toBeVisible();
+  await expect(signals.getByRole('button', { name: 'Open parking oversight' })).toHaveAttribute('type', 'button');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await signals.screenshot({ path: testInfo.outputPath('admin-vehicle-signal-history.png') });
+  expect(errors).toEqual([]);
+});
+
 test('repeat reports combine subjects and drilldowns across the authorised scope', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   const calls: Array<{ name: string; scope: unknown }> = [];

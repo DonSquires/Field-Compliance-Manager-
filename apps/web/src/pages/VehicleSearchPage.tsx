@@ -56,6 +56,7 @@ interface Vehicle {
   external_data_source_url: string | null;
   external_data_source_location: string | null;
   external_data_source_checked_at: string | null;
+  last_seen_at?: string | null;
   details_updated_at?: string | null;
   details_updated_by_org_name?: string | null;
 }
@@ -101,7 +102,16 @@ interface RecentObservation {
   photo_path: string | null;
 }
 
+interface ParkingSignal { id: string; chalked_at: string; return_by: string; status: string; movement_detected: boolean | null; bob_classification: string | null; bob_confidence: number | null; sign_confidence: number | null; effective_time_limit_minutes: number | null; vehicle_compliance_flags: string[] | null; rego_status: string | null; wof_status: string | null; cof_status: string | null; zone: LinkedName }
+interface OvernightSignal { id: string; overnight_date: string; verification_status: string; movement_decision: string | null; evidence_strength: string; observation_count: number; manual_review_required: boolean; evening_seen_at: string | null; morning_seen_at: string | null; site: LinkedName; zone: LinkedName }
+interface CctvVehicleSignal { id: string; observed_at: string; review_state: string; candidate_plate: string | null; site: LinkedName; zone: LinkedName }
+interface EnrichmentReceipt { source_name: string; source_location: string; retrieved_at: string; response_sha256: string }
+interface VehicleNoticeSignal { id: string; kind: string; reference: string | null; status: string; issued_at: string | null; detail: string | null }
+type LinkedName = { name: string | null } | Array<{ name: string | null }> | null;
+const linkedName = (value: LinkedName): string | null => Array.isArray(value) ? value[0]?.name ?? null : value?.name ?? null;
+
 const OBSERVATION_HISTORY_LIMIT = 50;
+const VEHICLE_SIGNAL_LIMIT = 25;
 
 function observationOutcome(obs: RecentObservation): { label: string; tone: string } {
   if (obs.compliance_status) {
@@ -125,7 +135,7 @@ interface VehicleBreach {
 }
 
 const VehicleSearchPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const navigate = useNavigate();
   const canOpenPersonSearch = canAccessFieldOpsArea('person-search', () => true, profile?.role);
   const [searchParams] = useSearchParams();
@@ -144,6 +154,12 @@ const VehicleSearchPage: React.FC = () => {
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(observations.map((obs) => obs.id));
   const selectedObservation = observations.find((obs) => obs.id === selectedObservationId) ?? null;
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
+  const [parkingSignals, setParkingSignals] = useState<ParkingSignal[]>([]);
+  const [overnightSignals, setOvernightSignals] = useState<OvernightSignal[]>([]);
+  const [cctvSignals, setCctvSignals] = useState<CctvVehicleSignal[]>([]);
+  const [enrichmentReceipts, setEnrichmentReceipts] = useState<EnrichmentReceipt[]>([]);
+  const [noticeSignals, setNoticeSignals] = useState<VehicleNoticeSignal[]>([]);
+  const [signalErrors, setSignalErrors] = useState<string[]>([]);
   const [permits, setPermits] = useState<PermitSummary[]>([]);
   const [searched, setSearched] = useState(false);
   const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
@@ -201,14 +217,21 @@ const VehicleSearchPage: React.FC = () => {
       setObservations([]);
       setSelectedObservationId(null);
       setBreaches([]);
+      setParkingSignals([]);
+      setOvernightSignals([]);
+      setCctvSignals([]);
+      setEnrichmentReceipts([]);
+      setNoticeSignals([]);
+      setSignalErrors([]);
       setShowFlagForm(false);
 
-      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
+      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts, parking_chalk_records, vehicle_overnight_sessions, cctv_entity_observations, parking_infringement_notices, infringement_notices, notices_to_vacate
+      // ATLAS CALLS: get_vehicle_enrichment_receipts (admin-only, minimized licensed-source history)
       // Resolve the canonical vehicle first so observation history follows the
       // global identity link, not only the plate text recorded at scan time.
       let vehicleQuery = supabase
         .from('canonical_vehicle_public')
-        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at, details_updated_at, details_updated_by_org_name');
+        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at, details_updated_at, details_updated_by_org_name, last_seen_at');
       vehicleQuery = canonicalVehicleId
         ? vehicleQuery.eq('id', canonicalVehicleId)
         : vehicleQuery.ilike('plate_number', cleanPlate);
@@ -217,6 +240,7 @@ const VehicleSearchPage: React.FC = () => {
       const vehData = vehRes.data as Vehicle | null;
       if (canonicalVehicleId && !vehData) throw new Error('The linked canonical vehicle is unavailable or you do not have access.');
       const resolvedPlate = normalizePlateNumber(vehData?.plate_number ?? cleanPlate);
+      const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
       setSelectedPlate(resolvedPlate);
       if (vehData?.plate_number) setPlate(vehData.plate_number);
 
@@ -241,6 +265,62 @@ const VehicleSearchPage: React.FC = () => {
           .order('created_at', { ascending: false })
           .limit(10),
       ]);
+
+      const [parkingRes, overnightRes, cctvRes, enrichmentRes, parkingNoticeRes, infringementRes, vacateRes] = await Promise.all([
+        organizationId ? supabase.from('parking_chalk_records')
+          .select('id, chalked_at, return_by, status, movement_detected, bob_classification, bob_confidence, sign_confidence, effective_time_limit_minutes, vehicle_compliance_flags, rego_status, wof_status, cof_status, zone:zone_id(name)')
+          .eq('organization_id', organizationId)
+          .or(vehData?.id ? `canonical_vehicle_id.eq.${vehData.id},plate.eq.${resolvedPlate}` : `plate.eq.${resolvedPlate}`)
+          .order('chalked_at', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+        organizationId ? supabase.from('vehicle_overnight_sessions')
+          .select('id, overnight_date, verification_status, movement_decision, evidence_strength, observation_count, manual_review_required, evening_seen_at, morning_seen_at, site:site_id(name), zone:zone_id(name)')
+          .eq('organization_id', organizationId).ilike('plate_number', resolvedPlate)
+          .order('overnight_date', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+        supabase.from('cctv_entity_observations')
+          .select('id, observed_at, review_state, candidate_plate, site:site_id(name), zone:zone_id(name)')
+          .eq('entity_kind', 'vehicle')
+          .or(vehData?.id ? `canonical_vehicle_id.eq.${vehData.id},candidate_plate.eq.${resolvedPlate}` : `candidate_plate.eq.${resolvedPlate}`)
+          .order('observed_at', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT),
+        organizationId && vehData?.id
+          ? supabase.rpc('get_vehicle_enrichment_receipts', { p_organization_id: organizationId, p_canonical_vehicle_id: vehData.id, p_limit: VEHICLE_SIGNAL_LIMIT })
+          : Promise.resolve({ data: [], error: null }),
+        organizationId ? supabase.from('parking_infringement_notices')
+          .select('id, notice_number, status, issued_at, zone_name').eq('organization_id', organizationId)
+          .ilike('plate_number', resolvedPlate).order('issued_at', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+        organizationId ? supabase.from('infringement_notices')
+          .select('id, notice_number, status, issued_at, offence_date, authorising_act').eq('organization_id', organizationId)
+          .ilike('plate_number', resolvedPlate).order('issued_at', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+        organizationId ? supabase.from('notices_to_vacate')
+          .select('id, status, issued_at, vacate_by, authorising_act').eq('organization_id', organizationId)
+          .ilike('plate_number', resolvedPlate).order('issued_at', { ascending: false }).limit(VEHICLE_SIGNAL_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const supplementalErrors: string[] = [];
+      if (parkingRes.error) supplementalErrors.push(`Parking evidence: ${parkingRes.error.message}`);
+      if (overnightRes.error) supplementalErrors.push(`Overnight verification: ${overnightRes.error.message}`);
+      if (cctvRes.error) supplementalErrors.push(`CCTV vehicle signals: ${cctvRes.error.message}`);
+      if (enrichmentRes.error) supplementalErrors.push(`Licensed enrichment history: ${enrichmentRes.error.message}`);
+      if (parkingNoticeRes.error) supplementalErrors.push(`Parking notices: ${parkingNoticeRes.error.message}`);
+      if (infringementRes.error) supplementalErrors.push(`Infringement notices: ${infringementRes.error.message}`);
+      if (vacateRes.error) supplementalErrors.push(`Notices to vacate: ${vacateRes.error.message}`);
+      setSignalErrors(supplementalErrors);
+      setParkingSignals(((parkingRes.data ?? []) as ParkingSignal[]));
+      setOvernightSignals(((overnightRes.data ?? []) as OvernightSignal[]));
+      setCctvSignals(((cctvRes.data ?? []) as CctvVehicleSignal[]));
+      const receipts = Array.isArray(enrichmentRes.data) ? enrichmentRes.data as Array<Partial<EnrichmentReceipt>> : [];
+      setEnrichmentReceipts(receipts.filter((receipt): receipt is EnrichmentReceipt =>
+        typeof receipt.source_name === 'string' && typeof receipt.source_location === 'string'
+        && typeof receipt.retrieved_at === 'string' && typeof receipt.response_sha256 === 'string'));
+      setNoticeSignals([
+        ...((parkingNoticeRes.data ?? []) as Array<{ id: string; notice_number: string; status: string; issued_at: string | null; zone_name: string | null }>).map((notice) => ({ id: notice.id, kind: 'Parking infringement', reference: notice.notice_number, status: notice.status, issued_at: notice.issued_at, detail: notice.zone_name })),
+        ...((infringementRes.data ?? []) as Array<{ id: string; notice_number: string; status: string; issued_at: string | null; offence_date: string | null; authorising_act: string | null }>).map((notice) => ({ id: notice.id, kind: 'Infringement', reference: notice.notice_number, status: notice.status, issued_at: notice.issued_at ?? notice.offence_date, detail: notice.authorising_act })),
+        ...((vacateRes.data ?? []) as Array<{ id: string; status: string; issued_at: string | null; vacate_by: string | null; authorising_act: string | null }>).map((notice) => ({ id: notice.id, kind: 'Notice to vacate', reference: null, status: notice.status, issued_at: notice.issued_at, detail: `${notice.authorising_act ?? 'Authority not recorded'}${notice.vacate_by ? ` · vacate by ${new Date(notice.vacate_by).toLocaleDateString('en-NZ')}` : ''}` })),
+      ].sort((a, b) => Date.parse(b.issued_at ?? '') - Date.parse(a.issued_at ?? '')));
 
       const historyFailure = describeLoadFailures([
         ['self-containment certification', scvRes.error],
@@ -308,7 +388,7 @@ const VehicleSearchPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => {
     const canonicalVehicleId = searchParams.get('vehicle')?.trim();
@@ -474,6 +554,7 @@ const VehicleSearchPage: React.FC = () => {
                         {vehicle?.colour || 'Colour not recorded'}
                         {vehicle?.body_type ? ` · ${vehicle.body_type}` : ''}
                       </div>
+                      {vehicle?.last_seen_at && <small>Last recorded: {new Date(vehicle.last_seen_at).toLocaleString('en-NZ')}</small>}
                     </div>
                   </div>
 
@@ -507,17 +588,16 @@ const VehicleSearchPage: React.FC = () => {
                   </div>
 
                   <div className="spec-item">
-                    <div className="spec-label">WOF / COF</div>
-                    <div className="spec-value">
-                      <span className={`badge ${vehicle?.wof_status === 'current' || vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' || vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
-                        {vehicle?.wof_status ? `WOF: ${vehicle.wof_status.toUpperCase()}` : vehicle?.cof_status ? `COF: ${vehicle.cof_status.toUpperCase()}` : 'UNKNOWN'}
-                      </span>
+                    <div className="spec-label">WoF / CoF</div>
+                    <div className="spec-value" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      <span className={`badge ${vehicle?.wof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>WoF: {vehicle?.wof_status?.toUpperCase() ?? 'UNKNOWN'}</span>
+                      <span className={`badge ${vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>CoF: {vehicle?.cof_status?.toUpperCase() ?? 'UNKNOWN'}</span>
                     </div>
-                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                        Exp: {new Date(vehicle.wof_expiry || vehicle.cof_expiry!).toLocaleDateString()}
-                      </div>
-                    )}
+                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                      {vehicle.wof_expiry && <span>WoF exp: {new Date(vehicle.wof_expiry).toLocaleDateString('en-NZ')}</span>}
+                      {vehicle.wof_expiry && vehicle.cof_expiry && ' · '}
+                      {vehicle.cof_expiry && <span>CoF exp: {new Date(vehicle.cof_expiry).toLocaleDateString('en-NZ')}</span>}
+                    </div>}
                   </div>
 
                   <div className="spec-item">
@@ -746,9 +826,9 @@ const VehicleSearchPage: React.FC = () => {
 
       {searched && !loading && matches === null && !error && (
         <div className="vehicle-search-results">
-          {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
+          {!vehicle && !scv && permits.length === 0 && observations.length === 0 && breaches.length === 0 && flags.length === 0 && parkingSignals.length === 0 && overnightSignals.length === 0 && cctvSignals.length === 0 && enrichmentReceipts.length === 0 && noticeSignals.length === 0 && signalErrors.length === 0 ? (
             <div className="empty-state">
-              <p>No vehicle records, permits, or observations found for "{selectedPlate}".</p>
+              <p>No registry, permit, observation, breach, flag, parking, overnight, or CCTV records found for "{selectedPlate}".</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '16px' }}>
@@ -799,6 +879,45 @@ const VehicleSearchPage: React.FC = () => {
                   </div>
                 </section>
               )}
+
+              <section className="contact-card vehicle-signal-history" aria-labelledby="vehicle-signal-history-title">
+                <header className="contact-header">
+                  <div><h3 id="vehicle-signal-history-title">Additional vehicle signals</h3><p className="contact-meta">Separate evidence sources; each retains its own review status and provenance.</p></div>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate('/admin/field-ops?area=cctv-triage')}>Open CCTV triage</button>
+                </header>
+                {signalErrors.length > 0 && <div className="alert alert-error" role="alert">Some supplementary signals could not be loaded: {signalErrors.join(' · ')}</div>}
+                <section aria-labelledby="vehicle-parking-history-title">
+                  <h4 id="vehicle-parking-history-title">Parking chalk ({parkingSignals.length}{parkingSignals.length === VEHICLE_SIGNAL_LIMIT ? ', latest shown' : ''})</h4>
+                  {parkingSignals.length === 0 ? <p>No parking chalk records in this organisation’s accessible scope.</p> : <ul>{parkingSignals.map((item) => <li key={item.id}>
+                    {new Date(item.chalked_at).toLocaleString('en-NZ')} · {item.status} · return by {new Date(item.return_by).toLocaleString('en-NZ')} · {linkedName(item.zone) ?? 'Location not recorded'} · {item.movement_detected === true ? 'moved' : item.movement_detected === false ? 'stationary' : 'movement unconfirmed'} · {item.bob_classification?.replace(/_/g, ' ') ?? 'classification pending'}{item.bob_confidence != null ? ` (${Math.round(item.bob_confidence * 100)}% confidence)` : ''} · limit {item.effective_time_limit_minutes ?? 'unknown'} min · signs {item.sign_confidence == null ? 'unrated' : `${Math.round(item.sign_confidence * 100)}%`} · {item.vehicle_compliance_flags?.length ? item.vehicle_compliance_flags.join(', ') : 'no compliance flags'} · Rego {item.rego_status ?? 'unknown'}, WoF {item.wof_status ?? 'unknown'}, CoF {item.cof_status ?? 'unknown'}
+                  </li>)}</ul>}
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate('/admin/field-ops?area=parking')}>Open parking oversight</button>
+                </section>
+                <section aria-labelledby="vehicle-overnight-history-title">
+                  <h4 id="vehicle-overnight-history-title">Overnight verification ({overnightSignals.length}{overnightSignals.length === VEHICLE_SIGNAL_LIMIT ? ', latest shown' : ''})</h4>
+                  {overnightSignals.length === 0 ? <p>No overnight session records in this organisation’s accessible scope.</p> : <ul>{overnightSignals.map((item) => <li key={item.id}>
+                    {new Date(`${item.overnight_date}T12:00:00`).toLocaleDateString('en-NZ')} · {item.verification_status.replace(/_/g, ' ')} · evidence {item.evidence_strength} · {item.movement_decision?.replace(/_/g, ' ') ?? 'movement pending'} · {item.observation_count} {item.observation_count === 1 ? 'observation' : 'observations'} · {linkedName(item.site) ?? linkedName(item.zone) ?? 'Location not recorded'} · {item.manual_review_required ? 'manual review required' : 'automated review status'} · evening {item.evening_seen_at ? new Date(item.evening_seen_at).toLocaleTimeString('en-NZ') : 'not seen'} · morning {item.morning_seen_at ? new Date(item.morning_seen_at).toLocaleTimeString('en-NZ') : 'not seen'}
+                  </li>)}</ul>}
+                </section>
+                <section aria-labelledby="vehicle-notice-history-title">
+                  <h4 id="vehicle-notice-history-title">Enforcement notices ({noticeSignals.length}{noticeSignals.length === VEHICLE_SIGNAL_LIMIT ? ', latest shown per source' : ''})</h4>
+                  {noticeSignals.length === 0 ? <p>No parking infringement, infringement or notice-to-vacate records in this organisation’s accessible scope.</p> : <ul>{noticeSignals.map((item) => <li key={`${item.kind}:${item.id}`}>
+                    {item.kind}{item.reference ? ` ${item.reference}` : ''} · {item.status.replace(/_/g, ' ')}{item.issued_at ? ` · ${new Date(item.issued_at).toLocaleDateString('en-NZ')}` : ''}{item.detail ? ` · ${item.detail}` : ''}
+                  </li>)}</ul>}
+                </section>
+                <section aria-labelledby="vehicle-cctv-history-title">
+                  <h4 id="vehicle-cctv-history-title">CCTV vehicle signals ({cctvSignals.length}{cctvSignals.length === VEHICLE_SIGNAL_LIMIT ? ', latest shown' : ''})</h4>
+                  {cctvSignals.length === 0 ? <p>No matching CCTV vehicle signals in your authorised scope.</p> : <ul>{cctvSignals.map((item) => <li key={item.id}>
+                    {new Date(item.observed_at).toLocaleString('en-NZ')} · {item.review_state.replace(/_/g, ' ')} · {linkedName(item.site) ?? linkedName(item.zone) ?? 'Location not recorded'} · {item.review_state === 'accepted' ? 'accepted sighting' : 'not confirmed; review in CCTV triage'}
+                  </li>)}</ul>}
+                </section>
+                {vehicle?.id && <section aria-labelledby="vehicle-enrichment-history-title">
+                  <h4 id="vehicle-enrichment-history-title">Licensed enrichment receipts ({enrichmentReceipts.length}{enrichmentReceipts.length === VEHICLE_SIGNAL_LIMIT ? ', latest shown' : ''})</h4>
+                  {enrichmentReceipts.length === 0 ? <p>No licensed enrichment receipts are recorded for this vehicle.</p> : <ul>{enrichmentReceipts.map((item) => <li key={`${item.source_name}:${item.retrieved_at}:${item.response_sha256}`}>
+                    {item.source_name} · {item.source_location} · checked {new Date(item.retrieved_at).toLocaleString('en-NZ')} · response {item.response_sha256.slice(0, 12)}…
+                  </li>)}</ul>}
+                </section>}
+              </section>
 
               {/* Recent Observations Timeline */}
               <div className="contact-card">
@@ -864,7 +983,7 @@ const VehicleSearchPage: React.FC = () => {
               {/* Recorded Breaches */}
               {breaches.length > 0 && (
                 <div className="contact-card">
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Breach Alerts ({breaches.length})</h3>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Breach Alerts ({breaches.length}{breaches.length >= 10 ? ', latest 10 shown' : ''})</h3>
                   <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
                     {breaches.map((b) => (
                       <div

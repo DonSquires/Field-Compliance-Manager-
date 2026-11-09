@@ -381,17 +381,16 @@ const OfficerVehicleLookupPage: React.FC = () => {
                   </div>
 
                   <div className="spec-item">
-                    <div className="spec-label">WOF / COF</div>
-                    <div className="spec-value">
-                      <span className={`badge ${vehicle?.wof_status === 'current' || vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' || vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
-                        {vehicle?.wof_status ? `WOF: ${vehicle.wof_status.toUpperCase()}` : vehicle?.cof_status ? `COF: ${vehicle.cof_status.toUpperCase()}` : 'UNKNOWN'}
-                      </span>
+                    <div className="spec-label">WoF / CoF</div>
+                    <div className="spec-value" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      <span className={`badge ${vehicle?.wof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>WoF: {vehicle?.wof_status?.toUpperCase() ?? 'UNKNOWN'}</span>
+                      <span className={`badge ${vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>CoF: {vehicle?.cof_status?.toUpperCase() ?? 'UNKNOWN'}</span>
                     </div>
-                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                        Exp: {new Date(vehicle.wof_expiry || vehicle.cof_expiry!).toLocaleDateString()}
-                      </div>
-                    )}
+                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                      {vehicle.wof_expiry && <span>WoF exp: {new Date(vehicle.wof_expiry).toLocaleDateString('en-NZ')}</span>}
+                      {vehicle.wof_expiry && vehicle.cof_expiry && ' · '}
+                      {vehicle.cof_expiry && <span>CoF exp: {new Date(vehicle.cof_expiry).toLocaleDateString('en-NZ')}</span>}
+                    </div>}
                   </div>
 
                   <div className="spec-item">
@@ -434,7 +433,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
 
               {/* Recent Observations Timeline */}
               <div className="contact-card">
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Recent Observations ({observations.length})</h3>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Recent Observations ({observations.length}{observations.length >= 10 ? ', latest 10 shown' : ''})</h3>
                 {observations.length === 0 ? (
                   <div className="empty-state" style={{ padding: '16px' }}>
                     <p style={{ margin: 0 }}>No prior scan observations recorded for this plate.</p>
@@ -479,7 +478,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
               {/* Recorded Breaches */}
               {breaches.length > 0 && (
                 <div className="contact-card">
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Compliance Breaches ({breaches.length})</h3>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Compliance Breaches ({breaches.length}{breaches.length >= 10 ? ', latest 10 shown' : ''})</h3>
                   <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
                     {breaches.map((b) => (
                       <div

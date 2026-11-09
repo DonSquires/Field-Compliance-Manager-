@@ -74,7 +74,7 @@ test('officer vehicle lookup refuses to present incomplete evidence as a result'
   await page.getByPlaceholder(/Enter plate number/).fill('ABC123');
   await page.getByRole('button', { name: 'Search Plate' }).click();
 
-  await expect(page.getByRole('alert')).toContainText('Observation history is unavailable.');
+  await expect(page.locator('.page-container .alert-error').filter({ hasText: 'Observation history is unavailable.' })).toBeVisible();
   await expect(page.getByText(/No vehicle records, SCV certifications, or observations found/)).toHaveCount(0);
   expect(browserErrors.filter((error) => !error.includes('status of 500'))).toEqual([]);
 });
