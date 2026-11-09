@@ -44694,6 +44694,24 @@ export type Database = {
         }
         Returns: Json
       }
+      get_location_patrol_checkpoints: {
+        Args: { p_location_id: string }
+        Returns: {
+          active: boolean
+          checkpoint_verification: string
+          checkpoint_verified_at: string
+          client_site_id: string
+          description: string
+          gps_lat: number
+          gps_lng: number
+          id: string
+          location_id: string
+          name: string
+          qr_code: string
+          radius_meters: number
+          zone_id: string
+        }[]
+      }
       get_manageable_user_identities: {
         Args: { p_operating_organization_id: string }
         Returns: {
@@ -47304,6 +47322,38 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      manage_location_patrol_checkpoint: {
+        Args: {
+          p_action: string
+          p_checkpoint_id?: string
+          p_client_request_id: string
+          p_client_site_id?: string
+          p_description?: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_location_id: string
+          p_name?: string
+          p_organization_id: string
+          p_qr_code?: string
+          p_radius_meters?: number
+          p_zone_id?: string
+        }
+        Returns: {
+          active: boolean
+          checkpoint_verification: string
+          client_site_id: string
+          created: boolean
+          geometry_changed: boolean
+          gps_lat: number
+          gps_lng: number
+          history_version: number
+          id: string
+          location_id: string
+          name: string
+          radius_meters: number
+          zone_id: string
+        }[]
       }
       manage_noise_assessment_review: {
         Args: {
