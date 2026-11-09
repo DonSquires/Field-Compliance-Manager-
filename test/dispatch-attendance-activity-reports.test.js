@@ -8,6 +8,7 @@ const { randomUUID } = require('node:crypto');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const migration = read('supabase/migrations/20261107212000_dispatch_attendance_in_activity_reports.sql');
+const latestReportMigration = read('supabase/migrations/20261109150000_report_disclosure_rules.sql');
 const schema = read('supabase/schema.sql');
 const load = () => import('../supabase/functions/_shared/report-activity-sections.mjs');
 
@@ -196,25 +197,19 @@ test('call-outs are their own client category, after incidents and before everyt
 });
 
 test('the report builder counts and labels call-outs and otherwise keeps the live definition', () => {
-  const sql = migrationBody('build_agreement_activity_report_core');
-  assert.match(sql, /\('incident', 'Incidents and investigations', 0\),\n\t\t\('call_out', 'Call-outs and responses', 1\),\n\t\t\('pest_control', 'Pest control', 2\)/);
-  assert.match(sql, /\('travel_admin', 'Travel and materials', 14\)/);
+  const sql = fnBody(latestReportMigration, 'create or replace function public.build_agreement_activity_report_core(');
+  assert.match(latestReportMigration, /\('incident', 'Incidents and investigations', 0\),\s*\('call_out', 'Call-outs and responses', 1\),\s*\('pest_control', 'Pest control', 2\)/);
+  assert.match(latestReportMigration, /\('travel_admin', 'Travel and materials', 14\)/);
+  assert.match(sql, /category_catalog as \(\s*select c\.code, c\.label, c\.sort_order\s*from public\.report_activity_categories c/);
+  assert.match(sql, /join category_catalog cc on cc\.code = c\.category/);
+  assert.match(sql, /order by cc\.sort_order/);
   assert.match(sql, /count\(\*\) filter \(where category = 'call_out'\) as call_outs/);
   assert.match(sql, /'callOuts', t\.call_outs/);
   // Comments and response notes still pass the identified-person redaction.
   assert.match(sql, /'n', public\.report_redact_identified_persons\(n\.note\)/);
   assert.match(sql, /'ac', public\.report_redact_identified_persons\(n\.action\)/);
-  let restored = sql
-    .replace("\t\t('call_out', 'Call-outs and responses', 1),\n", '')
-    .replace("\t\tcount(*) filter (where category = 'call_out') as call_outs,\n", '')
-    .replace("\t\t\t'callOuts', t.call_outs,\n", '')
-    .replace('agreement: call-outs attended, patrols', 'agreement: patrols');
-  for (const [code, order] of [['pest_control', 2], ['maintenance', 3], ['manufacture', 4], ['installation_removal', 5], ['securing', 6], ['inspection', 7],
-    ['camera_activation', 8], ['vehicle_observation', 9], ['other_work', 10], ['administration', 11], ['patrol_visit', 12], ['unclassified', 13], ['travel_admin', 14]]) {
-    restored = restored.replace(new RegExp(`(\\('${code}', '[^']+', )${order}\\)`), `$1${order - 1})`);
-  }
-  assertPriorOrApplied(sql, restored, liveBody('build_agreement_activity_report_core'));
-  assert.match(migration, /REVOKE ALL ON FUNCTION "public"\."build_agreement_activity_report_core"\([^)]*\) FROM PUBLIC, "anon", "authenticated", "service_role";/);
+  assert.equal(sql, liveBody('build_agreement_activity_report_core'));
+  assert.match(latestReportMigration, /revoke all on function public\.build_agreement_activity_report_core\([^)]*\) from public, anon, authenticated, service_role;/i);
 });
 
 test('both officer timelines list each dispatch milestone the officer recorded, keeping their grants', () => {
