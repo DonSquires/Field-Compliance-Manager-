@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, LandPlot, MapPinned, ShieldCheck, Siren, X } from 'lucide-react';
-import { LocationHouseMap, type EditableEntity, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
+import { useAuth } from '../context/AuthContext';
+import { LocationHouseMap, type EditableEntity, type HouseMapCheckpoint, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
 import './OperationalPlaceManagerHuman.css';
 
-type View = 'site' | 'zones' | 'boundary' | 'closures';
+type View = 'site' | 'zones' | 'boundary' | 'checkpoints' | 'closures';
 
 interface Site extends HouseMapSite {
   risk_level: string | null;
@@ -30,6 +31,7 @@ interface Zone extends HouseMapZone {
 
 interface Module { module_key: string; display_name: string }
 interface Closure { id: string; zone_id: string; closure_type: string; status: string; effective_from: string; effective_to: string | null; reason: string | null; resolution_notes: string | null }
+interface Checkpoint extends HouseMapCheckpoint { location_id: string; client_site_id: string | null; zone_id: string | null; description: string | null; qr_code: string | null; checkpoint_verified_at: string | null }
 interface EditorData { location: { id: string; name: string; address: string | null; organization_id: string }; sites: Site[]; zones: Zone[]; modules: Module[]; closures: Closure[] }
 interface GeographyData { locations: Array<{ id: string; address: string | null }>; sites: HouseMapSite[]; zones: HouseMapZone[] }
 
@@ -44,6 +46,9 @@ interface ZoneForm {
   scv: boolean;
   workflow: string;
 }
+
+interface CheckpointForm { name: string; description: string; qrCode: string; latitude: string; longitude: string; radius: string }
+const emptyCheckpoint: CheckpointForm = { name: '', description: '', qrCode: '', latitude: '', longitude: '', radius: '' };
 
 const ZONE_TYPE_LABELS: Record<string, string> = {
   general: 'General service area',
@@ -111,6 +116,7 @@ const emptyZone = (moduleKey = 'patrol'): ZoneForm => ({
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function OperationalPlaceManager({ locationId, initialZoneId, onClose, onSaved }: { locationId: string; initialZoneId?: string | null; onClose: () => void; onSaved: () => void }) {
+  const { profile } = useAuth();
   const [data, setData] = useState<EditorData | null>(null);
   const [view, setView] = useState<View>(initialZoneId ? 'zones' : 'site');
   const [siteId, setSiteId] = useState('');
@@ -123,9 +129,24 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const [zoneForm, setZoneForm] = useState<ZoneForm>(emptyZone());
   const [creatingZone, setCreatingZone] = useState(false);
   const [restriction, setRestriction] = useState({ type: 'temporary_closure', from: today(), to: '', reason: '' });
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [checkpointAnchor, setCheckpointAnchor] = useState(initialZoneId ? `zone:${initialZoneId}` : '');
+  const [checkpointId, setCheckpointId] = useState('');
+  const [checkpointForm, setCheckpointForm] = useState<CheckpointForm>(emptyCheckpoint);
+  const [checkpointFormOpen, setCheckpointFormOpen] = useState(false);
+  const [placingCheckpoint, setPlacingCheckpoint] = useState(false);
+  const [checkpointReviewed, setCheckpointReviewed] = useState('');
 
   const site = data?.sites.find((item) => item.id === siteId) ?? null;
   const zone = data?.zones.find((item) => item.id === zoneId) ?? null;
+  const selectedCheckpoint = checkpoints.find((item) => item.id === checkpointId) ?? null;
+  const checkpointFacetKind = checkpointAnchor.split(':')[0];
+  const checkpointFacetId = checkpointAnchor.split(':')[1] ?? '';
+  const checkpointSite = checkpointFacetKind === 'site' ? data?.sites.find((item) => item.id === checkpointFacetId) ?? null : null;
+  const checkpointZone = checkpointFacetKind === 'zone' ? data?.zones.find((item) => item.id === checkpointFacetId) ?? null : null;
+  const anchorCheckpoints = checkpoints.filter((item) => checkpointSite ? item.client_site_id === checkpointSite.id : checkpointZone ? item.zone_id === checkpointZone.id : false);
+  const checkpointPoint = checkpointForm.latitude.trim() && checkpointForm.longitude.trim()
+    ? { lat: Number(checkpointForm.latitude), lng: Number(checkpointForm.longitude) } : null;
   const isFreedomCamping = zoneForm.moduleKey === 'freedom_camping';
   const selectedRestrictions = useMemo(() => data?.closures.filter((item) => item.zone_id === zoneId) ?? [], [data?.closures, zoneId]);
 
@@ -152,6 +173,11 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
       sites: editor.sites.map((item) => ({ ...item, ...siteGeometry.get(item.id) })) as Site[],
       zones: editor.zones.map((item) => ({ ...item, ...zoneGeometry.get(item.id) })) as Zone[],
     };
+    const checkpointResponse = profile?.organizationId
+      ? await supabase.rpc('get_location_patrol_checkpoints', { p_location_id: locationId })
+      : { data: [], error: null };
+    if (checkpointResponse.error) { setError(checkpointResponse.error.message); return; }
+    setCheckpoints((checkpointResponse.data as Checkpoint[]) ?? []);
     setData(next);
     setSiteId((current) => next.sites.some((item) => item.id === current) ? current : next.sites[0]?.id ?? '');
     const requestedZoneId = preferredZoneId ?? initialZoneId ?? '';
@@ -162,7 +188,13 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
       if (requestedZoneId && next.zones.some((item) => item.id === requestedZoneId)) return `zone:${requestedZoneId}`;
       return next.sites[0] ? `site:${next.sites[0].id}` : next.zones[0] ? `zone:${next.zones[0].id}` : '';
     });
-  }, [initialZoneId, locationId]);
+    setCheckpointAnchor((current) => {
+      if (current.startsWith('site:') && next.sites.some((item) => `site:${item.id}` === current)) return current;
+      if (current.startsWith('zone:') && next.zones.some((item) => `zone:${item.id}` === current)) return current;
+      if (initialZoneId && next.zones.some((item) => item.id === initialZoneId)) return `zone:${initialZoneId}`;
+      return next.sites[0] ? `site:${next.sites[0].id}` : next.zones[0] ? `zone:${next.zones[0].id}` : '';
+    });
+  }, [initialZoneId, locationId, profile?.organizationId]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -270,6 +302,102 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     }), 'Temporary restriction ended. The history remains on this area.');
   };
 
+  const editCheckpoint = (item: Checkpoint) => {
+    setCheckpointId(item.id);
+    setCheckpointAnchor(item.client_site_id ? `site:${item.client_site_id}` : `zone:${item.zone_id}`);
+    setCheckpointForm({ name: item.name, description: item.description ?? '', qrCode: item.qr_code ?? '', latitude: item.gps_lat?.toString() ?? '', longitude: item.gps_lng?.toString() ?? '', radius: item.radius_meters.toString() });
+    setCheckpointFormOpen(true);
+    setCheckpointReviewed('');
+    setPlacingCheckpoint(false);
+  };
+
+  const addCheckpoint = () => {
+    setCheckpointId('');
+    setCheckpointForm(emptyCheckpoint);
+    setCheckpointFormOpen(true);
+    setCheckpointReviewed('');
+    setPlacingCheckpoint(true);
+  };
+
+  const saveCheckpoint = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!data || !profile?.organizationId || (!checkpointSite && !checkpointZone)) {
+      setError('Choose an authorised Site or Zone before managing a checkpoint.');
+      return;
+    }
+    if (!checkpointForm.name.trim() || !checkpointPoint || !Number.isFinite(checkpointPoint.lat) || !Number.isFinite(checkpointPoint.lng)) {
+      setError('Enter a checkpoint name and choose its position on the map.');
+      return;
+    }
+    const radius = checkpointForm.radius.trim() ? Number(checkpointForm.radius) : null;
+    if (radius !== null && (!Number.isInteger(radius) || radius < 1 || radius > 500)) {
+      setError('Checkpoint radius must be between 1 and 500 metres.');
+      return;
+    }
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const { data: receiptData, error: saveError } = await supabase.rpc('manage_location_patrol_checkpoint', {
+        p_client_request_id: crypto.randomUUID(),
+        p_action: checkpointId ? 'update' : 'create',
+        p_organization_id: profile.organizationId,
+        p_location_id: data.location.id,
+        p_checkpoint_id: checkpointId || null,
+        p_client_site_id: checkpointSite?.id ?? null,
+        p_zone_id: checkpointZone?.id ?? null,
+        p_name: checkpointForm.name.trim(),
+        p_description: checkpointForm.description,
+        p_gps_lat: checkpointPoint.lat,
+        p_gps_lng: checkpointPoint.lng,
+        p_radius_meters: radius,
+        p_qr_code: checkpointForm.qrCode,
+      });
+      if (saveError) throw saveError;
+      const receipt = (Array.isArray(receiptData) ? receiptData[0] : receiptData) as { id?: string; created?: boolean; geometry_changed?: boolean; history_version?: number } | null;
+      if (!receipt?.id) throw new Error('No checkpoint receipt was returned. Reload before retrying.');
+      const wasCreated = !checkpointId;
+      setCheckpointId(receipt.id);
+      setPlacingCheckpoint(false);
+      setCheckpointReviewed('');
+      setNotice(wasCreated
+        ? 'Checkpoint placed. It remains unverified until its position is inspected on the map.'
+        : receipt.geometry_changed ? 'Checkpoint position updated. Its verification was reset; inspect the new position on the map.' : 'Checkpoint details saved.');
+      await load();
+      onSaved();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'The checkpoint could not be saved.');
+    } finally { setBusy(false); }
+  };
+
+  const verifyCheckpoint = async () => {
+    if (!selectedCheckpoint || checkpointReviewed !== selectedCheckpoint.id) return;
+    setBusy(true); setError(null); setNotice(null);
+    const { error: verifyError } = await supabase.rpc('verify_boundary', { p_entity_type: 'patrol_checkpoint', p_entity_id: selectedCheckpoint.id });
+    if (verifyError) setError(verifyError.message);
+    else {
+      setNotice(`${selectedCheckpoint.name} confirmed from visual map review.`);
+      setCheckpointReviewed('');
+      await load();
+      onSaved();
+    }
+    setBusy(false);
+  };
+
+  const changeCheckpointStatus = (item: Checkpoint) => {
+    const anchor = item.client_site_id ? `site:${item.client_site_id}` : `zone:${item.zone_id}`;
+    const siteIdForRpc = item.client_site_id;
+    const zoneIdForRpc = item.zone_id;
+    void complete(() => supabase.rpc('manage_location_patrol_checkpoint', {
+      p_client_request_id: crypto.randomUUID(),
+      p_action: item.active ? 'deactivate' : 'reactivate',
+      p_organization_id: profile?.organizationId ?? '',
+      p_location_id: locationId,
+      p_checkpoint_id: item.id,
+      p_client_site_id: siteIdForRpc,
+      p_zone_id: zoneIdForRpc,
+    }), `${item.name} ${item.active ? 'deactivated' : 'reactivated'}.`);
+    setCheckpointAnchor(anchor);
+  };
+
   const startNewZone = () => {
     const moduleKey = data?.modules.find((item) => item.module_key === 'patrol')?.module_key ?? data?.modules[0]?.module_key ?? 'patrol';
     setZoneForm(emptyZone(moduleKey));
@@ -309,7 +437,8 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
         <button className={view === 'site' ? 'is-active' : ''} onClick={() => setView('site')}><ShieldCheck size={15} />1. Site briefing</button>
         <button className={view === 'zones' ? 'is-active' : ''} onClick={() => setView('zones')}><MapPinned size={15} />2. Work areas</button>
         <button className={view === 'boundary' ? 'is-active' : ''} onClick={() => setView('boundary')}><LandPlot size={15} />3. Map boundaries</button>
-        <button className={view === 'closures' ? 'is-active' : ''} onClick={() => setView('closures')}><Siren size={15} />4. Temporary restrictions</button>
+        <button className={view === 'checkpoints' ? 'is-active' : ''} onClick={() => setView('checkpoints')}><MapPinned size={15} />4. Checkpoints</button>
+        <button className={view === 'closures' ? 'is-active' : ''} onClick={() => setView('closures')}><Siren size={15} />5. Temporary restrictions</button>
       </nav>
       {error && <div className="place-manager-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
       {notice && <div className="place-manager-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
@@ -347,6 +476,59 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
             <div className="place-manager-heading"><div><h3>Draw or update a boundary</h3><p>Choose a Site or work area, inspect the real map, then confirm the shape officers may rely on.</p></div><select aria-label="Boundary to edit" value={boundaryTarget} onChange={(event) => setBoundaryTarget(event.target.value)}><optgroup label="Sites">{data.sites.map((item) => <option value={`site:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup><optgroup label="Work areas">{data.zones.map((item) => <option value={`zone:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup></select></div>
             <div className="place-manager-help"><LandPlot size={17} /><div><strong>Use the map, not GeoJSON.</strong><span>Find the LINZ parcel, draw corners over satellite imagery, or use a measured radius. A boundary is not used by officers until a person confirms it.</span></div></div>
             {editableEntity ? <LocationHouseMap key={boundaryTarget} data-testid="test-location-house-map" organizationId={data.location.organization_id} house={data.location} sites={data.sites} zones={data.zones} editableEntity={editableEntity} onSelectFacet={(facet) => { setNotice(null); setBoundaryTarget(`${facet.type === 'client_site' ? 'site' : 'zone'}:${facet.id}`); }} /> : <div className="place-manager-empty">Add a Site or work area before drawing a boundary.</div>}
+          </div>
+        ) : view === 'checkpoints' ? (
+          <div className="place-manager-checkpoints">
+            <div className="place-manager-heading">
+              <div><h3>Checkpoints</h3><p>Place a point-radius checkpoint under exactly one Site or Zone at this Location House.</p></div>
+              <div>
+                <select aria-label="Checkpoint Site or Zone" value={checkpointAnchor} onChange={(event) => { setCheckpointAnchor(event.target.value); setCheckpointId(''); setCheckpointForm(emptyCheckpoint); setCheckpointFormOpen(false); setCheckpointReviewed(''); setPlacingCheckpoint(false); }}>
+                  <optgroup label="Sites">{data.sites.map((item) => <option value={`site:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup>
+                  <optgroup label="Zones">{data.zones.map((item) => <option value={`zone:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup>
+                </select>
+                <button type="button" onClick={addCheckpoint} disabled={!checkpointSite && !checkpointZone}>Add checkpoint</button>
+              </div>
+            </div>
+            <div className="place-manager-help"><MapPinned size={17} /><div><strong>Checkpoints are separate from the Site or Zone boundary.</strong><span>Every new or moved point is unverified. Inspect its radius on this map, then confirm it explicitly.</span></div></div>
+            {checkpointSite || checkpointZone ? <div className="place-manager-checkpoint-layout">
+              <section className="place-manager-checkpoint-list" aria-label="Checkpoints for selected Site or Zone">
+                <h4>{checkpointSite?.name ?? checkpointZone?.name}</h4>
+                {anchorCheckpoints.length ? anchorCheckpoints.map((item) => <button type="button" key={item.id} className={checkpointId === item.id ? 'is-selected' : ''} onClick={() => editCheckpoint(item)}>
+                  <span><strong>{item.name}</strong><small>{item.gps_lat == null ? 'No map position' : `${item.radius_meters} m radius`} · {item.active ? 'active' : 'inactive'}</small></span>
+                  <em className={item.checkpoint_verification === 'verified' ? 'is-verified' : 'is-unverified'}>{item.checkpoint_verification === 'verified' ? 'Verified' : 'Unverified'}</em>
+                </button>) : <p>No checkpoints for this facet yet.</p>}
+              </section>
+              <LocationHouseMap
+                key={`checkpoint:${checkpointAnchor}`}
+                organizationId={data.location.organization_id}
+                house={data.location}
+                sites={data.sites}
+                zones={data.zones}
+                checkpoints={checkpoints}
+                checkpointDraftPoint={checkpointPoint}
+                checkpointPlacement={placingCheckpoint}
+                onCheckpointPosition={(point) => { setCheckpointForm((current) => ({ ...current, latitude: point.lat.toFixed(7), longitude: point.lng.toFixed(7) })); setCheckpointReviewed(''); setPlacingCheckpoint(false); }}
+              />
+              {checkpointFormOpen && <form className="place-manager-checkpoint-form" onSubmit={(event) => void saveCheckpoint(event)}>
+                <div className="place-manager-heading"><div><h4>{checkpointId ? 'Edit checkpoint' : 'New checkpoint'}</h4><p>{placingCheckpoint ? 'Click the map to set the point.' : 'Enter details and choose its position on the map.'}</p></div><button type="button" onClick={() => { setCheckpointId(''); setCheckpointForm(emptyCheckpoint); setCheckpointFormOpen(false); setCheckpointReviewed(''); setPlacingCheckpoint(false); }}>Cancel</button></div>
+                <div className="place-manager-grid is-three">
+                  <label><span>Checkpoint name</span><input required maxLength={200} value={checkpointForm.name} onChange={(event) => setCheckpointForm({ ...checkpointForm, name: event.target.value })} /></label>
+                  <label><span>Radius in metres</span><input type="number" min="1" max="500" value={checkpointForm.radius} onChange={(event) => setCheckpointForm({ ...checkpointForm, radius: event.target.value })} placeholder="Organisation default (5 m)" /></label>
+                  <label><span>QR code (optional)</span><input value={checkpointForm.qrCode} onChange={(event) => setCheckpointForm({ ...checkpointForm, qrCode: event.target.value })} /></label>
+                  <label className="is-wide"><span>Description (optional)</span><textarea rows={2} value={checkpointForm.description} onChange={(event) => setCheckpointForm({ ...checkpointForm, description: event.target.value })} /></label>
+                </div>
+                <div className="place-manager-checkpoint-position">
+                  <span>{checkpointPoint ? `Position: ${checkpointPoint.lat.toFixed(6)}, ${checkpointPoint.lng.toFixed(6)}` : 'No position selected'}</span>
+                  <button type="button" onClick={() => { setPlacingCheckpoint(true); setCheckpointReviewed(''); }}>{placingCheckpoint ? 'Click the map to place' : checkpointId ? 'Move on map' : 'Choose on map'}</button>
+                </div>
+                <footer><span>A changed position resets checkpoint verification.</span><button type="submit" className="is-primary" disabled={busy || !checkpointForm.name.trim() || !checkpointPoint}>{busy ? 'Saving' : checkpointId ? 'Save checkpoint' : 'Place checkpoint'}</button></footer>
+                {selectedCheckpoint?.checkpoint_verification !== 'verified' && selectedCheckpoint?.gps_lat != null && <div className="place-manager-checkpoint-review">
+                  <label><input type="checkbox" checked={checkpointReviewed === selectedCheckpoint.id} onChange={(event) => setCheckpointReviewed(event.target.checked ? selectedCheckpoint.id : '')} />Position inspected on the map</label>
+                  <button type="button" className="is-primary" disabled={busy || checkpointReviewed !== selectedCheckpoint.id} onClick={() => void verifyCheckpoint()}>Verify checkpoint</button>
+                </div>}
+                {selectedCheckpoint && <button type="button" disabled={busy} onClick={() => changeCheckpointStatus(selectedCheckpoint)}>{selectedCheckpoint.active ? 'Deactivate checkpoint' : 'Reactivate checkpoint'}</button>}
+              </form>}
+            </div> : <div className="place-manager-empty">Add a Site or Zone to this Location House before placing checkpoints.</div>}
           </div>
         ) : (
           <div className="place-manager-restrictions">

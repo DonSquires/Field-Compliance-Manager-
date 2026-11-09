@@ -13,6 +13,7 @@ import '../styles/PlaceWorkspace.css';
 export default function LocationProfilePage({ locationId }: { locationId: string }) {
   const { profile, operatingOrganizationId } = useAuth();
   const route = useLocation();
+  const workflowContext = readWorkflowContext(route.search);
   const providerId = readWorkflowContext(route.search).providerId ?? operatingOrganizationId ?? profile?.organizationId ?? undefined;
   const navigate = useNavigate();
   const [place, setPlace] = useState<FieldPlace | null>(null);
@@ -24,7 +25,7 @@ export default function LocationProfilePage({ locationId }: { locationId: string
   const [notice, setNotice] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [section, setSection] = useState<'profile' | 'reports'>('profile');
-  const [manage, setManage] = useState(false);
+  const [manage, setManage] = useState(() => new URLSearchParams(route.search).get('manage') === 'geofences');
   const [addressSearch, setAddressSearch] = useState('');
   const [addressMatches, setAddressMatches] = useState<AddressCandidate[]>([]);
   const [address, setAddress] = useState<AddressCandidate | null>(null);
@@ -147,6 +148,6 @@ export default function LocationProfilePage({ locationId }: { locationId: string
           <section className="place-section" aria-label="Location map"><LocationHouseMap organizationId={place.organization_id} house={place} sites={place.sites} zones={place.zones} /></section>
         </>}
     </>}
-    {manage && place && <OperationalPlaceManager locationId={place.id} onClose={() => { setManage(false); setRevision(value => value + 1); }} onSaved={() => setDirty(false)} />}
+    {manage && place && <OperationalPlaceManager locationId={place.id} initialZoneId={workflowContext.zoneId} onClose={() => { setManage(false); setRevision(value => value + 1); const params = new URLSearchParams(route.search); params.delete('manage'); navigate({ pathname: route.pathname, search: params.toString() ? `?${params.toString()}` : '' }, { replace: true }); }} onSaved={() => setDirty(false)} />}
   </div>;
 }

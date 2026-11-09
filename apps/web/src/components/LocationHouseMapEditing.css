@@ -1,0 +1,13 @@
+.leaflet-div-icon.house-map-vertex {
+  box-sizing: border-box;
+  border: 2px solid #f4f7f8;
+  border-radius: 50%;
+  background: #e5aa45;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.7);
+}
+
+.leaflet-div-icon.house-map-vertex.is-midpoint {
+  border-color: #1b3a49;
+  background: #f4f7f8;
+  opacity: 0.88;
+}

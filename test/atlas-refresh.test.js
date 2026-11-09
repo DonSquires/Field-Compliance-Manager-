@@ -484,15 +484,15 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('components/CrmOrganizationDialog', 'manage_crm_organization', 'calls'), true);
   assert.equal(hasEdge('components/CrmSiteDialog', 'find_crm_site_candidates', 'calls'), true);
   assert.equal(hasEdge('components/CrmSiteDialog', 'create_crm_site', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'get_geofence_review_queue', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'get_boundary_history', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'propose_boundary', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'accept_boundary_proposal', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'reject_boundary_proposal', 'calls'), true);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'verify_boundary', 'calls'), true);
-  // Workbench rule (P2): the browser never writes a live boundary directly.
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'manage_crm_site_boundary', 'calls'), false);
-  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'save_site_boundary', 'calls'), false);
+  assert.equal(hasEdge('components/LocationHouseMap', 'propose_boundary', 'calls'), true);
+  assert.equal(hasEdge('components/LocationHouseMap', 'accept_boundary_proposal', 'calls'), true);
+  assert.equal(hasEdge('components/LocationHouseMap', 'verify_boundary', 'calls'), true);
+  assert.equal(hasEdge('components/OperationalPlaceManager', 'get_location_patrol_checkpoints', 'calls'), true);
+  assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_location_patrol_checkpoint', 'calls'), true);
+  // Location House uses the governed proposal path; there is no separate workbench or direct geometry writer.
+  assert.equal(atlas.edges.some((edge) => edge.source_name === 'pages/SiteBoundaryReviewPage'), false);
+  assert.equal(hasEdge('components/LocationHouseMap', 'manage_crm_site_boundary', 'calls'), false);
+  assert.equal(hasEdge('components/LocationHouseMap', 'save_site_boundary', 'calls'), false);
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'get_crm_agreement_setup', 'calls'), true);
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'manage_crm_agreement_setup', 'calls'), true);
   assert.equal(hasEdge('components/CrmOperationalReadinessDialog', 'get_crm_enterprise_readiness', 'calls'), true);

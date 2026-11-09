@@ -12,7 +12,6 @@ const words = read('apps/web/src/lib/zoneSchedule.ts');
 const zonePage = read('apps/web/src/pages/ZoneDetailPage.tsx');
 const prefs = read('apps/web/src/lib/mapPreferences.ts');
 const houseMap = read('apps/web/src/components/LocationHouseMap.tsx');
-const workbench = read('apps/web/src/pages/SiteBoundaryReviewPage.tsx');
 
 test('zone activation schedules are Monday-first, human-editable, version-checked and audited (owner ruling 2026-09-20)', () => {
   assert.match(schedule, /v_isodow\s+int := extract\(isodow from v_local\)::int;/);
@@ -53,13 +52,14 @@ test('maps come back the way they were left: one instance per surface, remembere
   // the house map no longer tears the map down on every probe click; the overlay group is what re-renders
   assert.match(houseMap, /addLinzBaseLayers\(/);
   assert.match(houseMap, /rememberViewport\(/);
+  assert.match(houseMap, /restoreViewportOr\(/);
   assert.doesNotMatch(houseMap, /\}, \[sites, zones, linzPreview, probePoint, resolution, house\.name\]\);/);
-  assert.match(workbench, /addLinzBaseLayers\(/);
-  assert.match(workbench, /restoreViewportOr\(/);
 });
 
 test('a human can adjust a live boundary without redrawing it: stage the current shape, insert and remove vertices', () => {
-  assert.match(workbench, /Adjust current boundary/);
-  assert.match(workbench, /is-midpoint/);
-  assert.match(workbench, /contextmenu/);
+  assert.match(houseMap, /Adjust current boundary/);
+  assert.match(houseMap, /is-midpoint/);
+  assert.match(houseMap, /marker\.on\('contextmenu'/);
+  assert.match(houseMap, /adjusted_from: 'current_boundary'/);
+  assert.match(houseMap, /points && points\.length > 3 \? points\.filter/);
 });

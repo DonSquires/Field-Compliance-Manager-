@@ -43,9 +43,9 @@ test('every outcome has its own loud notice and the status is persisted with the
   for (const outcome of OUTCOMES.filter((o) => o !== 'resolved').concat('not_evaluated')) {
     assert.match(notice, new RegExp(`${outcome}: '[^']{40,}'`), `${outcome} must carry a distinct notice`);
   }
-  assert.match(notice, /unresolved_no_geofence: '[^']*Geofence workbench/);
-  assert.match(notice, /unresolved_unverified: '[^']*verified in the Geofence workbench/);
-  assert.match(notice, /unresolved_invalid: '[^']*redrawn or re-imported/);
+  assert.match(notice, /unresolved_no_geofence: '[^']*Location House/);
+  assert.match(notice, /unresolved_unverified: '[^']*verified in Location House/);
+  assert.match(notice, /unresolved_invalid: '[^']*redrawn or re-imported in Location House/);
   // Persisted on the observation's geofence_context.
   const context = scan.slice(scan.indexOf('const geofenceContext = {'), scan.indexOf('};', scan.indexOf('const geofenceContext = {')));
   for (const key of ['resolution_status: resolutionStatus', 'governor_overlap_flag: governorOverlapFlag', 'geofence_notice: geofenceNotice']) assert.ok(context.includes(key), `geofence_context must carry ${key}`);
@@ -69,5 +69,6 @@ test('web and mobile clients render the outcome distinctly and never fabricate o
   assert.match(mobileScreen, /result\.geofence_notice \?/);
   assert.doesNotMatch(mobileScreen, /No verified zone matched/);
   assert.doesNotMatch(relationships, /\?\? 'outside_all_geofences'/, 'an absent resolver row must not become a valid operational result');
-  assert.match(relationships, /resolutionStatus: row\?\.resolution_status \?\? 'unavailable'/);
+  assert.match(relationships, /if \(!row \|\| !row\.resolution_status \|\| row\.resolution_status === 'unavailable'\)/);
+  assert.match(relationships, /setGeofenceResolution\(\{ resolutionStatus: 'unavailable', siteId: null, zoneId: null \}\)/);
 });

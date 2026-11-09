@@ -102,7 +102,6 @@ const FinanceMoneyPage = React.lazy(() => import('../pages/FinanceMoneyPage'));
 const FinanceCostingPage = React.lazy(() => import('../pages/FinanceCostingPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
-const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
 const ZoneDetailPage = React.lazy(() => import('../pages/ZoneDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
@@ -879,7 +878,7 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
             return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
         }
       case 'sites':
-        return <SiteBoundaryReviewPage />;
+        return <LocationsPage />;
       case 'site-360':
         return <SiteDetailPage />;
       case 'zones':

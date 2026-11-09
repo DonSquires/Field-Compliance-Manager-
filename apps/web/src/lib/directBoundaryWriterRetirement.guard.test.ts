@@ -17,10 +17,6 @@ const setterSecurity = readFileSync(
 );
 const schema = readFileSync(resolve(root, 'supabase/schema.sql'), 'utf8');
 const databaseTypes = readFileSync(resolve(root, 'src/types/database.ts'), 'utf8');
-const reviewPage = readFileSync(
-  resolve(root, 'apps/web/src/pages/SiteBoundaryReviewPage.tsx'),
-  'utf8',
-);
 const houseMap = readFileSync(
   resolve(root, 'apps/web/src/components/LocationHouseMap.tsx'),
   'utf8',
@@ -55,9 +51,6 @@ describe('direct boundary writer retirement', () => {
     expect(governedWorkflow).toContain(
       'PERFORM public.verify_boundary(v_p.entity_type, v_p.entity_id);',
     );
-    expect(reviewPage).toContain("supabase.rpc('propose_boundary'");
-    expect(reviewPage).toContain("supabase.rpc('accept_boundary_proposal'");
-    expect(reviewPage).toContain("supabase.rpc('verify_boundary'");
     expect(houseMap).toContain("supabase.rpc('propose_boundary'");
     expect(houseMap).toContain("supabase.rpc('accept_boundary_proposal'");
   });
