@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -7,6 +8,9 @@ import {
   photoSourcePaths, runSourceScan, saveSyncState,
 } from './source-sync.mjs';
 import { MAX_NEW_PLACES_PER_SHEET, MAX_REVIEWED_PLACES, placeOverlay, placeRegistrationSql, placesToRegister } from './source-places.mjs';
+import {
+  buildCaptureGroups, captureCsv, captureSheet, captureVersion, chunkCaptureGroups, MAX_CAPTURE_BATCHES, validatePhotoCaptures,
+} from './source-captures.mjs';
 
 export const newPlaceLimit = map => map.max_new_places_per_sheet ?? MAX_NEW_PLACES_PER_SHEET;
 
@@ -31,6 +35,7 @@ export function validateSourceMap(map) {
     throw new Error('non_place_terms must be short words');
   }
   const namespaces = new Set();
+  const sheetsByCode = new Map();
   for (const [workbook, entry] of Object.entries(map.workbooks)) {
     if (entry.hold) {
       if (!/^[a-z0-9_]{1,80}$/.test(entry.hold) || entry.sheets) throw new Error(`${workbook}: a held workbook needs one reason code and no sheets`);
@@ -65,8 +70,10 @@ export function validateSourceMap(map) {
       // One namespace per sheet: a shared code would make two sheets overwrite each other's rows.
       if (namespaces.has(sheet.client_code)) throw new Error(`Client code ${sheet.client_code} is mapped twice`);
       namespaces.add(sheet.client_code);
+      sheetsByCode.set(sheet.client_code, sheet);
     }
   }
+  validatePhotoCaptures(map.photo_captures, sheetsByCode);
   return map;
 }
 
@@ -81,77 +88,77 @@ const changedRows = requested => (requested?.inserts ?? 0) + (requested?.updates
 
 // Promotes one workbook version. Every mapped sheet is previewed first; a sheet is committed only
 // when its namespace is proven live and its change volume is within the reviewed limit.
-export async function promoteWorkbookVersion({ version, map, exportPlan, syncPlan, namespaceEventCount, registerPlaces, commit }) {
+// Promotes one sheet of one source version through preview, place registration and the governed
+// sync. Returns null when the source changed while it was being exported.
+export async function promoteSheet({ version, sheet, map, exportPlan, syncPlan, namespaceEventCount, registerPlaces, commit }) {
+  const label = { sheet: sheet.sheet, client_code: sheet.client_code };
+  const freshPlan = plan => plan?.mode === 'plan' && plan.source_sha256 === version.sha256;
+  let plan = await exportPlan({ version, sheet, map });
+  if (!freshPlan(plan)) return null;
+  if (plan.manifest?.client_code !== sheet.client_code
+    || plan.manifest?.target_client_organization_id !== sheet.client_organization_id) {
+    throw new Error(`${sheet.client_code}: exported plan does not match its mapping`);
+  }
+  // A reviewed new client starts with no history, so only an explicit mapping flag lets its
+  // empty namespace through; an existing client's code must already have live events.
+  if (!sheet.new_namespace && !(await namespaceEventCount(sheet))) {
+    return { ...label, status: 'held', reason: 'namespace_unproven' };
+  }
+  const newPlaces = placesToRegister(plan, sheet);
+  let places;
+  if (newPlaces.length > newPlaceLimit(map)) {
+    return { ...label, status: 'held', reason: 'new_place_volume_review', new_places: newPlaces.map(place => place.name) };
+  }
+  if (newPlaces.length && registerPlaces) {
+    // Preview rolls the registration back, so it reports what would be created without creating it.
+    places = await registerPlaces({ version, sheet, map, places: newPlaces, commit });
+    // Preview rolls back creations and new coverage links, so it can only resolve places that were
+    // already registered and covered before this run.
+    const overlay = placeOverlay(newPlaces, commit ? places
+      : places.filter(place => place.status === 'existing' && place.agreement_linked && !place.coverage_added));
+    if (Object.keys(overlay).length) {
+      plan = await exportPlan({ version, sheet, map, placeOverlay: overlay });
+      if (!freshPlan(plan)) return null;
+    }
+  } else if (newPlaces.length) {
+    places = newPlaces.map(place => ({ name: place.name, status: 'not_registered' }));
+  }
+  let preview;
+  try {
+    preview = await syncPlan({ sourcePlan: plan, commit: false });
+  } catch (error) {
+    // The batch key is the source hash plus import configuration, so a closed batch means this
+    // exact sheet version was already promoted (e.g. before a sibling sheet was held).
+    if (serverRefusal(error) !== 'server_refused:this_source_and_import_configuration_already_has_a_closed_review_batch') throw error;
+    return { ...label, status: 'unchanged', reason: 'already_batched_for_this_version', ...(places ? { places } : {}) };
+  }
+  const summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
+    preview_result: preview.summary, ...(places ? { places } : {}) };
+  if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
+    return { ...label, status: 'held', reason: 'change_volume_review', ...summary };
+  }
+  if (!commit) return { ...label, status: 'previewed', ...summary };
+  if (preview.status === 'no_source_changes' || preview.status === 'source_rows_held') {
+    return { ...label, status: 'unchanged', ...summary };
+  }
+  try {
+    const applied = await syncPlan({ sourcePlan: plan, commit: true });
+    return { ...label, status: 'applied', batch_id: applied.batch_id, ...summary, result: applied.summary };
+  } catch (error) {
+    if (!/already synced/.test(error?.message ?? '')) throw error;
+    return { ...label, status: 'held', reason: 'already_synced_review', ...summary };
+  }
+}
+
+export async function promoteWorkbookVersion({ version, map, commit, ...deps }) {
   const base = { source_relative_path: version.relative_path, source_sha256: version.sha256 };
   const entry = workbookEntry(version.relative_path, map);
   if (entry.hold) return { ...base, status: 'held', reason: entry.hold, sheets: [] };
   const sheets = [];
-  const freshPlan = plan => plan?.mode === 'plan' && plan.source_sha256 === version.sha256;
   for (const sheet of entry.sheets) {
-    const label = { sheet: sheet.sheet, client_code: sheet.client_code };
-    let plan = await exportPlan({ version, sheet, map });
-    if (!freshPlan(plan)) {
-      return { ...base, status: 'stale', reason: 'source_changed_during_promotion', sheets };
-    }
-    if (plan.manifest?.client_code !== sheet.client_code
-      || plan.manifest?.target_client_organization_id !== sheet.client_organization_id) {
-      throw new Error(`${sheet.client_code}: exported plan does not match its mapping`);
-    }
-    // A reviewed new client starts with no history, so only an explicit mapping flag lets its
-    // empty namespace through; an existing client's code must already have live events.
-    if (!sheet.new_namespace && !(await namespaceEventCount(sheet))) {
-      sheets.push({ ...label, status: 'held', reason: 'namespace_unproven' });
-      continue;
-    }
-    const newPlaces = placesToRegister(plan, sheet);
-    let places;
-    if (newPlaces.length > newPlaceLimit(map)) {
-      sheets.push({ ...label, status: 'held', reason: 'new_place_volume_review', new_places: newPlaces.map(place => place.name) });
-      continue;
-    }
-    if (newPlaces.length && registerPlaces) {
-      // Preview rolls the registration back, so it reports what would be created without creating it.
-      places = await registerPlaces({ version, sheet, map, places: newPlaces, commit });
-      const overlay = commit ? placeOverlay(newPlaces, places) : {};
-      if (Object.keys(overlay).length) {
-        plan = await exportPlan({ version, sheet, map, placeOverlay: overlay });
-        if (!freshPlan(plan)) return { ...base, status: 'stale', reason: 'source_changed_during_promotion', sheets };
-      }
-    } else if (newPlaces.length) {
-      places = newPlaces.map(place => ({ name: place.name, status: 'not_registered' }));
-    }
-    let preview;
-    try {
-      preview = await syncPlan({ sourcePlan: plan, commit: false });
-    } catch (error) {
-      // The batch key is the source hash plus import configuration, so a closed batch means this
-      // exact sheet version was already promoted (e.g. before a sibling sheet was held).
-      if (serverRefusal(error) !== 'server_refused:this_source_and_import_configuration_already_has_a_closed_review_batch') throw error;
-      sheets.push({ ...label, status: 'unchanged', reason: 'already_batched_for_this_version', ...(places ? { places } : {}) });
-      continue;
-    }
-    const summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
-      preview_result: preview.summary, ...(places ? { places } : {}) };
-    if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
-      sheets.push({ ...label, status: 'held', reason: 'change_volume_review', ...summary });
-      continue;
-    }
-    if (!commit) {
-      sheets.push({ ...label, status: 'previewed', ...summary });
-      continue;
-    }
-    if (preview.status === 'no_source_changes' || preview.status === 'source_rows_held') {
-      sheets.push({ ...label, status: 'unchanged', ...summary });
-      continue;
-    }
-    try {
-      const applied = await syncPlan({ sourcePlan: plan, commit: true });
-      sheets.push({ ...label, status: 'applied', batch_id: applied.batch_id, ...summary,
-        result: applied.summary });
-    } catch (error) {
-      if (!/already synced/.test(error?.message ?? '')) throw error;
-      sheets.push({ ...label, status: 'held', reason: 'already_synced_review', ...summary });
-    }
+    const outcome = await promoteSheet({ version, sheet, map, commit, ...deps });
+    if (!outcome) return { ...base, status: 'stale', reason: 'source_changed_during_promotion', sheets };
+    sheets.push(outcome);
   }
   const held = sheets.find(sheet => sheet.status === 'held');
   if (held) return { ...base, status: 'held', reason: `sheet_${held.reason}`, sheets };
@@ -190,7 +197,8 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
     if (match.status !== 'matched') {
       const reason = { unmatched: 'no_exact_record_match', ambiguous: 'ambiguous_record_match',
         missing: 'source_missing' }[match.status];
-      results.push({ ...base, status: 'held', reason: reason ?? 'unclassified' });
+      results.push({ ...base, status: 'held', reason: reason ?? 'unclassified',
+        ...(match.status === 'unmatched' && match.parsed ? { parsed: match.parsed } : {}) });
       continue;
     }
     if (!commit) {
@@ -211,6 +219,45 @@ export async function promotePhotos({ entries, receipts = {}, classify, attach, 
     results.push({ ...base, status: 'applied', reused: outcome.reused, already_linked: outcome.already_linked });
   }
   return { results, receipts: nextReceipts };
+}
+
+// Turns unmatched structured photos into camera-capture rows, one governed batch per client chunk.
+// Returns the photos whose capture row now exists, so the caller can attach them straight away.
+export async function promoteCaptures({ photos, map, deps, commit, maxBatches, minuteOrganizations }) {
+  const config = map.photo_captures;
+  const sheets = new Map(Object.values(map.workbooks).flatMap(entry => entry.sheets ?? [])
+    .map(sheet => [sheet.client_code, sheet]));
+  const clients = config.clients.map(client => ({ ...client,
+    client_organization_id: sheets.get(client.profile_code).client_organization_id }));
+  const { groups, holds } = buildCaptureGroups(photos, { ...config, clients }, { minuteOrganizations });
+  const batches = [];
+  const captured = [];
+  const limits = { maxRows: Math.min(config.max_rows_per_batch, map.max_new_rows_per_sheet), maxPlaces: newPlaceLimit(map) };
+  for (const client of clients) {
+    const own = groups.filter(group => group.capture_code === client.capture_code);
+    for (const chunk of chunkCaptureGroups(own, limits)) {
+      const photosInChunk = chunk.reduce((total, group) => total + group.photos.length, 0);
+      if (batches.length >= maxBatches) {
+        batches.push({ client_code: client.capture_code, status: 'deferred', reason: 'capture_batch_limit_reached',
+          rows: chunk.length, photos: photosInChunk });
+        continue;
+      }
+      const version = captureVersion(client, captureCsv(chunk, config), config);
+      let outcome;
+      try {
+        outcome = await promoteSheet({ version, sheet: captureSheet(client, sheets.get(client.profile_code), config), map,
+          commit, ...deps });
+      } catch (error) {
+        const refusal = serverRefusal(error);
+        outcome = { client_code: client.capture_code, ...(refusal ? { status: 'held', reason: refusal } : { status: 'error' }),
+          error: describeError(error) };
+      }
+      batches.push({ ...(outcome ?? { client_code: client.capture_code, status: 'stale' }), rows: chunk.length,
+        photos: photosInChunk, source_sha256: version.sha256 });
+      if (outcome?.status === 'applied') captured.push(...chunk.flatMap(group => group.photos));
+    }
+  }
+  return { batches, holds, captured };
 }
 
 export async function listPhotoEntries(root) {
@@ -260,6 +307,16 @@ function tally(results) {
   return counts;
 }
 
+// Held capture folders, largest first, so a person can map a new client label in the source map.
+function heldFolders(holds) {
+  const counts = new Map();
+  for (const hold of holds) {
+    const key = `${hold.reason}:${hold.source_relative_path.replaceAll('\\', '/').split('/')[1] ?? ''}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Object.fromEntries([...counts].sort((a, b) => b[1] - a[1]).slice(0, 40));
+}
+
 // Applies results to scanner state: applied receipts acknowledge, holds are recorded, previews and
 // stale versions stay pending untouched.
 export function recordOutcomes(state, results) {
@@ -274,7 +331,7 @@ export function recordOutcomes(state, results) {
 }
 
 export async function runPromotion({ root, statePath, map, deps, commit = false, includePhotos = false,
-  recheckHolds = false, photoLimit = 500, settleMs, only = null, listPhotos = listPhotoEntries }) {
+  recheckHolds = false, photoLimit = 500, settleMs, only = null, listPhotos = listPhotoEntries, captureBatches = null }) {
   const lockPath = `${statePath}.lock`;
   await mkdir(path.dirname(statePath), { recursive: true, mode: 0o700 });
   const lock = await open(lockPath, 'wx').catch(error => {
@@ -306,9 +363,10 @@ export async function runPromotion({ root, statePath, map, deps, commit = false,
       }
     }
     let photos = [];
+    let captures = null;
     if (includePhotos) {
       const entries = await listPhotos(root);
-      const photoDeps = await deps.photoDeps({ commit });
+      let photoDeps = await deps.photoDeps({ commit });
       try {
         const outcome = await promotePhotos({ entries, receipts: state.photo_receipts ?? {}, commit, limit: photoLimit,
           ...photoDeps });
@@ -316,6 +374,26 @@ export async function runPromotion({ root, statePath, map, deps, commit = false,
         if (commit) {
           state = { ...state, photo_receipts: outcome.receipts };
           await saveSyncState(statePath, state);
+        }
+        const batches = captureBatches ?? map.photo_captures?.max_batches_per_run ?? 0;
+        if (map.photo_captures?.enabled && batches > 0) {
+          const unmatched = photos.filter(item => item.reason === 'no_exact_record_match' && item.parsed)
+            .map(item => ({ relative_path: item.source_relative_path, parsed: item.parsed }));
+          captures = await promoteCaptures({ photos: unmatched, map, deps, commit, maxBatches: batches,
+            minuteOrganizations: photoDeps.minuteOrganizations });
+          const capturedPaths = new Set(captures.captured);
+          const remaining = photoLimit - photos.filter(item => item.status === 'applied').length;
+          if (commit && capturedPaths.size && remaining > 0) {
+            // The new rows are only visible to a fresh index, so the attach step reloads its targets.
+            await photoDeps.close?.();
+            photoDeps = await deps.photoDeps({ commit });
+            const attached = await promotePhotos({ entries: entries.filter(entry => capturedPaths.has(entry.relative_path)),
+              receipts: state.photo_receipts ?? {}, commit, limit: remaining, ...photoDeps });
+            const byPath = new Map(attached.results.map(item => [item.source_relative_path, item]));
+            photos = photos.map(item => byPath.get(item.source_relative_path) ?? item);
+            state = { ...state, photo_receipts: attached.receipts };
+            await saveSyncState(statePath, state);
+          }
         }
       } finally {
         await photoDeps.close?.();
@@ -327,6 +405,8 @@ export async function runPromotion({ root, statePath, map, deps, commit = false,
       workbooks: workbooks.map(({ sheets, ...result }) => ({ ...result, sheets })),
       photos: { counts: tally(photos), sample_matches: photos.filter(item => ['previewed', 'applied'].includes(item.status))
         .slice(0, 20).map(item => item.source_relative_path) },
+      ...(captures ? { captures: { batches: captures.batches, holds: tally(captures.holds.map(hold => ({ status: 'held', ...hold }))),
+        held_folders: heldFolders(captures.holds), captured_photos: captures.captured.length } } : {}),
       remaining_pending: pendingSourceVersions(state).length,
       direct_finance_writes: 0,
     };
@@ -368,23 +448,39 @@ COMMIT;`);
 
 export async function linkedDeps({ root, map }) {
   const { cliQuery, linkedQuery, runSourceSync } = await import('./reconcile-plan.mjs');
+  const exportArgs = ({ version, sheet, overlay, input }) => [
+    path.join(REPO_ROOT, 'scripts', 'import-patrol-log.mjs'), '--export-plan', '--use-supabase-cli',
+    ...input,
+    '--org-id', sheet.client_organization_id, '--provider-org-id', map.provider_organization_id,
+    '--client-code', sheet.client_code, '--classification-profile', map.classification_profile,
+    '--zone-map-file', path.join(REPO_ROOT, 'scripts', 'data', 'zone-maps', sheet.zone_map),
+    '--source-label', path.posix.basename(version.relative_path), '--source-hash', version.sha256,
+    // Live rows were imported with narratives by owner choice, so the identity must match;
+    // their workshop proposals are never created automatically (evidenceOnly below).
+    '--include-narratives',
+    ...(sheet.column_aliases ? ['--source-column-aliases', JSON.stringify(sheet.column_aliases)] : []),
+    ...(map.non_place_terms ? ['--non-place-terms', JSON.stringify(map.non_place_terms)] : []),
+    ...(sheet.place_aliases ? ['--place-aliases', JSON.stringify(sheet.place_aliases)] : []),
+    ...(overlay ? ['--place-overlay', JSON.stringify(overlay)] : []),
+  ];
   return {
-    exportPlan: async ({ version, sheet, placeOverlay: overlay }) => JSON.parse(runNode([
-      path.join(REPO_ROOT, 'scripts', 'import-patrol-log.mjs'), '--export-plan', '--use-supabase-cli',
-      '--xlsx', path.join(root, ...version.relative_path.split('/')),
-      '--sheet', sheet.sheet, '--header-row', String(sheet.header_row),
-      '--org-id', sheet.client_organization_id, '--provider-org-id', map.provider_organization_id,
-      '--client-code', sheet.client_code, '--classification-profile', map.classification_profile,
-      '--zone-map-file', path.join(REPO_ROOT, 'scripts', 'data', 'zone-maps', sheet.zone_map),
-      '--source-label', path.posix.basename(version.relative_path), '--source-hash', version.sha256,
-      // Live rows were imported with narratives by owner choice, so the identity must match;
-      // their workshop proposals are never created automatically (evidenceOnly below).
-      '--include-narratives',
-      ...(sheet.column_aliases ? ['--source-column-aliases', JSON.stringify(sheet.column_aliases)] : []),
-      ...(map.non_place_terms ? ['--non-place-terms', JSON.stringify(map.non_place_terms)] : []),
-      ...(sheet.place_aliases ? ['--place-aliases', JSON.stringify(sheet.place_aliases)] : []),
-      ...(overlay ? ['--place-overlay', JSON.stringify(overlay)] : []),
-    ])),
+    exportPlan: async ({ version, sheet, placeOverlay: overlay }) => {
+      if (!version.csv) {
+        return JSON.parse(runNode(exportArgs({ version, sheet, overlay, input: [
+          '--xlsx', path.join(root, ...version.relative_path.split('/')),
+          '--sheet', sheet.sheet, '--header-row', String(sheet.header_row)] })));
+      }
+      // Camera-capture batches are generated rows, written to a private temporary file for the exporter.
+      const folder = await mkdtemp(path.join(tmpdir(), 'fcm-captures-'));
+      const csvPath = path.join(folder, 'captures.csv');
+      try {
+        await writeFile(csvPath, version.csv, { mode: 0o600 });
+        return JSON.parse(runNode(exportArgs({ version, sheet, overlay,
+          input: ['--csv', csvPath, '--source-sheet', sheet.sheet] })));
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    },
     registerPlaces: async ({ version, sheet, places, commit }) => {
       const actors = linkedQuery(`SELECT import_actor_id FROM public.import_source_profiles
         WHERE organization_id='${map.provider_organization_id}'::uuid AND profile_code='rm_patrol_log' AND active;`);
@@ -423,6 +519,8 @@ export async function linkedDeps({ root, map }) {
       return {
         classify: relativePath => photo.classifyPhoto(relativePath, root, byMinute, null, eventsByMinute),
         attach: row => photo.attachMatchedPhoto(service, governed, row),
+        minuteOrganizations: minuteKey => new Set([...(byMinute.get(minuteKey) ?? []), ...(eventsByMinute.get(minuteKey) ?? [])]
+          .map(target => target.organization_id)),
       };
     },
   };
@@ -434,7 +532,7 @@ async function main() {
   const statePath = argument('--state') ?? process.env.SOURCE_SYNC_STATE_PATH?.trim();
   const reportPath = argument('--report');
   if (!root || !statePath || !reportPath || path.extname(reportPath).toLowerCase() !== '.json') {
-    throw new Error('Use --root <R&M documents> --state <scanner state json> --report <report json> [--commit] [--photos] [--recheck-holds] [--photo-limit n] [--only <workbook name fragment> [--max-new-rows n]]');
+    throw new Error('Use --root <R&M documents> --state <scanner state json> --report <report json> [--commit] [--photos] [--recheck-holds] [--photo-limit n] [--capture-batches n] [--only <workbook name fragment> [--max-new-rows n]]');
   }
   const photoLimit = Number(argument('--photo-limit') ?? 500);
   if (!Number.isInteger(photoLimit) || photoLimit < 0 || photoLimit > 5000) throw new Error('--photo-limit must be 0-5000');
@@ -453,12 +551,19 @@ async function main() {
     }
     map.max_new_rows_per_sheet = limit;
   }
+  const captureArgument = argument('--capture-batches');
+  const captureBatches = captureArgument === undefined ? null : Number(captureArgument);
+  if (captureBatches !== null && (!Number.isInteger(captureBatches) || captureBatches < 0 || captureBatches > MAX_CAPTURE_BATCHES)) {
+    throw new Error(`--capture-batches must be 0-${MAX_CAPTURE_BATCHES}`);
+  }
   const report = await runPromotion({ root, statePath: path.resolve(statePath), map, deps: await linkedDeps({ root, map }),
     commit: process.argv.includes('--commit'), includePhotos: process.argv.includes('--photos'),
-    recheckHolds: process.argv.includes('--recheck-holds'), photoLimit, only: argument('--only') ?? null });
+    recheckHolds: process.argv.includes('--recheck-holds'), photoLimit, only: argument('--only') ?? null, captureBatches });
   await writeFile(reportPath, JSON.stringify(report, null, 2), { mode: 0o600 });
   console.log(JSON.stringify({ mode: report.mode, scan: report.scan,
-    workbooks: tally(report.workbooks), photos: report.photos.counts, remaining_pending: report.remaining_pending }));
+    workbooks: tally(report.workbooks), photos: report.photos.counts,
+    ...(report.captures ? { captures: tally(report.captures.batches), captured_photos: report.captures.captured_photos } : {}),
+    remaining_pending: report.remaining_pending }));
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

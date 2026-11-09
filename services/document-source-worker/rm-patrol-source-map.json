@@ -6,6 +6,26 @@
   "max_new_places_per_sheet": 40,
   "non_place_terms": ["N/A", "Enter", "Exit", "RE-ENTER", "start"],
   "notes": "Each mapped sheet reuses the client code (external_ref namespace) and client organisation proven by the live R&M patrol import. A wrong code would duplicate history, so the promoter refuses namespaces with no live events. Holds stay visible in every report until a reviewed mapping replaces them.",
+  "photo_captures": {
+    "enabled": true,
+    "notes": "Owner ruling 2026-11-09: a structured camera photo that matches no logged entry becomes a camera-capture row at its folder's place, for all history, without a review gate. A folder's last ' - ' segment names the client by these label tokens; no client, several clients or a hold token keeps the photo held. Each client's reviewed sheet (profile_code) supplies its organisation, zone map and place suffix; captures use their own namespace.",
+    "max_rows_per_batch": 250,
+    "max_batches_per_run": 4,
+    "source_label_prefix": "Photos camera captures",
+    "columns": { "job": "Log No", "patroller": "Patroller", "date": "Date", "time": "24hr Time", "location": "Location", "source": "Source", "subject": "Subject", "issue": "Issue", "comments": "Description/Comments", "registration": "Reg" },
+    "values": { "patroller": "Camera", "source": "SECURITY", "subject": "Camera", "issue": "Card review", "comment_prefix": "Camera Activation." },
+    "hold_label_tokens": ["public", "private", "doc"],
+    "clients": [
+      { "capture_code": "TPFLCAM", "profile_code": "TPFL2026", "label_tokens": ["tpfl"] },
+      { "capture_code": "OFOCAM", "profile_code": "OFO2026", "label_tokens": ["ofo", "onefortyone"] },
+      { "capture_code": "TDCCAM", "profile_code": "TDC", "label_tokens": ["tdc"] },
+      { "capture_code": "NCCCAM", "profile_code": "NCC", "label_tokens": ["ncc"] },
+      { "capture_code": "STANDCAM", "profile_code": "STAND", "label_tokens": ["pf olsen", "pfolsen", "pfo"] },
+      { "capture_code": "MRCAM", "profile_code": "MR", "label_tokens": ["m r", "mandr"] },
+      { "capture_code": "STRINGERCAM", "profile_code": "STRINGER", "label_tokens": ["stringer", "stringers"] },
+      { "capture_code": "TAYLORSCAM", "profile_code": "TAYLORS", "label_tokens": ["taylors"] }
+    ]
+  },
   "workbooks": {
     "ACTIVE Birdhurst camera and patrol log.xlsx": {
       "sheets": [{ "sheet": "2025", "header_row": 1, "client_code": "BIRDHURST", "client_organization_id": "1249f7c6-1217-4430-a5dd-9cf438a528ed", "zone_map": "birdhurst-zone-map.json" }]

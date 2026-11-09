@@ -49,7 +49,7 @@ export function placeRegistrationSql({ actorId, providerId, clientId, source, pl
   return `BEGIN;
 SET LOCAL request.jwt.claim.sub = '${actorId}';
 SET LOCAL statement_timeout = '60s';
-CREATE TEMP TABLE source_place_receipts(name text,status text,zone_id uuid,agreement_linked boolean) ON COMMIT DROP;
+CREATE TEMP TABLE source_place_receipts(name text,status text,zone_id uuid,agreement_linked boolean,coverage_added boolean) ON COMMIT DROP;
 DO $places$
 DECLARE
   v_data jsonb:=convert_from(decode('${encoded}','base64'),'UTF8')::jsonb;
@@ -75,7 +75,7 @@ BEGIN
     SELECT count(*) INTO v_count FROM public.locations
     WHERE organization_id='${clientId}'::uuid AND lower(name)=lower(v_place->>'name');
     IF v_count>1 THEN
-      INSERT INTO source_place_receipts VALUES(v_place->>'name','duplicate_house_review',NULL,false); CONTINUE;
+      INSERT INTO source_place_receipts VALUES(v_place->>'name','duplicate_house_review',NULL,false,false); CONTINUE;
     END IF;
     SELECT * INTO v_location FROM public.locations
     WHERE organization_id='${clientId}'::uuid
@@ -85,7 +85,7 @@ BEGIN
     IF v_created THEN
       IF EXISTS(SELECT 1 FROM public.canonical_places WHERE status<>'merged'
         AND lower(display_name) IN (lower(v_place->>'name'),lower(v_place->>'source_name'))) THEN
-        INSERT INTO source_place_receipts VALUES(v_place->>'name','registry_match_review',NULL,false); CONTINUE;
+        INSERT INTO source_place_receipts VALUES(v_place->>'name','registry_match_review',NULL,false,false); CONTINUE;
       END IF;
       v_location:=public.manage_crm_location(
         (v_place->>'request_id')::uuid,'${clientId}'::uuid,'create',v_place->>'name',NULL,NULL,NULL,
@@ -96,7 +96,7 @@ BEGIN
     IF v_location.canonical_place_id IS NULL THEN RAISE EXCEPTION 'Canonical registry link required'; END IF;
     SELECT count(*) INTO v_count FROM public.location_zones WHERE location_id=v_location.id AND is_active;
     IF v_count>1 THEN
-      INSERT INTO source_place_receipts VALUES(v_place->>'name','multiple_facets_review',NULL,false); CONTINUE;
+      INSERT INTO source_place_receipts VALUES(v_place->>'name','multiple_facets_review',NULL,false,false); CONTINUE;
     END IF;
     SELECT * INTO v_zone FROM public.location_zones WHERE location_id=v_location.id AND is_active LIMIT 1;
     IF NOT FOUND THEN
@@ -122,11 +122,11 @@ BEGIN
     END IF;
     INSERT INTO source_place_receipts VALUES(v_place->>'name',CASE WHEN v_created THEN 'created' ELSE 'existing' END,
       v_zone.id,v_linked OR EXISTS(SELECT 1 FROM public.service_agreement_locations l
-        WHERE l.zone_id=v_zone.id AND l.service_agreement_id=v_agreement AND l.status='active'));
+        WHERE l.zone_id=v_zone.id AND l.service_agreement_id=v_agreement AND l.status='active'),v_linked);
   END LOOP;
 END;
 $places$;
-SELECT name,status,zone_id,agreement_linked FROM source_place_receipts ORDER BY name;
+SELECT name,status,zone_id,agreement_linked,coverage_added FROM source_place_receipts ORDER BY name;
 ${commit ? 'COMMIT;' : 'ROLLBACK;'}`;
 }
 

@@ -250,6 +250,20 @@ test('unknown places are previewed without being created, then registered and re
   assert.deepEqual(exports.slice(1), [null, { 'New Place 0': 'zone-new' }]);
 });
 
+test('preview resolves only places that were already registered and covered before the run', async () => {
+  const exports = [];
+  const receipts = [
+    { name: 'New Place 0', status: 'existing', zone_id: 'zone-covered', agreement_linked: true, coverage_added: false },
+    { name: 'New Place 1', status: 'existing', zone_id: 'zone-linked-now', agreement_linked: true, coverage_added: true },
+    { name: 'New Place 2', status: 'created', zone_id: 'zone-new', agreement_linked: true, coverage_added: true },
+  ];
+  const preview = await promoteWorkbookVersion({ version, map: sourceMap(), commit: false, ...deps(),
+    exportPlan: async ({ placeOverlay }) => { exports.push(placeOverlay ?? null); return { ...plan(), unresolved_places: unresolved(3) }; },
+    registerPlaces: async () => receipts });
+  assert.equal(preview.status, 'previewed');
+  assert.deepEqual(exports, [null, { 'New Place 0': 'zone-covered' }]);
+});
+
 test('too many unknown places in one sheet are held for a person before anything is created', async () => {
   const calls = [];
   let registered = false;
