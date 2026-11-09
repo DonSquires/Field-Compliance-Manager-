@@ -229,7 +229,7 @@ export async function promoteCaptures({ photos, map, deps, commit, maxBatches, m
     .map(sheet => [sheet.client_code, sheet]));
   const clients = config.clients.map(client => ({ ...client,
     client_organization_id: sheets.get(client.profile_code).client_organization_id }));
-  const { groups, holds } = buildCaptureGroups(photos, { ...config, clients }, { minuteOrganizations });
+  const { groups, holds, ignored } = buildCaptureGroups(photos, { ...config, clients }, { minuteOrganizations });
   const batches = [];
   const captured = [];
   const limits = { maxRows: Math.min(config.max_rows_per_batch, map.max_new_rows_per_sheet), maxPlaces: newPlaceLimit(map) };
@@ -257,7 +257,7 @@ export async function promoteCaptures({ photos, map, deps, commit, maxBatches, m
       if (outcome?.status === 'applied') captured.push(...chunk.flatMap(group => group.photos));
     }
   }
-  return { batches, holds, captured };
+  return { batches, holds, ignored, captured };
 }
 
 export async function listPhotoEntries(root) {
@@ -330,14 +330,45 @@ export function recordOutcomes(state, results) {
   return next;
 }
 
+const EMPTY_LOCK_STALE_MS = 10 * 60 * 1000;
+
+const processAlive = pid => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+};
+
+// The lock records its owner's PID so a run killed mid-way (laptop restart, closed terminal) does
+// not block every later scheduled run: a lock whose process is gone is reclaimed. A lock with no
+// PID is only reclaimed once it is old enough that no live run can still be writing it.
+export async function acquireSourceLock(lockPath, { isAlive = processAlive, now = Date.now } = {}) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const lock = await open(lockPath, 'wx');
+      await lock.writeFile(String(process.pid));
+      return lock;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    const [text, info] = await Promise.all([readFile(lockPath, 'utf8').catch(() => ''), lstat(lockPath).catch(() => null)]);
+    const pid = Number.parseInt(text.trim(), 10);
+    const stale = Number.isInteger(pid) && pid > 0
+      ? !isAlive(pid)
+      : Boolean(info) && now() - info.mtimeMs > EMPTY_LOCK_STALE_MS;
+    if (!stale || attempt) break;
+    await rm(lockPath, { force: true });
+  }
+  throw new Error('Another promotion run holds the source lock');
+}
+
 export async function runPromotion({ root, statePath, map, deps, commit = false, includePhotos = false,
   recheckHolds = false, photoLimit = 500, settleMs, only = null, listPhotos = listPhotoEntries, captureBatches = null }) {
   const lockPath = `${statePath}.lock`;
   await mkdir(path.dirname(statePath), { recursive: true, mode: 0o700 });
-  const lock = await open(lockPath, 'wx').catch(error => {
-    if (error.code === 'EEXIST') throw new Error('Another promotion run holds the source lock');
-    throw error;
-  });
+  const lock = await acquireSourceLock(lockPath);
   try {
     // Workbooks only: photos are never hashed by the scanner (see promotePhotos).
     const scan = await runSourceScan({ root, statePath, includePhotos: false, settleMs });
@@ -406,7 +437,8 @@ export async function runPromotion({ root, statePath, map, deps, commit = false,
       photos: { counts: tally(photos), sample_matches: photos.filter(item => ['previewed', 'applied'].includes(item.status))
         .slice(0, 20).map(item => item.source_relative_path) },
       ...(captures ? { captures: { batches: captures.batches, holds: tally(captures.holds.map(hold => ({ status: 'held', ...hold }))),
-        held_folders: heldFolders(captures.holds), captured_photos: captures.captured.length } } : {}),
+        held_folders: heldFolders(captures.holds), ignored_before_floor: captures.ignored ?? 0,
+        captured_photos: captures.captured.length } } : {}),
       remaining_pending: pendingSourceVersions(state).length,
       direct_finance_writes: 0,
     };

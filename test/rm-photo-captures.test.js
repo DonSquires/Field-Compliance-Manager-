@@ -100,6 +100,21 @@ test('captures are held when the client already logged that minute or the folder
   assert.deepEqual(groups.map(group => group.capture_code), ['OFOCAM'], 'another client in that minute does not block a capture');
 });
 
+test('photos stamped before the configured floor are ignored, not captured or held', () => {
+  const config = withOrgs(captures({ earliest_capture_date: '2019-01-01' }));
+  const photos = [
+    photo('Photos/Central Rd - Hira - TPFL/000724 1523 stag.jpg'),
+    photo('Photos/Central Rd - Hira - TPFL/181231 2359 ute.jpg'),
+    photo('Photos/Central Rd - Hira - TPFL/190101 0000 ute.jpg'),
+  ];
+  const { groups, holds, ignored } = buildCaptureGroups(photos, config);
+  assert.equal(ignored, 2);
+  assert.deepEqual(holds, []);
+  assert.deepEqual(groups.map(group => group.minute_key), ['2019-01-01 00:00']);
+  assert.throws(() => validateSourceMap(sourceMap({ photo_captures: captures({ earliest_capture_date: '2019-13-01' }) })),
+    /earliest_capture_date/);
+});
+
 test('filename descriptions drop only the date and time stamp', () => {
   assert.equal(photoDescription('Photos/A - B - TPFL/241024 1523 GPT23 white ute.JPG'), 'GPT23 white ute');
   assert.equal(photoDescription('Photos/A - B - TPFL/RMM899 241024 152301 spotlighting.jpg'), 'RMM899 spotlighting');
