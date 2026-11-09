@@ -343,23 +343,31 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       locationRequestRef.current = requestId;
       const coordinates = { lat: position.coords.latitude, lng: position.coords.longitude };
       setCurrentCoordinates(coordinates);
+      setCurrentAddress(null);
       setLocationStatus('locating');
       setLocationError(null);
 
+      void resolveAddressForCoordinates(coordinates.lat, coordinates.lng)
+        .then((address) => {
+          if (requestId === locationRequestRef.current) setCurrentAddress(address?.label ?? null);
+        })
+        .catch(() => undefined);
+
       try {
-        const [{ data, error: resolutionError }, address] = await Promise.all([
-          supabase.rpc('resolve_operational_context_authorized', {
-            p_lat: coordinates.lat,
-            p_lng: coordinates.lng,
-            p_org_id: organizationId,
-            p_module_key: null,
-          }),
-          resolveAddressForCoordinates(coordinates.lat, coordinates.lng),
-        ]);
+        const { data, error: resolutionError } = await supabase.rpc('resolve_operational_context_authorized', {
+          p_lat: coordinates.lat,
+          p_lng: coordinates.lng,
+          p_org_id: organizationId,
+          p_module_key: null,
+        });
         if (requestId !== locationRequestRef.current) return;
-        setCurrentAddress(address?.label ?? null);
         if (resolutionError) throw resolutionError;
         const row = Array.isArray(data) ? data[0] : data;
+        if (!row || !row.resolution_status || row.resolution_status === 'unavailable') {
+          setSelectedPlaceIds({ siteId: null, zoneId: null });
+          setGeofenceResolution({ resolutionStatus: 'unavailable', siteId: null, zoneId: null });
+          throw new Error('The service geofence response was not confirmed.');
+        }
         const zoneId = row?.matched_zone_id ?? null;
         const siteId = row?.site_id ?? null;
         const matchedAgreementZone = zoneId && selectedAgreementZones.some((zone) => zone.id === zoneId);
@@ -382,11 +390,15 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         setLocationError(locationLoadError instanceof Error ? locationLoadError.message : 'Geofence location could not be resolved.');
       }
     }, (positionError) => {
+      locationRequestRef.current += 1;
       setLocationStatus('unavailable');
       setLocationError(positionError.message || 'Location permission was not granted.');
     }, { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 });
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    return () => {
+      locationRequestRef.current += 1;
+      navigator.geolocation.clearWatch(watchId);
+    };
   }, [locationMode, profile?.organizationId, profile?.role, selectedAgreementSites, selectedAgreementZones]);
 
   const value = useMemo<ServiceRelationshipContextValue>(() => ({

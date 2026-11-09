@@ -1,6 +1,35 @@
 import { expect, test } from '@playwright/test';
 import { installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsOfficer } from './fixtures';
 
+test('officer location settles while reverse-geocoding is still pending', async ({ page, context }, testInfo) => {
+  await installOfficerScheduleFixtures(page);
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: -41.274, longitude: 173.283, accuracy: 8 });
+  await page.route('**/rest/v1/rpc/resolve_operational_context_authorized', async (route) => {
+    await route.fulfill({ json: [{ resolution_status: 'resolved', site_id: '42424242-4242-4242-8242-424242424242', matched_zone_id: null, on_site: true }] });
+  });
+  let releaseAddress!: () => void;
+  const addressGate = new Promise<void>((resolve) => { releaseAddress = resolve; });
+  await page.route('**/functions/v1/linz-lookup', async (route) => {
+    if (route.request().postDataJSON()?.action !== 'reverse_geocode') { await route.fallback(); return; }
+    await addressGate;
+    await route.fulfill({ json: { candidates: [{ label: '1 Synthetic Street', source: 'linz_address' }] } });
+  });
+  try {
+    await signInAsOfficer(page, '/officer');
+    const pill = page.locator('.officer-location-pill');
+    await expect(pill).toContainText('Current location');
+    await expect(pill).not.toContainText('Finding location');
+    await pill.getByRole('button').click();
+    await expect(page.getByRole('note', { name: 'Current location evidence' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('officer-location-pending-address.png') });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    releaseAddress();
+  }
+  await expect(page.locator('.officer-location-pill')).toContainText('1 Synthetic Street');
+});
+
 test('officer can reach Home, Schedule and Tools with usable phone targets', async ({ page }, testInfo) => {
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
   await installOfficerScheduleFixtures(page);
