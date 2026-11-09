@@ -372,6 +372,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   useEffect(() => {
     const organizationId = activeShiftLocationContext?.organizationId ?? profile?.organizationId;
     const moduleKey = activeShiftLocationContext?.moduleKey ?? null;
+    const serviceContextReady = !loading && loadedOrganizationId === profile?.organizationId;
     // Admin selection is deliberate. Only field/scan shells opt into GPS resolution.
     if (locationMode !== 'gps' || !organizationId || profile?.role.startsWith('client_')) {
       setLocationStatus('idle');
@@ -524,6 +525,10 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         setCurrentCoordinates(coordinates);
         setLocationError(null);
         scheduleAddressRefresh();
+        if (!serviceContextReady) {
+          setLocationStatus('locating');
+          return;
+        }
         void resolveGeofence(coordinates, requestId);
       }, (positionError) => {
         if (!active || requestId !== locationRequestRef.current) return;
@@ -543,7 +548,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       if (geofenceTimeoutId !== null) window.clearTimeout(geofenceTimeoutId);
       if (addressRefreshTimer !== null) window.clearTimeout(addressRefreshTimer);
     };
-  }, [activeShiftLocationContext, locationMode, profile?.organizationId, profile?.role]);
+  }, [activeShiftLocationContext, loadedOrganizationId, loading, locationMode, profile?.organizationId, profile?.role]);
 
   const value = useMemo<ServiceRelationshipContextValue>(() => ({
     agreements,
