@@ -1146,10 +1146,16 @@ function ActivityReportBody({ packId, updatedAt, report: sourceReport, status, h
         <ul className="report-activity-facts">
           <li>{counted(totals.entries, 'entry is', 'entries are')} in the client report{accountedFor.reconciled ? '; every record in scope is accounted for.' : '.'}</li>
           {reportedLines.length > triagedLines.length && <li>{counted(reportedLines.length - triagedLines.length, 'internal servicing or routine-check record is', 'internal servicing and routine-check records are')} kept out of the client report. Original records remain available to Bob for incident review.</li>}
-          {accountedFor.withheldTravelAdmin > 0 && <li>{counted(accountedFor.withheldTravelAdmin, 'travel or materials record is', 'travel and materials records are')} kept out of the client report.</li>}
-          {accountedFor.withheldShiftMarkers > 0 && <li>{counted(accountedFor.withheldShiftMarkers, 'shift start or finish marker is', 'shift start and finish markers are')} kept out of the client report.</li>}
-          {accountedFor.withheldRoutineCards > 0 && <li>{counted(accountedFor.withheldRoutineCards, 'routine camera card swap is', 'routine camera card swaps are')} kept out of the client report.</li>}
-          {accountedFor.withheldDuplicates > 0 && <li>{counted(accountedFor.withheldDuplicates, 'duplicate entry is', 'duplicate entries are')} reported once, not again.</li>}
+          {accountedFor.withheldByReason.length > 0
+            ? accountedFor.withheldByReason.map((reason) => (
+              <li key={reason.code}>{counted(reason.entries, reason.labelOne || reason.code, reason.labelMany || reason.code)} kept out of the client report.</li>
+            ))
+            : <>
+              {accountedFor.withheldTravelAdmin > 0 && <li>{counted(accountedFor.withheldTravelAdmin, 'travel or materials record is', 'travel and materials records are')} kept out of the client report.</li>}
+              {accountedFor.withheldShiftMarkers > 0 && <li>{counted(accountedFor.withheldShiftMarkers, 'shift start or finish marker is', 'shift start and finish markers are')} kept out of the client report.</li>}
+              {accountedFor.withheldRoutineCards > 0 && <li>{counted(accountedFor.withheldRoutineCards, 'routine camera card swap is', 'routine camera card swaps are')} kept out of the client report.</li>}
+              {accountedFor.withheldDuplicates > 0 && <li>{counted(accountedFor.withheldDuplicates, 'duplicate entry is', 'duplicate entries are')} reported once, not again.</li>}
+            </>}
           {accountedFor.mirrorEventsExcluded > 0 && <li>{counted(accountedFor.mirrorEventsExcluded, 'automatic patrol-log copy of an observation was', 'automatic patrol-log copies of observations were')} excluded so nothing is counted twice.</li>}
           {accountedFor.unclassified > 0 && <li>{counted(accountedFor.unclassified, 'entry has', 'entries have')} no work type recorded and {accountedFor.unclassified === 1 ? 'appears' : 'appear'} as &ldquo;{label('category', 'unclassified')}&rdquo;.</li>}
           {accountedFor.notItemised > 0 && <li>{counted(accountedFor.notItemised, 'entry is', 'entries are')} counted in the totals but not listed in the site log because of the line limit.</li>}
