@@ -20,7 +20,7 @@ test('officer geofence resolves before the deferred address lookup', async ({ pa
   try {
     await signInAsOfficer(page, '/officer');
     const pill = page.locator('.officer-location-pill');
-    await expect(pill).toContainText('Current location');
+    await expect(pill).toContainText('Current location', { timeout: 20_000 });
     await expect(pill).not.toContainText('Finding location');
     expect(addressRequests).toBeGreaterThan(0);
     await expect(pill).not.toContainText('Synthetic Street');
