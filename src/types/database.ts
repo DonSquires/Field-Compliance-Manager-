@@ -44983,6 +44983,19 @@ export type Database = {
           work_status: string
         }[]
       }
+      get_vehicle_enrichment_receipts: {
+        Args: {
+          p_canonical_vehicle_id: string
+          p_limit?: number
+          p_organization_id: string
+        }
+        Returns: {
+          response_sha256: string
+          retrieved_at: string
+          source_location: string
+          source_name: string
+        }[]
+      }
       get_vehicle_identity_checks: {
         Args: { p_canonical_vehicle_id: string; p_organization_id: string }
         Returns: {
