@@ -6,7 +6,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261109180000_reopen_approved_timesheet.sql'), 'utf8');
+const priorMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261109180000_reopen_approved_timesheet.sql'), 'utf8');
+const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261109190000_preserve_branch_review_on_timesheet_reopen.sql'), 'utf8');
 const squash = (text) => text.replace(/\s+/g, ' ');
 
 test('reopening requires payroll authority, current revision, a reason and an unexported approved sheet', () => {
@@ -17,7 +18,8 @@ test('reopening requires payroll authority, current revision, a reason and an un
   assert.match(sql, /SET status = 'submitted'[\s\S]*approved_by = NULL[\s\S]*branch_reviewed_by = NULL/);
   assert.match(sql, /'timesheet_reopened'/);
   assert.match(sql, /'reason', v_reason[\s\S]*'previous_status', 'approved'[\s\S]*'previous_revision', p_expected_revision[\s\S]*'previous_branch_reviewed_by', v_previous_branch_reviewed_by[\s\S]*'previous_branch_review_notes', v_previous_branch_review_notes/);
-  assert.match(sql, /REVOKE ALL ON FUNCTION public\.reopen_approved_timesheet\(uuid, integer, text\) FROM PUBLIC, anon, service_role/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.reopen_approved_timesheet\(/);
+  assert.doesNotMatch(sql, /REVOKE ALL ON FUNCTION public\.reopen_approved_timesheet/);
 });
 
 test('reopen authorization, export locks and audit behavior run in disposable PostgreSQL', {
@@ -69,6 +71,7 @@ test('reopen authorization, export locks and audit behavior run in disposable Po
       INSERT INTO public.timesheets(id,organization_id,status,revision,payroll_export_batch_id,payroll_snapshot)
         VALUES ('${exported}','${org}','approved',2,gen_random_uuid(),'{}');
     `);
+    sql(priorMigration);
     sql(migration);
 
     fails(`BEGIN; ${as(officer)} SELECT public.reopen_approved_timesheet('${sheet}',7,'Correction needed'); COMMIT;`, /Active employer payroll administrator required/);

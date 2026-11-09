@@ -13,10 +13,6 @@ DECLARE
   v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
   v_previous_approved_by uuid;
   v_previous_approved_at timestamptz;
-  v_previous_branch_reviewed_by uuid;
-  v_previous_branch_reviewed_at timestamptz;
-  v_previous_branch_review_notes text;
-  v_previous_branch_reviewed_organization_id uuid;
   v_officer_user_id uuid;
 BEGIN
   SELECT * INTO v_sheet
@@ -38,10 +34,6 @@ BEGIN
   END IF;
   v_previous_approved_by := v_sheet.approved_by;
   v_previous_approved_at := v_sheet.approved_at;
-  v_previous_branch_reviewed_by := v_sheet.branch_reviewed_by;
-  v_previous_branch_reviewed_at := v_sheet.branch_reviewed_at;
-  v_previous_branch_review_notes := v_sheet.branch_review_notes;
-  v_previous_branch_reviewed_organization_id := v_sheet.branch_reviewed_organization_id;
 
   UPDATE public.timesheets
   SET status = 'submitted',
@@ -64,11 +56,7 @@ BEGIN
       'previous_status', 'approved',
       'previous_revision', p_expected_revision,
       'previous_approved_by', v_previous_approved_by,
-      'previous_approved_at', v_previous_approved_at,
-      'previous_branch_reviewed_by', v_previous_branch_reviewed_by,
-      'previous_branch_reviewed_at', v_previous_branch_reviewed_at,
-      'previous_branch_review_notes', v_previous_branch_review_notes,
-      'previous_branch_reviewed_organization_id', v_previous_branch_reviewed_organization_id
+      'previous_approved_at', v_previous_approved_at
     )
   );
 
