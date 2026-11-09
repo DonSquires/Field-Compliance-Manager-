@@ -567,3 +567,35 @@ test('an exhausted provider account returns 429 and is reported unavailable unti
   assert.equal(second.status, 429);
   assert.equal(chatCalls, 1, 'the exhausted account is not called again during the cooldown');
 });
+
+test('Anthropic Claude and OmniRoute use the OpenAI-compatible path and stay inert until configured (owner direction 2026-11-10)', async () => {
+  const unconfigured = createModelGatewayConfig({});
+  const missingKey = await invokeBuilderModel({ config: unconfigured, input: request({ provider: 'anthropic', model: 'claude-sonnet-5-5' }) });
+  assert.equal(missingKey.status, 503);
+  assert.equal(missingKey.body.code, 'provider_unconfigured');
+  assert.match(missingKey.body.error, /Anthropic/);
+  const noGateway = await invokeBuilderModel({ config: unconfigured, input: request({ provider: 'omniroute', model: 'auto' }) });
+  assert.equal(noGateway.status, 503);
+  assert.match(noGateway.body.error, /OmniRoute/);
+
+  const c = createModelGatewayConfig({
+    ANTHROPIC_API_KEY: 'claude-key', ANTHROPIC_OPENAI_BASE_URL: 'https://claude.example/v1/', BOB_ANTHROPIC_MODELS: 'claude-sonnet-5-5',
+    OMNIROUTE_BASE_URL: 'http://omniroute.example:20128/v1'
+  });
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : null });
+    if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'claude-sonnet-5-5' }, { id: 'auto' }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] }), { status: 200 });
+  };
+  const claude = await invokeBuilderModel({ config: c, fetchImpl, input: request({ provider: 'anthropic', model: 'claude-sonnet-5-5' }) });
+  assert.equal(claude.status, 200);
+  const claudeChat = calls.find(call => call.url === 'https://claude.example/v1/chat/completions');
+  assert.ok(claudeChat, 'Claude is called on its OpenAI-compatible endpoint');
+  assert.equal(claudeChat.headers.Authorization, 'Bearer claude-key');
+  assert.equal(claudeChat.body.model, 'claude-sonnet-5-5');
+
+  const routed = await invokeBuilderModel({ config: c, fetchImpl, input: request({ provider: 'omniroute', model: 'auto' }) });
+  assert.equal(routed.status, 200, 'a self-hosted OmniRoute runs without a key');
+  assert.ok(calls.some(call => call.url === 'http://omniroute.example:20128/v1/chat/completions'));
+});

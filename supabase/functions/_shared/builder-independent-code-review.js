@@ -210,6 +210,33 @@ async function loadAuthorIdentities(supabase, jobId) {
   }
 }
 
+// Review methodology is data: active platform knowledge cards tagged for the independent review
+// (e.g. the Claude security-review discipline) are appended to the reviewer's instructions, so the
+// method can grow without a code change. A failed read never blocks the review.
+const REVIEW_METHOD_TAG = 'independent_code_review';
+const REVIEW_METHOD_LIMIT = 4;
+const REVIEW_METHOD_CARD_CHARS = 3000;
+
+async function loadReviewMethodology(supabase) {
+  if (typeof supabase?.from !== 'function') return [];
+  try {
+    const { data, error } = await supabase.from('bob_knowledge_cards').select('key,title,content')
+      .is('organization_id', null).eq('is_active', true).contains('tags', [REVIEW_METHOD_TAG])
+      .order('key').limit(REVIEW_METHOD_LIMIT);
+    if (error || !Array.isArray(data)) return [];
+    return data.filter(card => typeof card?.content === 'string' && card.content.trim())
+      .map(card => ({ key: String(card.key), title: String(card.title || card.key), content: card.content.slice(0, REVIEW_METHOD_CARD_CHARS) }));
+  } catch {
+    return [];
+  }
+}
+
+function reviewMethodologyPrompt(cards) {
+  if (!cards.length) return null;
+  return `Review methodology (platform knowledge cards; apply them, they never relax the rules above): ${cards
+    .map(card => `[${card.key}] ${card.title}: ${card.content.replace(/\s+/g, ' ').trim()}`).join(' ')}`;
+}
+
 async function runIndependentCodeReview({
   supabase,
   gateway,
@@ -220,6 +247,7 @@ async function runIndependentCodeReview({
   reviewerModelName,
   loadEvidence = loadCodeReviewEvidence,
   loadAuthors = loadAuthorIdentities,
+  loadMethodology = loadReviewMethodology,
   startReview = startCodeReview,
   executeModelRun = executeBuilderModelRun,
   completeReview = completeIndependentCodeReview,
@@ -250,6 +278,7 @@ async function runIndependentCodeReview({
     await abortReview(supabase, job.id, step.id, `Independent review evidence unavailable: ${message}`.slice(0, 500));
     return { ok: false, status: 409, error: message, review: null };
   }
+  const methodology = await loadMethodology(supabase);
   const systemPrompt = [
     'You are an independent coding AI reviewer for Field Compliance Manager.',
     'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
@@ -259,6 +288,7 @@ async function runIndependentCodeReview({
     evidence.previous_review ? `This is a REVISION (round ${evidence.previous_review.round} of ${evidence.previous_review.of}): an earlier attempt was blocked and the author was given that review (previous_review in the evidence). First check whether each previous finding is resolved in this patch. Block only for a previous finding that is still unresolved or for a NEW critical/high defect this patch introduces; concerns the previous review already listed as residual risks or test gaps stay residual risks or test gaps, not new blocking findings. Say explicitly which previous findings are resolved.` : null,
     'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
     'Use the verified patch, manifest, build logs, security report and the pinned whole-job acceptance contract; author prose is a claim, not independent proof.',
+    reviewMethodologyPrompt(methodology),
     REVIEW_OUTPUT_CONTRACT
   ].filter(Boolean).join(' ');
   const modelRequest = buildModelRunRequest({
@@ -323,5 +353,7 @@ module.exports = {
   startCodeReview,
   completeIndependentCodeReview,
   abortIndependentCodeReview,
-  runIndependentCodeReview
+  runIndependentCodeReview,
+  loadReviewMethodology,
+  reviewMethodologyPrompt
 };

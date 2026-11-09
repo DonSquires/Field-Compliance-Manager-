@@ -20,7 +20,12 @@ const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 // outsourced fallback for when Bob is stuck or the prompt does not fit a local context window.
 // Ollama Cloud (ollama.com) speaks the Ollama chat API but is an external, keyed service: it is an
 // outsourced tier like OpenAI, never a stand-in for Bob's own compute.
-const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama', ollama_cloud: 'ollama_cloud' });
+// Anthropic (Claude) and OmniRoute speak the OpenAI Chat Completions protocol, so they share the
+// 'openai' transport kind; the provider name, not the kind, decides routing and egress policy.
+const PROVIDER_KINDS = Object.freeze({
+  openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama', ollama_cloud: 'ollama_cloud',
+  anthropic: 'openai', omniroute: 'openai'
+});
 const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
 const HEALTH_FAIL_TTL_MS = 60_000;
@@ -88,6 +93,11 @@ function nativeToolMessages(messages, tools) {
   });
 }
 
+// A self-hosted OmniRoute may run without a key; hosted vendors never do.
+function hostedProviderConfigured(providerConfig) {
+  return Boolean(providerConfig.baseUrl) && (Boolean(providerConfig.apiKey) || providerConfig.keyOptional === true);
+}
+
 function authHeaders(providerConfig) {
   return providerConfig.apiKey ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {};
 }
@@ -128,13 +138,13 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   if (!providerConfig) return { name, configured: false, healthy: false, installed: [] };
   const cacheKey = healthKey(name, providerConfig);
   if (providerConfig.kind === 'openai') {
-    if (!providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
+    if (!hostedProviderConfigured(providerConfig)) return { name, configured: false, healthy: false, installed: [] };
     const cached = healthCache.get(cacheKey);
     if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
     // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
     let installed = [];
     try {
-      const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: { Authorization: `Bearer ${providerConfig.apiKey}` }, signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3) });
+      const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: authHeaders(providerConfig), signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3) });
       const data = response.ok ? await response.json().catch(() => null) : null;
       installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
     } catch { signal?.throwIfAborted(); installed = []; }
@@ -280,6 +290,25 @@ function createModelGatewayConfig(env = process.env) {
       maxOutputTokens: Math.min(maxOutputTokens, 16384),
       numCtx: Math.max(8192, Number(env.BOB_OLLAMA_CLOUD_NUM_CTX) || 131072)
     },
+    // Anthropic Claude through its OpenAI-compatible endpoint (owner direction 2026-11-10: Claude is
+    // an implementation and security-review engine for Bob Builder and Vibe). External and keyed: it
+    // never joins the restricted chain. Ordered strongest-first; /models decides what the key serves.
+    anthropic: {
+      kind: 'openai',
+      apiKey: env.ANTHROPIC_API_KEY || '',
+      baseUrl: (env.ANTHROPIC_OPENAI_BASE_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, ''),
+      models: parseModelAllowlist(env.BOB_ANTHROPIC_MODELS, 'claude-opus-5-5,claude-sonnet-5-5,claude-opus-4-8,claude-sonnet-4-6,claude-haiku-5-5')
+    },
+    // OmniRoute: an owner-run OpenAI-compatible gateway that fans out to many providers, including
+    // free third-party tiers (owner accepted that data boundary 2026-11-10). Unconfigured until
+    // OMNIROUTE_BASE_URL is set; its model names are the gateway's own, so they come from config.
+    omniroute: {
+      kind: 'openai',
+      apiKey: env.OMNIROUTE_API_KEY || '',
+      keyOptional: true,
+      baseUrl: (env.OMNIROUTE_BASE_URL || '').replace(/\/+$/, ''),
+      models: parseModelAllowlist(env.BOB_OMNIROUTE_MODELS, 'auto')
+    },
     // The agentic lane is not bound by an edge timeout: give reasoning models
     // maximum effort, room to write, and long turns.
     reasoningEffort: REASONING_EFFORTS.has(env.BOB_BUILDER_REASONING_EFFORT) ? env.BOB_BUILDER_REASONING_EFFORT : 'high',
@@ -331,7 +360,7 @@ function validateModelRequest(input, config) {
 }
 
 function buildProviderBody({ input, config, model, nativeTools = false }) {
-  const isOpenAI = input.provider === 'openai';
+  const isOpenAI = config[input.provider]?.kind === 'openai';
   const messages = Array.isArray(input.messages)
     ? input.messages
     : [{ role: 'system', content: input.system_prompt }, { role: 'user', content: input.user_prompt }];
@@ -364,8 +393,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   if (signal?.aborted) return cancelled();
 
   const providerConfig = config[input.provider];
-  if (input.provider === 'openai' && !providerConfig.apiKey) {
-    return { status: 503, body: { error: 'OpenAI provider is not configured', code: 'provider_unconfigured' } };
+  if (providerConfig.kind === 'openai' && !hostedProviderConfigured(providerConfig)) {
+    const label = { openai: 'OpenAI', anthropic: 'Anthropic', omniroute: 'OmniRoute' }[input.provider] || input.provider;
+    return { status: 503, body: { error: `${label} provider is not configured`, code: 'provider_unconfigured' } };
   }
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) {
     return { status: 503, body: { error: 'Ollama Cloud provider is not configured', code: 'provider_unconfigured' } };
@@ -424,7 +454,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, planningTimeout || Infinity));
   try {
-    const isOpenAI = input.provider === 'openai';
+    const isOpenAI = providerConfig.kind === 'openai';
     const response = await fetchImpl(
       isOpenAI ? `${providerConfig.baseUrl}/chat/completions` : `${providerConfig.baseUrl}/api/chat`,
       {

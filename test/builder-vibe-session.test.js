@@ -2935,3 +2935,17 @@ for (const [shape, timedOutResponse] of VIBE_TIMEOUT_SHAPES) {
     assert.match(notice.content, /did not answer within \d+ min; switching to/);
   });
 }
+
+test('Vibe external tiers are configuration: owner-approved providers append after private compute, OpenAI never joins', () => {
+  assert.deepEqual(vibe.vibeExternalProviders({}), []);
+  assert.deepEqual(vibe.vibeExternalProviders({ BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'true' }), ['ollama_cloud']);
+  assert.deepEqual(vibe.vibeExternalProviders({ BOB_VIBE_EXTERNAL_PROVIDERS: 'anthropic, openai, nonsense, omniroute, anthropic' }), ['anthropic', 'omniroute']);
+  assert.deepEqual(vibe.vibeExternalProviders({ BOB_VIBE_EXTERNAL_PROVIDERS: 'anthropic', BOB_VIBE_ALLOW_OLLAMA_CLOUD: '1' }), ['ollama_cloud', 'anthropic']);
+  assert.equal(vibe.vibeCloudAllowed({ BOB_VIBE_EXTERNAL_PROVIDERS: 'anthropic' }), true);
+  assert.equal(vibe.vibeCloudAllowed({ BOB_VIBE_EXTERNAL_PROVIDERS: 'openai' }), false);
+  const routed = vibe.applyVibeRouting({}, { allowCloud: true, externals: ['ollama_cloud', 'anthropic'] });
+  assert.deepEqual(routed.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic']);
+  assert.equal(routed.routing_reason, 'private_first_owner_approved_external');
+  assert.equal(vibe.applyVibeRouting({}, { allowCloud: true }).routing_reason, 'private_first_owner_approved_ollama_cloud');
+  assert.deepEqual(vibe.applyVibeRouting({}, { allowCloud: false, externals: ['anthropic'] }).chain, ['gpu_workstation', 'ollama']);
+});

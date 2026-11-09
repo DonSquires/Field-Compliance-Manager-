@@ -249,3 +249,47 @@ test('independent reviewer aborts durable state when model execution fails', asy
   assert.equal(result.ok, false);
   assert.equal(aborted, true);
 });
+test('review methodology comes from active platform knowledge cards and a failed read never blocks the review', async () => {
+  const { loadReviewMethodology, reviewMethodologyPrompt } = require('../supabase/functions/_shared/builder-independent-code-review');
+  const calls = [];
+  const builder = {
+    select(columns) { calls.push(['select', columns]); return builder; },
+    is(column, value) { calls.push(['is', column, value]); return builder; },
+    eq(column, value) { calls.push(['eq', column, value]); return builder; },
+    contains(column, value) { calls.push(['contains', column, value]); return builder; },
+    order(column) { calls.push(['order', column]); return builder; },
+    limit(count) { calls.push(['limit', count]); return Promise.resolve({ data: [{ key: 'security_review_method', title: 'Security review', content: 'Trace untrusted input  to a sink.' }, { key: 'blank', title: 'x', content: '  ' }], error: null }); },
+  };
+  const cards = await loadReviewMethodology({ from(table) { calls.push(['from', table]); return builder; } });
+  assert.deepEqual(cards.map(card => card.key), ['security_review_method']);
+  assert.deepEqual(calls.find(call => call[0] === 'from'), ['from', 'bob_knowledge_cards']);
+  assert.deepEqual(calls.find(call => call[0] === 'is'), ['is', 'organization_id', null]);
+  assert.deepEqual(calls.find(call => call[0] === 'contains'), ['contains', 'tags', ['independent_code_review']]);
+  assert.match(reviewMethodologyPrompt(cards), /\[security_review_method\] Security review: Trace untrusted input to a sink\./);
+  assert.equal(reviewMethodologyPrompt([]), null);
+  assert.deepEqual(await loadReviewMethodology({}), []);
+  assert.deepEqual(await loadReviewMethodology({ from() { throw new Error('offline'); } }), []);
+  const denied = { select: () => denied, is: () => denied, eq: () => denied, contains: () => denied, order: () => denied, limit: async () => ({ data: null, error: { message: 'denied' } }) };
+  assert.deepEqual(await loadReviewMethodology({ from: () => denied }), []);
+});
+
+test('Superpowers and Claude security-review methods are seeded as attributed, retrievable platform cards', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261110120000_builder_superpowers_security_review_cards.sql'), 'utf8');
+  assert.match(sql, /WHERE NOT EXISTS/);
+  assert.match(sql, /existing\.organization_id IS NULL AND existing\.key = card\.key AND existing\.is_active/);
+  const cards = [...sql.matchAll(/\('discipline', '([a-z_]+)',[\s\S]*?\$\$([\s\S]*?)\$\$,\s*ARRAY\[([^\]]*)\]\)/g)]
+    .map(([, key, content, tags]) => ({ key, content, tags: tags.split(',').map(tag => tag.trim().replace(/'/g, '')) }));
+  assert.deepEqual(cards.map(card => card.key), [
+    'superpowers_test_driven_development', 'superpowers_systematic_debugging', 'superpowers_brainstorm_plan_execute',
+    'superpowers_verification_before_completion', 'claude_security_review_method', 'claude_security_review_false_positive_filter'
+  ]);
+  for (const card of cards) {
+    assert.ok(card.content.length <= 2500, `${card.key} fits the per-card retrieval cap`);
+    assert.match(card.content, /\((obra\/superpowers|anthropics\/claude-code-security-review), MIT\)/, `${card.key} carries its attribution`);
+  }
+  const reviewCards = cards.filter(card => card.tags.includes('independent_code_review'));
+  assert.deepEqual(reviewCards.map(card => card.key), ['superpowers_verification_before_completion', 'claude_security_review_method', 'claude_security_review_false_positive_filter']);
+  assert.ok(reviewCards.length <= 4, 'every review-method card fits the reviewer prompt limit');
+});

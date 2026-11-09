@@ -795,3 +795,17 @@ test('code requests start in-house like every other turn (owner ruling 2026-10-1
   const issues = runDeterministicChecks({ action: 'answer', reply: 'The catch block shows the raw message. To improve security, we should display a plain message and log the cause. If the app has a test runner, we should add a unit test.' }, { message: 'Bob, in apps/mobile/src/components/OfficerVehicleLookup.tsx the catch shows cause.message to officers; fix it and add a test', tools: ownerTools });
   assert.ok(issues.some((i) => i.code === 'code_answer_without_evidence'));
 });
+
+test('in-app Bob adds Claude as the last resort only when its key is set, and OmniRoute only by explicit route', () => {
+  const { createGatewayConfig } = require('../services/fcm-api/src/bob/modelGateway');
+  assert.deepEqual(createGatewayConfig({}).chains.planner, ['gpu_workstation', 'openai']);
+  const withClaude = createGatewayConfig({ ANTHROPIC_API_KEY: 'k', ANTHROPIC_PLAN_MODEL: 'claude-opus-5-5' });
+  assert.deepEqual(withClaude.chains.synthesis, ['gpu_workstation', 'openai', 'anthropic']);
+  assert.equal(withClaude.providers.anthropic.kind, 'openai');
+  assert.equal(withClaude.providers.anthropic.models.planner, 'claude-opus-5-5');
+  assert.equal(withClaude.providers.anthropic.baseUrl, 'https://api.anthropic.com/v1');
+  const routed = createGatewayConfig({ OMNIROUTE_BASE_URL: 'http://omniroute.example/v1/', BOB_ROUTE_PLANNER: 'omniroute,gpu_workstation' });
+  assert.deepEqual(routed.chains.planner, ['omniroute', 'gpu_workstation']);
+  assert.equal(routed.providers.omniroute.baseUrl, 'http://omniroute.example/v1');
+  assert.ok(!routed.chains.verifier.includes('omniroute'));
+});

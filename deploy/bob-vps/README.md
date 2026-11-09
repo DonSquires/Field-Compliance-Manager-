@@ -119,8 +119,14 @@ Owner ruling 2026-10-16 (supersedes the strong-first chains): Bob's own compute 
 the primary workforce and OpenAI is the paid last resort. Use
 `BOB_BUILDER_ROUTE_ANALYSIS=gpu_workstation,ollama,openai`,
 `BOB_BUILDER_ROUTE_AUTHOR=gpu_workstation,ollama,openai`, and
-`BOB_BUILDER_ROUTE_REVIEW=gpu_workstation,ollama,openai` (also the code default),
-`BOB_GPU_MODELS=qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b` (the laptop's ~6 GB
+`BOB_BUILDER_ROUTE_REVIEW=gpu_workstation,ollama,openai` to pin those chains.
+The code defaults are now `gpu_workstation,ollama_cloud,anthropic,openai` for
+analysis and authoring, and `anthropic,gpu_workstation,ollama_cloud,openai` for the
+independent (security) review (owner direction 2026-11-10: Claude is the
+security-review engine; it is skipped until `ANTHROPIC_API_KEY` is set in
+`/var/lib/bob/control-plane.env`). OmniRoute joins a chain only when
+`OMNIROUTE_BASE_URL` is set and a `BOB_BUILDER_ROUTE_*` value names `omniroute`.
+Set `BOB_GPU_MODELS=qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b` (the laptop's ~6 GB
 GPU keeps the 7b resident; the 14b is the distinct in-house reviewer; `gpt-oss:20b`
 is too slow there) and `BOB_OLLAMA_MODELS=qwen2.5-coder:7b,qwen3-coder:30b,llama3.1:8b`
 so the VPS CPU tier starts on a model it can serve. The OpenAI variables above apply

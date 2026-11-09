@@ -51,11 +51,13 @@ services:
       # Per-role provider chains (first healthy wins). In-house first (owner ruling
       # 2026-09-26): every role tries the laptop GPU, then OpenAI. plan.js escalates when a
       # local plan is unparseable or the verifier blocks it; the gateway skips a verifier
-      # that would share the author's identity.
-      BOB_ROUTE_PLANNER: ${BOB_ROUTE_PLANNER:-gpu_workstation,openai}
-      BOB_ROUTE_VERIFIER: ${BOB_ROUTE_VERIFIER:-gpu_workstation,openai}
-      BOB_ROUTE_SUBAGENT: ${BOB_ROUTE_SUBAGENT:-gpu_workstation,openai}
-      BOB_ROUTE_SYNTHESIS: ${BOB_ROUTE_SYNTHESIS:-gpu_workstation,openai}
+      # that would share the author's identity. Empty = the code default
+      # (gpu_workstation,openai, then anthropic once ANTHROPIC_API_KEY is set, 2026-11-10);
+      # set a chain in /opt/fcm/.env to pin one (e.g. omniroute is opt-in only).
+      BOB_ROUTE_PLANNER: ${BOB_ROUTE_PLANNER:-}
+      BOB_ROUTE_VERIFIER: ${BOB_ROUTE_VERIFIER:-}
+      BOB_ROUTE_SUBAGENT: ${BOB_ROUTE_SUBAGENT:-}
+      BOB_ROUTE_SYNTHESIS: ${BOB_ROUTE_SYNTHESIS:-}
       BOB_VERIFY_ENABLED: ${BOB_VERIFY_ENABLED:-true}
       BOB_PLAN_TURN_BUDGET_MS: ${BOB_PLAN_TURN_BUDGET_MS:-80000}
     extra_hosts:
