@@ -28391,6 +28391,150 @@ export type Database = {
           },
         ]
       }
+      report_activity_categories: {
+        Row: {
+          code: string
+          created_at: string
+          is_active: boolean
+          label: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          is_active?: boolean
+          label: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      report_disclosure_reasons: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          label_many: string
+          label_one: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          label_many: string
+          label_one: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          label_many?: string
+          label_one?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      report_disclosure_rules: {
+        Row: {
+          active: boolean
+          category_code: string | null
+          client_organization_id: string | null
+          conditions: Json
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          priority: number
+          provider_organization_id: string | null
+          reason_code: string | null
+          rule_code: string
+          rule_kind: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          category_code?: string | null
+          client_organization_id?: string | null
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          priority?: number
+          provider_organization_id?: string | null
+          reason_code?: string | null
+          rule_code: string
+          rule_kind: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          category_code?: string | null
+          client_organization_id?: string | null
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          priority?: number
+          provider_organization_id?: string | null
+          reason_code?: string | null
+          rule_code?: string
+          rule_kind?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_disclosure_rules_category_code_fkey"
+            columns: ["category_code"]
+            isOneToOne: false
+            referencedRelation: "report_activity_categories"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "report_disclosure_rules_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_disclosure_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_disclosure_rules_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_disclosure_rules_reason_code_fkey"
+            columns: ["reason_code"]
+            isOneToOne: false
+            referencedRelation: "report_disclosure_reasons"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
       report_incident_triage: {
         Row: {
           bob_assessed_at: string | null
@@ -50683,6 +50827,14 @@ export type Database = {
       report_redact_identified_persons: {
         Args: { p_text: string }
         Returns: string
+      }
+      report_rule_conditions_match: {
+        Args: { p_conditions: Json; p_facts: Json }
+        Returns: boolean
+      }
+      report_rule_conditions_valid: {
+        Args: { p_conditions: Json }
+        Returns: boolean
       }
       report_service_delivery_summary: {
         Args: { p_agreement_id: string; p_from: string; p_to: string }
