@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 export const MAX_NEW_PLACES_PER_SHEET = 10;
+// Ceiling for a reviewed source map that raises the per-sheet limit for a catch-up run.
+export const MAX_REVIEWED_PLACES = 50;
 
 export function registeredPlaceName(name, suffix) {
   const base = String(name ?? '').replace(/\s+/g, ' ').trim();
@@ -35,9 +37,9 @@ export function placesToRegister(plan, sheet) {
   return [...byName.values()];
 }
 
-export function placeRegistrationSql({ actorId, providerId, clientId, source, places, commit }) {
+export function placeRegistrationSql({ actorId, providerId, clientId, source, places, commit, limit = MAX_NEW_PLACES_PER_SHEET }) {
   if (![actorId, providerId, clientId].every(id => UUID.test(id ?? ''))) throw new Error('Place registration needs valid identities');
-  if (!places.length || places.length > MAX_NEW_PLACES_PER_SHEET) throw new Error('Place registration volume is out of range');
+  if (!places.length || places.length > Math.min(limit, MAX_REVIEWED_PLACES)) throw new Error('Place registration volume is out of range');
   const data = {
     source: { file: source.file, sheet: source.sheet, sha256: source.sha256 },
     places: places.map(place => ({ name: place.name, source_name: place.source_name,
