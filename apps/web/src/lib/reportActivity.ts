@@ -13,6 +13,7 @@ export const REPORT_PHOTO_BUCKETS: readonly string[] = ['bob-uploads', 'scans'];
 type Json = Record<string, unknown>;
 
 export interface ActivityCode { code: string; entries: number }
+export interface WithheldReason { code: string; entries: number; labelOne: string; labelMany: string }
 export interface ActivityCount extends ActivityCode { photos: number }
 export interface ActivityPlace { place: string; entries: number; photos: number; categories: Record<string, number> }
 export interface ActivitySpecies { code: string; culls: number; sightings: number; other: number; total: number }
@@ -45,6 +46,8 @@ export interface ActivityReport {
     eventsInScope: number; mirrorEventsExcluded: number; activityEvents: number; observationsInScope: number;
     workOrdersInScope: number; incidentsInScope: number; entries: number; reported: number; operationalWithheld: number;
     withheldTravelAdmin: number; withheldShiftMarkers: number; withheldRoutineCards: number; withheldDuplicates: number; itemised: number; notItemised: number; unclassified: number; reconciled: boolean;
+    /** Data-driven withheld reasons (report_disclosure_reasons); empty for packs built before the rules moved to data. */
+    withheldByReason: WithheldReason[];
   };
   labels: Record<string, Record<string, string>>;
 }
@@ -353,6 +356,9 @@ export function readActivityReport(data: unknown): ActivityReport | null {
       withheldTravelAdmin: num(accounted.withheldTravelAdmin), withheldShiftMarkers: num(accounted.withheldShiftMarkers),
       withheldRoutineCards: num(accounted.withheldRoutineCards), withheldDuplicates: num(accounted.withheldDuplicates),
       itemised: num(accounted.itemised), notItemised: num(accounted.notItemised), unclassified: num(accounted.unclassified), reconciled: accounted.reconciled === true,
+      withheldByReason: list(accounted.withheldByReason)
+        .map((row) => ({ code: str(row.code), entries: num(row.entries), labelOne: str(row.labelOne), labelMany: str(row.labelMany) }))
+        .filter((row) => row.code && row.entries > 0),
     },
     labels,
   };

@@ -45,8 +45,23 @@ describe('readActivityReport', () => {
     expect(report.byPlace[1].place).toBe('Not location-specific');
     expect(report.incidents).toMatchObject({ total: 1, investigations: 1, bySeverity: [{ code: 'high', entries: 1 }] });
     expect(report.accountedFor).toMatchObject({ reported: 9, withheldTravelAdmin: 2, withheldShiftMarkers: 1, reconciled: true });
+    expect(report.accountedFor.withheldByReason).toEqual([]);
     expect(report.pest.ammunition[1]).toEqual({ calibre: 'unspecified', entries: 1, rounds: null });
     expect(JSON.stringify(report)).not.toMatch(/"(hours|km|travelKm)"/);
+  });
+
+  it('reads withheld reasons and their labels from the data-driven disclosure rules', () => {
+    const withReasons = readActivityReport({ activityReport: {
+      ...activityReportFixture,
+      accountedFor: { ...activityReportFixture.accountedFor, withheldByReason: [
+        { code: 'routine_check', entries: 215, labelOne: 'routine status check (gate, lock or similar) is', labelMany: 'routine status checks (gates, locks and similar) are' },
+        { code: 'duplicate', entries: 0, labelOne: 'duplicate entry is', labelMany: 'duplicate entries are' },
+        { code: '', entries: 3 },
+      ] },
+    } })!;
+    expect(withReasons.accountedFor.withheldByReason).toEqual([
+      { code: 'routine_check', entries: 215, labelOne: 'routine status check (gate, lock or similar) is', labelMany: 'routine status checks (gates, locks and similar) are' },
+    ]);
   });
 
   it('treats legacy, version 1, malformed and future-version data as absent', () => {
