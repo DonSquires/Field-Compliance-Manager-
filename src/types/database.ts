@@ -30722,6 +30722,84 @@ export type Database = {
           },
         ]
       }
+      shift_timesheet_hour_corrections: {
+        Row: {
+          corrected_by: string
+          organization_id: string
+          payable_end: string
+          payable_start: string
+          payable_user_id: string
+          reason: string
+          shift_id: string
+          source_updated_at: string
+          staff_id: string
+          unpaid_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          corrected_by: string
+          organization_id: string
+          payable_end: string
+          payable_start: string
+          payable_user_id: string
+          reason: string
+          shift_id: string
+          source_updated_at: string
+          staff_id: string
+          unpaid_minutes: number
+          updated_at?: string
+        }
+        Update: {
+          corrected_by?: string
+          organization_id?: string
+          payable_end?: string
+          payable_start?: string
+          payable_user_id?: string
+          reason?: string
+          shift_id?: string
+          source_updated_at?: string
+          staff_id?: string
+          unpaid_minutes?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_timesheet_hour_corrections_corrected_by_fkey"
+            columns: ["corrected_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_hour_corrections_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_hour_corrections_payable_user_id_fkey"
+            columns: ["payable_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_hour_corrections_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: true
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_hour_corrections_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shifts: {
         Row: {
           actual_end: string | null
@@ -41381,6 +41459,20 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      correct_timesheet_shift_hours: {
+        Args: {
+          p_client_request_id: string
+          p_expected_correction_updated_at: string
+          p_expected_updated_at: string
+          p_payable_end: string
+          p_payable_start: string
+          p_reason: string
+          p_shift_id: string
+          p_staff_id: string
+          p_unpaid_minutes: number
+        }
+        Returns: Json
+      }
       create_and_assign_dispatch_job: {
         Args: {
           p_briefing_notes?: string
@@ -43982,28 +44074,52 @@ export type Database = {
           status: string
         }[]
       }
-      get_branch_timesheet_queue: {
-        Args: {
-          p_from?: string
-          p_operating_organization_id: string
-          p_to?: string
-        }
-        Returns: {
-          actual_hours: number
-          adjustment_hours: number
-          branch_review_notes: string
-          branch_reviewed_by: string
-          id: string
-          period_end: string
-          period_start: string
-          scheduled_hours: number
-          staff_id: string
-          status: string
-          submitted_at: string
-          work_derived_hours: number
-          work_summary: Json
-        }[]
-      }
+      get_branch_timesheet_queue:
+        | {
+            Args: {
+              p_from?: string
+              p_operating_organization_id: string
+              p_to?: string
+            }
+            Returns: {
+              actual_hours: number
+              adjustment_hours: number
+              branch_review_notes: string
+              branch_reviewed_by: string
+              id: string
+              period_end: string
+              period_start: string
+              scheduled_hours: number
+              staff_id: string
+              status: string
+              submitted_at: string
+              work_derived_hours: number
+              work_summary: Json
+            }[]
+          }
+        | {
+            Args: {
+              p_from: string
+              p_operating_organization_id: string
+              p_staff_id: string
+              p_to: string
+            }
+            Returns: {
+              actual_hours: number
+              adjustment_hours: number
+              branch_review_notes: string
+              branch_reviewed_by: string
+              id: string
+              period_end: string
+              period_start: string
+              scheduled_hours: number
+              staff_id: string
+              status: string
+              submitted_at: string
+              work_derived_hours: number
+              work_summary: Json
+            }[]
+          }
       get_callout_pay_summary: {
         Args: { p_callout_id: string }
         Returns: {
@@ -44632,6 +44748,19 @@ export type Database = {
         Returns: Json
       }
       get_place_hazard_source: { Args: { p_hazard_id: string }; Returns: Json }
+      get_recorded_officer_timesheet_work: {
+        Args: { p_period_end: string; p_period_start: string }
+        Returns: {
+          calculated_minutes: number
+          ended_at: string
+          label: string
+          metadata: Json
+          source_id: string
+          source_type: string
+          started_at: string
+          work_status: string
+        }[]
+      }
       get_report_pack_activity_accounting: {
         Args: { p_pack_id: string }
         Returns: Json
@@ -44822,6 +44951,15 @@ export type Database = {
           staff_id: string
           timesheet_id: string
         }[]
+      }
+      get_timesheet_shift_rows: {
+        Args: {
+          p_from: string
+          p_organization_id: string
+          p_staff_id?: string
+          p_to: string
+        }
+        Returns: Json
       }
       get_user_sign_in_states: {
         Args: { p_user_ids: string[] }
