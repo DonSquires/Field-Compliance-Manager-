@@ -69,6 +69,14 @@ test('packs without a v2 client activity report keep the legacy layout', async (
   assert.deepEqual(readActivityLines({ ...lines, version: 1 }), { lines: [], notItemised: 0 });
 });
 
+test('a client with no pest-control work sees no culling content', async () => {
+  const { monthlyActivityBlocks } = await load();
+  const { pestControl, ...privateReport } = report;
+  const privateLines = { ...lines, lines: lines.lines.filter((line) => line.c !== 'pest_control') };
+  const blocks = monthlyActivityBlocks({ activityReport: { ...privateReport, categories: report.categories.filter((row) => row.code !== 'pest_control') } }, privateLines);
+  assert.doesNotMatch(JSON.stringify(blocks), /cull|pest/i);
+});
+
 test('the compact client report keeps incidents, reviews, work and pest figures, without day-to-day tables', async () => {
   const { monthlyActivityBlocks } = await load();
   const blocks = monthlyActivityBlocks({ activityReport: report }, lines);

@@ -773,8 +773,10 @@ export function monthlyActivityBlocks(data, activityLines, options = {}) {
     { label: 'Observations', value: fmt(observationCount(totals)) },
     { label: 'Patrols', value: fmt(num(totals.patrolVisits)) },
     { label: 'Photos', value: fmt(num(totals.photos)) },
-    { label: 'Pest culls recorded', value: fmt(speciesCulls(report)) },
   ];
+  if (num(pest.entries) > 0 || speciesCulls(report) > 0) {
+    metrics.push({ label: 'Pest culls recorded', value: fmt(speciesCulls(report)) });
+  }
   const hunters = obj(report.hunterReturns);
   if (hunters) metrics.push({ label: 'Hunter-reported kills', value: fmt(num(hunters.animals)) });
   blocks.push({ kind: 'metrics', items: metrics });

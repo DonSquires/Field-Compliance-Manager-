@@ -1,34 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, stat, writeFile, lstat, realpath, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 
-export const patrolWorkbooks = [
-  'ACTIVE ThomasBros camera and patrol log.xlsx',
-  'ACTIVE Wrattens Camera and Patrol WRAT.xlsx',
-  'REMSEC Cycle Trails Patrol Log 2021.xlsx',
-  'REMSEC Digger work 2023.xlsx',
-  'REMSEC Fulton Hogan Patrol Log 2022.xlsx',
-  'REMSEC OFO Culling Log 2023.xlsx',
-  'REMSEC Private - Parks Patrol Log 2022.xlsx',
-  'REMSEC Private - Redvale - Merc.xlsx',
-  'ACTIVE Birdhurst camera and patrol log.xlsx',
-  'ACTIVE CommunityCameras install and maintenance log CCL.xlsx',
-  'ACTIVE DOC camera and patrol.xlsx',
-  'ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx',
-  'ACTIVE MPC log.xlsx',
-  'ACTIVE NelsonCityCouncil patrol NCC.xlsx',
-  'ACTIVE OneFortyOne camera and patrol OFO.xlsx',
-  'ACTIVE OperationLizard camera and patrol log DART.xlsx',
-  'ACTIVE OtherPrivate camera and patrol log PVT.xlsx',
-  'ACTIVE Private - Stringer camera and patrol STRN.xlsx',
-  'ACTIVE STAND camera and patrol PFO.xlsx',
-  'ACTIVE TasmanDistrictCouncil-camera and patrol TDC.xlsx',
-  'ACTIVE TasmanPineForest camera and patrol TPFL.xlsx',
-  'ACTIVE TaylorsContracting camera and patrol log.xlsx',
-];
+// The scanned workbooks are exactly the reviewed source map's workbooks (mapped or held), so a
+// new client workbook is watched by adding it to the map, never by editing code.
+export const patrolWorkbooks = Object.keys(JSON.parse(
+  readFileSync(new URL('./rm-patrol-source-map.json', import.meta.url), 'utf8')).workbooks);
 
 export function patrolSourcePaths() {
   return patrolWorkbooks.map(name => `Patrol Log Entries/All Log Spreadsheets/${name}`);

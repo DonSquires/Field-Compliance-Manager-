@@ -18,6 +18,12 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const WEB_SEARCH_API_URL = Deno.env.get('WEB_SEARCH_API_URL') ?? '';
 const WEB_SEARCH_API_KEY = Deno.env.get('WEB_SEARCH_API_KEY') ?? '';
+// Owner-approved providers (2026-11-09). Perplexity only proposes candidate URLs and Firecrawl only
+// reads a URL that has already passed the SSRF, blocklist and trust gates below; neither widens what
+// Bob may research. Keys are Edge Function secrets and never leave this function.
+const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY') ?? '';
+const FIRECRAWL_API_KEY = Deno.env.get('FIRECRAWL_API_KEY') ?? '';
+const FIRECRAWL_TIMEOUT_MS = 15000;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -133,7 +139,47 @@ function trustScore(url) {
 function stripHtml(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 }
+async function firecrawlReadable(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), FIRECRAWL_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://api.firecrawl.dev/v2/scrape', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${FIRECRAWL_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        url,
+        formats: [
+          'markdown'
+        ],
+        onlyMainContent: true
+      })
+    });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const content = String(payload?.data?.markdown ?? '').replace(/\s+/g, ' ').trim();
+    if (!content) return null;
+    return {
+      url,
+      title: String(payload?.data?.metadata?.title ?? url).slice(0, 200),
+      content: content.slice(0, MAX_CONTENT_CHARS),
+      trust: trustScore(url),
+      reader: 'firecrawl'
+    };
+  } catch  {
+    return null;
+  } finally{
+    clearTimeout(timer);
+  }
+}
 async function fetchReadable(url) {
+  if (FIRECRAWL_API_KEY) {
+    const read = await firecrawlReadable(url);
+    if (read) return read;
+  }
   const controller = new AbortController();
   const timer = setTimeout(()=>controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -157,7 +203,8 @@ async function fetchReadable(url) {
       url,
       title,
       content,
-      trust: trustScore(url)
+      trust: trustScore(url),
+      reader: 'direct'
     };
   } catch (e) {
     clearTimeout(timer);
@@ -274,9 +321,32 @@ serve(async (req)=>{
     const query = redactPII(rawQuery);
     const maxResults = Math.min(Math.max(body.max_results ?? 5, 1), MAX_FETCH);
     let candidateUrls = [];
+    let searchProvider = null;
     if (Array.isArray(body.urls) && body.urls.length) {
       candidateUrls = body.urls.map((u)=>String(u).trim());
+      searchProvider = 'explicit_urls';
+    } else if (PERPLEXITY_API_KEY) {
+      searchProvider = 'perplexity';
+      try {
+        const searchRes = await fetch('https://api.perplexity.ai/search', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            query,
+            max_results: Math.min(maxResults * 2, 20),
+            country: 'NZ'
+          })
+        });
+        if (searchRes.ok) {
+          const sdata = await searchRes.json();
+          candidateUrls = (sdata?.results ?? []).map((i: { url?: string })=>i?.url).filter(Boolean);
+        }
+      } catch (_e) {}
     } else if (WEB_SEARCH_API_URL && WEB_SEARCH_API_KEY) {
+      searchProvider = 'web_search_api';
       try {
         const searchRes = await fetch(`${WEB_SEARCH_API_URL}?q=${encodeURIComponent(query)}&count=${maxResults * 2}`, {
           headers: {
@@ -294,7 +364,7 @@ serve(async (req)=>{
     } else {
       return json({
         error: 'no_search_provider',
-        message: 'No search provider configured. Provide explicit urls, or set WEB_SEARCH_API_URL and WEB_SEARCH_API_KEY.'
+        message: 'No search provider configured. Provide explicit urls, or set PERPLEXITY_API_KEY (or WEB_SEARCH_API_URL and WEB_SEARCH_API_KEY).'
       }, 422);
     }
     const filtered = [
@@ -325,9 +395,14 @@ serve(async (req)=>{
           url: s.url,
           title: s.title,
           trust: s.trust,
+          reader: s.reader,
           excerpt: redactPII(s.content).slice(0, 1500)
         })),
       failed: failures,
+      providers: {
+        search: searchProvider,
+        reader: FIRECRAWL_API_KEY ? 'firecrawl_with_direct_fallback' : 'direct'
+      },
       advisory: true,
       note: isAutoInvoked ? `Autonomous, purpose-bound research (${autoInvokePurpose}), allowlisted official and sector-reference sources only. Advisory only — Bob does not act on fetched content. A human must still confirm before this data is relied upon.` : 'Advisory research only. Bob does not act on fetched content. Verify against official sources before use.',
       audit: {

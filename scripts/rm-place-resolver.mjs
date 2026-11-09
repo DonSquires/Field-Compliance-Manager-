@@ -52,7 +52,39 @@ function sameWords(left, right) {
 
 const targetKey = (target) => (typeof target === 'string' ? target : JSON.stringify(target));
 
-export function buildPlaceResolver(zoneMap) {
+// Options come from the reviewed source map, never from code:
+// - nonPlaceTerms: words officers type in the place columns that name no place ("N/A", "Enter",
+//   "Exit", "start"); they are treated as blank so the other column decides.
+// - placeAliases: a code or text that stands for a named place (e.g. "ALLF" for the client's
+//   "General / All Forests" place). A code alias wins over the text, exactly like a mapped code.
+export function buildPlaceResolver(zoneMap, { nonPlaceTerms = [], placeAliases = {} } = {}) {
+  const blank = new Set(nonPlaceTerms.map((term) => String(term).trim().toUpperCase()));
+  const aliases = new Map(Object.entries(placeAliases).map(([key, name]) => [key.trim().toUpperCase(), name]));
+  const resolveNamed = buildNamedResolver(zoneMap);
+  return function resolvePlace(reserveCode, locationText) {
+    const clean = (value) => {
+      const trimmed = String(value ?? '').trim();
+      return blank.has(trimmed.toUpperCase()) ? '' : trimmed;
+    };
+    const code = clean(reserveCode);
+    const text = clean(locationText);
+    const mappedCode = code ? resolveNamed(code, '') : null;
+    if (mappedCode?.target) return { ...mappedCode, sourceCode: code, sourceText: text };
+    for (const [key, field] of [[code, 'code'], [text, 'text']]) {
+      const alias = key && aliases.get(key.toUpperCase());
+      if (!alias) continue;
+      const mappedText = field === 'text' ? resolveNamed('', text) : null;
+      if (mappedText?.target) return { ...mappedText, sourceCode: code, sourceText: text };
+      const named = resolveNamed('', alias);
+      if (named.target) return { ...named, match: `alias_${field}`, sourceCode: code, sourceText: text };
+      return { target: null, match: null, placeName: alias,
+        sourceCode: field === 'code' ? code : '', sourceText: field === 'text' ? text : '' };
+    }
+    return { ...resolveNamed(code, text), sourceCode: code, sourceText: text };
+  };
+}
+
+function buildNamedResolver(zoneMap) {
   const entries = Object.entries(zoneMap ?? {}).filter(([, target]) => target);
   const byUpper = new Map();
   const byKey = new Map();

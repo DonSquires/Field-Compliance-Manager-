@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, symlink, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -115,10 +115,12 @@ test('corrupt checkpoint fails closed instead of reimporting every source', asyn
   await assert.rejects(loadSyncState(statePath), SyntaxError);
 });
 
-test('patrol allowlist contains all 22 requested workbooks and no inferred folder', () => {
+test('patrol allowlist is every reviewed source-map workbook and no inferred folder', async () => {
+  const map = JSON.parse(await readFile(new URL('../services/document-source-worker/rm-patrol-source-map.json', import.meta.url), 'utf8'));
   const paths = patrolSourcePaths();
-  assert.equal(paths.length, 22);
-  assert.equal(new Set(paths).size, 22);
+  assert.equal(paths.length, Object.keys(map.workbooks).length);
+  assert.equal(new Set(paths).size, paths.length);
+  assert.ok(paths.includes('Patrol Log Entries/All Log Spreadsheets/ACTIVE Gibbons Property GIB.xlsx'));
   assert.ok(paths.includes('Patrol Log Entries/All Log Spreadsheets/ACTIVE MPC log.xlsx'));
   assert.ok(paths.includes('Patrol Log Entries/All Log Spreadsheets/ACTIVE CommunityCameras install and maintenance log CCL.xlsx'));
 });
@@ -142,7 +144,7 @@ test('complete scan queues requested workbooks and photos without claiming promo
   await writeFile(path.join(root, 'Photos', 'evidence.jpg'), 'photo version');
   const summary = await runSourceScan({ root, statePath, includePhotos: true, settleMs: 0 });
   assert.equal(summary.workbooks.changed, 1);
-  assert.equal(summary.workbooks.unavailable, 21);
+  assert.equal(summary.workbooks.unavailable, patrolSourcePaths().length - 1);
   assert.equal(summary.photos.changed, 1);
   assert.equal(summary.pending, 2);
   assert.equal(summary.promotion, 'not_connected');

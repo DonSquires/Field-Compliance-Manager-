@@ -6,7 +6,9 @@ import {
   acknowledgeSourceVersion, holdSourceVersion, isHeldVersion, loadSyncState, pendingSourceVersions,
   photoSourcePaths, runSourceScan, saveSyncState,
 } from './source-sync.mjs';
-import { MAX_NEW_PLACES_PER_SHEET, placeOverlay, placeRegistrationSql, placesToRegister } from './source-places.mjs';
+import { MAX_NEW_PLACES_PER_SHEET, MAX_REVIEWED_PLACES, placeOverlay, placeRegistrationSql, placesToRegister } from './source-places.mjs';
+
+export const newPlaceLimit = map => map.max_new_places_per_sheet ?? MAX_NEW_PLACES_PER_SHEET;
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CODE = /^[A-Z0-9_-]{1,40}$/;
@@ -20,6 +22,14 @@ export function validateSourceMap(map) {
   }
   const limit = map.max_new_rows_per_sheet;
   if (!Number.isInteger(limit) || limit < 0 || limit > 5000) throw new Error('max_new_rows_per_sheet must be 0-5000');
+  if (map.max_new_places_per_sheet !== undefined
+    && (!Number.isInteger(map.max_new_places_per_sheet) || map.max_new_places_per_sheet < 0 || map.max_new_places_per_sheet > MAX_REVIEWED_PLACES)) {
+    throw new Error(`max_new_places_per_sheet must be 0-${MAX_REVIEWED_PLACES}`);
+  }
+  if (map.non_place_terms !== undefined && (!Array.isArray(map.non_place_terms)
+    || !map.non_place_terms.every(term => typeof term === 'string' && /^[\p{L}\p{N}/ .-]{1,20}$/u.test(term)))) {
+    throw new Error('non_place_terms must be short words');
+  }
   const namespaces = new Set();
   for (const [workbook, entry] of Object.entries(map.workbooks)) {
     if (entry.hold) {
@@ -36,6 +46,14 @@ export function validateSourceMap(map) {
       if (sheet.place_name_suffix !== undefined
         && (typeof sheet.place_name_suffix !== 'string' || !/^[\p{L}\p{N}&' .-]{1,40}$/u.test(sheet.place_name_suffix))) {
         throw new Error(`${workbook}: place_name_suffix must be a short client label`);
+      }
+      for (const [key, name] of Object.entries(sheet.place_aliases ?? {})) {
+        if (!/^[\p{L}\p{N}/ .-]{1,20}$/u.test(key) || typeof name !== 'string' || !/^[\p{L}\p{N}&'(),/ .-]{3,80}$/u.test(name)) {
+          throw new Error(`${workbook}: place alias ${key} must name one place`);
+        }
+      }
+      if (sheet.new_namespace !== undefined && sheet.new_namespace !== true) {
+        throw new Error(`${workbook}: new_namespace may only be true`);
       }
       for (const [position, alias] of Object.entries(sheet.column_aliases ?? {})) {
         if (!/^[1-9][0-9]{0,2}$/.test(position) || typeof alias?.source_header !== 'string'
@@ -79,13 +97,15 @@ export async function promoteWorkbookVersion({ version, map, exportPlan, syncPla
       || plan.manifest?.target_client_organization_id !== sheet.client_organization_id) {
       throw new Error(`${sheet.client_code}: exported plan does not match its mapping`);
     }
-    if (!(await namespaceEventCount(sheet))) {
+    // A reviewed new client starts with no history, so only an explicit mapping flag lets its
+    // empty namespace through; an existing client's code must already have live events.
+    if (!sheet.new_namespace && !(await namespaceEventCount(sheet))) {
       sheets.push({ ...label, status: 'held', reason: 'namespace_unproven' });
       continue;
     }
     const newPlaces = placesToRegister(plan, sheet);
     let places;
-    if (newPlaces.length > MAX_NEW_PLACES_PER_SHEET) {
+    if (newPlaces.length > newPlaceLimit(map)) {
       sheets.push({ ...label, status: 'held', reason: 'new_place_volume_review', new_places: newPlaces.map(place => place.name) });
       continue;
     }
@@ -100,7 +120,16 @@ export async function promoteWorkbookVersion({ version, map, exportPlan, syncPla
     } else if (newPlaces.length) {
       places = newPlaces.map(place => ({ name: place.name, status: 'not_registered' }));
     }
-    const preview = await syncPlan({ sourcePlan: plan, commit: false });
+    let preview;
+    try {
+      preview = await syncPlan({ sourcePlan: plan, commit: false });
+    } catch (error) {
+      // The batch key is the source hash plus import configuration, so a closed batch means this
+      // exact sheet version was already promoted (e.g. before a sibling sheet was held).
+      if (serverRefusal(error) !== 'server_refused:this_source_and_import_configuration_already_has_a_closed_review_batch') throw error;
+      sheets.push({ ...label, status: 'unchanged', reason: 'already_batched_for_this_version', ...(places ? { places } : {}) });
+      continue;
+    }
     const summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
       preview_result: preview.summary, ...(places ? { places } : {}) };
     if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
@@ -352,6 +381,8 @@ export async function linkedDeps({ root, map }) {
       // their workshop proposals are never created automatically (evidenceOnly below).
       '--include-narratives',
       ...(sheet.column_aliases ? ['--source-column-aliases', JSON.stringify(sheet.column_aliases)] : []),
+      ...(map.non_place_terms ? ['--non-place-terms', JSON.stringify(map.non_place_terms)] : []),
+      ...(sheet.place_aliases ? ['--place-aliases', JSON.stringify(sheet.place_aliases)] : []),
       ...(overlay ? ['--place-overlay', JSON.stringify(overlay)] : []),
     ])),
     registerPlaces: async ({ version, sheet, places, commit }) => {
@@ -360,7 +391,7 @@ export async function linkedDeps({ root, map }) {
       const actorId = actors?.length === 1 ? actors[0].import_actor_id : null;
       if (!/^[0-9a-f-]{36}$/i.test(actorId ?? '')) throw new Error('The R&M source profile has no configured import identity');
       return cliQuery(placeRegistrationSql({ actorId, providerId: map.provider_organization_id,
-        clientId: sheet.client_organization_id, places, commit,
+        clientId: sheet.client_organization_id, places, commit, limit: newPlaceLimit(map),
         source: { file: path.posix.basename(version.relative_path), sheet: sheet.sheet, sha256: version.sha256 } })) ?? [];
     },
     namespaceEventCount: async sheet => {

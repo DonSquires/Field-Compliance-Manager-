@@ -13,24 +13,44 @@ const ZONES = {
 test('known places resolve by code, text, case, normalised text and single-letter spelling slips', async () => {
   const { buildPlaceResolver } = await loadResolver();
   const resolve = buildPlaceResolver(ZONES);
-  assert.deepEqual(resolve('SER', ''), { target: 'zone-serpentine', match: 'reserve' });
+  assert.deepEqual(resolve('SER', ''), { target: 'zone-serpentine', match: 'reserve', sourceCode: 'SER', sourceText: '' });
   assert.equal(resolve('ser', '').match, 'reserve_case');
   assert.equal(resolve('', 'serpentine road').target, 'zone-serpentine');
-  assert.deepEqual(resolve('', 'Sepentine Rd'), { target: 'zone-serpentine', match: 'location_spelling' });
-  assert.deepEqual(resolve('', 'Spooners Rd'), { target: 'zone-spooners', match: 'location_spelling' });
+  assert.equal(resolve('', 'Sepentine Rd').match, 'location_spelling');
+  assert.equal(resolve('', 'Sepentine Rd').target, 'zone-serpentine');
+  assert.equal(resolve('', 'Spooners Rd').match, 'location_spelling');
+  assert.equal(resolve('', 'Spooners Rd').target, 'zone-spooners');
   assert.equal(resolve('', 'Elveys Rd').target, 'zone-elveys');
 });
 
 test('a location that is ambiguous or unknown becomes a new place name, never a guess', async () => {
   const { buildPlaceResolver, newPlaceName } = await loadResolver();
   const resolve = buildPlaceResolver(ZONES);
-  assert.deepEqual(resolve('', 'Dart'), { target: null, match: null, placeName: 'Dart' });
-  assert.deepEqual(resolve('PFO', 'Quinneys Rd'), { target: null, match: null, placeName: 'Quinneys Rd' });
+  assert.deepEqual(resolve('', 'Dart'), { target: null, match: null, placeName: 'Dart', sourceCode: '', sourceText: 'Dart' });
+  assert.deepEqual(resolve('PFO', 'Quinneys Rd'), { target: null, match: null, placeName: 'Quinneys Rd', sourceCode: 'PFO', sourceText: 'Quinneys Rd' });
   // Short words are not spelling-matched, so one slip cannot turn one real place into another.
   assert.equal(resolve('', 'Bowns').target, null);
   assert.equal(newPlaceName('', ''), null);
   assert.equal(newPlaceName('9', 'x'), null);
   assert.equal(newPlaceName('PFO', ''), 'PFO');
+});
+
+test('non-place words are blank and reviewed aliases name a client-wide place', async () => {
+  const { buildPlaceResolver } = await loadResolver();
+  const general = 'General / All Forests (Admin, HQ, Travel)';
+  const resolve = buildPlaceResolver({ ...ZONES, [`${general} (M&R)`]: 'zone-general' },
+    { nonPlaceTerms: ['N/A', 'Enter', 'Exit', 'start'], placeAliases: { ALLF: general, HQ: 'Head Office' } });
+  // An action word in either column names no place, so the other column decides.
+  assert.equal(resolve('Enter', 'Serpentine Rd').target, 'zone-serpentine');
+  assert.deepEqual(resolve('MTRN', 'enter'), { target: null, match: null, placeName: 'MTRN', sourceCode: 'MTRN', sourceText: '' });
+  assert.equal(resolve('N/A', 'Exit').placeName, null);
+  // A code alias wins over the text, like a mapped code; it records only the code for the overlay.
+  assert.deepEqual(resolve('allf', 'Clover Rd'), { target: 'zone-general', match: 'alias_code', sourceCode: 'allf', sourceText: 'Clover Rd' });
+  const unplaced = buildPlaceResolver(ZONES, { placeAliases: { ALLF: general } });
+  assert.deepEqual(unplaced('ALLF', 'Clover Rd'), { target: null, match: null, placeName: general, sourceCode: 'ALLF', sourceText: '' });
+  // A mapped code still beats an alias, and a text alias still prefers a mapped text.
+  assert.equal(resolve('SER', 'ALLF').target, 'zone-serpentine');
+  assert.equal(resolve('', 'hq').placeName, 'Head Office');
 });
 
 test('places to register are named with the client suffix and merged by name', async () => {
@@ -64,4 +84,8 @@ test('place registration runs as the import identity through governed RPCs and n
   assert.doesNotMatch(preview, /O'Neills/);
   assert.throws(() => placeRegistrationSql({ ...args, actorId: 'nope' }), /valid identities/);
   assert.throws(() => placeRegistrationSql({ ...args, places: [] }), /out of range/);
+  const many = Array.from({ length: 11 }, (_, i) => ({ ...places[0], name: `Place ${i}` }));
+  assert.throws(() => placeRegistrationSql({ ...args, places: many }), /out of range/);
+  assert.doesNotThrow(() => placeRegistrationSql({ ...args, places: many, limit: 40 }));
+  assert.throws(() => placeRegistrationSql({ ...args, places: [...many, ...many, ...many, ...many, ...many], limit: 99 }), /out of range/);
 });

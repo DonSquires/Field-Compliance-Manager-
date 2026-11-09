@@ -3,6 +3,8 @@
   "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
   "classification_profile": "rm_patrol_log",
   "max_new_rows_per_sheet": 250,
+  "max_new_places_per_sheet": 40,
+  "non_place_terms": ["N/A", "Enter", "Exit", "RE-ENTER", "start"],
   "notes": "Each mapped sheet reuses the client code (external_ref namespace) and client organisation proven by the live R&M patrol import. A wrong code would duplicate history, so the promoter refuses namespaces with no live events. Holds stay visible in every report until a reviewed mapping replaces them.",
   "workbooks": {
     "ACTIVE Birdhurst camera and patrol log.xlsx": {
@@ -17,7 +19,10 @@
       "reason": "The DOC place map used for the original import is not in the repository; add a reviewed map before automatic sync."
     },
     "ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx": {
-      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "MR", "place_name_suffix": "M&R", "client_organization_id": "b991ebca-c9ce-4488-a0fd-58f1be3b4810", "zone_map": "mr-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }]
+      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "MR", "place_name_suffix": "M&R", "place_aliases": { "ALLF": "General / All Forests (Admin, HQ, Travel)" }, "client_organization_id": "b991ebca-c9ce-4488-a0fd-58f1be3b4810", "zone_map": "mr-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true } } }]
+    },
+    "ACTIVE Gibbons Property GIB.xlsx": {
+      "sheets": [{ "sheet": "NOW", "header_row": 1, "client_code": "GIB", "new_namespace": true, "client_organization_id": "b45eca50-a576-49b8-b1bb-924ec962c743", "zone_map": "gib-zone-map.json" }]
     },
     "ACTIVE MPC log.xlsx": {
       "hold": "agreement_and_place_map_review",
@@ -44,10 +49,10 @@
       "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "STRINGER", "client_organization_id": "3d71adf0-d052-42d2-ba32-9cb39e790134", "zone_map": "stringer-zone-map.json" }]
     },
     "ACTIVE STAND camera and patrol PFO.xlsx": {
-      "sheets": [{ "sheet": "ACTIVE", "header_row": 1, "client_code": "STAND", "client_organization_id": "2c433420-9fcc-40ba-8b32-3b542aa15e8f", "zone_map": "stand-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true }, "32": { "source_header": "", "alias": "Unused (AF)", "require_empty": true } } }]
+      "sheets": [{ "sheet": "ACTIVE", "header_row": 1, "client_code": "STAND", "place_aliases": { "ALLF": "General / All Forests (Admin, HQ, Travel)" }, "client_organization_id": "2c433420-9fcc-40ba-8b32-3b542aa15e8f", "zone_map": "stand-zone-map.json", "column_aliases": { "24": { "source_header": "Issue", "alias": "Secondary Issue (X)", "preserve_source": true }, "32": { "source_header": "", "alias": "Unused (AF)", "require_empty": true } } }]
     },
     "ACTIVE TasmanDistrictCouncil-camera and patrol TDC.xlsx": {
-      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "TDC", "client_organization_id": "54ade19f-0bb7-45ca-a32d-2d87214c4e77", "zone_map": "tdc-zone-map.json", "column_aliases": { "23": { "source_header": "Issue", "alias": "Secondary Issue (W)", "preserve_source": true } } }]
+      "sheets": [{ "sheet": "DATA", "header_row": 1, "client_code": "TDC", "place_aliases": { "ALLF": "General / All Reserves (Admin, HQ, Travel) TDC", "TDC": "General / All Reserves (Admin, HQ, Travel) TDC" }, "client_organization_id": "54ade19f-0bb7-45ca-a32d-2d87214c4e77", "zone_map": "tdc-zone-map.json", "column_aliases": { "23": { "source_header": "Issue", "alias": "Secondary Issue (W)", "preserve_source": true } } }]
     },
     "ACTIVE TasmanPineForest camera and patrol TPFL.xlsx": {
       "sheets": [

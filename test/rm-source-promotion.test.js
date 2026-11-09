@@ -261,6 +261,49 @@ test('too many unknown places in one sheet are held for a person before anything
   assert.deepEqual(calls, []);
 });
 
+test('a reviewed map may raise the new-place limit and name a new namespace', async () => {
+  const calls = [];
+  const raised = sourceMap({ max_new_places_per_sheet: 20 });
+  let registered = 0;
+  const applied = await promoteWorkbookVersion({ version, map: raised, commit: true, ...deps({ calls }),
+    exportPlan: async () => ({ ...plan(), unresolved_places: unresolved(11) }),
+    registerPlaces: async ({ places }) => { registered = places.length; return []; } });
+  assert.notEqual(applied.reason, 'sheet_new_place_volume_review');
+  assert.equal(registered, 11);
+  const fresh = sourceMap();
+  fresh.workbooks[WORKBOOK].sheets[0].new_namespace = true;
+  const first = await promoteWorkbookVersion({ version, map: fresh, commit: false, ...deps({ namespace: 0 }) });
+  assert.notEqual(first.reason, 'sheet_namespace_unproven');
+  for (const bad of [{ max_new_places_per_sheet: 51 }, { max_new_places_per_sheet: -1 }, { non_place_terms: ['x'.repeat(40)] }]) {
+    assert.throws(() => validateSourceMap(sourceMap(bad)));
+  }
+  const badNamespace = sourceMap();
+  badNamespace.workbooks[WORKBOOK].sheets[0].new_namespace = 'yes';
+  assert.throws(() => validateSourceMap(badNamespace));
+  const badAlias = sourceMap();
+  badAlias.workbooks[WORKBOOK].sheets[0].place_aliases = { ALLF: 'x' };
+  assert.throws(() => validateSourceMap(badAlias));
+});
+
+test('a sheet already batched for this exact version is unchanged while its held sibling proceeds', async () => {
+  const map = sourceMap();
+  map.workbooks[WORKBOOK].sheets.push({ ...map.workbooks[WORKBOOK].sheets[0], sheet: '2026', client_code: 'THOMAS2026' });
+  const calls = [];
+  const result = await promoteWorkbookVersion({ version, map, commit: true, ...deps({ calls }),
+    exportPlan: async ({ sheet }) => ({ ...plan(), manifest: { client_code: sheet.client_code, target_client_organization_id: CLIENT } }),
+    syncPlan: async ({ sourcePlan, commit }) => {
+      if (sourcePlan.manifest.client_code === 'THOMASBROS') throw new Error('ERROR:  P0001: This source and import configuration already has a closed review batch');
+      calls.push(commit);
+      return { status: commit ? 'committed' : 'ready', batch_id: commit ? 'batch-2' : null,
+        requested: { inserts: 1, updates: 0, corrections: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+    } });
+  assert.equal(result.status, 'applied');
+  assert.deepEqual(result.sheets.map(sheet => [sheet.client_code, sheet.status]), [['THOMASBROS', 'unchanged'], ['THOMAS2026', 'applied']]);
+  assert.equal(result.receipt_id, 'batches:batch-2');
+  await assert.rejects(promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps(),
+    syncPlan: async () => { throw new Error('connection reset'); } }), /connection reset/);
+});
+
 test('the source map names new places with each client suffix', async () => {
   const map = JSON.parse(await readFile(new URL('../services/document-source-worker/rm-patrol-source-map.json', import.meta.url), 'utf8'));
   const suffixes = Object.values(map.workbooks).flatMap((entry) => entry.sheets ?? []).map((sheet) => sheet.place_name_suffix);

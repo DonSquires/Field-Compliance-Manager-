@@ -61,7 +61,10 @@ const importContextFile = flag('--import-context');
 const baseZoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 // Places registered for previously unknown locations (source-promote.mjs) extend the reviewed map.
 const zoneMap = { ...JSON.parse(flag('--place-overlay') ?? '{}'), ...baseZoneMap };
-const resolvePlace = buildPlaceResolver(zoneMap);
+const resolvePlace = buildPlaceResolver(zoneMap, {
+  nonPlaceTerms: JSON.parse(flag('--non-place-terms') ?? '[]'),
+  placeAliases: JSON.parse(flag('--place-aliases') ?? '{}'),
+});
 const token = process.env.SUPABASE_ACCESS_TOKEN || process.env.FIELD_COMPLIANCE_CODESPACE;
 if (importContextFile && !exportPlan) { console.error('--import-context is only allowed with --export-plan'); process.exit(1); }
 if (!exportPlan || !importContextFile) {
@@ -513,18 +516,20 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     // held and its location is reported so the promoter can register it as a new place.
     skippedNoZone += 1;
   }
-  if (!zoneId && !siteId && (reserveCode || locationText)) {
+  if (!zoneId && !siteId && (place.sourceCode || place.sourceText)) {
     // Shift markers with no place text at all are not unresolved places.
     // Spelling variants of the same new place are grouped so they register as one place.
-    const grouped = place.placeName ? resolvePendingPlace(null, locationText || place.placeName).target : null;
+    const placeCode = place.sourceCode;
+    const placeText = place.sourceText;
+    const grouped = place.placeName ? resolvePendingPlace(null, placeText || place.placeName).target : null;
     const key = grouped ?? place.placeName ?? '';
     if (place.placeName && !grouped) {
       pendingPlaceNames[key] = key;
       resolvePendingPlace = buildPlaceResolver(pendingPlaceNames);
     }
     const pending = unresolvedPlaces.get(key) ?? { name: place.placeName, reserve_codes: [], locations: [], source_rows: [] };
-    if (reserveCode && !pending.reserve_codes.includes(reserveCode)) pending.reserve_codes.push(reserveCode);
-    if (locationText && !pending.locations.includes(locationText)) pending.locations.push(locationText);
+    if (placeCode && !pending.reserve_codes.includes(placeCode)) pending.reserve_codes.push(placeCode);
+    if (placeText && !pending.locations.includes(placeText)) pending.locations.push(placeText);
     pending.source_rows.push(sourceFirstRow + rowIndex);
     unresolvedPlaces.set(key, pending);
   }
