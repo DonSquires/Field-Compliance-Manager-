@@ -1,0 +1,11 @@
+# Joins the upstream OmniRoute self-host stack (docker-compose.selfhost.yml, pinned tag)
+# to the networks fcm-api and bob-control-plane already use, so Bob reaches it at
+# http://omniroute:20128/v1 while every host port stays bound to 127.0.0.1.
+services:
+  omniroute:
+    networks: [default, fcm_fcm-net, bob-control-plane_default]
+networks:
+  fcm_fcm-net:
+    external: true
+  bob-control-plane_default:
+    external: true
