@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, getOfficerScanRecoveryContext, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
 
 describe('officer scan contract', () => {
+  it('requires manual plate confirmation only for a saved-capture recovery', () => {
+    const saved = buildOfficerScanPayload({ imageBase64: 'photo', zoneId: 'original-zone' });
+    expect(canSubmitOfficerScan(saved)).toBe(true);
+    const recovery = buildOfficerScanPayload({ imageBase64: 'photo', zoneId: 'original-zone', recoveryOriginalContext: getOfficerScanRecoveryContext(saved) });
+    expect(canSubmitOfficerScan(recovery)).toBe(false);
+    expect(canSubmitOfficerScan({ ...recovery, plate_number: 'SYN123' })).toBe(true);
+  });
   it('retains the original capture context across recovery attempts without duplicating the image', () => {
     const saved = buildOfficerScanPayload({ clientRequestId: 'original-request', imageBase64: 'original-photo', plateNumber: 'OLD123', zoneId: 'original-zone', capturedAt: '2026-11-10T07:00:00Z' });
     const original = getOfficerScanRecoveryContext(saved);

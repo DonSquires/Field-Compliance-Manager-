@@ -12,7 +12,10 @@ for (const { module, routePath } of [
     const requests: OfficerScanPayload[] = [];
     await installOfficerScheduleFixtures(page);
     await page.route('**/rest/v1/parking_chalk_records**', (route) => route.fulfill({ json: [] }));
-    await page.route('**/rest/v1/location_zones**', (route) => route.fulfill({ json: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Synthetic verified Zone' }] }));
+    await page.route('**/rest/v1/location_zones**', (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      return route.fulfill({ json: query.has('organization_id') || query.has('id') ? [] : [{ id: '66666666-6666-4666-8666-666666666666', name: 'Synthetic verified Zone', module_key: module === 'parking' ? 'parking_enforcement' : 'freedom_camping' }] });
+    });
     await page.route('**/functions/v1/process-officer-scan', (route) => {
       requests.push(JSON.parse(route.request().postData() ?? '{}'));
       return route.fulfill({ status: 400, json: { code: 'plate_confirmation_required', error: 'Keep this photo and confirm the plate manually.' } });
@@ -24,12 +27,25 @@ for (const { module, routePath } of [
     await zone.selectOption('66666666-6666-4666-8666-666666666666');
     await page.getByRole('button', { name: module === 'parking' ? 'Chalk Vehicle' : 'Process scan', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'Photo retained on this device.' })).toContainText('confirm the plate manually');
+    const firstSavedContext = await page.evaluate(async (requestId) => new Promise<unknown>((resolve, reject) => {
+      const open = indexedDB.open('fcm-field-operations', 1);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const database = open.result;
+        const transaction = database.transaction('officer-scan-queue', 'readonly');
+        const request = transaction.objectStore('officer-scan-queue').get(requestId!);
+        request.onsuccess = () => resolve(request.result?.body.recovery_original_context);
+        transaction.oncomplete = () => database.close();
+      };
+    }), requests[0].client_request_id);
+    expect(firstSavedContext).toMatchObject({ client_request_id: requests[0].client_request_id, captured_at: requests[0].captured_at, module_key: requests[0].module_key });
     await page.reload();
     const review = page.getByRole('button', { name: 'Review saved capture' });
     await expect(review).toBeVisible();
     await review.click();
     await expect(page.getByRole('img', { name: 'Vehicle evidence preview' })).toBeVisible();
-    await page.getByPlaceholder('Use if ALPR cannot read').fill('SYN123');
+    await expect(page.getByRole('button', { name: 'Recover saved capture', exact: true })).toBeDisabled();
+    await page.getByPlaceholder('Confirm plate for recovery').fill('SYN123');
     await page.getByRole('button', { name: 'Recover saved capture', exact: true }).click();
     await expect.poll(() => requests.length).toBe(2);
     expect(requests[1].client_request_id).toBe(requests[0].client_request_id);

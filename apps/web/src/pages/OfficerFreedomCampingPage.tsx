@@ -58,6 +58,7 @@ interface ZoneOption {
   location_id?: string | null;
   organization_id?: string | null;
   module_key?: string | null;
+  service_agreement_id?: string | null;
 }
 
 interface BreachOutcome {
@@ -119,7 +120,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const routeLocation = useLocation();
   const requestedBreachId = new URLSearchParams(routeLocation.search).get('breach');
   const { profile, operatingOrganizationId } = useAuth();
-  const { selectedAgreement, selectedAgreementZones, selectedSite, selectedZone } = useServiceRelationships();
+  const { agreements, zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('freedom_camping');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [observations, setObservations] = useState<ObservationSummary[]>([]);
@@ -172,7 +173,6 @@ const OfficerFreedomCampingPage: React.FC = () => {
     try {
       setLoadingHistory(true);
       setHistoryError(null);
-      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [observationsResponse, zonesResponse] = await Promise.all([
         supabase
           .from('observations')
@@ -181,15 +181,15 @@ const OfficerFreedomCampingPage: React.FC = () => {
           .eq('module_key', 'freedom_camping')
           .order('observed_at', { ascending: false })
           .limit(8),
-        activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('location_zones').select('id, name, location_id, organization_id, module_key').in('id', activeZoneIds).eq('module_key', 'freedom_camping').order('name')
-          : supabase.from('location_zones').select('id, name, location_id, organization_id, module_key').eq('organization_id', profile.organizationId).eq('module_key', 'freedom_camping').order('name'),
+        supabase.from('location_zones').select('id, name, location_id, organization_id, module_key').eq('module_key', 'freedom_camping').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
       if (observationsResponse.error) throw observationsResponse.error;
       if (zonesResponse.error) throw zonesResponse.error;
       const observationRows = (observationsResponse.data as ObservationSummary[]) ?? [];
       setObservations(observationRows);
-      setZones((zonesResponse.data as ZoneOption[]) ?? []);
+      setZones(((zonesResponse.data as ZoneOption[]) ?? []).map((zone) => ({ ...zone,
+        service_agreement_id: relationshipZones.find((linked) => linked.id === zone.id)?.service_agreement_id ?? null,
+      })));
       const observationIds = observationRows.map((observation) => observation.id);
       if (observationIds.length) {
         const { data: breachRows, error: breachError } = await supabase.from('breach_alerts').select('id, observation_id, status, action_type, actioned_at, notes, requested_action, enforcement_mode, request_disposition').in('observation_id', observationIds).order('actioned_at', { ascending: false, nullsFirst: false });
@@ -201,13 +201,13 @@ const OfficerFreedomCampingPage: React.FC = () => {
     } finally {
       setLoadingHistory(false);
     }
-  }, [profile?.id, profile?.organizationId, selectedAgreementZones]);
+  }, [profile?.id, profile?.organizationId, relationshipZones]);
 
   useEffect(() => {
-    if (selectedZone && !zoneId) {
+    if (selectedZone?.module_key === 'freedom_camping' && !zoneId && !recoveryOriginalContext) {
       setZoneId(selectedZone.id);
     }
-  }, [selectedZone, zoneId]);
+  }, [selectedZone, zoneId, recoveryOriginalContext]);
 
   useEffect(() => {
     if (requestedBreachId) {
@@ -326,8 +326,9 @@ const OfficerFreedomCampingPage: React.FC = () => {
   useEffect(() => {
     void loadHistory();
     void refreshQueueCount();
-    void acquireLocation();
-  }, [acquireLocation, loadHistory, refreshQueueCount]);
+  }, [loadHistory, refreshQueueCount]);
+
+  useEffect(() => { void acquireLocation(); }, [acquireLocation]);
 
   useEffect(() => {
     const handleOnline = () => void syncQueuedScans();
@@ -340,16 +341,16 @@ const OfficerFreedomCampingPage: React.FC = () => {
   }, [imagePreviewUrl]);
 
   const workingZone = zones.find((zone) => zone.id === zoneId)
-    ?? selectedAgreementZones.find((zone) => zone.id === zoneId && zone.module_key === 'freedom_camping')
-    ?? (selectedZone?.module_key === 'freedom_camping' ? selectedZone : null);
-  const scanLocationId = workingZone?.location_id ?? selectedSite?.location_id ?? null;
-  const scanSiteId = selectedSite?.location_id === scanLocationId ? selectedSite.id : null;
+    ?? relationshipZones.find((zone) => zone.id === zoneId && zone.module_key === 'freedom_camping');
+  const workingAgreement = agreements.find((agreement) => agreement.id === workingZone?.service_agreement_id);
+  const scanLocationId = workingZone?.location_id ?? recoveryOriginalContext?.location_id ?? null;
+  const scanSiteId = scanLocationId && selectedSite?.location_id === scanLocationId ? selectedSite.id : null;
   const payload = useMemo(() => buildOfficerScanPayload({
     clientRequestId,
-    operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile?.organizationId,
-    locationId: recoveryOriginalContext ? recoveryOriginalContext.location_id : scanLocationId,
-    clientSiteId: recoveryOriginalContext ? recoveryOriginalContext.client_site_id : scanSiteId,
-    serviceAgreementId: recoveryOriginalContext ? recoveryOriginalContext.service_agreement_id : selectedAgreement?.id,
+    operatingOrganizationId: workingAgreement?.provider_organization_id ?? recoveryOriginalContext?.operating_organization_id ?? operatingOrganizationId ?? profile?.organizationId,
+    locationId: scanLocationId,
+    clientSiteId: workingZone ? scanSiteId : recoveryOriginalContext?.client_site_id,
+    serviceAgreementId: workingAgreement?.id ?? (workingZone ? undefined : recoveryOriginalContext?.service_agreement_id),
     recoveryOriginalContext,
     locationSource: recoveryOriginalContext && zoneId ? 'manual_zone' : location.source === 'device_gps' || location.source === 'address_candidate' ? location.source : zoneId ? 'manual_zone' : 'unavailable',
     plateNumber,
@@ -358,7 +359,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, selectedAgreement, scanLocationId, scanSiteId, recoveryOriginalContext]);
+  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, workingAgreement, workingZone, scanLocationId, scanSiteId, recoveryOriginalContext]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
@@ -435,6 +436,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
         const message = await describeOfficerScanError(error);
         if (stagedCapture) {
           await markQueuedOfficerScanAttempt(stagedCapture, message, true);
+          setRecoveryOriginalContext(getOfficerScanRecoveryContext(stagedCapture.body));
           await refreshQueueCount();
         }
         setSubmitError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
@@ -566,17 +568,18 @@ const OfficerFreedomCampingPage: React.FC = () => {
       {savedCaptures.filter((scan) => scan.status === 'needs_review').map((scan) => <div className="fc-inline-message" key={scan.id}>
         <span>{scan.lastError ?? 'Saved capture needs review'}</span>
         <button type="button" className="fc-new-scan" disabled={submitting} onClick={() => {
+          const original = getOfficerScanRecoveryContext(scan.body);
           setImageBase64(scan.body.image_base64);
           setImagePreviewUrl(`data:image/jpeg;base64,${scan.body.image_base64}`);
-          setCapturedAt(scan.body.captured_at);
+          setCapturedAt(original.captured_at);
           setPlateNumber(scan.body.plate_number ?? '');
           setZoneId(scan.body.zone_id ?? '');
           setClientRequestId(scan.body.client_request_id ?? scan.id);
-          setRecoveryOriginalContext(getOfficerScanRecoveryContext(scan.body));
-          if ((scan.body.location_source === 'device_gps' || scan.body.location_source === 'address_candidate') && scan.body.gps_lat != null && scan.body.gps_lng != null) {
-            setLocation({ status: 'ready', latitude: scan.body.gps_lat, longitude: scan.body.gps_lng, accuracy: 0, source: scan.body.location_source, message: scan.body.location_source === 'address_candidate' ? 'Saved address candidate' : 'Saved device location' });
-          } else if (scan.body.gps_lat != null && scan.body.gps_lng != null) {
-            setLocation({ status: 'ready', latitude: scan.body.gps_lat, longitude: scan.body.gps_lng, accuracy: 0, source: 'unavailable', message: 'Saved coordinates have unconfirmed source · select the capture Working Zone' });
+          setRecoveryOriginalContext(original);
+          if ((original.location_source === 'device_gps' || original.location_source === 'address_candidate') && original.gps_lat != null && original.gps_lng != null) {
+            setLocation({ status: 'ready', latitude: original.gps_lat, longitude: original.gps_lng, accuracy: 0, source: original.location_source, message: original.location_source === 'address_candidate' ? 'Saved address candidate' : 'Saved device location' });
+          } else if (original.gps_lat != null && original.gps_lng != null) {
+            setLocation({ status: 'ready', latitude: original.gps_lat, longitude: original.gps_lng, accuracy: 0, source: 'unavailable', message: 'Saved coordinates have unconfirmed source · select the capture Working Zone' });
           } else {
             setLocation({ status: 'unavailable', latitude: null, longitude: null, accuracy: null, source: 'unavailable', message: 'Saved location source is not confirmed · choose a Zone' });
           }
@@ -614,7 +617,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               <span>Plate <small>manual fallback</small></span>
               <div className="fc-select-wrap">
                 <Search size={17} aria-hidden="true" />
-                <input value={plateNumber} onChange={(event) => setPlateNumber(event.target.value)} placeholder="Use if ALPR cannot read" autoCapitalize="characters" spellCheck={false} />
+                <input value={plateNumber} onChange={(event) => setPlateNumber(event.target.value)} required={Boolean(recoveryOriginalContext)} placeholder={recoveryOriginalContext ? 'Confirm plate for recovery' : 'Use if ALPR cannot read'} autoCapitalize="characters" spellCheck={false} />
               </div>
             </label>
             <label className="fc-field">
