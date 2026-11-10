@@ -90,6 +90,8 @@ function createGatewayConfig(env = process.env) {
       kind: 'openai',
       baseUrl: trimSlash(env.ANTHROPIC_OPENAI_BASE_URL || 'https://api.anthropic.com/v1'),
       apiKey: env.ANTHROPIC_API_KEY || '',
+      // Rejects response_format json_object (live 2026-11-11); prompts demand JSON and replies are parsed.
+      jsonMode: false,
       models: {
         planner: env.ANTHROPIC_PLAN_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
         verifier: env.ANTHROPIC_VERIFY_MODEL || env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
@@ -188,7 +190,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
 
   function buildBody(provider, role, messages, options) {
     const reasoning = provider.kind === 'openai' && isReasoningModel(provider.model, provider.reasoningOverride);
-    const body = { model: provider.model, messages, response_format: { type: 'json_object' } };
+    const body = { model: provider.model, messages, ...(provider.jsonMode === false ? {} : { response_format: { type: 'json_object' } }) };
     if (options.forceClassicParams !== true && reasoning) {
       body.max_completion_tokens = options.maxTokens || config.planMaxTokens;
       body.reasoning_effort = options.reasoningEffort || (provider.reasoningEffort ? provider.reasoningEffort[role] : undefined) || 'medium';

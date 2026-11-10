@@ -297,6 +297,9 @@ function createModelGatewayConfig(env = process.env) {
       kind: 'openai',
       apiKey: env.ANTHROPIC_API_KEY || '',
       baseUrl: (env.ANTHROPIC_OPENAI_BASE_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, ''),
+      // Its OpenAI-compatible endpoint rejects response_format json_object (live 2026-11-11: "Input should
+      // be 'json_schema'"); Bob's prompts already demand JSON and every caller validates the output.
+      jsonMode: false,
       models: parseModelAllowlist(env.BOB_ANTHROPIC_MODELS, 'claude-opus-5-5,claude-sonnet-5-5,claude-opus-4-8,claude-sonnet-4-6,claude-haiku-5-5')
     },
     // OmniRoute: an owner-run OpenAI-compatible gateway that fans out to many providers, including
@@ -375,7 +378,7 @@ function buildProviderBody({ input, config, model, nativeTools = false }) {
     if (providerConfig.kind === 'ollama') body.keep_alive = '5m';
     return body;
   }
-  if (input.output_schema) body.response_format = { type: 'json_object' };
+  if (input.output_schema && config[input.provider]?.jsonMode !== false) body.response_format = { type: 'json_object' };
   if (isReasoningModel(model)) {
     body.reasoning_effort = input.reasoning_effort || config.reasoningEffort;
     body.max_completion_tokens = Math.min(Number(input.max_output_tokens) || config.maxOutputTokens, config.maxOutputTokens);

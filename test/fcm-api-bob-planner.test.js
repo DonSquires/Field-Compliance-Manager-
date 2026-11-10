@@ -804,6 +804,7 @@ test('in-app Bob adds Claude as the last resort only when its key is set, and Om
   assert.equal(withClaude.providers.anthropic.kind, 'openai');
   assert.equal(withClaude.providers.anthropic.models.planner, 'claude-opus-5-5');
   assert.equal(withClaude.providers.anthropic.baseUrl, 'https://api.anthropic.com/v1');
+  assert.equal(withClaude.providers.anthropic.jsonMode, false, 'Anthropic rejects response_format json_object');
   const routed = createGatewayConfig({ OMNIROUTE_BASE_URL: 'http://omniroute.example/v1/', BOB_ROUTE_PLANNER: 'omniroute,gpu_workstation' });
   assert.deepEqual(routed.chains.planner, ['omniroute', 'gpu_workstation']);
   assert.equal(routed.providers.omniroute.baseUrl, 'http://omniroute.example/v1');

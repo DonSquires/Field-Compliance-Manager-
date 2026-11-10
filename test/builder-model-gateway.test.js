@@ -595,6 +595,15 @@ test('Anthropic Claude and OmniRoute use the OpenAI-compatible path and stay ine
   assert.equal(claudeChat.headers.Authorization, 'Bearer claude-key');
   assert.equal(claudeChat.body.model, 'claude-sonnet-5-5');
 
+  // Live 2026-11-11: Anthropic rejects response_format json_object, so structured requests omit it there only.
+  calls.length = 0;
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } } };
+  assert.equal((await invokeBuilderModel({ config: c, fetchImpl, input: request({ provider: 'anthropic', model: 'claude-sonnet-5-5', output_schema: schema }) })).status, 200);
+  assert.equal(calls.find(call => call.url.endsWith('/chat/completions')).body.response_format, undefined);
+  calls.length = 0;
+  assert.equal((await invokeBuilderModel({ config: c, fetchImpl, input: request({ provider: 'omniroute', model: 'auto', output_schema: schema }) })).status, 200);
+  assert.deepEqual(calls.find(call => call.url.endsWith('/chat/completions')).body.response_format, { type: 'json_object' });
+
   const routed = await invokeBuilderModel({ config: c, fetchImpl, input: request({ provider: 'omniroute', model: 'auto' }) });
   assert.equal(routed.status, 200, 'a self-hosted OmniRoute runs without a key');
   assert.ok(calls.some(call => call.url === 'http://omniroute.example:20128/v1/chat/completions'));
