@@ -1,0 +1,45 @@
+{
+  "$comment": "Repository guardrails for Claude Code hooks. The hooks read every rule from this file; change the rules here, not in the scripts.",
+  "protectedPaths": [
+    {
+      "pattern": "^supabase/schema\\.sql$",
+      "reason": "supabase/schema.sql is regenerated from the live catalog. Apply the migration, then run node scripts/schema-snapshot-live.mjs (or supabase db dump --linked --schema public)."
+    },
+    {
+      "pattern": "^\\.github/workflows/",
+      "reason": "GitHub workflow files are owner-managed. Propose the change to the owner instead of editing them."
+    },
+    {
+      "pattern": "(^|/)\\.env(\\.[^/]+)?$",
+      "allowPattern": "\\.example$",
+      "reason": "Environment files hold secrets. Never write or redirect into them; edit the matching .example file instead."
+    },
+    {
+      "pattern": "\\.env$",
+      "reason": "Environment files hold secrets. Never write or redirect into them; edit the matching .example file instead."
+    }
+  ],
+  "releaseIdentity": {
+    "name": "Don Squires",
+    "email": "256263525+DonSquires@users.noreply.github.com",
+    "reason": "Vercel only deploys commits authored by the verified owner identity (see AGENTS.md, release identity)."
+  },
+  "protectedBranches": [
+    {
+      "name": "main",
+      "reason": "main changes only through a pull request; push a feature branch and open a PR."
+    }
+  ],
+  "postEditChecks": [
+    {
+      "pattern": "^supabase/migrations/[^/]+\\.sql$",
+      "command": "npm run check:migrations",
+      "label": "migration version uniqueness"
+    },
+    {
+      "pattern": "^apps/web/src/.+\\.(tsx|css)$",
+      "command": "npm run check:css",
+      "label": "CSS contracts"
+    }
+  ]
+}
