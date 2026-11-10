@@ -45442,6 +45442,10 @@ export type Database = {
         Args: { p_from: string; p_to: string }
         Returns: Json
       }
+      get_working_zone_policy: {
+        Args: { p_operating_organization_id?: string; p_zone_id: string }
+        Returns: Json
+      }
       gettransactionid: { Args: never; Returns: unknown }
       grant_branch_area_access: {
         Args: {
@@ -52922,6 +52926,16 @@ export type Database = {
           p_site_version?: number
           p_zone_id?: string
           p_zone_version?: number
+        }
+        Returns: Json
+      }
+      save_working_zone_policy: {
+        Args: {
+          p_expected_version: number
+          p_operating_organization_id?: string
+          p_policy: Json
+          p_request_id: string
+          p_zone_id: string
         }
         Returns: Json
       }
