@@ -17,6 +17,20 @@ export interface OfficerScanPayload {
   client_request_id?: string;
   offline_queued?: boolean;
   synced_at?: string;
+  recovery_original_context?: OfficerScanRecoveryContext;
+}
+
+export type OfficerScanRecoveryContext = Pick<OfficerScanPayload,
+  'client_request_id' | 'captured_at' | 'module_key' | 'gps_lat' | 'gps_lng' | 'plate_number'
+  | 'zone_id' | 'location_source' | 'operating_organization_id' | 'location_id' | 'client_site_id' | 'service_agreement_id'>;
+
+export function getOfficerScanRecoveryContext(body: OfficerScanPayload): OfficerScanRecoveryContext {
+  return body.recovery_original_context ?? {
+    client_request_id: body.client_request_id, captured_at: body.captured_at, module_key: body.module_key,
+    gps_lat: body.gps_lat, gps_lng: body.gps_lng, plate_number: body.plate_number, zone_id: body.zone_id,
+    location_source: body.location_source, operating_organization_id: body.operating_organization_id,
+    location_id: body.location_id, client_site_id: body.client_site_id, service_agreement_id: body.service_agreement_id,
+  };
 }
 
 export interface ScanSafetyWarningSummary {
@@ -99,6 +113,7 @@ export function buildOfficerScanPayload(input: {
   clientSiteId?: string | null;
   serviceAgreementId?: string | null;
   locationSource?: OfficerScanPayload['location_source'];
+  recoveryOriginalContext?: OfficerScanRecoveryContext;
 }): OfficerScanPayload {
   const plateNumber = normalizePlate(input.plateNumber ?? '');
   return {
@@ -115,6 +130,7 @@ export function buildOfficerScanPayload(input: {
     captured_at: input.capturedAt ?? new Date().toISOString(),
     location_source: input.locationSource ?? (input.zoneId ? 'manual_zone' : 'unavailable'),
     ...(input.clientRequestId ? { client_request_id: input.clientRequestId } : {}),
+    ...(input.recoveryOriginalContext ? { recovery_original_context: input.recoveryOriginalContext } : {}),
   };
 }
 

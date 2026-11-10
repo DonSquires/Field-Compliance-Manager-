@@ -722,11 +722,12 @@ serve(async (req)=>{
   let requestReceipt = null;
   let safeToRetry = true;
   let captureEvidence = null;
+  let recoveryFromFingerprint = null;
   const json = async (body, status = 200)=>{
     if (status >= 400 && requestReceipt?.owned) {
       const { error } = await requestReceipt.client.from('officer_command_requests').update({
         command_status: 'failed',
-        response: { ...body, success: false, http_status: status, retryable: safeToRetry, request_fingerprint: requestReceipt.fingerprint, capture_evidence: captureEvidence }
+        response: { ...body, success: false, http_status: status, retryable: safeToRetry, request_fingerprint: requestReceipt.fingerprint, capture_evidence: captureEvidence, recovery_from_fingerprint: recoveryFromFingerprint }
       }).eq('request_id', requestReceipt.id).eq('actor_user_id', requestReceipt.actorId);
       if (error) console.error('[scan] failure receipt could not be finalized');
     }
@@ -796,25 +797,56 @@ serve(async (req)=>{
     const requestFingerprint = Array.from(new Uint8Array(fingerprintBytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
     const completeReceipt = async (response) => {
       if (clientRequestId) {
-        const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response: { ...response, request_fingerprint: requestFingerprint } }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
+        const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response: { ...response, request_fingerprint: requestFingerprint, recovery_from_fingerprint: recoveryFromFingerprint } }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
         if (receiptError) console.error('[scan] receipt completion failed:', receiptError.message);
       }
       return json(response);
     };
     if (clientRequestId) {
-      const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
+      const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_type, command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
       if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
       if (existingReceipt && existingReceipt.response?.request_fingerprint !== requestFingerprint) {
-        return json({ error: 'This request belongs to different scan evidence. Start a new scan request.', code: 'scan_request_mismatch' }, 409);
+        const original = body.recovery_original_context;
+        const unchangedCapture = original && original.client_request_id === clientRequestId
+          && original.captured_at === capturedAt && original.module_key === moduleKey
+          && original.gps_lat === submittedGpsLat && original.gps_lng === submittedGpsLng
+          && (locationSource === 'manual_zone' || (original.location_source ? original.location_source === locationSource : locationSource !== 'device_gps'));
+        if (!unchangedCapture || existingReceipt.command_type !== 'process_officer_scan'
+          || existingReceipt.command_status !== 'failed' || existingReceipt.response?.retryable !== true
+          || existingReceipt.response?.observation_id || existingReceipt.response?.chalk_record_id) {
+          return json({ error: 'The saved request cannot be safely resumed automatically. Keep the photo for operations review.', code: 'scan_request_mismatch' }, 409);
+        }
+        const legacyFingerprints = await Promise.all([...new Set([normalizePlateNumber(original.plate_number ?? ''), manualPlateNumber, ''])].map((plate) => sha256Hex(new TextEncoder().encode(JSON.stringify({
+          image_base64: imageBase64, plate_number: plate,
+          gps_lat: original.gps_lat, gps_lng: original.gps_lng,
+          zone_id: original.zone_id ?? null, module_key: original.module_key, captured_at: original.captured_at ?? null
+        })))));
+        const originalFingerprint = await sha256Hex(new TextEncoder().encode(JSON.stringify({
+          image_base64: imageBase64, gps_lat: original.gps_lat, gps_lng: original.gps_lng,
+          operating_organization_id: original.operating_organization_id ?? orgId,
+          location_id: original.location_id ?? null, client_site_id: original.client_site_id ?? null,
+          service_agreement_id: original.service_agreement_id ?? null, zone_id: original.zone_id ?? null,
+          location_source: original.location_source ?? (original.zone_id ? 'manual_zone' : 'unavailable'),
+          module_key: original.module_key, captured_at: original.captured_at ?? null
+        })));
+        if (![...legacyFingerprints, originalFingerprint].includes(existingReceipt.response.request_fingerprint)) {
+          return json({ error: 'The saved photo or original capture context does not match this request. Keep it for operations review.', code: 'scan_request_mismatch' }, 409);
+        }
+        if (legacyFingerprints.includes(existingReceipt.response.request_fingerprint) && locationSource === 'device_gps') {
+          return json({ error: 'The legacy capture has no confirmed GPS source. Select its Working Zone to recover it without claiming device presence.', code: 'scan_recovery_location_required' }, 409);
+        }
+        recoveryFromFingerprint = existingReceipt.response.request_fingerprint;
       }
+      recoveryFromFingerprint = recoveryFromFingerprint ?? existingReceipt?.response?.recovery_from_fingerprint ?? null;
       captureEvidence = existingReceipt?.response?.capture_evidence ?? null;
       if (existingReceipt?.command_status === 'completed' && existingReceipt.response?.success === true) return json(existingReceipt.response);
       if (existingReceipt) {
         if (existingReceipt.command_status !== 'failed' || existingReceipt.response?.retryable !== true) {
           return json({ error: 'This scan needs recovery before it can be processed again. Keep the saved capture.', code: 'scan_recovery_required', request_id: clientRequestId }, 409);
         }
-        const { data: claimed, error: claimError } = await supabase.from('officer_command_requests').update({ command_status: 'processing' })
-          .eq('request_id', clientRequestId).eq('actor_user_id', officerId).eq('command_status', 'failed').select('id').maybeSingle();
+        const { data: claimed, error: claimError } = await supabase.from('officer_command_requests').update({ command_status: 'processing', response: { ...existingReceipt.response, request_fingerprint: requestFingerprint, recovery_from_fingerprint: recoveryFromFingerprint } })
+          .eq('request_id', clientRequestId).eq('actor_user_id', officerId).eq('command_status', 'failed')
+          .eq('response->>request_fingerprint', existingReceipt.response.request_fingerprint).select('id').maybeSingle();
         if (claimError || !claimed) return json({ error: 'This scan request is already being processed' }, 409);
       } else {
         const { error: receiptInsertError } = await supabase.from('officer_command_requests').insert({
@@ -829,6 +861,15 @@ serve(async (req)=>{
       if (receiptInsertError) return json({ error: 'Scan request receipt could not be created' }, 503);
       }
       requestReceipt = { client: supabase, id: clientRequestId, actorId: officerId, fingerprint: requestFingerprint, owned: true };
+      if (recoveryFromFingerprint) {
+        const { error: recoveryAuditError } = await supabase.from('audit_log').insert({
+          organization_id: orgId, actor_user_id: officerId, action: 'officer_scan_capture_recovered',
+          target_table: 'officer_command_requests', target_id: clientRequestId,
+          metadata: { original_fingerprint: recoveryFromFingerprint, resumed_fingerprint: requestFingerprint,
+            original_capture: { captured_at: capturedAt, gps_lat: submittedGpsLat, gps_lng: submittedGpsLng, module_key: moduleKey } }
+        });
+        if (recoveryAuditError) return json({ error: 'Saved capture recovery audit could not be confirmed. Keep the photo and retry.', code: 'scan_recovery_audit_failed' }, 503);
+      }
     }
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'

@@ -9,10 +9,11 @@ const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/pr
   .replace(/import \{ serve \} from '[^']+';/, '')
   .replace(/import \{ createClient as _createClient \} from '[^']+';/, '');
 
-function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'parking_enforcement', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true } = {}) {
+function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'parking_enforcement', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true, recoveryAuditFailsOnce = false } = {}) {
   let handler;
   let receipt = null;
   let registeredEvidence = null;
+  let recoveryAudits = 0;
   const uploads = [];
   const writes = [];
   const rpcCalls = [];
@@ -32,6 +33,10 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
     delete() { throw new Error('Request receipts must not be deleted to retry a scan'); }
     then(resolve, reject) {
       const result = { data: null, error: null };
+      if (this.table === 'audit_log' && this.value?.action === 'officer_scan_capture_recovered') {
+        recoveryAudits += 1;
+        if (recoveryAuditFailsOnce && recoveryAudits === 1) result.error = { message: 'synthetic audit outage' };
+      }
       if (this.table === 'user_profiles') result.data = { id: '11111111-1111-4111-8111-111111111111', role, organization_id: '22222222-2222-4222-8222-222222222222' };
       if (this.table === 'evidence_items') {
         if (this.action === 'select') result.data = registeredEvidence;
@@ -106,6 +111,14 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
   const body = { client_request_id: '33333333-3333-4333-8333-333333333333', module_key: 'freedom_camping', gps_lat: 0, gps_lng: 0, location_source: 'device_gps', image_base64: 'YQ==', captured_at: '2026-11-10T07:00:00Z' };
   return {
     receipt: () => receipt,
+    legacyRecoveryContext: () => {
+      const { image_base64: imageBase64, ...original } = body;
+      receipt.response.request_fingerprint = require('node:crypto').createHash('sha256').update(JSON.stringify({
+        image_base64: imageBase64, plate_number: '', gps_lat: body.gps_lat, gps_lng: body.gps_lng,
+        zone_id: null, module_key: body.module_key, captured_at: body.captured_at,
+      })).digest('hex');
+      return original;
+    },
     uploads,
     writes,
     rpcCalls,
@@ -141,6 +154,60 @@ test('a saved ALPR-failed capture can be retried with a manual plate without reu
   assert.equal(retry.status, 200);
   assert.equal(fixture.uploads.length, 2);
   assert.equal(fixture.rpcCalls.filter((call) => call.name === 'register_edge_court_photo').length, 1);
+});
+
+test('a proven legacy pre-write failure resumes the same saved photo with a manual plate', async () => {
+  const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+  await fixture.request();
+  const original = { ...fixture.legacyRecoveryContext(), plate_number: 'SYN123' };
+  const priorFingerprint = fixture.receipt().response.request_fingerprint;
+  const result = await fixture.request({ plate_number: 'SYN123', zone_id: '55555555-5555-4555-8555-555555555555', location_source: 'manual_zone', recovery_original_context: original });
+  assert.equal(result.status, 200);
+  assert.equal(fixture.receipt().response.recovery_from_fingerprint, priorFingerprint);
+  assert.equal(fixture.uploads.length, 2);
+});
+
+test('legacy recovery never accepts different photo bytes or capture time', async () => {
+  for (const changes of [{ image_base64: 'Yg==' }, { captured_at: '2026-11-10T07:01:00Z' }]) {
+    const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+    await fixture.request();
+    const original = fixture.legacyRecoveryContext();
+    const result = await fixture.request({ ...changes, zone_id: '55555555-5555-4555-8555-555555555555', location_source: 'manual_zone', recovery_original_context: original });
+    assert.equal(result.status, 409);
+    assert.equal(result.body.code, 'scan_request_mismatch');
+    assert.equal(fixture.writes.length, 0);
+  }
+});
+
+test('a failed recovery audit is required again on the next retry', async () => {
+  const fixture = scanFixture({ moduleKey: 'freedom_camping', recoveryAuditFailsOnce: true });
+  await fixture.request();
+  const changes = { plate_number: 'SYN123', zone_id: '55555555-5555-4555-8555-555555555555', location_source: 'manual_zone', recovery_original_context: fixture.legacyRecoveryContext() };
+  const first = await fixture.request(changes);
+  assert.equal(first.status, 503);
+  assert.equal(first.body.code, 'scan_recovery_audit_failed');
+  assert.equal(fixture.writes.length, 0);
+  assert.equal((await fixture.request(changes)).status, 200);
+  assert.ok(fixture.receipt().response.recovery_from_fingerprint);
+});
+
+test('legacy recovery cannot claim device GPS provenance from its old fingerprint', async () => {
+  const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+  await fixture.request();
+  const result = await fixture.request({ plate_number: 'SYN123', recovery_original_context: fixture.legacyRecoveryContext() });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'scan_recovery_location_required');
+  assert.equal(fixture.writes.length, 0);
+});
+
+test('legacy recovery refuses receipts that may have partial primary writes', async () => {
+  const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+  await fixture.request();
+  const original = fixture.legacyRecoveryContext();
+  fixture.receipt().response.retryable = false;
+  const result = await fixture.request({ plate_number: 'SYN123', recovery_original_context: original });
+  assert.equal(result.status, 409);
+  assert.equal(fixture.writes.length, 0);
 });
 
 test('a failed photo upload cannot claim a saved capture', async () => {

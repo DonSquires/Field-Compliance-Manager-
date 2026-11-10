@@ -23,6 +23,7 @@ import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
   describeOfficerScanError,
+  getOfficerScanRecoveryContext,
   getCurrentPosition,
   imageFileToBase64,
   isNetworkFailure,
@@ -86,7 +87,7 @@ interface OfficerEnforcementReceipt {
 
 type LocationState =
   | { status: 'locating'; latitude: null; longitude: null; accuracy: null; source: 'unavailable'; message: string }
-  | { status: 'ready'; latitude: number; longitude: number; accuracy: number; source: 'device_gps' | 'address_candidate'; message: string }
+  | { status: 'ready'; latitude: number; longitude: number; accuracy: number; source: 'device_gps' | 'address_candidate' | 'unavailable'; message: string }
   | { status: 'unavailable'; latitude: null; longitude: null; accuracy: null; source: 'unavailable'; message: string };
 
 const INITIAL_LOCATION: LocationState = {
@@ -132,6 +133,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [imageBase64, setImageBase64] = useState<string>();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
+  const [recoveryOriginalContext, setRecoveryOriginalContext] = useState<ReturnType<typeof getOfficerScanRecoveryContext>>();
   const [preparingImage, setPreparingImage] = useState(false);
   const [location, setLocation] = useState<LocationState>(INITIAL_LOCATION);
   const [addressQuery, setAddressQuery] = useState('');
@@ -344,18 +346,19 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const scanSiteId = selectedSite?.location_id === scanLocationId ? selectedSite.id : null;
   const payload = useMemo(() => buildOfficerScanPayload({
     clientRequestId,
-    operatingOrganizationId: operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile?.organizationId,
-    locationId: scanLocationId,
-    clientSiteId: scanSiteId,
-    serviceAgreementId: selectedAgreement?.id,
-    locationSource: location.source === 'device_gps' || location.source === 'address_candidate' ? location.source : zoneId ? 'manual_zone' : 'unavailable',
+    operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile?.organizationId,
+    locationId: recoveryOriginalContext ? recoveryOriginalContext.location_id : scanLocationId,
+    clientSiteId: recoveryOriginalContext ? recoveryOriginalContext.client_site_id : scanSiteId,
+    serviceAgreementId: recoveryOriginalContext ? recoveryOriginalContext.service_agreement_id : selectedAgreement?.id,
+    recoveryOriginalContext,
+    locationSource: recoveryOriginalContext && zoneId ? 'manual_zone' : location.source === 'device_gps' || location.source === 'address_candidate' ? location.source : zoneId ? 'manual_zone' : 'unavailable',
     plateNumber,
     imageBase64,
     latitude: location.latitude,
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, selectedAgreement, scanLocationId, scanSiteId]);
+  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, selectedAgreement, scanLocationId, scanSiteId, recoveryOriginalContext]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
@@ -364,6 +367,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setPlateNumber('');
     setClientRequestId(crypto.randomUUID());
     setCapturedAt(undefined);
+    setRecoveryOriginalContext(undefined);
     setSubmitError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [imagePreviewUrl]);
@@ -376,6 +380,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setResult(null);
     setPlateNumber('');
     setClientRequestId(crypto.randomUUID());
+    setRecoveryOriginalContext(undefined);
     try {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       setImagePreviewUrl(URL.createObjectURL(file));
@@ -567,8 +572,11 @@ const OfficerFreedomCampingPage: React.FC = () => {
           setPlateNumber(scan.body.plate_number ?? '');
           setZoneId(scan.body.zone_id ?? '');
           setClientRequestId(scan.body.client_request_id ?? scan.id);
+          setRecoveryOriginalContext(getOfficerScanRecoveryContext(scan.body));
           if ((scan.body.location_source === 'device_gps' || scan.body.location_source === 'address_candidate') && scan.body.gps_lat != null && scan.body.gps_lng != null) {
             setLocation({ status: 'ready', latitude: scan.body.gps_lat, longitude: scan.body.gps_lng, accuracy: 0, source: scan.body.location_source, message: scan.body.location_source === 'address_candidate' ? 'Saved address candidate' : 'Saved device location' });
+          } else if (scan.body.gps_lat != null && scan.body.gps_lng != null) {
+            setLocation({ status: 'ready', latitude: scan.body.gps_lat, longitude: scan.body.gps_lng, accuracy: 0, source: 'unavailable', message: 'Saved coordinates have unconfirmed source · select the capture Working Zone' });
           } else {
             setLocation({ status: 'unavailable', latitude: null, longitude: null, accuracy: null, source: 'unavailable', message: 'Saved location source is not confirmed · choose a Zone' });
           }
@@ -657,7 +665,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
           <button className="fc-submit" type="submit" disabled={!imageBase64 || !canSubmitOfficerScan(payload) || preparingImage || submitting}>
             {submitting ? <RefreshCw size={19} className="is-spinning" aria-hidden="true" /> : imageBase64 ? <Upload size={19} aria-hidden="true" /> : <ImagePlus size={19} aria-hidden="true" />}
-            {submitting ? 'Processing scan' : 'Process scan'}
+            {submitting ? 'Processing scan' : recoveryOriginalContext ? 'Recover saved capture' : 'Process scan'}
           </button>
         </form>
 
