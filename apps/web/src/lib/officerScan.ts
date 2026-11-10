@@ -135,6 +135,7 @@ export function buildOfficerScanPayload(input: {
 }
 
 export function canSubmitOfficerScan(payload: OfficerScanPayload): boolean {
+  if (payload.recovery_original_context && !payload.plate_number) return false;
   const hasEvidence = Boolean(payload.plate_number || payload.image_base64);
   const hasLocation = Boolean(
     payload.zone_id || (payload.location_source === 'device_gps' && payload.gps_lat !== null && payload.gps_lng !== null),
@@ -223,18 +224,36 @@ async function runStoreRequest<T>(
 }
 
 export async function queueOfficerScan(body: OfficerScanPayload, ownerId?: string): Promise<QueuedOfficerScan> {
-  const capturedAt = body.captured_at;
   const requestId = body.client_request_id ?? crypto.randomUUID();
-  const queued: QueuedOfficerScan = {
-    id: requestId,
-    ownerId,
-    capturedAt,
-    attempts: 0,
-    status: 'pending',
-    body: { ...body, client_request_id: requestId, offline_queued: true },
-  };
-  await runStoreRequest('readwrite', (store) => store.put(queued));
-  return queued;
+  const database = await openScanDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(SCAN_STORE, 'readwrite');
+    const store = transaction.objectStore(SCAN_STORE);
+    const lookup = store.get(requestId);
+    let queued: QueuedOfficerScan;
+    let failure: Error | undefined;
+    lookup.onsuccess = () => {
+      const existing = lookup.result as QueuedOfficerScan | undefined;
+      if (existing && (existing.ownerId !== ownerId || existing.body.image_base64 !== body.image_base64
+        || existing.body.captured_at !== body.captured_at || existing.body.module_key !== body.module_key)) {
+        failure = new Error('This saved request belongs to a different capture. Its original photo has been retained.');
+        transaction.abort();
+        return;
+      }
+      queued = {
+        id: requestId, ownerId, capturedAt: body.captured_at,
+        attempts: existing?.attempts ?? 0, status: 'pending',
+        body: { ...body, client_request_id: requestId, offline_queued: true,
+          recovery_original_context: getOfficerScanRecoveryContext(existing?.body ?? { ...body, client_request_id: requestId }) },
+      };
+      store.put(queued);
+    };
+    transaction.oncomplete = () => { database.close(); resolve(queued); };
+    transaction.onerror = transaction.onabort = () => {
+      database.close();
+      reject(failure ?? transaction.error ?? new Error('The saved capture could not be updated safely.'));
+    };
+  });
 }
 
 export async function listQueuedOfficerScans(ownerId?: string): Promise<QueuedOfficerScan[]> {
