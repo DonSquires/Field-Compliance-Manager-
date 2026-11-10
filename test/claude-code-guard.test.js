@@ -11,11 +11,25 @@ const load = (file) => import(pathToFileURL(path.join(hooks, file)).href);
 
 const owner = { 'user.name': 'Don Squires', 'user.email': '256263525+DonSquires@users.noreply.github.com' };
 
-async function harness({ config = owner, branch = 'feature/x' } = {}) {
+async function harness({
+  config = owner,
+  branch = 'feature/x',
+  headAuthor = 'Don Squires <256263525+DonSquires@users.noreply.github.com>',
+  commitAuthor = () => 'Don Squires <256263525+DonSquires@users.noreply.github.com>',
+  rebaseAuthors = () => ['Don Squires <256263525+DonSquires@users.noreply.github.com>'],
+} = {}) {
   const { evaluate } = await load('guard.mjs');
   const { loadPolicy } = await load('lib.mjs');
   const policy = loadPolicy();
-  const ctx = { projectDir: root, gitConfig: (key) => config[key] || '', currentBranch: () => branch };
+  const ctx = {
+    projectDir: root,
+    gitConfig: (key) => config[key] || '',
+    currentBranch: () => branch,
+    headAuthor: () => headAuthor,
+    commitAuthor,
+    commitAuthors: (ref) => [commitAuthor(ref)],
+    rebaseAuthors,
+  };
   return (tool_name, tool_input) => evaluate({ tool_name, tool_input, cwd: root }, policy, ctx);
 }
 
@@ -39,6 +53,9 @@ test('shell writes into protected paths are denied, reads and safe redirects are
   assert.ok(check('Bash', { command: 'cp deploy/x.env.example .env' }).deny);
   assert.equal(check('Bash', { command: 'grep -n wf_runs supabase/schema.sql 2>&1 > /dev/null' }), null);
   assert.equal(check('Bash', { command: 'node scripts/check-migration-versions.js > out.txt' }), null);
+  assert.ok(check('Bash', { command: `node -e "require('fs').writeFileSync('supabase/schema.sql', 'bad')"` })?.deny, 'inline code that writes a protected path is denied');
+  assert.ok(check('Bash', { command: `python -c "open('.github/workflows/ci.yml', 'w').write('bad')"` })?.deny);
+  assert.equal(check('Bash', { command: `node -e "console.log('.env.example')"` }), null);
 });
 
 test('commits must use the verified release identity', async () => {
@@ -61,6 +78,31 @@ test('pushes to the protected branch are denied; feature-branch pushes are allow
   assert.equal(onFeature('Bash', { command: 'git push origin main --dry-run' }), null);
   const onMain = await harness({ branch: 'main' });
   assert.ok(onMain('Bash', { command: 'git push' }).deny);
+});
+
+test('push repo options do not hide protected-branch refspecs', async () => {
+  const onFeature = await harness();
+  assert.ok(onFeature('Bash', { command: 'git push --repo=origin main' })?.deny);
+  assert.ok(onFeature('Bash', { command: 'git push --repo origin main' })?.deny);
+});
+
+test('author-preserving git operations reject commits authored by another identity', async () => {
+  const foreignAuthor = 'Automation Bot <bot@example.com>';
+  const check = await harness({
+    headAuthor: foreignAuthor,
+    commitAuthor: () => foreignAuthor,
+    rebaseAuthors: () => [foreignAuthor],
+  });
+  assert.ok(check('Bash', { command: 'git cherry-pick abc123' })?.deny);
+  assert.ok(check('Bash', { command: 'git rebase origin/main' })?.deny);
+  assert.ok(check('Bash', { command: 'git commit --amend -m "amend"' })?.deny);
+  assert.ok(check('Bash', { command: 'git rebase --onto new-base origin/main' })?.deny);
+});
+
+test('Atlas preflight validates names before interpolating SQL literals', () => {
+  const skill = fs.readFileSync(path.join(root, '.claude', 'skills', 'atlas-preflight', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(skill.includes('Before any query, validate the target name against `^[A-Za-z0-9_.:-]{1,200}$`'));
+  assert.ok(skill.includes('Reject quotes,\nsemicolons, wildcards, whitespace and SQL syntax'));
 });
 
 test('post-edit checks map paths to commands from policy data', async () => {

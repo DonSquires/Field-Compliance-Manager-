@@ -14,6 +14,11 @@ Read-only. Never mutate data, never hand-edit Atlas tables, never print or pass 
 project, which only works from the main checkout that is linked (`supabase link`); from a worktree,
 add `--workdir` pointing at the linked checkout.
 
+Before any query, validate the target name against `^[A-Za-z0-9_.:-]{1,200}$`. Reject quotes,
+semicolons, wildcards, whitespace and SQL syntax; if the request contains them, ask for the exact
+entity name instead. Validate the entity type against `table`, `column`, `rpc`, `edge_function` or
+`feature`. Never substitute raw `$ARGUMENTS` into a command; use only the validated name token below.
+
 ## Steps
 
 1. **Capability map** - is it present, wired, exercised?
