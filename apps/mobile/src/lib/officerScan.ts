@@ -14,6 +14,7 @@ export type OfficerScanPayload = {
   image_base64: string;
   gps_lat: number | null;
   gps_lng: number | null;
+  location_source?: 'device_gps';
   module_key: ScanModuleKey;
   captured_at: string;
   client_request_id: string;
@@ -35,7 +36,7 @@ export type OfficerScanResult = {
   safety_warnings?: Array<{ id: string; hazard_class: string; alert_level: string; organization_name: string | null; contact_phone: string | null; contact_email: string | null; is_own_organization: boolean }> | null;
 };
 
-export type QueuedOfficerScan = { id: string; attempts: number; payload: OfficerScanPayload };
+export type QueuedOfficerScan = { id: string; attempts: number; payload: OfficerScanPayload; status?: 'pending' | 'needs_review' };
 
 export async function captureVehiclePhoto(): Promise<string | null> {
   const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -106,12 +107,18 @@ export async function removeQueuedOfficerScan(id: string): Promise<void> {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue.filter((item) => item.id !== id)));
 }
 
-export async function syncQueuedOfficerScans(): Promise<{ synced: number; pending: number; dropped: number }> {
+export async function syncQueuedOfficerScans(): Promise<{ synced: number; pending: number; dropped: number; review: number }> {
   const queue = await listQueuedOfficerScans();
   const pending: QueuedOfficerScan[] = [];
   let synced = 0;
   let dropped = 0;
+  let review = 0;
   for (const item of queue) {
+    if (item.payload.location_source !== 'device_gps') {
+      pending.push({ ...item, status: 'needs_review' });
+      review += 1;
+      continue;
+    }
     try {
       await submitOfficerScan({ ...item.payload, synced_at: new Date().toISOString() });
       synced += 1;
@@ -127,5 +134,5 @@ export async function syncQueuedOfficerScans(): Promise<{ synced: number; pendin
     }
   }
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(pending));
-  return { synced, pending: pending.length, dropped };
+  return { synced, pending: pending.length - review, dropped, review };
 }

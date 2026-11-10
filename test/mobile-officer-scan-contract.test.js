@@ -68,6 +68,13 @@ test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /export async function removeQueuedOfficerScan/);
 });
 
+test('mobile declares device GPS and retains legacy captures whose source is not confirmed', () => {
+  assert.match(screen, /location_source: 'device_gps'/);
+  assert.match(source, /item\.payload\.location_source !== 'device_gps'/);
+  assert.match(source, /pending\.push\(\{ \.\.\.item, status: 'needs_review' \}\)/);
+  assert.match(screen, /retained for location-source review/);
+});
+
 test('mobile scan queue clearly distinguishes empty, pending, and synced states', () => {
   assert.match(screen, /if \(queued === 0\)/);
   assert.match(screen, /Queue is clear/);

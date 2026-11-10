@@ -235,3 +235,21 @@ Verification: 2,325 web tests pass; 22 integrated desktop/mobile browser cases p
 Fresh human tests reported during repair still hit unchanged production: the recent read showed 400 followed by 409, stuck processing receipts and no new observation/chalk or scan-photo objects in the scoped paths. No real photos, receipts or attendance records were changed or reconstructed. Previous browser-only photos cannot be recovered from nonexistent server objects by this patch.
 
 Still outstanding: supplier 403 account diagnosis/edge-to-private inference parity, restoration of the unavailable scene-classification capability, full task/module/provider-branch authorization acceptance, mobile-native offline recovery, capture-time/legal/notice lifecycle work, and real-device end-to-end human acceptance. No live credential rotation, tenant-data repair, migration application, deployment, commit or push was performed during this repair turn. The two forward migrations require the protected release lane, followed by regenerated live schema and Atlas refresh.
+
+## Follow-up after PR #460, 2026-11-10
+
+The initial repair was merged in PR #460 and the managed release lane applied its migrations. The follow-up starts from `f8d2d1a8d`; it does not edit or replay those migrations.
+
+A fresh standalone Freedom Camping test still failed before record creation. The bounded database log identified the exact registration failure: `Court photo evidence requires inference watermark provenance and SHA-256 hashes`. The capture-first path uploaded raw bytes but omitted the metadata required by the live evidence trigger.
+
+The follow-up repair, pending release:
+
+- Registers original plus inference-watermarked evidence with both SHA-256 hashes before ALPR. One evidence item is then attached to the final observation/chalk with an audit event; manual plate confirmation reuses that item and request ID instead of uploading again.
+- Uses the authorized operating organization for jurisdiction resolution and persistence, including branch module grants and canonical default operating context for callers without an explicit organization. A supplied operational agreement must be in date and linked to that provider, module and Working Zone.
+- Preserves the current place model confirmed by the owner: organization jurisdiction provides organizational context; the House anchors the place; Site and Zone remain sibling facets; `zone_id` is the module-specific Working Zone, not a new nested entity. The House/Site context must agree with the selected Zone.
+- Separates `device_gps`, `address_candidate` and `manual_zone`. Address coordinates never populate officer GPS evidence or establish presence/jurisdiction. Unmeasured presence and bounds remain unknown. An address candidate alone cannot submit a Parking report without a Working Zone.
+- Retains source-less photos before returning a location-confirmation error. New mobile captures declare device GPS; legacy native queue entries without a source are held for review by the updated app. This is not a complete native recovery workflow or a deployed native-app acceptance claim.
+
+Local verification includes 2,326 web unit tests, TypeScript lint and a production build; all six scan browser cases pass, including four officer/standalone reload-and-manual-confirmation routes. The five unchanged Location House policy/checkpoint cases passed in the preceding integrated run. Shared runtime, geofence and mobile contract checks pass; the disposable PostgreSQL role test also passes. Two stale root geofence assertions were updated. The three existing catalog-identity/CCTV failures remain unrelated and the complete root suite is not claimed green.
+
+No new schema migration is required. No real-user session, production photo replay, receipt clearing or business-record repair was performed. Supplier authorization, unavailable scene classification, real-device/native acceptance, and the remaining legal/notice/reporting gates above remain open; the incident is not fully accepted until a fresh governed production scan confirms the evidence and record chain.

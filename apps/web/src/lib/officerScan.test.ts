@@ -24,6 +24,7 @@ describe('officer scan contract', () => {
       zone_id: 'zone-1',
       module_key: 'freedom_camping',
       captured_at: '2026-08-30T04:30:00.000Z',
+      location_source: 'manual_zone',
     });
   });
 
@@ -32,9 +33,20 @@ describe('officer scan contract', () => {
       imageBase64: 'encoded-image',
       latitude: -41.2865,
       longitude: 174.7762,
+      locationSource: 'device_gps',
     });
     expect(payload.plate_number).toBeUndefined();
     expect(canSubmitOfficerScan(payload)).toBe(true);
+  });
+
+  it('does not treat an address candidate as a selected place or device GPS', () => {
+    const payload = buildOfficerScanPayload({
+      imageBase64: 'encoded-image',
+      latitude: -41.2865,
+      longitude: 174.7762,
+      locationSource: 'address_candidate',
+    });
+    expect(canSubmitOfficerScan(payload)).toBe(false);
   });
 
   it('normalizes the manual plate fallback while preserving photo evidence', () => {
