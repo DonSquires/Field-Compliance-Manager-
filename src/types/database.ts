@@ -2915,6 +2915,128 @@ export type Database = {
           },
         ]
       }
+      bob_model_catalog: {
+        Row: {
+          active: boolean
+          base_quality: number
+          cost_tier: number
+          created_at: string
+          id: string
+          model_name: string
+          notes: string | null
+          privacy_class: string
+          provider: string
+          task_quality: Json
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          base_quality?: number
+          cost_tier: number
+          created_at?: string
+          id?: string
+          model_name?: string
+          notes?: string | null
+          privacy_class: string
+          provider: string
+          task_quality?: Json
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          base_quality?: number
+          cost_tier?: number
+          created_at?: string
+          id?: string
+          model_name?: string
+          notes?: string | null
+          privacy_class?: string
+          provider?: string
+          task_quality?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bob_model_routing_policies: {
+        Row: {
+          active: boolean
+          allow_external: boolean
+          created_at: string
+          excluded_providers: string[]
+          id: string
+          max_candidates: number
+          max_cost_tier: number
+          notes: string | null
+          organization_id: string | null
+          prior_strength: number
+          surface: string
+          task_class: string
+          updated_at: string
+          weights: Json
+        }
+        Insert: {
+          active?: boolean
+          allow_external?: boolean
+          created_at?: string
+          excluded_providers?: string[]
+          id?: string
+          max_candidates?: number
+          max_cost_tier?: number
+          notes?: string | null
+          organization_id?: string | null
+          prior_strength?: number
+          surface: string
+          task_class?: string
+          updated_at?: string
+          weights?: Json
+        }
+        Update: {
+          active?: boolean
+          allow_external?: boolean
+          created_at?: string
+          excluded_providers?: string[]
+          id?: string
+          max_candidates?: number
+          max_cost_tier?: number
+          notes?: string | null
+          organization_id?: string | null
+          prior_strength?: number
+          surface?: string
+          task_class?: string
+          updated_at?: string
+          weights?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_model_routing_policies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_model_task_classes: {
+        Row: {
+          created_at: string
+          match_kind: string
+          match_value: string
+          task_class: string
+        }
+        Insert: {
+          created_at?: string
+          match_kind: string
+          match_value: string
+          task_class: string
+        }
+        Update: {
+          created_at?: string
+          match_kind?: string
+          match_value?: string
+          task_class?: string
+        }
+        Relationships: []
+      }
       bob_nz_finance_readiness_checks: {
         Row: {
           bob_can_do: string
@@ -37911,6 +38033,17 @@ export type Database = {
           source: string
           tags: string[]
           title: string
+        }[]
+      }
+      bob_model_route_stats: {
+        Args: { p_days?: number }
+        Returns: {
+          avg_seconds: number
+          completed: number
+          model_name: string
+          provider: string
+          runs: number
+          task_class: string
         }[]
       }
       bob_recall_prior_context: {
