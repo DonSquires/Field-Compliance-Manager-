@@ -24,6 +24,7 @@ COPY supabase/functions/_shared/builder-backend-engineer.js /opt/bob/supabase/fu
 COPY supabase/functions/_shared/builder-model-adapter.js /opt/bob/supabase/functions/_shared/builder-model-adapter.js
 COPY supabase/functions/_shared/builder-patch-envelope.js /opt/bob/supabase/functions/_shared/builder-patch-envelope.js
 COPY supabase/functions/_shared/builder-repository-context.js /opt/bob/supabase/functions/_shared/builder-repository-context.js
+COPY services/fcm-api/src/bob/modelRouter.js /opt/bob/services/fcm-api/src/bob/modelRouter.js
 COPY apps/web/package.json apps/web/package-lock.json /opt/bob/web-package/
 RUN cd /opt/bob/web-package \
 	&& npm ci \
