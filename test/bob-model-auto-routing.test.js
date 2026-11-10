@@ -96,6 +96,30 @@ test('restricted data, exclusions, cost ceilings and inactive rows remove candid
   assert.equal(rankCandidates({ candidates, catalog, policies: [{ ...platform, max_candidates: 1 }], taskClasses, surface: 'vibe' }).ordered.length, 1);
 });
 
+test('an untried model inherits its provider record on the task, not a fresh optimistic prior', () => {
+  // Live 2026-11-11: Ollama Cloud completed 30 of 207 product analyses, yet each untried model ranked above Claude.
+  const analysis = [...taskClasses, { match_kind: 'workload_kind', match_value: 'product_analysis', task_class: 'analysis' }];
+  const stats = [{ provider: 'ollama_cloud', model_name: 'kimi-k3', task_class: 'analysis', runs: 207, completed: 30, avg_seconds: 60 }];
+  const result = rankCandidates({
+    candidates: [{ provider: 'ollama_cloud', model: 'gemma4:31b' }, { provider: 'anthropic', model: 'claude-opus-5-5' }],
+    catalog, policies: [platform], taskClasses: analysis, stats, surface: 'builder', workloadKind: 'product_analysis',
+  });
+  assert.equal(result.ordered[0].provider, 'anthropic');
+  assert.ok(result.ordered[1].success < 0.25, 'the untried model starts from its provider record');
+  const fresh = rankCandidates({ candidates: [{ provider: 'ollama_cloud', model: 'gemma4:31b' }], catalog, policies: [platform], taskClasses: analysis, surface: 'builder', workloadKind: 'product_analysis' });
+  assert.ok(fresh.ordered[0].success > 0.5, 'a provider with no history keeps the catalogue prior');
+});
+
+test('one provider cannot fill every candidate slot', () => {
+  const candidates = ['a', 'b', 'c', 'd', 'e'].map(model => ({ provider: 'ollama_cloud', model })).concat([{ provider: 'anthropic', model: 'claude' }, { provider: 'gpu_workstation', model: 'qwen' }]);
+  const ranked = rankCandidates({ candidates, catalog, policies: [{ ...platform, max_candidates: 4, max_per_provider: 2 }], taskClasses, surface: 'builder' });
+  assert.equal(ranked.ordered.length, 4);
+  assert.deepEqual([...new Set(ranked.ordered.map(entry => entry.provider))].sort(), ['anthropic', 'gpu_workstation', 'ollama_cloud']);
+  assert.equal(ranked.ordered.filter(entry => entry.provider === 'ollama_cloud').length, 2);
+  const roomy = rankCandidates({ candidates, catalog, policies: [{ ...platform, max_candidates: 7, max_per_provider: 2 }], taskClasses, surface: 'builder' });
+  assert.equal(roomy.ordered.length, 7, 'extra models still fill slots no other provider wants');
+});
+
 function fakeSupabase({ rows = {}, fail = false } = {}) {
   const calls = [];
   return {

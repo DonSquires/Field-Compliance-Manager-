@@ -350,6 +350,37 @@ test('model execution walks the in-house-first chain and escalates to OpenAI onl
   assert.deepEqual(upserts, [['ollama', 'llama3.1:8b'], ['openai', 'gpt-5.4-mini']]);
 });
 
+test('a provider that rejects the prompt as too large is not re-tried on its other models', async () => {
+  const request = makeRequest({ workloadKind: 'independent_code_review', modelName: 'gpt-5.4-mini' });
+  const health = {
+    gpu_workstation: { configured: true, healthy: true, models: ['qwen3:8b', 'qwen2.5-coder:7b'], ready_model: 'qwen3:8b' },
+    openai: { configured: true, healthy: true, models: ['gpt-5.4-mini'] }
+  };
+  const ordered = [{ provider: 'gpu_workstation', model: 'qwen3:8b' }, { provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' }, { provider: 'openai', model: 'gpt-5.4-mini' }];
+  const router = { rank: async () => ({ ordered, excluded: [], task_class: 'review', policy: null }), catalogProviders: async () => [], observe() {} };
+  const mock = createSupabaseMock();
+  const calls = [];
+  const result = await executeBuilderModelRun({
+    supabase: mock.client,
+    modelRequest: request,
+    router,
+    gateway: {
+      gatewayUrl: 'https://control.example',
+      apiToken: 'server-token',
+      health,
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(init.body);
+        calls.push(`${body.provider}:${body.model}`);
+        if (body.provider === 'gpu_workstation') return { ok: false, status: 413, text: async () => JSON.stringify({ error: 'prompt exceeds the gpu_workstation context window (24576 tokens)', code: 'context_exceeded' }) };
+        return { ok: true, status: 200, text: async () => JSON.stringify({ provider: 'openai', model: 'gpt-5.4-mini', content: '{"verdict":"passed"}', usage: {} }) };
+      }
+    },
+    validateOutput: content => JSON.parse(content)
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['gpu_workstation:qwen3:8b', 'openai:gpt-5.4-mini']);
+});
+
 test('in-house providers get a longer gateway timeout than OpenAI, and an explicit gateway timeout wins', () => {
   const { gatewayTimeoutFor } = require('../supabase/functions/_shared/builder-model-adapter.js');
   assert.equal(gatewayTimeoutFor('openai', {}, {}), 90000);

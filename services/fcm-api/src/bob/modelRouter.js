@@ -20,6 +20,7 @@
 const DEFAULT_WEIGHTS = Object.freeze({ quality: 0.3, success: 0.4, cost: 0.2, latency: 0.1 });
 const DEFAULT_PRIOR_STRENGTH = 6;
 const DEFAULT_MAX_CANDIDATES = 6;
+const DEFAULT_MAX_PER_PROVIDER = 2;
 const LOAD_TTL_MS = 60_000;
 const LOAD_FAIL_TTL_MS = 30_000;
 const LOAD_TIMEOUT_MS = 4_000;
@@ -112,7 +113,11 @@ function rankCandidates({ candidates, catalog = [], policies = [], stats = [], t
     // Untried models start halfway between neutral and their catalogue quality: a premium model must
     // earn its rank with real outcomes rather than lead on its reputation alone.
     const prior = 0.5 + (quality - 0.5) * 0.5;
-    const success = stat ? (stat.completed + prior * priorStrength) / (stat.runs + priorStrength) : prior;
+    // A model with little history inherits its provider's record on this task, so a provider that keeps
+    // failing a task cannot have each of its other models re-tried on a fresh optimistic prior.
+    const providerStat = candidate.model ? statFor(allStats, candidate.provider, null, taskClass) : null;
+    const providerPrior = providerStat ? (providerStat.completed + prior * priorStrength) / (providerStat.runs + priorStrength) : prior;
+    const success = stat ? (stat.completed + providerPrior * priorStrength) / (stat.runs + priorStrength) : providerPrior;
     const speed = stat && stat.avg_seconds !== null ? 1 / (1 + stat.avg_seconds / 120) : 0.5;
     const cheapness = 1 - clamp01(Number(entry.cost_tier) / 3, 0.66);
     const score = weights.quality * quality + weights.success * success + weights.cost * cheapness + weights.latency * speed;
@@ -129,7 +134,17 @@ function rankCandidates({ candidates, catalog = [], policies = [], stats = [], t
   });
   scored.sort((left, right) => right.score - left.score || left.index - right.index);
   const cap = Number(policy?.max_candidates) > 0 ? Number(policy.max_candidates) : DEFAULT_MAX_CANDIDATES;
-  const ordered = scored.slice(0, cap);
+  // One provider's model list must not fill every slot: its extra models only take slots other providers leave free.
+  const perProvider = Number(policy?.max_per_provider) > 0 ? Number(policy.max_per_provider) : DEFAULT_MAX_PER_PROVIDER;
+  const counts = new Map();
+  const first = [];
+  const overflow = [];
+  for (const candidate of scored) {
+    const count = counts.get(candidate.provider) || 0;
+    (count < perProvider ? first : overflow).push(candidate);
+    counts.set(candidate.provider, count + 1);
+  }
+  const ordered = [...first, ...overflow].slice(0, cap);
   return {
     ordered: ordered.map(({ index, ...rest }) => rest),
     excluded,
@@ -163,7 +178,8 @@ function createModelRouter({ supabase = null, now = Date.now, logger = console, 
       try {
         const [catalog, policies, taskClasses, stats] = await withTimeout(Promise.all([
           supabase.from('bob_model_catalog').select('provider, model_name, privacy_class, cost_tier, base_quality, task_quality, active'),
-          supabase.from('bob_model_routing_policies').select('id, organization_id, surface, task_class, allow_external, max_cost_tier, excluded_providers, weights, prior_strength, max_candidates, active'),
+          // '*' so a policy column added later (e.g. max_per_provider) never breaks a router deployed first.
+          supabase.from('bob_model_routing_policies').select('*'),
           supabase.from('bob_model_task_classes').select('match_kind, match_value, task_class'),
           supabase.rpc('bob_model_route_stats', { p_days: 30 }),
         ]), LOAD_TIMEOUT_MS);
