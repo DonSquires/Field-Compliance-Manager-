@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { getDefaultModelRouter } = require('../../../services/fcm-api/src/bob/modelRouter');
 
 const PROVIDERS = Object.freeze({
   OPENAI: 'openai',
@@ -75,7 +76,7 @@ function parseChain(raw, fallback) {
 // joins the unrestricted chains after the flat-rate Ollama Cloud subscription and before per-call
 // OpenAI, and leads the independent (security) review chains. An unconfigured provider is skipped by health, so
 // these defaults are inert until ANTHROPIC_API_KEY is set. OmniRoute (which can reach free
-// third-party tiers) joins a chain only when BOB_BUILDER_ROUTE_* names it.
+// third-party tiers) joins a chain when BOB_BUILDER_ROUTE_* names it or the auto router ranks it.
 const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OPENAI]);
 const SECURITY_FIRST = Object.freeze([PROVIDERS.ANTHROPIC, PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
 const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
@@ -122,7 +123,16 @@ function routeBuilderModel({ workloadKind, containsRestrictedData = false, env =
   else if (REVIEW_WORKLOADS.has(workloadKind)) { chain = chains.review; reason = 'security_review_engine_first'; }
   else if (SECURITY_WORKLOADS.has(workloadKind)) { chain = chains.security; reason = 'security_review_engine_first'; }
   else { chain = chains.analysis; reason = 'in_house_first_analysis'; }
-  return { provider: chain[0], chain, reason };
+  const pinVariable = {
+    restricted_data_local_only: 'BOB_BUILDER_ROUTE_RESTRICTED',
+    low_risk_local_workload: 'BOB_BUILDER_ROUTE_LOCAL',
+    in_house_first_author: 'BOB_BUILDER_ROUTE_AUTHOR',
+    security_review_engine_first: REVIEW_WORKLOADS.has(workloadKind) ? 'BOB_BUILDER_ROUTE_REVIEW' : 'BOB_BUILDER_ROUTE_SECURITY',
+    in_house_first_analysis: 'BOB_BUILDER_ROUTE_ANALYSIS'
+  }[reason];
+  // An explicit env chain is the owner's emergency override and switches auto ranking off for that stage.
+  const pinned = Boolean(String(env?.[pinVariable] || '').trim());
+  return { provider: chain[0], chain, reason, pinned };
 }
 
 function buildModelRunRequest({
@@ -170,6 +180,7 @@ function buildModelRunRequest({
     provider: route.provider,
     chain: route.chain,
     routing_reason: route.reason,
+    routing_pinned: route.pinned,
     model_name: modelName,
     prompt_version: promptVersion,
     idempotency_key: `${jobId}::${stepId || 'job'}::${requestHash}`,
@@ -372,6 +383,98 @@ function selectProviders(modelRequest, { health = null, avoid = [], startAfter =
 
 const ESCALATE_STATUSES = new Set([408, 413, 422, 429, 500, 502, 503, 504]);
 
+// Every installed allowlisted model a healthy provider offers, after the one selectProviders chose,
+// so the ranker can prefer a stronger model on the same provider (e.g. gpt-oss:120b over kimi).
+function expandModels(pool, modelRequest, health, avoid = []) {
+  const expanded = [];
+  const seen = new Set();
+  const push = candidate => {
+    const key = `${candidate.provider}\u0000${candidate.model || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    expanded.push(candidate);
+  };
+  for (const candidate of pool) {
+    push(candidate);
+    const status = health ? health[candidate.provider] : null;
+    if (!status || !Array.isArray(status.models)) continue;
+    if (candidate.provider === PROVIDERS.OPENAI && modelRequest.model_name) continue;
+    const installed = Array.isArray(status.installed) && status.installed.length ? status.installed : null;
+    for (const model of status.models) {
+      if (!model || (installed && !installed.includes(model) && !installed.includes(`${model}:latest`))) continue;
+      if (avoid.some(identity => identity && identity.provider === candidate.provider && (!identity.model || identity.model === model))) continue;
+      push({ provider: candidate.provider, model });
+    }
+  }
+  return expanded;
+}
+
+/**
+ * The candidates a request should try, best first. With a model router (data-driven auto routing)
+ * the pool is every healthy catalogued provider and installed model, ranked for this workload;
+ * without one, or when the stage is env-pinned, the static chain order stands. Restricted data
+ * never reaches an external provider on either path.
+ */
+async function routedCandidates(modelRequest, { health = null, avoid = [], startAfter = null, router = getDefaultModelRouter(), surface = 'builder' } = {}) {
+  const staticCandidates = selectProviders(modelRequest, { health, avoid, startAfter });
+  if (!router) return { candidates: staticCandidates, routing: { mode: 'static', reason: 'no_router' } };
+  if (modelRequest.routing_pinned) return { candidates: staticCandidates, routing: { mode: 'static', reason: 'env_pinned' } };
+  const restricted = modelRequest.routing_reason === 'restricted_data_local_only';
+  let ranked = null;
+  try {
+    const known = new Set(Object.values(PROVIDERS));
+    const extra = restricted ? [] : (await router.catalogProviders()).filter(provider => known.has(provider));
+    const chain = [...new Set([...(Array.isArray(modelRequest.chain) && modelRequest.chain.length ? modelRequest.chain : [modelRequest.provider]), ...extra])];
+    const pool = expandModels(selectProviders({ ...modelRequest, chain }, { health, avoid }), modelRequest, health, avoid)
+      .filter(candidate => !restricted || !EXTERNAL_PROVIDERS.has(candidate.provider));
+    ranked = await router.rank({
+      candidates: pool,
+      surface,
+      workloadKind: modelRequest.request?.workload_kind || null,
+      promptVersion: modelRequest.prompt_version,
+      organizationId: modelRequest.organization_id,
+      restricted
+    });
+  } catch (error) {
+    return { candidates: staticCandidates, routing: { mode: 'static', reason: `router_error: ${String(error && error.message || error).slice(0, 120)}` } };
+  }
+  if (!ranked) return { candidates: staticCandidates, routing: { mode: 'static', reason: 'routing_data_unavailable' } };
+  let ordered = ranked.ordered
+    .filter(candidate => !restricted || !EXTERNAL_PROVIDERS.has(candidate.provider))
+    .map(({ provider, model }) => ({ provider, model }));
+  if (startAfter) {
+    const last = ordered.map(candidate => candidate.provider).lastIndexOf(startAfter);
+    if (last >= 0) ordered = ordered.slice(last + 1);
+  }
+  const routing = {
+    mode: 'auto',
+    surface,
+    task_class: ranked.task_class,
+    policy: ranked.policy,
+    ranked: ranked.ordered.map(({ provider, model, score, quality, success, runs, cost_tier }) => ({ provider, model, score, quality, success, runs, cost_tier })),
+    excluded: ranked.excluded
+  };
+  if (!ordered.length) return { candidates: staticCandidates, routing: { ...routing, mode: 'static', reason: 'policy_permitted_none' } };
+  return { candidates: ordered, routing };
+}
+
+// The routing decision stored on the run, so later ranking and the owner can see why this model ran.
+function compactRouting(routing, modelRequest) {
+  return {
+    mode: routing.mode,
+    reason: routing.reason || modelRequest.routing_reason || null,
+    task_class: routing.task_class || null,
+    policy_id: routing.policy?.id || null,
+    rank: Array.isArray(routing.ranked) ? routing.ranked.findIndex(entry => entry.provider === modelRequest.provider && entry.model === modelRequest.model_name) + 1 || null : null,
+    score: Array.isArray(routing.ranked) ? routing.ranked.find(entry => entry.provider === modelRequest.provider && entry.model === modelRequest.model_name)?.score ?? null : null
+  };
+}
+
+function observeOutcome(router, routing, candidate, result, startedAt) {
+  if (!router || typeof router.observe !== 'function' || !candidate) return;
+  router.observe({ provider: candidate.provider, model: candidate.model, taskClass: routing?.task_class || 'general', ok: Boolean(result?.ok), latencyMs: Date.now() - startedAt });
+}
+
 function providerRequest(modelRequest, candidate, suffix) {
   return {
     ...modelRequest,
@@ -382,18 +485,22 @@ function providerRequest(modelRequest, candidate, suffix) {
   };
 }
 
-async function executeBuilderModelRun({ supabase, modelRequest, gateway, validateOutput = null, avoidIdentities = [], startAfter = null }) {
+async function executeBuilderModelRun({ supabase, modelRequest, gateway, validateOutput = null, avoidIdentities = [], startAfter = null, router = getDefaultModelRouter() }) {
   if (!supabase || !modelRequest) throw new Error('supabase and modelRequest are required');
   const health = await fetchModelHealth(gateway || {});
-  const candidates = selectProviders(modelRequest, { health, avoid: avoidIdentities, startAfter });
-  if (!candidates.length) return { ok: false, status: 503, error: 'no model provider is available for this request', attempts: [] };
+  const { candidates, routing } = await routedCandidates(modelRequest, { health, avoid: avoidIdentities, startAfter, router });
+  if (!candidates.length) return { ok: false, status: 503, error: 'no model provider is available for this request', attempts: [], routing };
   const attempts = [];
   const corrections = [];
+  const triedProviders = new Set();
   let last = null;
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
-    // The first provider keeps the caller's idempotency key; escalations get their own run record.
-    const attemptRequest = providerRequest(modelRequest, candidate, index === 0 ? null : candidate.provider);
+    // The first provider keeps the caller's idempotency key; escalations get their own run record
+    // (a second model on an already-tried provider is keyed by provider and model).
+    const suffix = index === 0 ? null : triedProviders.has(candidate.provider) ? `${candidate.provider}:${candidate.model}` : candidate.provider;
+    triedProviders.add(candidate.provider);
+    const attemptRequest = { ...providerRequest(modelRequest, candidate, suffix), routing };
     if (corrections.length) {
       const feedback = JSON.stringify({ validation_corrections: corrections.slice(-3), instruction: 'Correct these prior validation failures. Preserve all original evidence, scope and output requirements.' });
       attemptRequest.request = Array.isArray(attemptRequest.request.messages)
@@ -401,13 +508,15 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
         : { ...attemptRequest.request, user_prompt: `${attemptRequest.request.user_prompt}\n\n${feedback}` };
       attemptRequest.idempotency_key += `::correction-${crypto.createHash('sha256').update(feedback).digest('hex').slice(0, 16)}`;
     }
+    const attemptStarted = Date.now();
     last = await executeSingleModelRun({ supabase, modelRequest: attemptRequest, gateway, validateOutput });
+    if (!last.duplicate) observeOutcome(router, routing, candidate, last, attemptStarted);
     attempts.push({ provider: candidate.provider, model: candidate.model, ok: last.ok, status: last.status ?? null, error: last.ok ? null : String(last.error || '').slice(0, 200) });
-    if (last.ok || last.duplicate) return { ...last, provider: candidate.provider, model_name: candidate.model, attempts, escalated: index > 0 };
+    if (last.ok || last.duplicate) return { ...last, provider: candidate.provider, model_name: candidate.model, attempts, escalated: index > 0, routing };
     if (last.validation_error) corrections.push(String(last.validation_error).slice(0, 600));
     if (!ESCALATE_STATUSES.has(Number(last.status))) break;
   }
-  return { ...last, attempts, escalated: attempts.length > 1 };
+  return { ...last, attempts, escalated: attempts.length > 1, routing };
 }
 
 async function executeSingleModelRun({ supabase, modelRequest, gateway, validateOutput = null }) {
@@ -451,7 +560,7 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
   }
 
   const result = await callModelGateway({ ...gateway, modelRequest, timeoutMs: gatewayTimeoutFor(modelRequest.provider, gateway, process.env, modelRequest.request) });
-  const usage = { ...(result.data?.usage || {}), output_validated: null };
+  const usage = { ...(result.data?.usage || {}), output_validated: null, ...(modelRequest.routing && modelRequest.routing.reason !== 'no_router' ? { routing: compactRouting(modelRequest.routing, modelRequest) } : {}) };
   const completedAt = new Date().toISOString();
   if (result.ok) {
     if (validateOutput) {
@@ -526,6 +635,9 @@ module.exports = {
   gatewayTimeoutFor,
   planningTimeoutFor,
   selectProviders,
+  expandModels,
+  routedCandidates,
+  compactRouting,
   providerRequest,
   executeBuilderModelRun,
   executeSingleModelRun
