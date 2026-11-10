@@ -117,7 +117,9 @@ function rankCandidates({ candidates, catalog = [], policies = [], stats = [], t
     // failing a task cannot have each of its other models re-tried on a fresh optimistic prior.
     const providerStat = candidate.model ? statFor(allStats, candidate.provider, null, taskClass) : null;
     const providerPrior = providerStat ? (providerStat.completed + prior * priorStrength) / (providerStat.runs + priorStrength) : prior;
-    const success = stat ? (stat.completed + providerPrior * priorStrength) / (stat.runs + priorStrength) : providerPrior;
+    // The model's record on other tasks must not outweigh its provider's record on this one.
+    const evidence = stat && (stat.scope === 'task' || providerStat?.scope !== 'task') ? stat : null;
+    const success = evidence ? (evidence.completed + providerPrior * priorStrength) / (evidence.runs + priorStrength) : providerPrior;
     const speed = stat && stat.avg_seconds !== null ? 1 / (1 + stat.avg_seconds / 120) : 0.5;
     const cheapness = 1 - clamp01(Number(entry.cost_tier) / 3, 0.66);
     const score = weights.quality * quality + weights.success * success + weights.cost * cheapness + weights.latency * speed;
@@ -134,17 +136,17 @@ function rankCandidates({ candidates, catalog = [], policies = [], stats = [], t
   });
   scored.sort((left, right) => right.score - left.score || left.index - right.index);
   const cap = Number(policy?.max_candidates) > 0 ? Number(policy.max_candidates) : DEFAULT_MAX_CANDIDATES;
-  // One provider's model list must not fill every slot: its extra models only take slots other providers leave free.
+  // Slots are filled round by round: every provider's best model first, then each provider's next, up to
+  // max_per_provider; a provider's further models only take slots nobody else wants. Attempts then run in score order.
   const perProvider = Number(policy?.max_per_provider) > 0 ? Number(policy.max_per_provider) : DEFAULT_MAX_PER_PROVIDER;
   const counts = new Map();
-  const first = [];
-  const overflow = [];
-  for (const candidate of scored) {
+  const tiered = scored.map((candidate, order) => {
     const count = counts.get(candidate.provider) || 0;
-    (count < perProvider ? first : overflow).push(candidate);
     counts.set(candidate.provider, count + 1);
-  }
-  const ordered = [...first, ...overflow].slice(0, cap);
+    return { candidate, order, tier: Math.min(count, perProvider) };
+  });
+  const chosen = new Set(tiered.sort((a, b) => a.tier - b.tier || a.order - b.order).slice(0, cap).map(entry => entry.candidate));
+  const ordered = scored.filter(candidate => chosen.has(candidate));
   return {
     ordered: ordered.map(({ index, ...rest }) => rest),
     excluded,
