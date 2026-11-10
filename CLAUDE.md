@@ -5,6 +5,8 @@
 - `.claude/hooks/policy.json` holds the guardrails the hooks enforce: protected paths
   (`supabase/schema.sql`, `.github/workflows/`, env files), the release identity and the protected
   `main` branch, plus the fast checks that run after an edit. Change rules there, not in the scripts.
+- The command guard catches direct and common inline-interpreter writes; it is best-effort, not an OS
+  sandbox. GitHub branch protection and filesystem permissions remain authoritative.
 - Before touching shared terrain, run the `atlas-preflight` skill (Atlas capability map, terrain
   edges, blast radius and `supabase/schema.sql`, kept separate).
 - `/new-migration` and `/human-test-report` are the repeatable checklists for migrations and

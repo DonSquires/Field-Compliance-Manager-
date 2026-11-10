@@ -13,6 +13,8 @@ export function loadPolicy(file = path.join(hooksDir, 'policy.json')) {
   });
   return {
     protectedPaths: (policy.protectedPaths || []).map(compile),
+    opaqueCommandPatterns: (policy.opaqueCommandPatterns || []).map(compile),
+    protectedCommandTargets: (policy.protectedCommandTargets || []).map(compile),
     releaseIdentity: policy.releaseIdentity || null,
     protectedBranches: policy.protectedBranches || [],
     postEditChecks: (policy.postEditChecks || []).map(compile),

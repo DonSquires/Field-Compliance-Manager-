@@ -19,6 +19,26 @@
       "reason": "Environment files hold secrets. Never write or redirect into them; edit the matching .example file instead."
     }
   ],
+  "opaqueCommandPatterns": [
+    {
+      "pattern": "^(node|python([0-9]+(\\.[0-9]+)?)?|perl|ruby|bun|deno|php|lua|pwsh|powershell|bash|sh|cmd)(\\.exe)?$",
+      "reason": "Inline interpreters can write files without shell redirection. Use an explicit edit tool or a reviewed repository script."
+    }
+  ],
+  "protectedCommandTargets": [
+    {
+      "pattern": "supabase[\\\\/]schema\\.sql",
+      "reason": "supabase/schema.sql is regenerated from the live catalog and must not be written by hand."
+    },
+    {
+      "pattern": "\\.github[\\\\/]workflows[\\\\/]",
+      "reason": "GitHub workflow files are owner-managed."
+    },
+    {
+      "pattern": "(^|[\\\\/])\\.env(?!\\.example)(\\.[^\\\\/\\s'\"`]+)?(?=$|[\\s'\"`])|(^|[\\\\/])[^\\\\/\\s'\"`]+\\.env(?=$|[\\s'\"`])",
+      "reason": "Environment files can contain secrets."
+    }
+  ],
   "releaseIdentity": {
     "name": "Don Squires",
     "email": "256263525+DonSquires@users.noreply.github.com",
