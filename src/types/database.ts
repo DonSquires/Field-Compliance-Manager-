@@ -2966,6 +2966,7 @@ export type Database = {
           id: string
           max_candidates: number
           max_cost_tier: number
+          max_per_provider: number
           notes: string | null
           organization_id: string | null
           prior_strength: number
@@ -2982,6 +2983,7 @@ export type Database = {
           id?: string
           max_candidates?: number
           max_cost_tier?: number
+          max_per_provider?: number
           notes?: string | null
           organization_id?: string | null
           prior_strength?: number
@@ -2998,6 +3000,7 @@ export type Database = {
           id?: string
           max_candidates?: number
           max_cost_tier?: number
+          max_per_provider?: number
           notes?: string | null
           organization_id?: string | null
           prior_strength?: number
