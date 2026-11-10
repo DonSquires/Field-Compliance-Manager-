@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
-import { buildOfficerScanPayload, describeOfficerScanError, imageFileToBase64, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
+import { buildOfficerScanPayload, describeOfficerScanError, getOfficerScanRecoveryContext, imageFileToBase64, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
@@ -67,6 +67,7 @@ const OfficerParkingPage: React.FC = () => {
   const [plateNumber, setPlateNumber] = useState('');
   const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
   const [capturedAt, setCapturedAt] = useState<string>();
+  const [recoveryOriginalContext, setRecoveryOriginalContext] = useState<ReturnType<typeof getOfficerScanRecoveryContext>>();
   const [savedCaptures, setSavedCaptures] = useState<QueuedOfficerScan[]>([]);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [preparingImage, setPreparingImage] = useState(false);
@@ -147,6 +148,7 @@ const OfficerParkingPage: React.FC = () => {
       setImageBase64(await imageFileToBase64(file));
       setCapturedAt(new Date().toISOString());
       setClientRequestId(crypto.randomUUID());
+      setRecoveryOriginalContext(undefined);
       setPlateNumber('');
     } catch (captureError) {
       setImagePreviewUrl(null);
@@ -163,6 +165,7 @@ const OfficerParkingPage: React.FC = () => {
     setImageBase64(null);
     setCapturedAt(undefined);
     setClientRequestId(crypto.randomUUID());
+    setRecoveryOriginalContext(undefined);
     setPlateNumber('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -200,9 +203,12 @@ const OfficerParkingPage: React.FC = () => {
       const siteId = selectedSite?.location_id === locationId ? selectedSite.id : null;
       const payload = buildOfficerScanPayload({
         imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt,
-        operatingOrganizationId: operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile.organizationId,
-        locationId, clientSiteId: siteId, serviceAgreementId: selectedAgreement?.id,
-        locationSource: addressPoint ? 'address_candidate' : form.zone_id ? 'manual_zone' : 'unavailable',
+        operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile.organizationId,
+        locationId: recoveryOriginalContext ? recoveryOriginalContext.location_id : locationId,
+        clientSiteId: recoveryOriginalContext ? recoveryOriginalContext.client_site_id : siteId,
+        serviceAgreementId: recoveryOriginalContext ? recoveryOriginalContext.service_agreement_id : selectedAgreement?.id,
+        locationSource: recoveryOriginalContext ? form.zone_id ? 'manual_zone' : 'unavailable' : addressPoint ? 'address_candidate' : form.zone_id ? 'manual_zone' : 'unavailable',
+        recoveryOriginalContext,
         zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null,
         moduleKey: 'parking_enforcement',
       });
@@ -299,6 +305,7 @@ const OfficerParkingPage: React.FC = () => {
           setPlateNumber(scan.body.plate_number ?? '');
           setCapturedAt(scan.body.captured_at);
           setClientRequestId(scan.body.client_request_id ?? scan.id);
+          setRecoveryOriginalContext(getOfficerScanRecoveryContext(scan.body));
           setForm({ zone_id: scan.body.zone_id ?? '' });
           if (scan.body.gps_lat != null && scan.body.gps_lng != null) setAddressPoint({ label: 'Saved capture location', lat: scan.body.gps_lat, lng: scan.body.gps_lng, source: 'linz_address' });
         }}><Search size={15} />Review saved capture</button>
@@ -339,7 +346,7 @@ const OfficerParkingPage: React.FC = () => {
             {addressCandidates.length > 1 && <div className="form-row">{addressCandidates.map((candidate) => <button type="button" className="btn btn-secondary btn-sm" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => setAddressPoint(candidate)}>{candidate.label}</button>)}</div>}
           </div>
           <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || !form.zone_id}>
-            {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
+            {submitting ? 'Saving chalk record' : recoveryOriginalContext ? 'Recover saved capture' : 'Chalk Vehicle'}
           </button>
         </form>
       )}

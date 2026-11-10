@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import type { OfficerScanPayload } from '../src/lib/officerScan';
 
 for (const { module, routePath } of [
   { module: 'parking', routePath: '/officer/parking' },
@@ -8,7 +9,7 @@ for (const { module, routePath } of [
   { module: 'parking', routePath: '/modules/parking_enforcement' },
 ]) {
   test(`${routePath} retains a rejected photo across reload and exposes the server error`, async ({ page }) => {
-    const requests: Array<{ client_request_id: string; plate_number?: string }> = [];
+    const requests: OfficerScanPayload[] = [];
     await installOfficerScheduleFixtures(page);
     await page.route('**/rest/v1/parking_chalk_records**', (route) => route.fulfill({ json: [] }));
     await page.route('**/rest/v1/location_zones**', (route) => route.fulfill({ json: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Synthetic verified Zone' }] }));
@@ -29,10 +30,13 @@ for (const { module, routePath } of [
     await review.click();
     await expect(page.getByRole('img', { name: 'Vehicle evidence preview' })).toBeVisible();
     await page.getByPlaceholder('Use if ALPR cannot read').fill('SYN123');
-    await page.getByRole('button', { name: module === 'parking' ? 'Chalk Vehicle' : 'Process scan', exact: true }).click();
+    await page.getByRole('button', { name: 'Recover saved capture', exact: true }).click();
     await expect.poll(() => requests.length).toBe(2);
     expect(requests[1].client_request_id).toBe(requests[0].client_request_id);
     expect(requests[1].plate_number).toBe('SYN123');
+    expect(requests[1].recovery_original_context?.client_request_id).toBe(requests[0].client_request_id);
+    expect(requests[1].recovery_original_context?.captured_at).toBe(requests[0].captured_at);
+    expect(requests[1].recovery_original_context).not.toHaveProperty('image_base64');
   });
 }
 

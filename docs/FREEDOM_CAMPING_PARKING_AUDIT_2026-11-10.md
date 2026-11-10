@@ -253,3 +253,13 @@ The follow-up repair, pending release:
 Local verification includes 2,326 web unit tests, TypeScript lint and a production build; all six scan browser cases pass, including four officer/standalone reload-and-manual-confirmation routes. The five unchanged Location House policy/checkpoint cases passed in the preceding integrated run. Shared runtime, geofence and mobile contract checks pass; the disposable PostgreSQL role test also passes. Two stale root geofence assertions were updated. The three existing catalog-identity/CCTV failures remain unrelated and the complete root suite is not claimed green.
 
 No new schema migration is required. No real-user session, production photo replay, receipt clearing or business-record repair was performed. Supplier authorization, unavailable scene classification, real-device/native acceptance, and the remaining legal/notice/reporting gates above remain open; the incident is not fully accepted until a fresh governed production scan confirms the evidence and record chain.
+
+## Saved-capture recovery follow-up
+
+After PR #462, human observation confirmed older saved captures still hit `scan_request_mismatch`. Review rebuilt the context using the current header, and pre-release fingerprints also included plate text, so retaining the image alone did not make those receipts replayable.
+
+The follow-up adds an explicit **Recover saved capture** action. It retains the original saved context separately, without duplicating image bytes. The authenticated server verifies the original modern or legacy fingerprint, unchanged photo/time/coordinates/module, and a failed retryable pre-write receipt before atomically claiming the same request. Recovery is audited, including across audit-outage retries. Partial/completed/processing or unverifiable receipts remain blocked for operations review. No receipt is deleted or blindly reset.
+
+Legacy fingerprints did not bind coordinate provenance, so their recovery requires a selected Working Zone and does not establish GPS presence. Original capture time and coordinates remain preserved. A manual plate correction can match the saved, currently confirmed, or originally blank plate variant without relaxing photo identity.
+
+Verification: all 2,327 web tests, web TypeScript checks, and six officer/standalone browser cases pass. The runtime regressions cover successful legacy recovery, changed photo/time rejection, unproven GPS rejection, partial-write refusal and audit failure/retry. The real evidence-custody PostgreSQL contract also passes. This is code/test evidence, not proof that the user's two device-local captures have been recovered in production.

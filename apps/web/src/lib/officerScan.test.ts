@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
+import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, getOfficerScanRecoveryContext, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
 
 describe('officer scan contract', () => {
+  it('retains the original capture context across recovery attempts without duplicating the image', () => {
+    const saved = buildOfficerScanPayload({ clientRequestId: 'original-request', imageBase64: 'original-photo', plateNumber: 'OLD123', zoneId: 'original-zone', capturedAt: '2026-11-10T07:00:00Z' });
+    const original = getOfficerScanRecoveryContext(saved);
+    expect(original).not.toHaveProperty('image_base64');
+    const resumed = buildOfficerScanPayload({ clientRequestId: 'original-request', imageBase64: 'original-photo', plateNumber: 'NEW123', zoneId: 'corrected-zone', recoveryOriginalContext: original });
+    expect(getOfficerScanRecoveryContext(resumed)).toEqual(original);
+    expect(resumed.recovery_original_context?.zone_id).toBe('original-zone');
+    expect(resumed.recovery_original_context?.captured_at).toBe(saved.captured_at);
+  });
   it('surfaces the edge response without replacing it with the generic SDK error', async () => {
     const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
       context: Response.json({ code: 'plate_confirmation_required', error: 'Keep this photo and confirm the plate manually.' }, { status: 400 }),
