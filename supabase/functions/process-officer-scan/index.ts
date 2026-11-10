@@ -274,7 +274,8 @@ function inferenceHeaders() {
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
-    const decision = data.confidence === 'different' ? 'moved' : data.confidence === 'same' ? 'stationary' : 'inconclusive';
+    const decision = data.confidence === 'different' && data.scene_confidence === 'changed' ? 'moved'
+      : data.confidence === 'same' && data.scene_confidence === 'same' ? 'stationary' : 'inconclusive';
     return {
       moved: decision === 'moved',
       similarity: data.similarity ?? 0,
@@ -340,7 +341,7 @@ async function upsertOvernightSession(supabase, input) {
     if (existingSessionId) {
       const { data: existing } = await supabase.from('vehicle_overnight_sessions').select('observation_count, verification_status').eq('id', existingSessionId).maybeSingle();
       const count = Number(existing?.observation_count ?? 1) + 1;
-      await supabase.from('vehicle_overnight_sessions').update({
+      const { error: sessionWriteError } = await supabase.from('vehicle_overnight_sessions').update({
         evening_observation_id: input.observationId,
         evening_seen_at: input.observedAt,
         evening_gps_lat: input.gpsLat,
@@ -349,6 +350,7 @@ async function upsertOvernightSession(supabase, input) {
         observation_count: count,
         updated_at: new Date().toISOString()
       }).eq('id', existingSessionId);
+      if (sessionWriteError) throw new Error('The evening overnight evidence could not be saved.');
       return {
         id: existingSessionId,
         overnight_date: overnightDate,
@@ -360,7 +362,7 @@ async function upsertOvernightSession(supabase, input) {
       };
     }
     // New evening session -- is_compliant intentionally null (awaiting morning).
-    const { data: created } = await supabase.from('vehicle_overnight_sessions').insert({
+    const { data: created, error: sessionWriteError } = await supabase.from('vehicle_overnight_sessions').insert({
       organization_id: input.orgId,
       plate_number: input.plateNumber,
       zone_id: input.zoneId,
@@ -380,6 +382,7 @@ async function upsertOvernightSession(supabase, input) {
       compliance_reason: 'awaiting_morning_verification',
       client_org_id: input.clientOrgId ?? null
     }).select('id').single();
+    if (sessionWriteError || !created?.id) throw new Error('The evening overnight session was not confirmed.');
     return {
       id: created?.id ?? null,
       overnight_date: overnightDate,
@@ -408,7 +411,7 @@ async function upsertOvernightSession(supabase, input) {
   const verificationStatus = moved ? 'moved' : inconclusive ? 'inconclusive' : 'verified_overnight';
   const evidenceStrength = verificationStatus === 'verified_overnight' ? 'strong' : 'manual_review';
   const count = Number(existing?.observation_count ?? 1) + 1;
-  await supabase.from('vehicle_overnight_sessions').update({
+  const { error: sessionWriteError } = await supabase.from('vehicle_overnight_sessions').update({
     morning_observation_id: input.observationId,
     morning_seen_at: input.observedAt,
     morning_gps_lat: input.gpsLat,
@@ -426,6 +429,7 @@ async function upsertOvernightSession(supabase, input) {
     breach_alert_id: verificationStatus === 'verified_overnight' ? input.breachAlertId : null,
     updated_at: new Date().toISOString()
   }).eq('id', existingSessionId);
+  if (sessionWriteError) throw new Error('The morning overnight evidence could not be saved.');
   return {
     id: existingSessionId,
     overnight_date: overnightDate,
@@ -573,7 +577,7 @@ async function upsertOvernightSession(supabase, input) {
     // Session already exists for this overnight_date — update it with the
     // current scan's data (morning side) and the real compliance verdict.
     const count = Number(existing.observation_count ?? 1) + 1;
-    await supabase.from('vehicle_overnight_sessions').update({
+    const { error: sessionWriteError } = await supabase.from('vehicle_overnight_sessions').update({
       morning_observation_id: input.observationId,
       morning_seen_at: input.observedAt,
       morning_gps_lat: input.gpsLat,
@@ -591,6 +595,7 @@ async function upsertOvernightSession(supabase, input) {
       breach_alert_id: inferredVerificationStatus === 'verified_overnight' ? input.breachAlertId : null,
       updated_at: new Date().toISOString()
     }).eq('id', existing.id);
+    if (sessionWriteError) throw new Error('The daily overnight evidence could not be saved.');
     return {
       id: existing.id,
       overnight_date: overnightDate,
@@ -603,7 +608,7 @@ async function upsertOvernightSession(supabase, input) {
   }
   // No existing session — insert a new row. Fill BOTH halves:
   // evening_* from the PREVIOUS observation, morning_* from the CURRENT scan.
-  const { data: created } = await supabase.from('vehicle_overnight_sessions').insert({
+  const { data: created, error: sessionWriteError } = await supabase.from('vehicle_overnight_sessions').insert({
     organization_id: input.orgId,
     plate_number: input.plateNumber,
     zone_id: input.zoneId,
@@ -615,7 +620,7 @@ async function upsertOvernightSession(supabase, input) {
     evening_seen_at: input.prevObs?.observed_at ?? null,
     evening_gps_lat: null,
     evening_gps_lng: null,
-    evening_photo_url: null,
+    evening_photo_url: input.prevObs?.photo_url ?? null,
     // Morning side: current scan
     morning_observation_id: input.observationId,
     morning_seen_at: input.observedAt,
@@ -634,6 +639,7 @@ async function upsertOvernightSession(supabase, input) {
     breach_alert_id: inferredVerificationStatus === 'verified_overnight' ? input.breachAlertId : null,
     client_org_id: input.clientOrgId ?? null
   }).select('id').single();
+  if (sessionWriteError || !created?.id) throw new Error('The daily overnight session was not confirmed.');
   return {
     id: created?.id ?? null,
     overnight_date: overnightDate,
@@ -671,7 +677,8 @@ async function renderWatermarkedEvidence(bytes, watermarkText) {
     headers: {
       'x-inference-api-key': INFERENCE_API_KEY
     },
-    body: formData
+    body: formData,
+    signal: AbortSignal.timeout(INFER_TIMEOUT_MS)
   });
   if (!res.ok) {
     throw new Error(`Inference watermark service failed with HTTP ${res.status}`);
@@ -695,14 +702,14 @@ async function storeScanEvidence(supabase, input) {
     `Plate ${input.plateNumber}`,
     `Time ${input.observedAt}`,
     input.zoneName ? `Zone ${input.zoneName}` : null,
-    input.gpsLat !== null && input.gpsLng !== null ? `GPS ${input.gpsLat.toFixed(6)}, ${input.gpsLng.toFixed(6)}` : 'GPS unavailable',
+    input.gpsLat != null && input.gpsLng != null ? `GPS ${Number(input.gpsLat).toFixed(6)}, ${Number(input.gpsLng).toFixed(6)}` : 'GPS unavailable',
     `Officer ${input.officerId}`,
     `Observation ${input.observationId}`
   ].filter(Boolean).join(' | ');
   const watermarked = await renderWatermarkedEvidence(bytes, watermarkText);
   const rawSha256 = await sha256Hex(bytes);
   const watermarkedSha256 = await sha256Hex(watermarked);
-  await supabase.storage.from(SCAN_BUCKET).upload(originalPath, new Blob([
+  const { error: originalUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(originalPath, new Blob([
     bytes
   ], {
     type: 'image/jpeg'
@@ -710,10 +717,12 @@ async function storeScanEvidence(supabase, input) {
     upsert: false,
     contentType: 'image/jpeg'
   });
-  await supabase.storage.from(SCAN_BUCKET).upload(watermarkedPath, watermarked, {
+  if (originalUploadError) throw new Error('The original scan image upload was not confirmed.');
+  const { error: watermarkedUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(watermarkedPath, watermarked, {
     upsert: false,
     contentType: 'image/jpeg'
   });
+  if (watermarkedUploadError) throw new Error('The watermarked scan image upload was not confirmed.');
   const { error: evidenceError } = await supabase.rpc('register_edge_court_photo', {
     p_organization_id: input.orgId,
     p_module_key: input.moduleKey,
@@ -735,13 +744,25 @@ serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
   });
-  const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+  let requestReceipt = null;
+  let safeToRetry = true;
+  let captureEvidence = null;
+  const json = async (body, status = 200)=>{
+    if (status >= 400 && requestReceipt?.owned) {
+      const { error } = await requestReceipt.client.from('officer_command_requests').update({
+        command_status: 'failed',
+        response: { ...body, success: false, http_status: status, retryable: safeToRetry, request_fingerprint: requestReceipt.fingerprint, capture_evidence: captureEvidence }
+      }).eq('request_id', requestReceipt.id).eq('actor_user_id', requestReceipt.actorId);
+      if (error) console.error('[scan] failure receipt could not be finalized');
+    }
+    return new Response(JSON.stringify({ ...body, ...(status >= 400 ? { retryable: safeToRetry, capture_saved: captureEvidence !== null } : {}) }), {
       status,
       headers: {
         ...CORS,
         'Content-Type': 'application/json'
       }
     });
+  };
   try {
     // Step 1: Auth
     const authHeader = req.headers.get('Authorization');
@@ -749,15 +770,21 @@ serve(async (req)=>{
       error: 'Unauthorized'
     }, 401);
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const callerClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_SERVICE_KEY, {
+      global: { headers: { Authorization: authHeader } }, auth: { persistSession: false }
+    });
     const token = authHeader.replace('Bearer ', '').trim();
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return json({
       error: 'Unauthorized'
     }, 401);
-    const { data: profile } = await supabase.from('user_profiles').select('id, role, organization_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('user_profiles').select('id, role, organization_id').eq('id', user.id).is('deactivated_at', null).single();
     if (!profile?.organization_id) return json({
       error: 'Officer profile not found or not linked to an organisation'
     }, 403);
+    if (!['officer', 'admin_officer', 'admin', 'master', 'grand_master', 'scan_operator'].includes(profile.role)) {
+      return json({ error: 'An active operational role is required to process vehicle evidence' }, 403);
+    }
     const orgId = profile.organization_id;
     const officerId = profile.id;
     // Step 2: Parse input
@@ -765,9 +792,14 @@ serve(async (req)=>{
     const { plate_number: manualPlateNumberInput, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
     const manualPlateNumber = typeof manualPlateNumberInput === 'string' ? normalizePlateNumber(manualPlateNumberInput) : '';
     const clientRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : '';
+    const fingerprintBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify({
+      image_base64: imageBase64, plate_number: manualPlateNumber, gps_lat: gpsLat, gps_lng: gpsLng,
+      zone_id: manualZoneId ?? null, module_key: moduleKey, captured_at: capturedAt ?? null
+    })));
+    const requestFingerprint = Array.from(new Uint8Array(fingerprintBytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
     const completeReceipt = async (response) => {
       if (clientRequestId) {
-        const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
+        const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response: { ...response, request_fingerprint: requestFingerprint } }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
         if (receiptError) console.error('[scan] receipt completion failed:', receiptError.message);
       }
       return json(response);
@@ -775,25 +807,31 @@ serve(async (req)=>{
     if (clientRequestId) {
       const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
       if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
+      if (existingReceipt && existingReceipt.response?.request_fingerprint !== requestFingerprint) {
+        return json({ error: 'This request belongs to different scan evidence. Start a new scan request.', code: 'scan_request_mismatch' }, 409);
+      }
+      captureEvidence = existingReceipt?.response?.capture_evidence ?? null;
       if (existingReceipt?.command_status === 'completed' && existingReceipt.response?.success === true) return json(existingReceipt.response);
       if (existingReceipt) {
-        const receiptAgeMs = Date.now() - new Date(existingReceipt.created_at).getTime();
-        if (existingReceipt.command_status !== 'processing' || !Number.isFinite(receiptAgeMs) || receiptAgeMs < 15 * 60 * 1000) {
-          return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
+        if (existingReceipt.command_status !== 'failed' || existingReceipt.response?.retryable !== true) {
+          return json({ error: 'This scan needs recovery before it can be processed again. Keep the saved capture.', code: 'scan_recovery_required', request_id: clientRequestId }, 409);
         }
-        const { error: staleReceiptError } = await supabase.from('officer_command_requests').delete().eq('request_id', clientRequestId).eq('actor_user_id', officerId);
-        if (staleReceiptError) return json({ error: 'Stale scan request receipt could not be recovered' }, 503);
-      }
-      const { error: receiptInsertError } = await supabase.from('officer_command_requests').insert({
+        const { data: claimed, error: claimError } = await supabase.from('officer_command_requests').update({ command_status: 'processing' })
+          .eq('request_id', clientRequestId).eq('actor_user_id', officerId).eq('command_status', 'failed').select('id').maybeSingle();
+        if (claimError || !claimed) return json({ error: 'This scan request is already being processed' }, 409);
+      } else {
+        const { error: receiptInsertError } = await supabase.from('officer_command_requests').insert({
         request_id: clientRequestId,
         organization_id: orgId,
         actor_user_id: officerId,
         command_type: 'process_officer_scan',
         command_status: 'processing',
-        response: {}
+        response: { request_fingerprint: requestFingerprint }
       });
       if (receiptInsertError?.code === '23505') return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
       if (receiptInsertError) return json({ error: 'Scan request receipt could not be created' }, 503);
+      }
+      requestReceipt = { client: supabase, id: clientRequestId, actorId: officerId, fingerprint: requestFingerprint, owned: true };
     }
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'
@@ -833,6 +871,25 @@ serve(async (req)=>{
     if (capturedDate.getTime() > Date.now() + 5 * 60 * 1000) return json({
       error: 'captured_at cannot be in the future'
     }, 400);
+    if (manualZoneId) {
+      const { data: canAccessPlace, error: placeAccessError } = await callerClient.rpc('has_location_access', { p_site_id: null, p_zone_id: manualZoneId });
+      if (placeAccessError || canAccessPlace !== true) return json({ error: 'Active authority for this Zone could not be confirmed', code: 'scan_place_access_denied' }, 403);
+    }
+    if (!captureEvidence) {
+      const captureBytes = base64ToBytes(imageBase64);
+      if (!captureBytes.length || captureBytes.length > 20 * 1024 * 1024) return json({ error: 'Scan photo must be between 1 byte and 20 MB' }, 400);
+      const captureHash = await sha256Hex(captureBytes);
+      const capturePath = `org/${orgId}/scan-captures/${clientRequestId || crypto.randomUUID()}/${crypto.randomUUID()}.jpg`;
+      const { error: captureUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(capturePath, new Blob([captureBytes], { type: 'image/jpeg' }), { upsert: false, contentType: 'image/jpeg' });
+      if (captureUploadError) return json({ error: 'The scan photo could not be saved. Keep the capture on this device and retry.', code: 'capture_storage_failed' }, 503);
+      const { data: captureId, error: captureRegistrationError } = await supabase.rpc('register_edge_court_photo', {
+        p_organization_id: orgId, p_module_key: moduleKey, p_storage_path: capturePath,
+        p_captured_at: capturedDate.toISOString(),
+        p_metadata: { sha256: captureHash, request_id: clientRequestId || null, captured_by_user_id: officerId, capture_state: 'awaiting_plate_confirmation', source: 'submitted_scan_image', processed_observation_created: false }
+      });
+      if (captureRegistrationError || !captureId) return json({ error: 'The photo upload completed but its evidence registration was not confirmed. Keep the capture for review.', code: 'capture_registration_failed' }, 503);
+      captureEvidence = { evidence_id: captureId, storage_path: capturePath, sha256: captureHash };
+    }
     // Steps 3 & 4: ALPR + full inference in parallel (same photo, two calls).
     // An officer-entered plate is the governed fallback when ALPR cannot read the image.
     let alprResult = null;
@@ -851,9 +908,10 @@ serve(async (req)=>{
       }
       alprUsed = alprResult !== null;
     }
-    const plateNumber = manualPlateNumber || normalizePlateNumber(alprResult?.plate ?? '');
+    const plateNumber = manualPlateNumber || (alprResult?.confidence >= MIN_ALPR_CONFIDENCE ? normalizePlateNumber(alprResult?.plate ?? '') : '');
     if (!plateNumber) return json({
-      error: 'A plate could not be confirmed from the photo. Capture a clearer image and try again.'
+      error: 'Photo saved. A plate could not be confirmed. Confirm the plate manually, or capture a clearer image.',
+      code: 'plate_confirmation_required'
     }, 400);
     const plateConfidence = manualPlateNumber ? null : alprResult?.confidence ?? null;
     const plateSource = manualPlateNumber ? 'manual' : 'alpr';
@@ -881,11 +939,12 @@ serve(async (req)=>{
     let resolutionStatus = manualZoneId ? 'resolved' : hasLatitude && hasLongitude ? null : 'not_evaluated';
     let governorOverlapFlag = false;
     if (!zoneId && hasLatitude && hasLongitude) {
-      const { data: ctxRows, error: contextError } = await supabase.rpc('resolve_operational_context', {
+      const { data: ctxRows, error: contextError } = await callerClient.rpc('resolve_operational_context_authorized', {
         p_lat: Number(gpsLat),
         p_lng: Number(gpsLng),
         p_org_id: orgId,
-        p_module_key: moduleKey ?? null
+        p_module_key: moduleKey ?? null,
+        p_at: capturedDate.toISOString()
       });
       if (contextError) return json({
         error: 'Geofence context could not be resolved',
@@ -915,8 +974,9 @@ serve(async (req)=>{
     if (zoneId) {
       // Lightweight fetch for the zone name (used in the evidence watermark) and
       // location_id; site_id already came from resolve_context.
-      let zoneQuery = supabase.from('location_zones').select('id, name, location_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('is_active', true);
-      if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId);
+      const { data: canAccessPlace, error: placeAccessError } = await callerClient.rpc('has_location_access', { p_site_id: siteId, p_zone_id: zoneId });
+      if (placeAccessError || canAccessPlace !== true) return json({ error: 'Active authority for the resolved place could not be confirmed', code: 'scan_place_access_denied' }, 403);
+      const zoneQuery = supabase.from('location_zones').select('id, name, location_id, module_key, active_schedule, boundary_verification, organization_id').eq('id', zoneId).eq('is_active', true);
       const { data: zoneData, error: zoneError } = await zoneQuery.maybeSingle();
       if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
       if (!zoneData || zoneData.boundary_verification !== 'verified') return json({ error: 'An active verified Zone in this organization is required' }, 409);
@@ -928,6 +988,11 @@ serve(async (req)=>{
       }
       zoneName = zoneData.name;
       locationId = zoneData.location_id;
+      if (!clientOrgId && locationId) {
+        const { data: house, error: houseError } = await supabase.from('locations').select('organization_id').eq('id', locationId).single();
+        if (houseError || !house) return json({ error: 'Place ownership could not be confirmed' }, 503);
+        clientOrgId = house.organization_id;
+      }
       if (!siteId && locationId) {
         // Manual zone selection skipped the resolver: the site is the zone's sibling on the same house.
         const { data: siblingSite } = await supabase.from('client_sites').select('id').eq('location_id', locationId).eq('active', true).order('created_at').limit(1).maybeSingle();
@@ -945,7 +1010,7 @@ serve(async (req)=>{
     }
     const geofenceContext = {
       resolved_at: capturedDate.toISOString(),
-      resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context',
+      resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context_authorized',
       spatial_resolution_evaluated: !manualZoneId && hasLatitude && hasLongitude,
       resolution_status: resolutionStatus,
       governor_overlap_flag: governorOverlapFlag,
@@ -971,11 +1036,11 @@ serve(async (req)=>{
         // a. canonical_vehicles lookup (same as FC — VOI/flags + rego/WoF/CoF compliance)
         supabase.from('canonical_vehicles').select('id, make, model, year, colour, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, compliance_checked_at').eq('plate_number', plateNumber).maybeSingle(),
         // b. Most recent active chalk record for this plate in this zone/org
-        supabase.from('parking_chalk_records').select('id, chalked_at, return_by, status, embedding, photo_url, zone_id').eq('organization_id', orgId).eq('plate', plateNumber).eq('status', 'active').order('chalked_at', {
-          ascending: false
+        supabase.from('parking_chalk_records').select('id, chalked_at, return_by, status, embedding, photo_url, photo_urls, zone_id').eq('organization_id', orgId).eq('plate', plateNumber).eq('zone_id', zoneId).eq('status', 'active').order('chalked_at', {
+          ascending: true
         }).limit(1).maybeSingle(),
         // c. Zone parking rules from location_zones
-        zoneId ? supabase.from('location_zones').select('parking_time_limit_minutes, parking_disabled_multiplier').eq('id', zoneId).single() : Promise.resolve({
+        zoneId ? supabase.from('location_zones').select('parking_time_limit_minutes, parking_disabled_multiplier, parking_signage_photo_url').eq('id', zoneId).single() : Promise.resolve({
           data: null
         }),
         // d. parking_module_config for org defaults
@@ -985,6 +1050,11 @@ serve(async (req)=>{
       ]);
       const parkingVehicle = parkingVehicleRes.data;
       const priorChalk = parkingChalkRes.data;
+      const zoneParkingRule = _parkingZoneRulesRes.data;
+      if (parkingChalkRes.error || _parkingZoneRulesRes.error) return json({ error: 'Photo saved, but Parking history or rules could not be loaded.', code: 'parking_policy_unavailable' }, 503);
+      if (!zoneId || resolutionStatus !== 'resolved' || !zoneParkingRule?.parking_signage_photo_url || !Number.isInteger(zoneParkingRule.parking_time_limit_minutes) || zoneParkingRule.parking_time_limit_minutes <= 0) {
+        return json({ error: 'Photo saved. A verified Parking Zone with a source-backed time limit is required before chalk timing can start.', code: 'parking_rule_review_required' }, 422);
+      }
       const parkingOfficerName = parkingOfficerRes.data?.display_name ?? null;
       const parkingSafetyWarnings = await loadSafetyWarnings(supabase, parkingVehicle?.id ?? null, orgId);
       // Merge vehicle attributes: inference > canonical > null
@@ -1100,22 +1170,24 @@ serve(async (req)=>{
       }
       // If moved: update prior chalk record to status='compliant'
       if (parkingMovement?.moved && priorChalk?.id) {
-        await supabase.from('parking_chalk_records').update({
+        safeToRetry = false;
+        const { error: movementWriteError } = await supabase.from('parking_chalk_records').update({
           status: 'compliant',
           resolved_at: new Date().toISOString()
         }).eq('id', priorChalk.id);
+        if (movementWriteError) throw new Error('The previous parking session could not be closed.');
         console.log(`[scan:parking] prior chalk ${priorChalk.id} marked compliant (vehicle moved)`);
       }
       let parkingCompliance = {
-        verdict: 'clear',
-        effective_limit_minutes: 60,
-        grace_period_minutes: 5,
+        verdict: 'unknown',
+        effective_limit_minutes: zoneParkingRule.parking_time_limit_minutes,
+        grace_period_minutes: 0,
         chalked_at: null,
         minutes_elapsed: null,
         is_overstay: false,
         is_repeat: false,
         repeat_count: 0,
-        recommended_action: 'none'
+        recommended_action: 'review_required'
       };
       // Only run compliance if vehicle did NOT move (moved = compliant, no need to check)
       if (!parkingMovement?.moved) {
@@ -1123,11 +1195,13 @@ serve(async (req)=>{
           p_org_id: orgId,
           p_zone_id: zoneId,
           p_plate: plateNumber,
-          p_is_disabled_bay: parkingScene?.is_disabled_bay ?? false,
-          p_sign_time_limit_minutes: parkingScene?.sign_time_limit_minutes ?? null
+          p_is_disabled_bay: parkingScene?.is_disabled_bay === true,
+          p_sign_time_limit_minutes: null
         });
-        if (!compErr && compData) {
-          parkingCompliance = compData;
+        if (compErr || !compData || !Number.isFinite(compData.effective_limit_minutes) || compData.effective_limit_minutes <= 0) return json({ error: 'Photo saved, but the Parking policy result was not confirmed.', code: 'parking_policy_unavailable' }, 503);
+        parkingCompliance = compData;
+        if (parkingCompliance.is_overstay && (!parkingScene || parkingMovement?.decision !== 'stationary')) {
+          parkingCompliance = { ...parkingCompliance, verdict: 'unknown', is_overstay: false, recommended_action: 'review_required' };
         }
       }
       console.log(`[scan:parking] compliance: verdict=${parkingCompliance.verdict} overstay=${parkingCompliance.is_overstay} repeat=${parkingCompliance.is_repeat}`);
@@ -1136,13 +1210,16 @@ serve(async (req)=>{
       const effectiveLimitMs = effectiveLimitMinutes * 60 * 1000;
       // C5 fix: use a single timestamp for both chalked_at and return_by
       // to avoid drift between separate Date.now() calls.
-      const parkingNowMs = Date.now();
+      const parkingNowMs = capturedDate.getTime();
       const parkingObservedAt = new Date(parkingNowMs).toISOString();
-      const { data: chalkData, error: chalkErr } = await supabase.from('parking_chalk_records').insert({
+      safeToRetry = false;
+      const reuseChalk = priorChalk && !parkingMovement?.moved;
+      const { data: chalkData, error: chalkErr } = reuseChalk ? { data: { id: priorChalk.id }, error: null } : await supabase.from('parking_chalk_records').insert({
         organization_id: orgId,
         plate: plateNumber,
         zone_id: zoneId,
         client_site_id: siteId,
+        location_name: zoneName,
         chalked_at: parkingObservedAt,
         return_by: new Date(parkingNowMs + effectiveLimitMs).toISOString(),
         status: 'active',
@@ -1191,9 +1268,11 @@ serve(async (req)=>{
         zoneName
       });
       if (parkingEvidence.originalPath || parkingEvidence.watermarkedPath) {
-        await supabase.from('parking_chalk_records').update({
-          photo_url: parkingEvidence.watermarkedPath ?? parkingEvidence.originalPath
+        const { error: photoLinkError } = await supabase.from('parking_chalk_records').update({
+          photo_url: reuseChalk ? priorChalk.photo_url ?? parkingEvidence.watermarkedPath : parkingEvidence.watermarkedPath ?? parkingEvidence.originalPath,
+          photo_urls: [...(reuseChalk && Array.isArray(priorChalk.photo_urls) ? priorChalk.photo_urls : []), { storage_path: parkingEvidence.watermarkedPath, captured_at: parkingObservedAt, raw_sha256: parkingEvidence.rawSha256, watermarked_sha256: parkingEvidence.watermarkedSha256 }]
         }).eq('id', chalkRecordId);
+        if (photoLinkError) throw new Error('The parking scan photo linkage was not confirmed.');
       }
       // Step 10P: Create breach alert if overstay
       // #162 fix: plain insert + unique-violation (23505) handling.
@@ -1236,7 +1315,7 @@ serve(async (req)=>{
       // #162 fix: plain insert + unique-violation (23505) handling.
       // Same root cause as Step 10P — partial unique index cannot be
       // inferred as an ON CONFLICT arbiter.
-      for (const flag of vehicleComplianceFlags){
+      for (const flag of vehicleComplianceFlags.filter(() => Boolean(zoneId && resolutionStatus === 'resolved'))){
         const breachType = flag === 'expired_rego' ? 'expired_rego' : flag === 'expired_wof' ? 'expired_wof' : 'expired_cof';
         const { error: vcBreachErr } = await supabase.from('breach_alerts').insert({
           organization_id: orgId,
@@ -1403,71 +1482,13 @@ serve(async (req)=>{
       windowPeek = await classifyOvernightWindow(supabase, orgId, plateNumber, zoneId, observedAt);
       console.log(`[scan] window=${windowPeek.scanWindow ?? 'none'} date=${windowPeek.overnightDate ?? 'none'} prior=${windowPeek.priorVerificationStatus ?? 'none'}`);
     }
-    // Step 7b: Write the overnight session row NOW (before compliance check)
-    // so the RPC counts this morning's verified overnight correctly.
-    // BRANCHED on verificationMode:
-    //   two_photo_verified       → upsertOvernightSession (evening/morning window)
-    //   single_daily_observation → upsertSingleDailyOvernightSession (calendar-day pair)
-    // breachAlertId is null here; it gets stamped back onto the session row
-    // after Step 10 creates the breach_alerts row.
-    let overnightSessionPre;
-    let singleDailySessionId = null;
-    if (verificationMode === 'single_daily_observation' && singleDailyPeek) {
-      overnightSessionPre = await upsertSingleDailyOvernightSession(supabase, {
-        orgId,
-        plateNumber,
-        zoneId,
-        siteId,
-        locationId,
-        observationId: '',
-        observedAt,
-        gpsLat,
-        gpsLng,
-        photoUrl: null,
-        isScv,
-        breachAlertId: null,
-        movementResult,
-        singleDailyPeek,
-        prevObs: prevObs ? {
-          id: prevObs.id,
-          observed_at: prevObs.observed_at
-        } : null,
-        complianceIsCompliant: true,
-        complianceReason: 'pending',
-        clientOrgId
-      });
-      // Thread the REAL session id from the pre-compliance write so the
-      // post-compliance call (Step 10b) always performs a genuine UPDATE.
-      singleDailySessionId = overnightSessionPre.id;
-    } else {
-      overnightSessionPre = await upsertOvernightSession(supabase, {
-        orgId,
-        plateNumber,
-        zoneId,
-        siteId,
-        locationId,
-        observationId: '',
-        observedAt,
-        gpsLat,
-        gpsLng,
-        photoUrl: null,
-        isScv,
-        breachAlertId: null,
-        movementResult,
-        windowPeek,
-        complianceIsCompliant: true,
-        complianceReason: 'pending',
-        clientOrgId
-      });
-    }
-    const verificationStatusPre = overnightSessionPre.verification_status;
-    console.log(`[scan] session_pre id=${overnightSessionPre.id ?? 'none'} status=${verificationStatusPre ?? 'none'}`);
+    safeToRetry = false;
     // Step 8: Compliance check -- now runs AFTER the session row exists, so
     // calculate_vehicle_compliance (0193) correctly counts this morning's
     // verified overnight when deciding the verdict.
     let compliance = {
-      is_compliant: true,
-      reason: 'no_zone_configured',
+      is_compliant: null,
+      reason: zoneId ? 'pending_overnight_evaluation' : 'no_zone_configured',
       nights_this_zone: 0,
       nights_this_month: 0,
       limit_consecutive: null,
@@ -1475,14 +1496,6 @@ serve(async (req)=>{
       scv_required: false,
       is_scv: isScv
     };
-    if (zoneId) {
-      const { data: complianceData, error: complianceErr } = await supabase.rpc('calculate_vehicle_compliance', {
-        p_plate: plateNumber,
-        p_zone_id: zoneId,
-        p_org_id: orgId
-      });
-      if (!complianceErr && complianceData) compliance = complianceData;
-    }
     // Homeless: check for a CONFIRMED homeless_claims record (0191).
     // Unlike the old silent override, we now record the true rule verdict and
     // set enforcement_exempt instead of force-flipping is_compliant.
@@ -1498,26 +1511,9 @@ serve(async (req)=>{
     // separately via the homeless-claims workflow (0191). The breach is
     // held as 'open' until an admin reviews and confirms/declines.
     }
-    // SCV sticker override: blue sticker = physical evidence of SCV certification
-    const stickerBlue = inferResult?.sticker_presence === true && inferResult?.sticker_color === 'blue';
-    if (stickerBlue && compliance.reason === 'no_scv_certificate') {
-      compliance.is_compliant = true;
-      compliance.reason = 'scv_sticker_detected';
-    }
     // Step 8a: At-risk detection (Tier 1 pilot requirement)
     let complianceStatus = 'unknown';
     // W1 fix: a zone-less scan or unconfigured zone is never a breach — benefit of the doubt.
-    if (!zoneId || compliance.reason === 'no_zone_configured' || compliance.reason === 'no_rules_configured') {
-      complianceStatus = 'unknown';
-    } else if (compliance.is_compliant) {
-      const atRiskConsecutive = compliance.limit_consecutive !== null && compliance.nights_this_zone >= compliance.limit_consecutive - 1 && compliance.nights_this_zone < compliance.limit_consecutive;
-      const atRiskMonthly = compliance.limit_monthly !== null && compliance.nights_this_month >= compliance.limit_monthly - 2 && compliance.nights_this_month < compliance.limit_monthly;
-      complianceStatus = atRiskConsecutive || atRiskMonthly ? 'at_risk' : 'compliant';
-    } else if (enforcementExempt) {
-      complianceStatus = 'breach_exempt'; // non-compliant but enforcement suppressed
-    } else {
-      complianceStatus = 'breach';
-    }
     console.log(`[scan] plate=${plateNumber} compliant=${compliance.is_compliant} status=${complianceStatus} reason=${compliance.reason} exempt=${enforcementExempt}`);
     // Step 9: Write observation with the now-correct compliance verdict.
     const { data: obsData, error: obsErr } = await supabase.from('observations').insert({
@@ -1582,14 +1578,44 @@ serve(async (req)=>{
       zoneName
     });
     if (evidence.originalPath || evidence.watermarkedPath) {
-      await supabase.from('observations').update({
+      const { error: photoLinkError } = await supabase.from('observations').update({
         original_photo_url: evidence.originalPath,
         watermarked_photo_url: evidence.watermarkedPath,
         photo_url: evidence.watermarkedPath,
         photo_captured_at: evidenceObservedAt,
         photo_watermark_text: evidence.watermarkText
       }).eq('id', observationId);
+      if (photoLinkError) throw new Error('The camping scan photo linkage was not confirmed.');
     }
+    const sessionInput = {
+      orgId, plateNumber, zoneId, siteId, locationId, observationId, observedAt, gpsLat, gpsLng,
+      photoUrl: evidence.watermarkedPath, isScv, breachAlertId: null, movementResult, windowPeek, singleDailyPeek,
+      prevObs: prevObs ? { id: prevObs.id, observed_at: prevObs.observed_at, photo_url: prevObs.original_photo_url } : null,
+      complianceIsCompliant: null, complianceReason: 'pending', clientOrgId
+    };
+    const overnightSessionPre = verificationMode === 'single_daily_observation' && singleDailyPeek
+      ? await upsertSingleDailyOvernightSession(supabase, sessionInput)
+      : await upsertOvernightSession(supabase, sessionInput);
+    const verificationStatusPre = overnightSessionPre.verification_status;
+    if (zoneId) {
+      const { data: complianceData, error: complianceErr } = await supabase.rpc('calculate_vehicle_compliance', { p_plate: plateNumber, p_zone_id: zoneId, p_org_id: orgId });
+      if (complianceErr || !complianceData) throw new Error('The camping policy result was not confirmed.');
+      compliance = complianceData;
+    }
+    if (!zoneId || compliance.reason === 'no_zone_configured' || compliance.reason === 'no_rules_configured') {
+      complianceStatus = 'unknown';
+    } else if (compliance.is_compliant === true) {
+      const atRiskConsecutive = compliance.limit_consecutive !== null && compliance.nights_this_zone >= compliance.limit_consecutive - 1 && compliance.nights_this_zone < compliance.limit_consecutive;
+      const atRiskMonthly = compliance.limit_monthly !== null && compliance.nights_this_month >= compliance.limit_monthly - 2 && compliance.nights_this_month < compliance.limit_monthly;
+      complianceStatus = atRiskConsecutive || atRiskMonthly ? 'at_risk' : 'compliant';
+    } else if (compliance.is_compliant === false) {
+      complianceStatus = enforcementExempt ? 'breach_exempt' : 'breach';
+    }
+    const { error: verdictWriteError } = await supabase.from('observations').update({
+      is_compliant: compliance.is_compliant, compliance_reason: compliance.reason, compliance_status: complianceStatus,
+      nights_this_zone: compliance.nights_this_zone, nights_this_month: compliance.nights_this_month
+    }).eq('id', observationId);
+    if (verdictWriteError) throw new Error('The camping policy receipt could not be saved.');
     // Step 10: Breach alert -- GATED on verified_overnight.
     // An evening scan NEVER creates a breach_alerts row (#73 G1 fix at the
     // application layer; 0193 already fixes it at the DB layer).
@@ -1642,65 +1668,15 @@ serve(async (req)=>{
         breachWriteError = `FC breach insert failed: ${breachInsertErr.code} ${breachInsertErr.message}`;
       }
     }
-    // Step 10b: Stamp the real observation_id, photo_url, compliance verdict,
-    // and breach_alert_id back onto the session row now that we have them.
-    // (The pre-compliance upsert used placeholder values.)
-    // BRANCHED on verificationMode:
-    //   two_photo_verified       → upsertOvernightSession (same as Step 7b)
-    //   single_daily_observation → upsertSingleDailyOvernightSession, threading
-    //     the REAL session id from the pre-compliance write so the second call
-    //     always performs a genuine UPDATE (not a fragile insert-that-silently-fails).
-    let overnightSession;
-    if (verificationMode === 'single_daily_observation' && singleDailyPeek) {
-      // Thread the real session id into the peek so the write function finds
-      // the existing row and UPDATEs it instead of attempting a duplicate INSERT.
-      const peekWithRealId = {
-        ...singleDailyPeek,
-        existingSessionId: singleDailySessionId
-      };
-      overnightSession = await upsertSingleDailyOvernightSession(supabase, {
-        orgId,
-        plateNumber,
-        zoneId,
-        siteId,
-        locationId,
-        observationId,
-        observedAt,
-        gpsLat,
-        gpsLng,
-        photoUrl: evidence.watermarkedPath,
-        isScv,
-        breachAlertId,
-        movementResult,
-        singleDailyPeek: peekWithRealId,
-        prevObs: prevObs ? {
-          id: prevObs.id,
-          observed_at: prevObs.observed_at
-        } : null,
-        complianceIsCompliant: compliance.is_compliant,
-        complianceReason: compliance.reason,
-        clientOrgId
-      });
-    } else {
-      overnightSession = await upsertOvernightSession(supabase, {
-        orgId,
-        plateNumber,
-        zoneId,
-        siteId,
-        locationId,
-        observationId,
-        observedAt,
-        gpsLat,
-        gpsLng,
-        photoUrl: evidence.watermarkedPath,
-        isScv,
-        breachAlertId,
-        movementResult,
-        windowPeek,
-        complianceIsCompliant: compliance.is_compliant,
-        complianceReason: compliance.reason,
-        clientOrgId
-      });
+    const overnightSession = overnightSessionPre;
+    if (overnightSession.id) {
+      const verified = overnightSession.verification_status === 'verified_overnight';
+      const { error: sessionVerdictError } = await supabase.from('vehicle_overnight_sessions').update({
+        is_compliant: verified ? compliance.is_compliant : null,
+        compliance_reason: verified ? compliance.reason : overnightSession.verification_status,
+        breach_alert_id: verified ? breachAlertId : null
+      }).eq('id', overnightSession.id);
+      if (sessionVerdictError) throw new Error('The overnight session verdict could not be saved.');
     }
     // Step 11: GPS log (non-blocking)
     if (gpsLat !== null && gpsLng !== null) {
@@ -1772,15 +1748,6 @@ serve(async (req)=>{
     });
   } catch (err) {
     console.error('[scan] unexpected error:', err);
-    return new Response(JSON.stringify({
-      error: 'Scan pipeline encountered an unexpected error.',
-      detail: err instanceof Error ? err.message : String(err)
-    }), {
-      status: 500,
-      headers: {
-        ...CORS,
-        'Content-Type': 'application/json'
-      }
-    });
+    return json({ error: safeToRetry ? 'The scan could not be processed. Keep the saved photo and retry.' : 'The scan may be partially saved. Keep the photo and ask operations to recover this request.', code: safeToRetry ? 'scan_processing_failed' : 'scan_recovery_required' }, 500);
   }
 });

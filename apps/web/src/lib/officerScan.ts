@@ -61,8 +61,11 @@ export interface OfficerScanResult {
 
 export interface QueuedOfficerScan {
   id: string;
+  ownerId?: string;
   capturedAt: string;
   attempts: number;
+  status?: 'pending' | 'needs_review';
+  lastError?: string;
   body: OfficerScanPayload;
 }
 
@@ -113,6 +116,19 @@ export function isNetworkFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const name = error instanceof Error ? error.name : '';
   return name === 'FunctionsFetchError' || /failed to fetch|network|load failed|fetch/i.test(message);
+}
+
+export async function describeOfficerScanError(error: unknown): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    try {
+      const body = await context.clone().json() as { error?: unknown };
+      if (typeof body.error === 'string' && body.error.trim()) return body.error.slice(0, 500);
+    } catch {
+      return 'The scan service rejected the request without a readable error. Keep the saved capture for review.';
+    }
+  }
+  return error instanceof Error ? error.message : 'The scan could not be processed.';
 }
 
 export async function imageFileToBase64(file: File, maxDimension = 1600): Promise<string> {
@@ -167,36 +183,40 @@ async function runStoreRequest<T>(
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(SCAN_STORE, mode);
     const request = operation(transaction.objectStore(SCAN_STORE));
-    request.onsuccess = () => resolve(request.result);
+    let result: T;
+    request.onsuccess = () => { result = request.result; };
     request.onerror = () => reject(request.error ?? new Error('Offline scan storage failed.'));
-    transaction.oncomplete = () => database.close();
-    transaction.onerror = () => reject(transaction.error ?? new Error('Offline scan transaction failed.'));
+    transaction.oncomplete = () => { database.close(); resolve(result); };
+    transaction.onerror = transaction.onabort = () => { database.close(); reject(transaction.error ?? new Error('Offline scan transaction failed.')); };
   });
 }
 
-export async function queueOfficerScan(body: OfficerScanPayload): Promise<QueuedOfficerScan> {
+export async function queueOfficerScan(body: OfficerScanPayload, ownerId?: string): Promise<QueuedOfficerScan> {
   const capturedAt = body.captured_at;
+  const requestId = body.client_request_id ?? crypto.randomUUID();
   const queued: QueuedOfficerScan = {
-    id: crypto.randomUUID(),
+    id: requestId,
+    ownerId,
     capturedAt,
     attempts: 0,
-    body: { ...body, offline_queued: true },
+    status: 'pending',
+    body: { ...body, client_request_id: requestId, offline_queued: true },
   };
   await runStoreRequest('readwrite', (store) => store.put(queued));
   return queued;
 }
 
-export async function listQueuedOfficerScans(): Promise<QueuedOfficerScan[]> {
+export async function listQueuedOfficerScans(ownerId?: string): Promise<QueuedOfficerScan[]> {
   const scans = await runStoreRequest<QueuedOfficerScan[]>('readonly', (store) => store.getAll());
-  return scans.sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
+  return scans.filter((scan) => !ownerId || scan.ownerId === ownerId).sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
 }
 
 export async function removeQueuedOfficerScan(id: string): Promise<void> {
   await runStoreRequest('readwrite', (store) => store.delete(id));
 }
 
-export async function markQueuedOfficerScanAttempt(scan: QueuedOfficerScan): Promise<void> {
-  await runStoreRequest('readwrite', (store) => store.put({ ...scan, attempts: scan.attempts + 1 }));
+export async function markQueuedOfficerScanAttempt(scan: QueuedOfficerScan, lastError?: string, needsReview = false): Promise<void> {
+  await runStoreRequest('readwrite', (store) => store.put({ ...scan, attempts: scan.attempts + 1, lastError, status: needsReview ? 'needs_review' : 'pending' }));
 }
 
 export function shouldDropQueuedOfficerScan(scan: QueuedOfficerScan): boolean {

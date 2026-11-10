@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const manager = readFileSync(resolve(process.cwd(), 'src/components/OperationalPlaceManager.tsx'), 'utf8');
 const houseMap = readFileSync(resolve(process.cwd(), 'src/components/LocationHouseMap.tsx'), 'utf8');
+const policy = readFileSync(resolve(process.cwd(), 'src/components/WorkingZonePolicyEditor.tsx'), 'utf8');
 const locations = readFileSync(resolve(process.cwd(), 'src/pages/LocationsPage.tsx'), 'utf8');
 const zones = readFileSync(resolve(process.cwd(), 'src/pages/ZoneDetailPage.tsx'), 'utf8');
 const site = readFileSync(resolve(process.cwd(), 'src/pages/SiteDetailPage.tsx'), 'utf8');
@@ -51,8 +52,11 @@ describe('human operational controls', () => {
 
   it('shows freedom-camping fields only for the freedom-camping service', () => {
     expect(manager).toContain("const isFreedomCamping = zoneForm.moduleKey === 'freedom_camping'");
-    expect(manager).toContain('{isFreedomCamping && <fieldset');
-    expect(manager).toContain('Self-contained vehicle requirement applies');
+    expect(manager).toContain('<WorkingZonePolicyEditor');
+    expect(manager).toContain("['parking_enforcement', 'freedom_camping'].includes(zone.module_key)");
+    expect(policy).toContain('Self-contained vehicle requirement applies');
+    expect(policy).toContain('Parking policy');
+    expect(policy).toContain("supabase.rpc('save_working_zone_policy'");
     expect(manager).toContain("p_scv_required: isFreedomCamping ? zoneForm.scv : false");
     expect(manager).toContain('What may officers or visitors do here?');
     expect(manager).not.toContain('<span>Rule</span>');

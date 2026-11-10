@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOfficerScanPayload, canSubmitOfficerScan, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
+import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
 
 describe('officer scan contract', () => {
+  it('surfaces the edge response without replacing it with the generic SDK error', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      context: Response.json({ code: 'plate_confirmation_required', error: 'Keep this photo and confirm the plate manually.' }, { status: 400 }),
+    });
+    expect(await describeOfficerScanError(error)).toBe('Keep this photo and confirm the plate manually.');
+    expect(await error.context.json()).toMatchObject({ code: 'plate_confirmation_required' });
+  });
   it('normalizes a manual plate and builds the edge-function payload', () => {
     expect(normalizePlate(' abc-123 ')).toBe('ABC123');
     expect(buildOfficerScanPayload({

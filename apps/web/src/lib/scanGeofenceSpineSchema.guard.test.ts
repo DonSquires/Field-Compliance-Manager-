@@ -20,14 +20,16 @@ describe('officer scan geofence spine', () => {
 
   it('resolves closure state after every zone match and fails closed on lookup errors', () => {
     expect(scan).toContain("error: 'Geofence context could not be resolved'");
-    expect(scan).toContain("supabase.rpc('resolve_operational_context'");
+    expect(scan).toContain("callerClient.rpc('resolve_operational_context_authorized'");
     expect(scan).toContain("supabase.rpc('is_zone_closed'");
     expect(scan).toContain("error: 'Zone closure state could not be resolved'");
-    expect(scan).toContain("resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context'");
+    expect(scan).toContain("resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context_authorized'");
   });
 
   it('prevents manual Zone selection from bypassing tenant and geofence gates', () => {
-    expect(scan).toContain("if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId)");
+    expect(scan).toContain("callerClient.rpc('has_location_access'");
+    expect(scan).toContain('placeAccessError || canAccessPlace !== true');
+    expect(scan).not.toContain("if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId)");
     expect(scan).toContain("zoneData.boundary_verification !== 'verified'");
     expect(scan).toContain('zoneData.module_key !== moduleKey');
     expect(scan).toContain("supabase.rpc('_geofence_active_at'");

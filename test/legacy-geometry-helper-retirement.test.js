@@ -33,9 +33,9 @@ test('retires only the four duplicate geometry helpers', () => {
 });
 
 test('preserves the governed field context and closure paths', () => {
-  assert.match(scan, /rpc\('resolve_operational_context'/);
+  assert.match(scan, /callerClient\.rpc\('resolve_operational_context_authorized'/);
   assert.match(scan, /rpc\('is_zone_closed'/);
-  assert.match(scan, /resolution_source: manualZoneId \? 'manual_zone' : 'resolve_operational_context'/);
+  assert.match(scan, /resolution_source: manualZoneId \? 'manual_zone' : 'resolve_operational_context_authorized'/);
 });
 
 test('preserves the canonical travel-distance calculator', () => {

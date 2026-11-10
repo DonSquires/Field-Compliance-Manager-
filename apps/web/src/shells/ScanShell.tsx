@@ -6,6 +6,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
+  describeOfficerScanError,
   getCurrentPosition,
   imageFileToBase64,
   isNetworkFailure,
@@ -14,6 +15,7 @@ import {
   queueOfficerScan,
   removeQueuedOfficerScan,
   type ScanModuleKey,
+  type QueuedOfficerScan,
 } from '../lib/officerScan';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { supabase } from '../lib/supabase';
@@ -71,6 +73,7 @@ export function ScanShell() {
   const [imageBase64, setImageBase64] = useState<string>();
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
+  const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
   const [preparingImage, setPreparingImage] = useState(false);
   const [location, setLocation] = useState<{ status: 'locating' | 'ready' | 'unavailable'; lat: number | null; lng: number | null; accuracy: number | null }>({ status: 'locating', lat: null, lng: null, accuracy: null });
   const [submitting, setSubmitting] = useState(false);
@@ -123,11 +126,12 @@ export function ScanShell() {
 
   const refreshQueue = useCallback(async () => {
     try {
-      setQueuedCount((await listQueuedOfficerScans()).length);
+      if (!profile?.id) return;
+      setQueuedCount((await listQueuedOfficerScans(profile.id)).length);
     } catch {
       setQueueMessage('Offline storage is unavailable.');
     }
-  }, []);
+  }, [profile?.id]);
 
   useEffect(() => {
     void loadEntitlements();
@@ -148,19 +152,21 @@ export function ScanShell() {
   }), [moduleKey, relationships.zones]);
 
   const payload = useMemo(() => buildOfficerScanPayload({
+    clientRequestId,
     imageBase64,
     latitude: location.lat,
     longitude: location.lng,
     zoneId,
     capturedAt,
     moduleKey,
-  }), [capturedAt, imageBase64, location.lat, location.lng, moduleKey, zoneId]);
+  }), [capturedAt, clientRequestId, imageBase64, location.lat, location.lng, moduleKey, zoneId]);
 
   const clearCapture = useCallback(() => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(undefined);
     setImageBase64(undefined);
     setCapturedAt(undefined);
+    setClientRequestId(crypto.randomUUID());
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [previewUrl]);
@@ -186,22 +192,24 @@ export function ScanShell() {
   };
 
   const queueCurrentScan = useCallback(async () => {
-    await queueOfficerScan(payload);
+    await queueOfficerScan(payload, profile?.id);
     await refreshQueue();
     setQueueMessage('Scan stored on this device and queued for sync.');
     clearCapture();
-  }, [clearCapture, payload, refreshQueue]);
+  }, [clearCapture, payload, profile?.id, refreshQueue]);
 
   const syncQueue = useCallback(async () => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     setQueueMessage(null);
     try {
-      const scans = await listQueuedOfficerScans();
+      if (!profile?.id) return;
+      const scans = await listQueuedOfficerScans(profile.id);
       let synced = 0;
       for (const scan of scans) {
-        const { error: syncError } = await supabase.functions.invoke('process-officer-scan', { body: { ...scan.body, synced_at: new Date().toISOString() } });
-        if (syncError) {
-          await markQueuedOfficerScanAttempt(scan);
+        if (scan.status === 'needs_review') continue;
+        const { data, error: syncError } = await supabase.functions.invoke('process-officer-scan', { body: { ...scan.body, synced_at: new Date().toISOString() } });
+        if (syncError || !data?.success) {
+          await markQueuedOfficerScanAttempt(scan, syncError ? await describeOfficerScanError(syncError) : 'The scan receipt was not confirmed.', !isNetworkFailure(syncError));
           continue;
         }
         await removeQueuedOfficerScan(scan.id);
@@ -212,7 +220,7 @@ export function ScanShell() {
     } catch (syncError) {
       setQueueMessage(syncError instanceof Error ? syncError.message : 'Queued scans could not be synced.');
     }
-  }, [refreshQueue]);
+  }, [profile?.id, refreshQueue]);
 
   useEffect(() => {
     const handleOnline = () => void syncQueue();
@@ -226,7 +234,10 @@ export function ScanShell() {
     setSubmitting(true);
     setError(null);
     setResult(null);
+    let stagedCapture: QueuedOfficerScan | null = null;
     try {
+      stagedCapture = await queueOfficerScan(payload, profile?.id);
+      await refreshQueue();
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         await queueCurrentScan();
         return;
@@ -234,6 +245,8 @@ export function ScanShell() {
       const { data, error: invokeError } = await supabase.functions.invoke<ScanResult>('process-officer-scan', { body: payload });
       if (invokeError) throw invokeError;
       if (!data?.success) throw new Error('The scan did not return a confirmed record.');
+      await removeQueuedOfficerScan(stagedCapture.id);
+      await refreshQueue();
       setResult(data);
       clearCapture();
     } catch (submitError) {
@@ -244,7 +257,9 @@ export function ScanShell() {
           setError(queueError instanceof Error ? queueError.message : 'The scan could not be queued.');
         }
       } else {
-        setError(submitError instanceof Error ? submitError.message : 'The scan could not be processed.');
+        const message = await describeOfficerScanError(submitError);
+        if (stagedCapture) await markQueuedOfficerScanAttempt(stagedCapture, message, true);
+        setError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
       }
     } finally {
       setSubmitting(false);
