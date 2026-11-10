@@ -33,7 +33,8 @@ test('the scan pipeline reads the status, fails closed on an absent row, and nev
   assert.match(scan, /governorOverlapFlag = ctx\.governor_overlap_flag === true/);
   assert.match(scan, /if \(!ctx\) return json\(\{ error: 'Geofence context could not be resolved', detail: 'resolver returned no row' \}, 503\)/);
   assert.match(scan, /resolutionStatus !== 'resolved' && \(zoneId \|\| siteId\)[\s\S]*?503/);
-  assert.match(scan, /let resolutionStatus = manualZoneId \? 'resolved' : hasLatitude && hasLongitude \? null : 'not_evaluated'/);
+  assert.match(scan, /let resolutionStatus = hasLatitude && hasLongitude \? null : 'not_evaluated'/);
+  assert.match(scan, /spatial_resolution_evaluated: locationSource === 'device_gps' && hasLatitude && hasLongitude/);
   assert.doesNotMatch(scan, /if \(ctx\) \{\s*zoneId = ctx\.matched_zone_id/, 'an absent resolver row must not be silently tolerated');
 });
 

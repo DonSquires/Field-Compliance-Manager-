@@ -52,7 +52,7 @@ const RESOLUTION_LABEL: Record<string, string> = {
   unresolved_no_geofence: 'No geofence configured here',
   unresolved_unverified: 'Boundary exists but is not verified',
   unresolved_invalid: 'Boundary geometry is invalid',
-  not_evaluated: 'No GPS fix — geofence not evaluated',
+  not_evaluated: 'Device GPS not used for place resolution',
 };
 
 const MODULE_LABEL: Record<ScanModuleKey, string> = {
@@ -61,7 +61,7 @@ const MODULE_LABEL: Record<ScanModuleKey, string> = {
 };
 
 export function ScanShell() {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, operatingOrganizationId } = useAuth();
   const relationships = useServiceRelationships();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,10 +156,15 @@ export function ScanShell() {
     imageBase64,
     latitude: location.lat,
     longitude: location.lng,
+    operatingOrganizationId: operatingOrganizationId ?? relationships.selectedAgreement?.provider_organization_id ?? profile?.organizationId,
+    locationId: relationships.zones.find((zone) => zone.id === zoneId)?.location_id ?? relationships.selectedSite?.location_id,
+    clientSiteId: relationships.zones.find((zone) => zone.id === zoneId)?.location_id === relationships.selectedSite?.location_id ? relationships.selectedSite?.id : null,
+    serviceAgreementId: relationships.selectedAgreement?.id,
+    locationSource: location.status === 'ready' ? 'device_gps' : zoneId ? 'manual_zone' : 'unavailable',
     zoneId,
     capturedAt,
     moduleKey,
-  }), [capturedAt, clientRequestId, imageBase64, location.lat, location.lng, moduleKey, zoneId]);
+  }), [capturedAt, clientRequestId, imageBase64, location.lat, location.lng, location.status, moduleKey, operatingOrganizationId, profile?.organizationId, relationships.selectedAgreement, relationships.selectedSite, relationships.zones, zoneId]);
 
   const clearCapture = useCallback(() => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);

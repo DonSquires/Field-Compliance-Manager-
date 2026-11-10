@@ -31,6 +31,9 @@ interface ParkingZone {
   id: string;
   name: string;
   address: string | null;
+  location_id?: string | null;
+  organization_id?: string | null;
+  module_key?: string | null;
 }
 
 interface ParkingScanResult {
@@ -45,8 +48,8 @@ interface ParkingScanResult {
 }
 
 const OfficerParkingPage: React.FC = () => {
-  const { profile } = useAuth();
-  const { selectedAgreementZones, selectedZone } = useServiceRelationships();
+  const { profile, operatingOrganizationId } = useAuth();
+  const { selectedAgreement, selectedAgreementZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('parking_enforcement');
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [zones, setZones] = useState<ParkingZone[]>([]);
@@ -105,15 +108,15 @@ const OfficerParkingPage: React.FC = () => {
               .eq('officer_id', profile.id))
           .order('chalked_at', { ascending: false }),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('location_zones').select('id, name, locations(address)').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
-          : supabase.from('location_zones').select('id, name, locations(address)').eq('organization_id', profile.organizationId).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
+            ? supabase.from('location_zones').select('id, name, location_id, organization_id, module_key, locations(address)').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
+          : supabase.from('location_zones').select('id, name, location_id, organization_id, module_key, locations(address)').eq('organization_id', profile.organizationId).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
 
       if (err) throw err;
       if (zoneError) throw zoneError;
       setRecords((data as ChalkRecord[]) || []);
       // A zone's address is its house's address.
-      setZones(((zoneData as unknown as Array<{ id: string; name: string; locations: { address: string | null } | null }>) || []).map((zone) => ({ id: zone.id, name: zone.name, address: zone.locations?.address ?? null })));
+      setZones(((zoneData as unknown as Array<{ id: string; name: string; location_id: string | null; organization_id: string; module_key: string; locations: { address: string | null } | null }>) || []).map((zone) => ({ id: zone.id, name: zone.name, address: zone.locations?.address ?? null, location_id: zone.location_id, organization_id: zone.organization_id, module_key: zone.module_key })));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load parking records');
     } finally {
@@ -190,7 +193,19 @@ const OfficerParkingPage: React.FC = () => {
       setSubmitting(true);
       setError(null);
       setReceipt(null);
-      const payload = buildOfficerScanPayload({ imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt, zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null, moduleKey: 'parking_enforcement' });
+      const workingZone = zones.find((zone) => zone.id === form.zone_id)
+        ?? selectedAgreementZones.find((zone) => zone.id === form.zone_id && zone.module_key === 'parking_enforcement')
+        ?? (selectedZone?.module_key === 'parking_enforcement' ? selectedZone : null);
+      const locationId = workingZone?.location_id ?? selectedSite?.location_id ?? null;
+      const siteId = selectedSite?.location_id === locationId ? selectedSite.id : null;
+      const payload = buildOfficerScanPayload({
+        imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt,
+        operatingOrganizationId: operatingOrganizationId ?? selectedAgreement?.provider_organization_id ?? profile.organizationId,
+        locationId, clientSiteId: siteId, serviceAgreementId: selectedAgreement?.id,
+        locationSource: addressPoint ? 'address_candidate' : form.zone_id ? 'manual_zone' : 'unavailable',
+        zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null,
+        moduleKey: 'parking_enforcement',
+      });
       stagedCapture = await queueOfficerScan(payload, profile.id);
       await refreshSavedCaptures();
       if (!navigator.onLine) {
@@ -302,7 +317,7 @@ const OfficerParkingPage: React.FC = () => {
           </div>
           <div className="form-group">
             <label htmlFor="parking-plate">Plate (manual fallback)</label>
-            <input id="parking-plate" value={plateNumber} onChange={(event) => { setPlateNumber(event.target.value); setClientRequestId(crypto.randomUUID()); }} autoCapitalize="characters" spellCheck={false} placeholder="Use if ALPR cannot read" />
+            <input id="parking-plate" value={plateNumber} onChange={(event) => setPlateNumber(event.target.value)} autoCapitalize="characters" spellCheck={false} placeholder="Use if ALPR cannot read" />
           </div>
           <div className="form-group">
             <label htmlFor="parking-zone">Verified parking Zone</label>
@@ -323,7 +338,7 @@ const OfficerParkingPage: React.FC = () => {
             {addressError && <small className="form-hint">{addressError}</small>}
             {addressCandidates.length > 1 && <div className="form-row">{addressCandidates.map((candidate) => <button type="button" className="btn btn-secondary btn-sm" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => setAddressPoint(candidate)}>{candidate.label}</button>)}</div>}
           </div>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || (!form.zone_id && !addressPoint)}>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || !form.zone_id}>
             {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
           </button>
         </form>

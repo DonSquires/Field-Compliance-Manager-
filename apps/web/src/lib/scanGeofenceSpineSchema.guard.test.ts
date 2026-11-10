@@ -23,7 +23,7 @@ describe('officer scan geofence spine', () => {
     expect(scan).toContain("callerClient.rpc('resolve_operational_context_authorized'");
     expect(scan).toContain("supabase.rpc('is_zone_closed'");
     expect(scan).toContain("error: 'Zone closure state could not be resolved'");
-    expect(scan).toContain("resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context_authorized'");
+    expect(scan).toContain("resolution_source: locationSource === 'device_gps' ? 'resolve_operational_context_authorized' : locationSource");
   });
 
   it('prevents manual Zone selection from bypassing tenant and geofence gates', () => {
@@ -34,7 +34,9 @@ describe('officer scan geofence spine', () => {
     expect(scan).toContain('zoneData.module_key !== moduleKey');
     expect(scan).toContain("supabase.rpc('_geofence_active_at'");
     expect(scan).toContain("error: 'Selected Zone is not active at the capture time'");
-    expect(scan).toContain('spatial_resolution_evaluated: !manualZoneId');
+    expect(scan).toContain("spatial_resolution_evaluated: locationSource === 'device_gps' && hasLatitude && hasLongitude");
+    expect(scan).toContain("const locationContextNeedsReview = !manualZoneId && (!hasLatitude || !hasLongitude)");
+    expect(scan).toContain("p_org_id: orgId");
   });
 
   it('resolves only active contracted places for provider field operations', () => {
@@ -47,10 +49,10 @@ describe('officer scan geofence spine', () => {
   });
 
   it('rejects scans without defensible spatial evidence', () => {
-    expect(scan).toContain("error: 'A manual Zone or complete GPS coordinates are required'");
+    expect(scan).toContain("code: 'location_confirmation_required'");
     expect(scan).toContain("error: 'gps_lat and gps_lng must be a complete valid coordinate pair'");
-    expect(scan).toContain('Number(gpsLat) < -90');
-    expect(scan).toContain('Number(gpsLng) > 180');
+    expect(scan).toContain('Number(submittedGpsLat) < -90');
+    expect(scan).toContain('Number(submittedGpsLng) > 180');
   });
 
   it('returns closure evidence without rewriting module verdict semantics', () => {

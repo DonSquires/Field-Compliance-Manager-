@@ -79,7 +79,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     setResult(null);
     try {
       const normalizedPlate = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-      const payload: OfficerScanPayload = { ...(normalizedPlate ? { plate_number: normalizedPlate } : {}), image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, module_key: moduleKey, captured_at: new Date().toISOString(), client_request_id: crypto.randomUUID() };
+      const payload: OfficerScanPayload = { ...(normalizedPlate ? { plate_number: normalizedPlate } : {}), image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, location_source: 'device_gps', module_key: moduleKey, captured_at: new Date().toISOString(), client_request_id: crypto.randomUUID() };
       try {
         setResult(await submitOfficerScan(payload));
         setPhotoUri(null);
@@ -108,8 +108,9 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
       await refreshQueue();
       const parts = [`${status.synced} scan${status.synced === 1 ? '' : 's'} sent.`];
       if (status.pending) parts.push(`${status.pending} still waiting for a connection.`);
+      if (status.review) parts.push(`${status.review} saved capture${status.review === 1 ? '' : 's'} retained for location-source review.`);
       if (status.dropped) parts.push(`${status.dropped} scan${status.dropped === 1 ? '' : 's'} could not be delivered after repeated attempts and ${status.dropped === 1 ? 'was' : 'were'} removed from the queue.`);
-      if (!status.pending && !status.dropped) parts.push('Your queue is clear.');
+      if (!status.pending && !status.dropped && !status.review) parts.push('Your queue is clear.');
       Alert.alert('Queue sync', parts.join(' '));
     } finally { setWorking(false); }
   };

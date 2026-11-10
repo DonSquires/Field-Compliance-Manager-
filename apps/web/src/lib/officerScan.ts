@@ -2,6 +2,11 @@ export type ScanComplianceStatus = 'compliant' | 'at_risk' | 'breach' | 'breach_
 export type ScanModuleKey = 'freedom_camping' | 'parking_enforcement';
 
 export interface OfficerScanPayload {
+  operating_organization_id?: string;
+  location_id?: string;
+  client_site_id?: string;
+  service_agreement_id?: string;
+  location_source?: 'device_gps' | 'address_candidate' | 'manual_zone' | 'unavailable';
   plate_number?: string;
   image_base64?: string;
   gps_lat: number | null;
@@ -42,8 +47,8 @@ export interface OfficerScanResult {
   exemption_reason?: string | null;
   zone_id: string | null;
   zone_name: string | null;
-  on_site: boolean;
-  in_operating_bounds: boolean;
+  on_site: boolean | null;
+  in_operating_bounds: boolean | null;
   out_of_bounds_district: string | null;
   effective_rules?: Record<string, unknown> | null;
   zone_closed?: boolean;
@@ -89,9 +94,18 @@ export function buildOfficerScanPayload(input: {
   capturedAt?: string;
   moduleKey?: ScanModuleKey;
   clientRequestId?: string;
+  operatingOrganizationId?: string | null;
+  locationId?: string | null;
+  clientSiteId?: string | null;
+  serviceAgreementId?: string | null;
+  locationSource?: OfficerScanPayload['location_source'];
 }): OfficerScanPayload {
   const plateNumber = normalizePlate(input.plateNumber ?? '');
   return {
+    ...(input.operatingOrganizationId ? { operating_organization_id: input.operatingOrganizationId } : {}),
+    ...(input.locationId ? { location_id: input.locationId } : {}),
+    ...(input.clientSiteId ? { client_site_id: input.clientSiteId } : {}),
+    ...(input.serviceAgreementId ? { service_agreement_id: input.serviceAgreementId } : {}),
     ...(plateNumber ? { plate_number: plateNumber } : {}),
     ...(input.imageBase64 ? { image_base64: input.imageBase64 } : {}),
     gps_lat: input.latitude ?? null,
@@ -99,6 +113,7 @@ export function buildOfficerScanPayload(input: {
     ...(input.zoneId ? { zone_id: input.zoneId } : {}),
     module_key: input.moduleKey ?? 'freedom_camping',
     captured_at: input.capturedAt ?? new Date().toISOString(),
+    location_source: input.locationSource ?? (input.zoneId ? 'manual_zone' : 'unavailable'),
     ...(input.clientRequestId ? { client_request_id: input.clientRequestId } : {}),
   };
 }
@@ -106,7 +121,7 @@ export function buildOfficerScanPayload(input: {
 export function canSubmitOfficerScan(payload: OfficerScanPayload): boolean {
   const hasEvidence = Boolean(payload.plate_number || payload.image_base64);
   const hasLocation = Boolean(
-    payload.zone_id || (payload.gps_lat !== null && payload.gps_lng !== null),
+    payload.zone_id || (payload.location_source === 'device_gps' && payload.gps_lat !== null && payload.gps_lng !== null),
   );
   return hasEvidence && hasLocation;
 }
