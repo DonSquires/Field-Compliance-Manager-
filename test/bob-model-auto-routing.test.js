@@ -120,6 +120,32 @@ test('one provider cannot fill every candidate slot', () => {
   assert.equal(roomy.ordered.length, 7, 'extra models still fill slots no other provider wants');
 });
 
+test('four providers competing for four slots each get one (review: PR #465)', () => {
+  const candidates = [
+    { provider: 'ollama_cloud', model: 'a' }, { provider: 'ollama_cloud', model: 'b' },
+    { provider: 'gpu_workstation', model: 'c' }, { provider: 'gpu_workstation', model: 'd' },
+    { provider: 'anthropic', model: 'claude' }, { provider: 'openai', model: 'gpt' },
+  ];
+  const ranked = rankCandidates({ candidates, catalog, policies: [{ ...platform, max_candidates: 4, max_per_provider: 2 }], taskClasses, surface: 'builder' });
+  assert.deepEqual(ranked.ordered.map(entry => entry.provider).sort(), ['anthropic', 'gpu_workstation', 'ollama_cloud', 'openai']);
+  const scores = ranked.ordered.map(entry => entry.score);
+  assert.deepEqual(scores, [...scores].sort((a, b) => b - a), 'chosen candidates are still attempted in score order');
+});
+
+test("a model's record on other tasks cannot outweigh its provider's record on this task (review: PR #465)", () => {
+  const analysis = [...taskClasses, { match_kind: 'workload_kind', match_value: 'product_analysis', task_class: 'analysis' }];
+  const stats = [
+    { provider: 'ollama_cloud', model_name: 'kimi-k3', task_class: 'analysis', runs: 207, completed: 30, avg_seconds: 60 },
+    { provider: 'ollama_cloud', model_name: 'gemma4:31b', task_class: 'light', runs: 200, completed: 200, avg_seconds: 10 },
+  ];
+  const result = rankCandidates({
+    candidates: [{ provider: 'ollama_cloud', model: 'gemma4:31b' }, { provider: 'anthropic', model: 'claude-opus-5-5' }],
+    catalog, policies: [platform], taskClasses: analysis, stats, surface: 'builder', workloadKind: 'product_analysis',
+  });
+  assert.equal(result.ordered[0].provider, 'anthropic');
+  assert.ok(result.ordered[1].success < 0.25);
+});
+
 function fakeSupabase({ rows = {}, fail = false } = {}) {
   const calls = [];
   return {
