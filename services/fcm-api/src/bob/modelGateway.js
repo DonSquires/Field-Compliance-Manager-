@@ -97,8 +97,8 @@ function createGatewayConfig(env = process.env) {
         synthesis: env.ANTHROPIC_PLAN_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
       },
     },
-    // OmniRoute: owner-run OpenAI-compatible gateway; inert until OMNIROUTE_BASE_URL is set and only
-    // used when a BOB_ROUTE_* chain names it. A self-hosted instance may run without a key.
+    // OmniRoute: owner-run OpenAI-compatible gateway; inert until OMNIROUTE_BASE_URL is set, then
+    // used when a BOB_ROUTE_* chain names it or the auto router ranks it. A self-hosted instance may run without a key.
     omniroute: {
       kind: 'gateway',
       baseUrl: trimSlash(env.OMNIROUTE_BASE_URL),
@@ -138,9 +138,18 @@ function paramsUnsupportedError(text) {
   return /max_tokens|temperature|unsupported (parameter|value)|not supported with this model|reasoning_effort|max_completion_tokens/i.test(String(text || ''));
 }
 
-function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now, logger = console } = {}) {
+function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now, logger = console, router = null } = {}) {
   const config = createGatewayConfig(env);
   const health = new Map();
+  // A role whose BOB_ROUTE_* chain is set explicitly is pinned (owner override); the rest are ranked
+  // per turn by the data-driven model router (bob_model_catalog / bob_model_routing_policies).
+  const pinnedRoles = {
+    planner: Boolean(String(env.BOB_ROUTE_PLANNER || '').trim()),
+    verifier: Boolean(String(env.BOB_ROUTE_VERIFIER || '').trim()),
+    subagent: Boolean(String(env.BOB_ROUTE_SUBAGENT || '').trim()),
+    synthesis: Boolean(String(env.BOB_ROUTE_SYNTHESIS || '').trim()),
+  };
+  const lastRanked = {};
 
   function providerFor(name, role) {
     const provider = config.providers[name];
@@ -258,6 +267,23 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     return null;
   }
 
+  async function rankedChain(role) {
+    const base = config.chains[role] || config.chains.planner;
+    if (!router || pinnedRoles[role]) return base;
+    try {
+      const names = [...new Set([...base, ...Object.keys(config.providers)])];
+      const candidates = names.map((name) => providerFor(name, role)).filter(Boolean).map((provider) => ({ provider: provider.name, model: provider.model }));
+      const ranked = await router.rank({ candidates, surface: 'in_app', role });
+      if (!ranked || !ranked.ordered.length) return base;
+      const chain = [...new Set(ranked.ordered.map((entry) => entry.provider))];
+      lastRanked[role] = { chain, taskClass: ranked.task_class, ranked: ranked.ordered, policy: ranked.policy };
+      return chain;
+    } catch (error) {
+      logger.warn?.(`model gateway: auto routing failed for ${role}, static chain stands (${String(error && error.message || error).slice(0, 160)})`);
+      return base;
+    }
+  }
+
   /**
    * Run a JSON-mode chat completion for a role. Returns
    * { content, provider, model, latency_ms, attempts } or throws when every
@@ -266,7 +292,8 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
    * the model that wrote the draft (BOB_DOCTRINE §9).
    */
   async function chatJson(role, messages, options = {}) {
-    const chain = options.chain || config.chains[role] || config.chains.planner;
+    const chain = options.chain || await rankedChain(role);
+    const taskClass = lastRanked[role] ? lastRanked[role].taskClass : 'general';
     const attempts = [];
     for (const name of chain) {
       const provider = providerFor(name, role);
@@ -282,7 +309,9 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
           continue;
         }
       }
+      const callStarted = now();
       const result = await callProvider(provider, role, messages, options, attempts);
+      if (router && typeof router.observe === 'function') router.observe({ provider: name, model: provider.model, taskClass, ok: Boolean(result), latencyMs: now() - callStarted });
       if (result) return { ...result, attempts };
       if (options.signal && options.signal.aborted) break;
     }
@@ -296,6 +325,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     const probes = await Promise.all(names.map((name) => probe(name)));
     return {
       chains: config.chains,
+      auto_routing: router ? { enabled: true, pinned_roles: Object.keys(pinnedRoles).filter((role) => pinnedRoles[role]), last_ranked: lastRanked } : { enabled: false },
       providers: probes.map((entry) => ({
         ...entry,
         kind: config.providers[entry.name].kind,
@@ -304,9 +334,14 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     };
   }
 
+  // The role's current chain: the last auto-ranked order when routing is data-driven, else the static one.
+  function currentChain(role) {
+    return (lastRanked[role] && lastRanked[role].chain) || config.chains[role] || config.chains.planner;
+  }
+
   // The rest of a role's chain after `providerName` (escalation), or null when it was the last resort.
   function chainAfter(role, providerName) {
-    const chain = config.chains[role] || config.chains.planner;
+    const chain = currentChain(role);
     const index = chain.indexOf(providerName);
     if (index < 0 || index + 1 >= chain.length) return null;
     return chain.slice(index + 1);
@@ -321,7 +356,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
   // laptop model, not fail the turn (2026-09-27: every code request 502'd on "no credits remaining").
   // Null when the chain has no strong tier or is already strong-first.
   function fastChain(role) {
-    const chain = config.chains[role] || config.chains.planner;
+    const chain = currentChain(role);
     const fast = chain.filter((name) => providerKind(name) === 'openai');
     if (!fast.length || fast.length === chain.length) return null;
     const reordered = [...fast, ...chain.filter((name) => providerKind(name) !== 'openai')];

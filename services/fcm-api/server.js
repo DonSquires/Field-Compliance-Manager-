@@ -9,6 +9,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { verifyAndConsumeToken } = require('./src/security/job_token_consumer');
 const { verifyJobToken } = require('./src/security/job_token_verifier');
 const { createModelGateway } = require('./src/bob/modelGateway');
+const { createModelRouter } = require('./src/bob/modelRouter');
 const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
 const { classifyIdentityDocument, extractIdentityFields, extractIdentityFieldsConsensus, identityDocumentDefinition } = require('./src/bob/identityDocument');
@@ -30,10 +31,13 @@ const inferenceApiKey = process.env.INFERENCE_API_KEY || '';
 const identityInferenceSecret = process.env.IDENTITY_INFERENCE_SECRET || '';
 const maxBodyBytes = Number(process.env.MAX_BODY_BYTES || 256 * 1024 * 1024);
 const maxIdentityBytes = Number(process.env.IDENTITY_DOCUMENT_MAX_BYTES || 25 * 1024 * 1024);
-const modelGateway = createModelGateway();
 const supabase = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
   : null;
+// In-app Bob ranks providers per role from data (bob_model_catalog / _routing_policies); BOB_MODEL_ROUTING=static opts out.
+const modelGateway = createModelGateway({
+  router: supabase && !/^static$/i.test(String(process.env.BOB_MODEL_ROUTING || '')) ? createModelRouter({ supabase }) : null,
+});
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json' });

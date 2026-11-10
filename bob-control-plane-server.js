@@ -26,6 +26,7 @@ const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLapto
 const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
 const { createKnowledgeTool } = require('./builder-knowledge');
 const { embedText, embeddingConfig } = require('./services/fcm-api/src/bob/knowledgeEmbedding');
+const { createModelRouter, setDefaultModelRouter } = require('./services/fcm-api/src/bob/modelRouter');
 const { createBuilderChatWorker } = require('./builder-chat-session');
 const { createPlatformTools } = require('./bob-platform-diagnostics');
 const { runBrowserSpecs, runVibeHumanTest } = require('./builder-vibe-human-test');
@@ -72,6 +73,8 @@ const builderSupabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE
     auth: { persistSession: false, autoRefreshToken: false }
   })
   : null;
+// Data-driven auto routing for Builder, Vibe and Builder chat (bob_model_catalog / _routing_policies).
+setDefaultModelRouter(builderSupabase && !/^static$/i.test(String(process.env.BOB_MODEL_ROUTING || '')) ? createModelRouter({ supabase: builderSupabase }) : null);
 const retrieveBuilderKnowledge = createKnowledgeTool({
   supabase: builderSupabase,
   embed: async text => {

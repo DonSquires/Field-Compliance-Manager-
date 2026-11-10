@@ -151,6 +151,22 @@ answers 429 and escalates, so concurrent stages run in parallel across the GPU a
 The VPS Ollama keeps restricted-data runs and fcm-api's knowledge-card embeddings
 (`POST /api/bob/embed`, plus a backfill every `BOB_EMBED_BACKFILL_INTERVAL_MS`, default 15 min,
 batch `BOB_EMBED_BACKFILL_BATCH`, default 25; `0` disables the timer).
+Owner direction 2026-11-10 ("the right agent is selected for the job instead of hard coding it"):
+**auto model routing** supersedes the fixed chains above as the default. Bob Builder, Vibe Builder
+and in-app Bob rank every healthy, catalogued provider/model per job with
+`services/fcm-api/src/bob/modelRouter.js` from data (migration
+`20261110140000_bob_model_auto_routing.sql`): `bob_model_catalog` (privacy class, cost tier,
+quality priors per task class), `bob_model_task_classes` (workload kind / prompt family / in-app
+role → task class), `bob_model_routing_policies` (weights, external permission, cost ceiling and
+candidate cap per surface and task, optional org override) and `bob_model_route_stats()` (30-day
+success and latency from `builder_model_runs`, smoothed toward the prior). Tune behaviour by
+editing those rows, not code; each Builder run records its decision in `usage_metadata.routing`
+and fcm-api's `GET /api/bob/health` reports `bob.auto_routing`. Restricted data stays
+on local models whatever the rows say, and Vibe still uses only the providers
+`BOB_VIBE_EXTERNAL_PROVIDERS` permits — the router only reorders them. A `BOB_BUILDER_ROUTE_*` or
+`BOB_ROUTE_*` value now **pins** that stage to its static chain (emergency override), and
+`BOB_MODEL_ROUTING=static` switches auto routing off everywhere. If the tables cannot be read the
+static chains stand.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 or the GitHub publication credentials used by this deployment. For GitHub
 publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the

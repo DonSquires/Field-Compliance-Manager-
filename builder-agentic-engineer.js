@@ -21,7 +21,7 @@ const crypto = require('node:crypto');
 const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const { createBranchWorkspace, redactGitError } = require('./builder-branch-workspace');
 const { isProtectedPath, laneAllows, laneFor, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
-const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
+const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, routedCandidates, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
@@ -1752,9 +1752,9 @@ async function runAgenticEngineer({
   };
 
   const health = providerHealth || await fetchModelHealth(gateway || {});
-  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
+  const { candidates, routing: autoRouting } = await routedCandidates(baseRequest, { health, startAfter: startAfterProvider });
   if (!candidates.length) {
-    return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain } };
+    return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain, auto: autoRouting } };
   }
   let active = 0;
   let providerStartedTurn = 0;
@@ -2055,7 +2055,7 @@ async function runAgenticEngineer({
     turns,
     usage,
     duration_ms: now() - started,
-    routing: { provider: candidates[active].provider, model: authorModel, chain: baseRequest.chain, escalated: active > 0, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' },
+    routing: { provider: candidates[active].provider, model: authorModel, chain: baseRequest.chain, escalated: active > 0, reason: baseRequest.routing_reason, auto: autoRouting, prompt_version: PROMPT_VERSION, reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' },
   };
 }
 

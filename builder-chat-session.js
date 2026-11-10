@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, createTools, parseToolCall, compactMessages } = require('./builder-agentic-engineer');
-const { applyVibeRouting, vibeProviderCandidates, vibeNativeTools, vibeToolSchema } = require('./builder-vibe-session');
+const { applyVibeRouting, vibeProviderCandidates, rankVibeCandidates, vibeNativeTools, vibeToolSchema } = require('./builder-vibe-session');
 const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { runBuilderResearch } = require('./builder-chat-research');
@@ -544,7 +544,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   }), { allowCloud: false });
   const nativeTools = builderChatNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
-  const candidates = vibeProviderCandidates(modelRequest, health);
+  const { candidates } = await rankVibeCandidates(modelRequest, vibeProviderCandidates(modelRequest, health), { surface: 'builder', ...(deps.modelRouter !== undefined ? { router: deps.modelRouter } : {}) });
   if (!candidates.length) return ledgerFallback() || { reply: 'No Builder model is available right now, so I could not answer. The model gateway health needs checking.', error: true };
   const callModel = deps.callModel || callModelGateway;
   const started = Date.now();

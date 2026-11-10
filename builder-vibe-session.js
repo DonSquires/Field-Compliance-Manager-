@@ -18,6 +18,7 @@ const { humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs } = require
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
+const { getDefaultModelRouter } = require('./services/fcm-api/src/bob/modelRouter');
 
 const PROMPT_VERSION = 'vibe-v22';
 const VIBE_LIMITS = Object.freeze({
@@ -195,6 +196,29 @@ function vibeProviderCandidates(modelRequest, health) {
     }
   }
   return candidates;
+}
+
+// Data-driven auto routing over the permitted candidates (egress rules above already applied):
+// the router only reorders and caps, it never adds an external model the session may not use.
+async function rankVibeCandidates(modelRequest, candidates, { router = getDefaultModelRouter(), surface = 'vibe' } = {}) {
+  if (!router || !candidates.length) return { candidates, routing: { mode: 'static', reason: router ? 'no_candidates' : 'no_router' } };
+  try {
+    const ranked = await router.rank({
+      candidates, surface,
+      workloadKind: modelRequest.request?.workload_kind || null,
+      promptVersion: modelRequest.prompt_version,
+      organizationId: modelRequest.organization_id,
+    });
+    if (!ranked || !ranked.ordered.length) return { candidates, routing: { mode: 'static', reason: ranked ? 'policy_permitted_none' : 'routing_data_unavailable' } };
+    const permitted = new Set(candidates.map(entry => `${entry.provider}\u0000${entry.model || ''}`));
+    const ordered = ranked.ordered.filter(entry => permitted.has(`${entry.provider}\u0000${entry.model || ''}`)).map(({ provider, model }) => ({ provider, model }));
+    return {
+      candidates: ordered.length ? ordered : candidates,
+      routing: { mode: 'auto', surface, task_class: ranked.task_class, policy: ranked.policy, ranked: ranked.ordered.map(({ provider, model, score, success, runs, cost_tier }) => ({ provider, model, score, success, runs, cost_tier })), excluded: ranked.excluded },
+    };
+  } catch (error) {
+    return { candidates, routing: { mode: 'static', reason: `router_error: ${String(error && error.message || error).slice(0, 120)}` } };
+  }
 }
 
 function toolCallKey(tool, args) {
@@ -940,7 +964,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const modelRequest = applyVibeRouting(baseRequest, { allowCloud: cloudPermitted, externals: deps.externalProviders ?? vibeExternalProviders() });
   const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
-  const candidates = vibeProviderCandidates(modelRequest, health);
+  const { candidates, routing: autoRouting } = await rankVibeCandidates(modelRequest, vibeProviderCandidates(modelRequest, health), { router: deps.modelRouter === undefined ? getDefaultModelRouter() : deps.modelRouter });
   if (!candidates.length) return { reply: 'No model provider is available right now, so I could not work on this. The model gateway health needs checking.', error: true, tools };
   const callModel = deps.callModel || callModelGateway;
   const started = Date.now();
@@ -1539,6 +1563,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         payload: {
           message_id: message.id, provider: candidate.provider, model: candidate.model, tool_protocol: protocol,
           external_egress: isVibeExternal(candidate.provider),
+          ...(autoRouting.mode === 'auto' ? { routing: { mode: 'auto', task_class: autoRouting.task_class, policy_id: autoRouting.policy?.id || null, score: autoRouting.ranked.find(entry => entry.provider === candidate.provider && entry.model === candidate.model)?.score ?? null } } : {}),
           ...(isVibeExternal(candidate.provider) ? {
             attachment_context_ids: attachmentCloudConsent ? attachmentContext.map(item => item.id) : [],
             raw_attachments_sent: false,
@@ -1991,4 +2016,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, vibeExternalProviders, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, vibeExternalProviders, applyVibeRouting, vibeProviderCandidates, rankVibeCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
