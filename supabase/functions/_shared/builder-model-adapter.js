@@ -493,9 +493,12 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
   const attempts = [];
   const corrections = [];
   const triedProviders = new Set();
+  // A provider that rejected the prompt as too large rejects it on every model it serves (one context window).
+  const contextRejected = new Set();
   let last = null;
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
+    if (contextRejected.has(candidate.provider)) continue;
     // The first provider keeps the caller's idempotency key; escalations get their own run record
     // (a second model on an already-tried provider is keyed by provider and model).
     const suffix = index === 0 ? null : triedProviders.has(candidate.provider) ? `${candidate.provider}:${candidate.model}` : candidate.provider;
@@ -514,6 +517,7 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
     attempts.push({ provider: candidate.provider, model: candidate.model, ok: last.ok, status: last.status ?? null, error: last.ok ? null : String(last.error || '').slice(0, 200) });
     if (last.ok || last.duplicate) return { ...last, provider: candidate.provider, model_name: candidate.model, attempts, escalated: index > 0, routing };
     if (last.validation_error) corrections.push(String(last.validation_error).slice(0, 600));
+    if (last.code === 'context_exceeded') contextRejected.add(candidate.provider);
     if (!ESCALATE_STATUSES.has(Number(last.status))) break;
   }
   return { ...last, attempts, escalated: attempts.length > 1, routing };
