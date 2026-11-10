@@ -125,7 +125,23 @@ analysis and authoring, and `anthropic,gpu_workstation,ollama_cloud,openai` for 
 independent (security) review (owner direction 2026-11-10: Claude is the
 security-review engine; it is skipped until `ANTHROPIC_API_KEY` is set in
 `/var/lib/bob/control-plane.env`). OmniRoute joins a chain only when
-`OMNIROUTE_BASE_URL` is set and a `BOB_BUILDER_ROUTE_*` value names `omniroute`.
+`OMNIROUTE_BASE_URL` is set and a `BOB_BUILDER_ROUTE_*` value names `omniroute`
+(or the auto router ranks it).
+OmniRoute runs from `/opt/omniroute` (deployed 2026-11-11): the upstream
+`docker-compose.selfhost.yml` and `.env.selfhost.example` pinned to tag `v3.8.53`
+(image `diegosouzapw/omniroute:3.8.53`, never `latest`), plus
+`deploy/omniroute/docker-compose.override.yml`. `.env` is mode 600 with
+`REQUIRE_API_KEY=true` and a generated `INITIAL_PASSWORD` (the dashboard login; never print it).
+Ports stay on `127.0.0.1`; Bob uses `OMNIROUTE_BASE_URL=http://omniroute:20128/v1` and an
+`OMNIROUTE_API_KEY` named `bob-fcm` in both `/var/lib/bob/control-plane.env` and
+`/opt/fcm/.env`, with `BOB_OMNIROUTE_MODELS=auto/best-coding,auto/best-reasoning`,
+`OMNIROUTE_MODEL=auto/best-coding` and `OMNIROUTE_PLAN_MODEL=auto/best-reasoning` (OmniRoute's own
+combos choose the upstream). Start: `docker compose -f docker-compose.selfhost.yml -f docker-compose.override.yml up -d`.
+API-key upstreams (Anthropic, OpenAI, Ollama Cloud) were added from the existing Bob keys through
+`POST /api/providers` after a dashboard login; they share those accounts' quotas. Free-tier keys and
+subscription (OAuth) accounts are added by the owner in the dashboard over an SSH tunnel
+(`ssh -N -L 20128:127.0.0.1:20128 root@<vps>`, then `http://localhost:20128`). The keyless
+browser-backed free tiers do not work in this image (no Chromium).
 Set `BOB_GPU_MODELS=qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b` (the laptop's ~6 GB
 GPU keeps the 7b resident; the 14b is the distinct in-house reviewer; `gpt-oss:20b`
 is too slow there) and `BOB_OLLAMA_MODELS=qwen2.5-coder:7b,qwen3-coder:30b,llama3.1:8b`
