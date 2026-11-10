@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
-import { imageFileToBase64, type ScanSafetyWarningSummary } from '../lib/officerScan';
+import { buildOfficerScanPayload, describeOfficerScanError, imageFileToBase64, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
@@ -61,11 +61,22 @@ const OfficerParkingPage: React.FC = () => {
   const [resolvingAddress, setResolvingAddress] = useState(false);
   const [addressError, setAddressError] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [plateNumber, setPlateNumber] = useState('');
+  const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
+  const [capturedAt, setCapturedAt] = useState<string>();
+  const [savedCaptures, setSavedCaptures] = useState<QueuedOfficerScan[]>([]);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [preparingImage, setPreparingImage] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [scanWarnings, setScanWarnings] = useState<ScanSafetyWarningSummary[]>([]);
+
+  const refreshSavedCaptures = useCallback(async () => {
+    if (!profile?.id) return;
+    setSavedCaptures((await listQueuedOfficerScans(profile.id)).filter((scan) => scan.body.module_key === 'parking_enforcement'));
+  }, [profile?.id]);
+
+  useEffect(() => { void refreshSavedCaptures().catch(() => setError('Device storage is unavailable. Capture cannot be submitted safely.')); }, [refreshSavedCaptures]);
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -131,6 +142,9 @@ const OfficerParkingPage: React.FC = () => {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       setImagePreviewUrl(URL.createObjectURL(file));
       setImageBase64(await imageFileToBase64(file));
+      setCapturedAt(new Date().toISOString());
+      setClientRequestId(crypto.randomUUID());
+      setPlateNumber('');
     } catch (captureError) {
       setImagePreviewUrl(null);
       setImageBase64(null);
@@ -144,6 +158,9 @@ const OfficerParkingPage: React.FC = () => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
     setImageBase64(null);
+    setCapturedAt(undefined);
+    setClientRequestId(crypto.randomUUID());
+    setPlateNumber('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -168,28 +185,31 @@ const OfficerParkingPage: React.FC = () => {
     e.preventDefault();
     if (!profile?.id || !profile?.organizationId) return;
 
+    let stagedCapture: QueuedOfficerScan | null = null;
     try {
       setSubmitting(true);
       setError(null);
       setReceipt(null);
+      const payload = buildOfficerScanPayload({ imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt, zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null, moduleKey: 'parking_enforcement' });
+      stagedCapture = await queueOfficerScan(payload, profile.id);
+      await refreshSavedCaptures();
+      if (!navigator.onLine) {
+        setReceipt('Photo saved on this device. Review this capture when connected.');
+        return;
+      }
 
       // The scan function owns Zone validation, policy timing, geofence evidence,
       // compliance evaluation, and the parking_chalk_records write.
       const { data, error } = await supabase
         .functions
         .invoke<ParkingScanResult>('process-officer-scan', {
-          body: {
-            image_base64: imageBase64,
-            ...(form.zone_id ? { zone_id: form.zone_id } : {}),
-            gps_lat: addressPoint?.lat ?? null,
-            gps_lng: addressPoint?.lng ?? null,
-            module_key: 'parking_enforcement',
-            captured_at: new Date().toISOString(),
-          },
+          body: payload,
         });
 
       if (error) throw error;
       if (!data?.success || !data.chalk_record_id) throw new Error('Parking chalk receipt was not confirmed.');
+      await removeQueuedOfficerScan(stagedCapture.id);
+      await refreshSavedCaptures();
       setForm({ zone_id: '' });
       setAddressQuery('');
       setAddressCandidates([]);
@@ -201,7 +221,12 @@ const OfficerParkingPage: React.FC = () => {
       if (data.breach_write_error) setError(data.breach_write_error);
       await loadRecords();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to chalk vehicle');
+      const message = await describeOfficerScanError(err);
+      if (stagedCapture) {
+        await markQueuedOfficerScanAttempt(stagedCapture, message, true);
+        await refreshSavedCaptures();
+      }
+      setError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
     } finally {
       setSubmitting(false);
     }
@@ -250,6 +275,19 @@ const OfficerParkingPage: React.FC = () => {
       )}
       {receipt && <ScanSafetyWarnings warnings={scanWarnings} />}
       {receipt && <div className="alert alert-success" role="status">{receipt}</div>}
+      {savedCaptures.map((scan) => <div className="alert" key={scan.id}>
+        <span>{scan.lastError ?? 'Parking capture saved on this device.'}</span>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={submitting} onClick={() => {
+          setShowForm(true);
+          setImageBase64(scan.body.image_base64 ?? null);
+          setImagePreviewUrl(`data:image/jpeg;base64,${scan.body.image_base64}`);
+          setPlateNumber(scan.body.plate_number ?? '');
+          setCapturedAt(scan.body.captured_at);
+          setClientRequestId(scan.body.client_request_id ?? scan.id);
+          setForm({ zone_id: scan.body.zone_id ?? '' });
+          if (scan.body.gps_lat != null && scan.body.gps_lng != null) setAddressPoint({ label: 'Saved capture location', lat: scan.body.gps_lat, lng: scan.body.gps_lng, source: 'linz_address' });
+        }}><Search size={15} />Review saved capture</button>
+      </div>)}
 
       <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
         {showForm ? 'Cancel' : '+ Chalk Vehicle'}
@@ -261,6 +299,10 @@ const OfficerParkingPage: React.FC = () => {
           <div className="form-group">
             <label>Vehicle evidence</label>
             {imagePreviewUrl ? <div className="scan-preview"><img src={imagePreviewUrl} alt="Vehicle evidence preview" /><span><CheckCircle2 size={15} /> Evidence ready for ALPR</span><button type="button" onClick={clearVehicleCapture} title="Remove image"><X size={18} /><span className="sr-only">Remove image</span></button></div> : <button type="button" className="scan-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}><Camera size={28} /><strong>{preparingImage ? 'Preparing image' : 'Capture vehicle'}</strong><span>Plate must be visible for ALPR</span></button>}
+          </div>
+          <div className="form-group">
+            <label htmlFor="parking-plate">Plate (manual fallback)</label>
+            <input id="parking-plate" value={plateNumber} onChange={(event) => { setPlateNumber(event.target.value); setClientRequestId(crypto.randomUUID()); }} autoCapitalize="characters" spellCheck={false} placeholder="Use if ALPR cannot read" />
           </div>
           <div className="form-group">
             <label htmlFor="parking-zone">Verified parking Zone</label>

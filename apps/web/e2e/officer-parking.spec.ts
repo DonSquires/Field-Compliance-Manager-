@@ -1,6 +1,32 @@
 import { expect, test } from '@playwright/test';
 import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
+for (const { module, routePath } of [
+  { module: 'parking', routePath: '/officer/parking' },
+  { module: 'freedom_camping', routePath: '/officer/freedom_camping' },
+  { module: 'freedom_camping', routePath: '/modules/freedom_camping' },
+  { module: 'parking', routePath: '/modules/parking_enforcement' },
+]) {
+  test(`${routePath} retains a rejected photo across reload and exposes the server error`, async ({ page }) => {
+    await installOfficerScheduleFixtures(page);
+    await page.route('**/rest/v1/parking_chalk_records**', (route) => route.fulfill({ json: [] }));
+    await page.route('**/rest/v1/location_zones**', (route) => route.fulfill({ json: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Synthetic verified Zone' }] }));
+    await page.route('**/functions/v1/process-officer-scan', (route) => route.fulfill({ status: 400, json: { code: 'plate_confirmation_required', error: 'Keep this photo and confirm the plate manually.' } }));
+    await signInAsOfficer(page, routePath);
+    if (module === 'parking') await page.getByRole('button', { name: /Chalk Vehicle/ }).click();
+    await page.locator('input[type="file"]').setInputFiles('node_modules/leaflet/dist/images/marker-icon.png');
+    const zone = module === 'parking' ? page.getByLabel('Verified parking Zone') : page.locator('.fc-field select');
+    await zone.selectOption('66666666-6666-4666-8666-666666666666');
+    await page.getByRole('button', { name: module === 'parking' ? 'Chalk Vehicle' : 'Process scan', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Photo retained on this device.' })).toContainText('confirm the plate manually');
+    await page.reload();
+    const review = page.getByRole('button', { name: 'Review saved capture' });
+    await expect(review).toBeVisible();
+    await review.click();
+    await expect(page.getByRole('img', { name: 'Vehicle evidence preview' })).toBeVisible();
+  });
+}
+
 test('officer records parking chalk through the verified-Zone scan workflow', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installOfficerScheduleFixtures(page);

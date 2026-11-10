@@ -20,7 +20,9 @@ describe('Officer Freedom Camping interaction boundary', () => {
 
   it('keeps camera, offline queue, and all schema verdict states visible', () => {
     expect(source).toContain('capture="environment"');
-    expect(source).toContain('queueOfficerScan(payload)');
+    expect(source).toContain('queueOfficerScan(payload, profile?.id)');
+    expect(source).toContain('listQueuedOfficerScans(profile.id)');
+    expect(source).toContain('Photo retained on this device.');
     for (const status of ['compliant', 'at_risk', 'breach', 'breach_exempt', 'unknown']) {
       expect(source).toContain(`${status}:`);
     }

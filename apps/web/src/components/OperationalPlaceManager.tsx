@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { AlertTriangle, CheckCircle2, LandPlot, MapPinned, ShieldCheck, Siren, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap, type EditableEntity, type HouseMapCheckpoint, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
+import { WorkingZonePolicyEditor } from './WorkingZonePolicyEditor';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
 import './OperationalPlaceManagerHuman.css';
@@ -455,7 +456,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
             </> : <div className="place-manager-empty">No Site is linked to this place. Add it in the client portfolio first.</div>}
           </form>
         ) : view === 'zones' ? (
-          <form onSubmit={(event) => void saveZone(event)}>
+          <><form onSubmit={(event) => void saveZone(event)}>
             <div className="place-manager-heading"><div><h3>{creatingZone ? 'Add a work area' : 'Work area settings'}</h3><p>A work area is the named part of this place where a service and its rules apply.</p></div><div>{!creatingZone && <select aria-label="Work area to edit" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setBoundaryTarget(`zone:${event.target.value}`); }}>{data.zones.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}<button type="button" onClick={creatingZone ? () => setCreatingZone(false) : startNewZone}>{creatingZone ? 'Cancel' : 'Add work area'}</button></div></div>
             {(zone || creatingZone) ? <>
               <div className="place-manager-help"><MapPinned size={17} /><div><strong>{creatingZone ? 'Name the area officers will recognise.' : 'These settings tell officers what applies after GPS selects this area.'}</strong><span>The boundary itself is drawn and confirmed in the next step.</span></div></div>
@@ -467,10 +468,11 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
                 <label><span>If an issue is found</span><select value={zoneForm.workflow} onChange={(event) => setZoneForm({ ...zoneForm, workflow: event.target.value })}>{Object.entries(WORKFLOW_LABELS).map(([value, label]) => <option value={value} key={value || 'default'}>{label}</option>)}</select></label>
                 <label className="place-manager-check"><input type="checkbox" checked={zoneForm.active} onChange={(event) => setZoneForm({ ...zoneForm, active: event.target.checked })} />Area is available for operations</label>
               </div>
-              {isFreedomCamping && <fieldset className="place-manager-module-fields"><legend>Freedom camping limits</legend><p>These controls appear only because the selected service is Freedom camping.</p><div className="place-manager-grid"><label><span>Consecutive-night limit</span><input type="number" min="0" value={zoneForm.nightConsecutive} onChange={(event) => setZoneForm({ ...zoneForm, nightConsecutive: event.target.value })} placeholder="No limit recorded" /></label><label><span>Monthly-night limit</span><input type="number" min="0" value={zoneForm.nightMonthly} onChange={(event) => setZoneForm({ ...zoneForm, nightMonthly: event.target.value })} placeholder="No limit recorded" /></label><label className="place-manager-check"><input type="checkbox" checked={zoneForm.scv} onChange={(event) => setZoneForm({ ...zoneForm, scv: event.target.checked })} />Self-contained vehicle requirement applies</label></div></fieldset>}
               <footer><span>{creatingZone ? 'Saving creates the area, then opens its map boundary.' : `Saved version ${zone?.configuration_version ?? 0}`}</span><button type="submit" className="is-primary" disabled={busy || !zoneForm.name.trim()}>{creatingZone ? 'Save and draw boundary' : 'Save area settings'}</button></footer>
             </> : <div className="place-manager-empty">No work area exists yet. Add one to describe where a service applies.</div>}
           </form>
+          {zone && !creatingZone && zone.module_key === zoneForm.moduleKey && ['parking_enforcement', 'freedom_camping'].includes(zone.module_key) && <WorkingZonePolicyEditor key={zone.id} zoneId={zone.id} moduleKey={zone.module_key} configurationVersion={zone.configuration_version} onSaved={() => { void load(zone.id); onSaved(); }} />}
+          </>
         ) : view === 'boundary' ? (
           <div className="place-manager-boundary">
             <div className="place-manager-heading"><div><h3>Draw or update a boundary</h3><p>Choose a Site or work area, inspect the real map, then confirm the shape officers may rely on.</p></div><select aria-label="Boundary to edit" value={boundaryTarget} onChange={(event) => setBoundaryTarget(event.target.value)}><optgroup label="Sites">{data.sites.map((item) => <option value={`site:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup><optgroup label="Work areas">{data.zones.map((item) => <option value={`zone:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup></select></div>

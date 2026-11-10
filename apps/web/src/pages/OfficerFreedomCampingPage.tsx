@@ -22,13 +22,13 @@ import { type AddressCandidate, resolveAddressCandidates } from '../lib/location
 import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
+  describeOfficerScanError,
   getCurrentPosition,
   imageFileToBase64,
   isNetworkFailure,
   listQueuedOfficerScans,
   markQueuedOfficerScanAttempt,
-  MAX_UPLOAD_ATTEMPTS,
-  shouldDropQueuedOfficerScan,
+  type QueuedOfficerScan,
   OfficerScanResult,
   queueOfficerScan,
   removeQueuedOfficerScan,
@@ -124,7 +124,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [zoneId, setZoneId] = useState('');
   const [plateNumber, setPlateNumber] = useState('');
-  const [clientRequestId, setClientRequestId] = useState(() => crypto.randomUUID());
+  const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
   const [imageBase64, setImageBase64] = useState<string>();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
@@ -139,6 +139,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<OfficerScanResult | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [savedCaptures, setSavedCaptures] = useState<QueuedOfficerScan[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
   const [enforcementAction, setEnforcementAction] = useState<OfficerEnforcementAction>('written_warning');
@@ -210,11 +211,14 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
   const refreshQueueCount = useCallback(async () => {
     try {
-      setQueuedCount((await listQueuedOfficerScans()).length);
+      if (!profile?.id) return;
+      const scans = (await listQueuedOfficerScans(profile.id)).filter((scan) => scan.body.module_key === 'freedom_camping');
+      setQueuedCount(scans.length);
+      setSavedCaptures(scans);
     } catch {
       setQueueMessage('Offline storage is unavailable on this device.');
     }
-  }, []);
+  }, [profile?.id]);
 
   const acquireLocation = useCallback(async () => {
     setLocation(INITIAL_LOCATION);
@@ -278,30 +282,28 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setSyncing(true);
     setQueueMessage(null);
     try {
-      const queuedScans = await listQueuedOfficerScans();
+      if (!profile?.id) return;
+      const queuedScans = await listQueuedOfficerScans(profile.id);
       let synced = 0;
-      let dropped = 0;
+      let held = 0;
       for (const scan of queuedScans) {
+        if (scan.body.module_key !== 'freedom_camping' || scan.status === 'needs_review') continue;
         const { error } = await supabase.functions.invoke('process-officer-scan', {
           body: { ...scan.body, synced_at: new Date().toISOString() },
         });
         if (error) {
-          if (!isNetworkFailure(error) || shouldDropQueuedOfficerScan(scan)) {
-            await removeQueuedOfficerScan(scan.id);
-            dropped += 1;
-          } else {
-            await markQueuedOfficerScanAttempt(scan);
-          }
+          await markQueuedOfficerScanAttempt(scan, await describeOfficerScanError(error), !isNetworkFailure(error));
+          held += 1;
           continue;
         }
         await removeQueuedOfficerScan(scan.id);
         synced += 1;
       }
       await refreshQueueCount();
-      if (synced > 0 || dropped > 0) {
+      if (synced > 0 || held > 0) {
         const messages = [];
         if (synced > 0) messages.push(`${synced} queued scan${synced === 1 ? '' : 's'} synced`);
-        if (dropped > 0) messages.push(`${dropped} scan${dropped === 1 ? '' : 's'} removed after ${MAX_UPLOAD_ATTEMPTS} failed attempts`);
+        if (held > 0) messages.push(`${held} capture${held === 1 ? '' : 's'} retained on this device for review`);
         setQueueMessage(`${messages.join('. ')}.`);
         await loadHistory();
       }
@@ -310,7 +312,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  }, [loadHistory, refreshQueueCount]);
+  }, [loadHistory, profile?.id, refreshQueueCount]);
 
   useEffect(() => {
     void loadHistory();
@@ -372,11 +374,11 @@ const OfficerFreedomCampingPage: React.FC = () => {
   };
 
   const queueCurrentScan = useCallback(async () => {
-    await queueOfficerScan(payload);
+    await queueOfficerScan(payload, profile?.id);
     await refreshQueueCount();
     setQueueMessage('Scan saved on this device and queued for sync.');
     clearCapture();
-  }, [clearCapture, payload, refreshQueueCount]);
+  }, [clearCapture, payload, profile?.id, refreshQueueCount]);
 
   const submitScan = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -384,7 +386,10 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setSubmitting(true);
     setSubmitError(null);
     setResult(null);
+    let stagedCapture: QueuedOfficerScan | null = null;
     try {
+      stagedCapture = await queueOfficerScan(payload, profile?.id);
+      await refreshQueueCount();
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         await queueCurrentScan();
         return;
@@ -392,6 +397,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
       const { data, error } = await supabase.functions.invoke<OfficerScanResult>('process-officer-scan', { body: payload });
       if (error) throw error;
       if (!data?.observation_id) throw new Error('The scan completed without an observation record.');
+      await removeQueuedOfficerScan(stagedCapture.id);
+      await refreshQueueCount();
       setResult(data);
       clearCapture();
       await loadHistory();
@@ -403,7 +410,12 @@ const OfficerFreedomCampingPage: React.FC = () => {
           setSubmitError(queueError instanceof Error ? queueError.message : 'The scan could not be queued.');
         }
       } else {
-        setSubmitError(error instanceof Error ? error.message : 'The scan could not be processed.');
+        const message = await describeOfficerScanError(error);
+        if (stagedCapture) {
+          await markQueuedOfficerScanAttempt(stagedCapture, message, true);
+          await refreshQueueCount();
+        }
+        setSubmitError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
       }
     } finally {
       setSubmitting(false);
@@ -529,6 +541,18 @@ const OfficerFreedomCampingPage: React.FC = () => {
       )}
 
       {queueMessage && <div className="fc-inline-message" role="status">{queueMessage}</div>}
+      {savedCaptures.filter((scan) => scan.status === 'needs_review').map((scan) => <div className="fc-inline-message" key={scan.id}>
+        <span>{scan.lastError ?? 'Saved capture needs review'}</span>
+        <button type="button" className="fc-new-scan" disabled={submitting} onClick={() => {
+          setImageBase64(scan.body.image_base64);
+          setImagePreviewUrl(`data:image/jpeg;base64,${scan.body.image_base64}`);
+          setCapturedAt(scan.body.captured_at);
+          setPlateNumber(scan.body.plate_number ?? '');
+          setZoneId(scan.body.zone_id ?? '');
+          setClientRequestId(scan.body.client_request_id ?? scan.id);
+          if (scan.body.gps_lat != null && scan.body.gps_lng != null) setLocation({ status: 'ready', latitude: scan.body.gps_lat, longitude: scan.body.gps_lng, accuracy: 0, message: 'Saved capture location' });
+        }}><Search size={15} />Review saved capture</button>
+      </div>)}
 
       <div className="fc-scan-layout">
         <form className="fc-capture-panel" onSubmit={submitScan}>
@@ -561,7 +585,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               <span>Plate <small>manual fallback</small></span>
               <div className="fc-select-wrap">
                 <Search size={17} aria-hidden="true" />
-                <input value={plateNumber} onChange={(event) => setPlateNumber(event.target.value)} placeholder="Use if ALPR cannot read" autoCapitalize="characters" spellCheck={false} />
+                <input value={plateNumber} onChange={(event) => { setPlateNumber(event.target.value); setClientRequestId(crypto.randomUUID()); }} placeholder="Use if ALPR cannot read" autoCapitalize="characters" spellCheck={false} />
               </div>
             </label>
             <label className="fc-field">

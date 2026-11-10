@@ -13,8 +13,9 @@ describe('ScanShell standalone contract', () => {
 
   it('uses the complete scan edge function and shared offline queue', () => {
     expect(source).toContain("functions.invoke<ScanResult>('process-officer-scan'");
-    expect(source).toContain('queueOfficerScan(payload)');
-    expect(source).toContain('listQueuedOfficerScans()');
+    expect(source).toContain('queueOfficerScan(payload, profile?.id)');
+    expect(source).toContain('listQueuedOfficerScans(profile.id)');
+    expect(source).toContain("scan.status === 'needs_review'");
     expect(source).not.toContain("console.log('Scanned:'");
   });
 
