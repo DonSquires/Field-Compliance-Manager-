@@ -438,6 +438,28 @@ test('job_status resolves a job by id prefix or branch from the job ledger', asy
   assert.match((await tools.job_status({ job: 'deadbeef' })).error, /no Builder job/);
 });
 
+test('Builder chat finds an old job by its human reference and uses it in receipts', async () => {
+  const recent = Array.from({ length: 205 }, (_, i) => ({
+    id: `recent-${i}`, human_reference: `BB-${i + 2}`, title: `Recent ${i}`, status: 'failed',
+  }));
+  const old = {
+    id: 'aae6d519-0000-4000-8000-000000000001', human_reference: 'BB-1',
+    title: 'Original job', status: 'failed',
+  };
+  const supabase = filteringSupabase({
+    builder_jobs: [...recent, old],
+    builder_job_steps: [], builder_approvals: [],
+  });
+  const tools = chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS });
+  const result = await tools.job_status({ job: 'bb-1' });
+  assert.equal(result.job?.human_reference, 'BB-1');
+  assert.equal(result.job?.title, 'Original job');
+  assert.deepEqual(chat.statusIntent('What is the status of BB-1?'), { kind: 'job', job: 'BB-1' });
+  assert.match(chat.formatJobStatus(result), /Original job \(BB-1\)/);
+  assert.match(chat.formatJobList({ jobs: [result.job] }), /Original job \(BB-1\)/);
+  assert.match(chat.formatOwnerQueue({ blocked_recently: [result.job] }), /Original job \(BB-1\)/);
+});
+
 function filteringSupabase(tables) {
   const query = rows => {
     let out = rows;

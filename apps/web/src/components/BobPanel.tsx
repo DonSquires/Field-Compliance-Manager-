@@ -34,6 +34,8 @@ const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024;
 const ACCEPTED_BOB_UPLOAD_LABEL = 'Any file type up to 128 GB each';
 const BOB_REQUEST_TIMEOUT_MS = 120_000;
 const BOB_REQUEST_TIMEOUT_MESSAGE = 'Bob is still working after 120 seconds. Check this request before retrying; the durable run prevents duplicate work.';
+const BOB_SESSION_PAGE_SIZE = 50;
+const BOB_SESSION_FIELDS = 'id, human_reference, title, pinned, archived_at, created_at, updated_at';
 
 interface BobMessage {
   id: string;
@@ -100,6 +102,7 @@ interface BobAttachmentRecord {
 
 interface BobSessionSummary {
   id: string;
+  human_reference: string;
   title: string | null;
   pinned: boolean;
   archived_at: string | null;
@@ -153,11 +156,50 @@ interface ActiveBobTurn {
   message: string;
   startedAt: string;
   accepted: boolean;
+  submittedFileIds: string[];
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
 type SessionFilter = 'all' | 'pinned' | 'archived';
 type SearchScope = 'chats' | 'files' | 'actions';
+
+interface BobSessionCursor {
+  id: string;
+  updated_at: string;
+}
+
+interface BobSessionQuery {
+  search: string;
+  filter: SessionFilter;
+}
+
+function readBobSession(value: unknown): BobSessionSummary {
+  if (!value || typeof value !== 'object') throw new Error('Bob did not return a valid conversation.');
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== 'string' || !row.id
+    || typeof row.human_reference !== 'string' || !/^BOB-[1-9]\d*$/.test(row.human_reference)
+    || (row.title !== null && typeof row.title !== 'string')
+    || typeof row.pinned !== 'boolean'
+    || (row.archived_at !== null && typeof row.archived_at !== 'string')
+    || typeof row.created_at !== 'string' || typeof row.updated_at !== 'string') {
+    throw new Error('Bob could not confirm the conversation and its reference. Refresh before retrying.');
+  }
+  return {
+    id: row.id,
+    human_reference: row.human_reference,
+    title: row.title,
+    pinned: row.pinned,
+    archived_at: row.archived_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function bobErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return fallback;
+}
 
 interface GlobalSearchResult {
   id: string;
@@ -206,7 +248,13 @@ function formatContextEntry(key: string, value: string): [string, string] {
   return [label, readable];
 }
 
-export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations', launchPrompt = null, presentation = 'floating' }) => {
+export const BobPanel: React.FC<BobPanelProps> = (props) => {
+  const { profile } = useAuth();
+  const scope = JSON.stringify([profile?.id ?? null, profile?.organizationId ?? null, props.mode ?? 'operations']);
+  return <ScopedBobPanel key={scope} {...props} />;
+};
+
+const ScopedBobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations', launchPrompt = null, presentation = 'floating' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
@@ -216,12 +264,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [auditEvents, setAuditEvents] = useState<BobAuditEvent[]>([]);
   const [governedActions, setGovernedActions] = useState<BobGovernedAction[]>([]);
   const [sessions, setSessions] = useState<BobSessionSummary[]>([]);
+  const [activeSession, setActiveSession] = useState<BobSessionSummary | null>(null);
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
   const [searchScope, setSearchScope] = useState<SearchScope>('chats');
+  const [sessionListLoading, setSessionListLoading] = useState(false);
+  const [sessionListError, setSessionListError] = useState<string | null>(null);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [globalResults, setGlobalResults] = useState<GlobalSearchResult[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
   // Compact mode is a conversation surface. Side panes open on demand as
   // drawers; users can expose both when they deliberately expand the workspace.
   const [sidebarOpen, setSidebarOpen] = useState(() => presentation === 'floating' && typeof window !== 'undefined' && window.innerWidth >= 1100);
@@ -257,6 +311,20 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const appliedLaunchPromptRef = useRef<string | null>(null);
+  const sessionRequestRef = useRef(0);
+  const sessionQueryRef = useRef<BobSessionQuery>({ search: '', filter: 'all' });
+  sessionQueryRef.current = { search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter };
+  const sessionCursorRef = useRef<BobSessionCursor | null>(null);
+  const failedSessionCursorRef = useRef<BobSessionCursor | null>(null);
+  const conversationRequestRef = useRef(0);
+  const intendedConversationRef = useRef<string | null>(null);
+  const displayedConversationRef = useRef<string | null>(null);
+  const renameBusyRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const contextEntries = useMemo(() => Object.entries(context ?? {}).filter(([key]) => {
     const pages: Record<string, string> = { crmTab: 'crm', rosterTab: 'roster', fieldOpsSubArea: 'field-ops', reportsTab: 'reports' };
     return CONTEXT_CHIP_KEYS.has(key) && (!pages[key] || context?.page === pages[key]);
@@ -273,21 +341,52 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     typeof entry[1] === 'string' || typeof entry[1] === 'number').map(([key, value]) => [key, String(value)] as [string, string]).slice(0, 12), [context]);
   const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments, activeTurn });
 
+  const isCurrentConversationRequest = useCallback((convId: string, request: number) =>
+    mountedRef.current && conversationRequestRef.current === request && intendedConversationRef.current === convId, []);
+
+  const clearSubmittedFiles = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const submitted = new Set(ids);
+    setPendingFiles(current => current.filter(file => !submitted.has(file.id)));
+  }, []);
+
+  const activateConversation = useCallback((session: BobSessionSummary) => {
+    if (displayedConversationRef.current !== session.id) {
+      setMessages([]);
+      setAttachments([]);
+      setAuditEvents([]);
+      setGovernedActions([]);
+      setMessageFeedback({});
+      setFeedbackEditorMessageId(null);
+      setFeedbackStatus(null);
+      setFeedbackLoadError(null);
+      setActiveTurn(null);
+    }
+    displayedConversationRef.current = session.id;
+    setActiveSession(session);
+    setConversationId(session.id);
+  }, []);
+
   const loadAttachments = useCallback(async (convId: string) => {
+    const request = conversationRequestRef.current;
     const { data, error: attachmentErr } = await supabase
       .from('bob_attachments')
       .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, extraction_payload, confidence, created_at, source_type, source_url')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
+    if (!isCurrentConversationRequest(convId, request)) return;
     if (attachmentErr) throw attachmentErr;
     setAttachments((data as BobAttachmentRecord[]) ?? []);
-  }, []);
+  }, [isCurrentConversationRequest]);
 
   const loadMessageFeedback = useCallback(async (convId: string) => {
+    const request = conversationRequestRef.current;
     if (!profile?.id) {
-      setMessageFeedback({});
-      setFeedbackLoadError(null);
+      if (isCurrentConversationRequest(convId, request)) {
+        setMessageFeedback({});
+        setFeedbackLoadError(null);
+      }
       return;
     }
 
@@ -298,6 +397,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       .eq('conversation_id', convId)
       .eq('user_id', profile.id);
 
+    if (!isCurrentConversationRequest(convId, request)) return;
     if (feedbackError) {
       setMessageFeedback({});
       setFeedbackLoadError('Saved reply feedback could not be loaded. Bob chat remains available.');
@@ -307,9 +407,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     setMessageFeedback(Object.fromEntries(
       ((data as BobMessageFeedback[]) ?? []).map((feedback) => [feedback.message_id, feedback])
     ));
-  }, [profile?.id]);
+  }, [isCurrentConversationRequest, profile?.id]);
 
   const loadAuditEvents = useCallback(async (convId: string) => {
+    const request = conversationRequestRef.current;
     const { data, error: auditError } = await supabase
       .from('bob_event_log')
       .select('id, turn_index, step_index, event_type, tool, outcome, created_at')
@@ -318,11 +419,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       .order('step_index', { ascending: false })
       .limit(100);
 
+    if (!isCurrentConversationRequest(convId, request)) return;
     if (auditError) throw auditError;
     setAuditEvents((data as BobAuditEvent[]) ?? []);
-  }, []);
+  }, [isCurrentConversationRequest]);
 
   const loadGovernedActions = useCallback(async (convId: string) => {
+    const request = conversationRequestRef.current;
     const { data, error: actionError } = await supabase
       .from('bob_agentic_actions')
       .select('id, action_type, status, context_summary, bob_reasoning, error_message, created_at')
@@ -330,26 +433,86 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       .order('created_at', { ascending: false })
       .limit(100);
 
+    if (!isCurrentConversationRequest(convId, request)) return;
     if (actionError) throw actionError;
     setGovernedActions((data as BobGovernedAction[]) ?? []);
-  }, []);
+  }, [isCurrentConversationRequest]);
 
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(async (query: BobSessionQuery, cursor: BobSessionCursor | null = null) => {
     if (!profile?.organizationId || !profile?.id) return;
-    const { data, error: sessionErr } = await supabase
-      .from('bob_conversations')
-      .select('id, title, pinned, archived_at, created_at, updated_at')
+    const request = ++sessionRequestRef.current;
+    setSessionListLoading(true);
+    setSessionListError(null);
+    failedSessionCursorRef.current = cursor;
+    try {
+      const { data, error: sessionErr } = await supabase.rpc('bob_list_conversations', {
+        p_organization_id: profile.organizationId,
+        p_module_key: mode,
+        p_search: query.search,
+        p_filter: query.filter,
+        p_cursor_updated_at: cursor?.updated_at ?? null,
+        p_cursor_id: cursor?.id ?? null,
+        p_page_size: BOB_SESSION_PAGE_SIZE,
+      });
+      if (request !== sessionRequestRef.current) return;
+      if (sessionErr) throw sessionErr;
+      if (!Array.isArray(data)) throw new Error('Bob did not return a valid conversation history.');
+      const results = data.map(readBobSession);
+      const page = results.slice(0, BOB_SESSION_PAGE_SIZE);
+      setSessions(current => {
+        const byId = new Map((cursor ? current : []).map(session => [session.id, session]));
+        page.forEach(session => byId.set(session.id, session));
+        return [...byId.values()];
+      });
+      sessionCursorRef.current = page.length ? page[page.length - 1] : cursor;
+      setHasMoreSessions(results.length > BOB_SESSION_PAGE_SIZE);
+    } catch (sessionErr) {
+      if (request === sessionRequestRef.current) {
+        setSessionListError(bobErrorMessage(sessionErr, 'Bob conversation history could not be loaded.'));
+      }
+    } finally {
+      if (request === sessionRequestRef.current) setSessionListLoading(false);
+    }
+  }, [mode, profile?.organizationId, profile?.id]);
+
+  useEffect(() => {
+    sessionRequestRef.current += 1;
+    sessionCursorRef.current = null;
+    failedSessionCursorRef.current = null;
+    setSessions([]);
+    setHasMoreSessions(false);
+    setSessionListError(null);
+    if (!open || !profile?.organizationId || !profile?.id) {
+      setSessionListLoading(false);
+      return;
+    }
+    setSessionListLoading(true);
+    const search = searchScope === 'chats' ? sessionSearch.trim() : '';
+    const timer = window.setTimeout(() => {
+      void loadSessions({ search, filter: sessionFilter });
+    }, search ? 200 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      sessionRequestRef.current += 1;
+    };
+  }, [open, profile?.organizationId, profile?.id, mode, sessionSearch, sessionFilter, searchScope, loadSessions]);
+
+  const fetchSession = useCallback(async (convId: string) => {
+    if (!profile?.organizationId || !profile?.id) throw new Error('Bob conversation is unavailable.');
+    const { data, error: sessionErr } = await supabase.from('bob_conversations')
+      .select(BOB_SESSION_FIELDS)
+      .eq('id', convId)
       .eq('organization_id', profile.organizationId)
       .eq('user_id', profile.id)
       .eq('module_key', mode)
-      .order('updated_at', { ascending: false })
-      .limit(100);
-
+      .maybeSingle();
     if (sessionErr) throw sessionErr;
-    setSessions((data as BobSessionSummary[]) ?? []);
+    if (!data) throw new Error('That Bob conversation is not available in this organization and workspace.');
+    return readBobSession(data);
   }, [mode, profile?.organizationId, profile?.id]);
 
   const loadActiveTurn = useCallback(async (convId: string) => {
+    const request = conversationRequestRef.current;
     const { data, error: runError } = await supabase
       .from('bob_turn_runs')
       .select('request_id, status, started_at, heartbeat_at, completed_at, error_code')
@@ -357,25 +520,38 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       .in('status', ['queued', 'running', 'cancel_requested'])
       .order('created_at', { ascending: false })
       .limit(1);
+    if (!isCurrentConversationRequest(convId, request)) return;
     if (runError) throw runError;
 
     const restoredRun = (data as BobTurnRun[] | null)?.[0];
-    setActiveTurn(restoredRun ? {
+    setActiveTurn(current => restoredRun ? {
       requestId: restoredRun.request_id,
       status: restoredRun.status,
-      message: '',
+      message: current?.requestId === restoredRun.request_id ? current.message : '',
       startedAt: restoredRun.started_at,
       accepted: true,
+      submittedFileIds: current?.requestId === restoredRun.request_id ? current.submittedFileIds : [],
     } : null);
-  }, []);
+  }, [isCurrentConversationRequest]);
 
-  const selectSession = useCallback(async (convId: string) => {
+  const selectSession = useCallback(async (convId: string, refreshHistory = false) => {
+    if (refreshHistory && intendedConversationRef.current !== convId) return false;
+    intendedConversationRef.current = convId;
+    const request = ++conversationRequestRef.current;
+    const isCurrent = () => mountedRef.current && conversationRequestRef.current === request;
     try {
       setLoading(true);
       setActivityPhase('refreshing');
       setError(null);
-      setConversationId(convId);
-      setPendingFiles([]);
+      const selected = await fetchSession(convId);
+      if (!isCurrent()) return false;
+      const changingConversation = displayedConversationRef.current !== selected.id;
+      activateConversation(selected);
+      setSessions(current => current.map(session => session.id === selected.id ? selected : session));
+      if (changingConversation) setPendingFiles([]);
+      if (refreshHistory) {
+        void loadSessions({ search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter });
+      }
 
       const historyResult = await supabase
         .from('bob_messages')
@@ -383,34 +559,85 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
+      if (!isCurrent()) return false;
       if (historyResult.error) throw historyResult.error;
       setMessages((historyResult.data as BobMessage[]) || []);
       setFeedbackEditorMessageId(null);
       setFeedbackStatus(null);
       await Promise.all([
-        loadActiveTurn(convId),
         loadAttachments(convId),
         loadAuditEvents(convId),
         loadGovernedActions(convId),
         loadMessageFeedback(convId),
       ]);
+      if (!isCurrent()) return false;
+      await loadActiveTurn(convId);
+      if (!isCurrent()) return false;
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'That Bob session could not be opened.');
+      if (isCurrent()) {
+        if (displayedConversationRef.current !== convId) intendedConversationRef.current = displayedConversationRef.current;
+        setError(bobErrorMessage(err, 'That Bob session could not be opened.'));
+      }
+      return false;
     } finally {
-      setActivityPhase('idle');
-      setLoading(false);
+      if (isCurrent()) {
+        setActivityPhase('idle');
+        setLoading(false);
+      }
     }
-  }, [loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback]);
+  }, [activateConversation, fetchSession, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback,
+    loadSessions, searchScope, sessionSearch, sessionFilter]);
 
-  const renameSession = useCallback(async (convId: string, title: string) => {
+  const renameSession = useCallback(async (convId: string, title: string, confirmUnchanged = false) => {
+    if (renameBusyRef.current || !profile?.organizationId) return;
     const trimmed = title.trim();
-    if (!trimmed) return;
-    setSessions(current => current.map(item => item.id === convId ? { ...item, title: trimmed } : item));
-    const { error: renameErr } = await supabase.from('bob_conversations').update({ title: trimmed }).eq('id', convId);
-    if (renameErr) setError(renameErr.message);
-  }, []);
+    if (!trimmed || trimmed.length > 160) {
+      setError('Use a conversation name between 1 and 160 characters.');
+      return;
+    }
+    const previous = sessions.find(item => item.id === convId);
+    if (!previous) {
+      setError('That conversation is no longer in the current history. Refresh before editing its name.');
+      return;
+    }
+    if (previous.title === trimmed && !confirmUnchanged) {
+      setRenamingId(null);
+      return;
+    }
+    renameBusyRef.current = true;
+    setRenameBusy(true);
+    setError(null);
+    setSessionNotice(null);
+    try {
+      const { data, error: renameErr } = await supabase.rpc('bob_rename_conversation', {
+        p_conversation_id: convId,
+        p_organization_id: profile.organizationId,
+        p_module_key: mode,
+        p_expected_title: previous.title,
+        p_title: trimmed,
+      });
+      if (renameErr) throw renameErr;
+      const saved = readBobSession(data);
+      if (saved.id !== convId || saved.title !== trimmed || saved.human_reference !== previous.human_reference) {
+        throw new Error('The saved name and reference could not be confirmed. Refresh before retrying.');
+      }
+      sessionRequestRef.current += 1;
+      setSessions(current => current.map(item => item.id === convId ? saved : item));
+      setActiveSession(current => current?.id === convId ? saved : current);
+      setRenamingId(null);
+      setSessionNotice(`Name saved for ${saved.human_reference}.`);
+      void loadSessions(sessionQueryRef.current);
+    } catch (renameErr) {
+      setError(bobErrorMessage(renameErr, 'The conversation name could not be saved.'));
+    } finally {
+      renameBusyRef.current = false;
+      setRenameBusy(false);
+    }
+  }, [sessions, profile?.organizationId, mode, loadSessions]);
 
   const searchWorkspace = useCallback(async (value: string, scope: SearchScope) => {
+    if (value !== sessionSearch) sessionRequestRef.current += 1;
     setSessionSearch(value);
     if (scope === 'chats' || value.trim().length < 2 || !profile?.organizationId) {
       setGlobalResults([]);
@@ -444,7 +671,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       return;
     }
     setGlobalResults((data ?? []).map((item: { id: string; action_type: string; status: string; context_summary: string | null; conversation_id: string | null }) => ({ id: item.id, type: 'action', title: item.action_type.replaceAll('_', ' '), detail: item.context_summary || item.status, conversationId: item.conversation_id })));
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, sessionSearch]);
 
   const updateSession = useCallback(async (convId: string, patch: Partial<Pick<BobSessionSummary, 'pinned' | 'archived_at'>>) => {
     const previous = sessions;
@@ -479,6 +706,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   // be treated as repository/build evidence.
   const loadConversation = useCallback(async () => {
     if (!profile?.organizationId || !profile?.id) return;
+    const request = ++conversationRequestRef.current;
+    const isCurrent = () => mountedRef.current && conversationRequestRef.current === request;
 
     try {
       setLoading(true);
@@ -487,7 +716,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       const { data: existing, error: findErr } = await supabase
         .from('bob_conversations')
-        .select('id')
+        .select(BOB_SESSION_FIELDS)
         .eq('organization_id', profile.organizationId)
         .eq('user_id', profile.id)
         .eq('module_key', mode)
@@ -495,23 +724,27 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         .limit(1)
         .maybeSingle();
 
+      if (!isCurrent()) return;
       if (findErr) throw findErr;
 
-      let convId = existing?.id ?? null;
+      let session = existing ? readBobSession(existing) : null;
 
-      if (!convId) {
+      if (!session) {
         // ATLAS WRITES: bob_conversations
         const { data: created, error: createErr } = await supabase
           .from('bob_conversations')
           .insert([{ organization_id: profile.organizationId, user_id: profile.id, module_key: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
-          .select('id')
+          .select(BOB_SESSION_FIELDS)
           .single();
 
+        if (!isCurrent()) return;
         if (createErr) throw createErr;
-        convId = created.id;
+        session = readBobSession(created);
       }
 
-      setConversationId(convId);
+      const convId = session.id;
+      intendedConversationRef.current = convId;
+      activateConversation(session);
 
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
@@ -519,6 +752,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
+      if (!isCurrent()) return;
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
       setFeedbackEditorMessageId(null);
@@ -529,15 +763,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         loadAuditEvents(convId),
         loadGovernedActions(convId),
         loadMessageFeedback(convId),
-        loadSessions(),
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
+      if (isCurrent()) setError(bobErrorMessage(err, 'Failed to load Bob conversation'));
     } finally {
-      setActivityPhase('idle');
-      setLoading(false);
+      if (isCurrent()) {
+        setActivityPhase('idle');
+        setLoading(false);
+      }
     }
-  }, [mode, profile?.organizationId, profile?.id, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback, loadSessions]);
+  }, [activateConversation, mode, profile?.organizationId, profile?.id, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback]);
 
   const saveMessageFeedback = async (messageId: string, rating: 'up' | 'down', note: string | null) => {
     try {
@@ -655,6 +890,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   const startNewConversation = useCallback(async () => {
     if (!profile?.organizationId || !profile?.id) return;
+    const previousIntent = intendedConversationRef.current;
+    intendedConversationRef.current = null;
+    conversationRequestRef.current += 1;
     try {
       setLoading(true);
       setActivityPhase('preparing');
@@ -662,23 +900,24 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       const { data: created, error: createErr } = await supabase
         .from('bob_conversations')
         .insert([{ organization_id: profile.organizationId, user_id: profile.id, module_key: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
-        .select('id')
+        .select(BOB_SESSION_FIELDS)
         .single();
       if (createErr) throw createErr;
-      setConversationId(created.id);
-      setMessages([]);
+      if (!mountedRef.current) return;
+      const session = readBobSession(created);
+      intendedConversationRef.current = session.id;
+      activateConversation(session);
       setPendingFiles([]);
-      setAttachments([]);
-      setAuditEvents([]);
-      setGovernedActions([]);
-      await loadSessions();
+      setSessionNotice(`Started ${session.human_reference}.`);
+      await loadSessions({ search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
+      intendedConversationRef.current = previousIntent;
+      setError(bobErrorMessage(err, 'New Bob conversation could not be created. Refresh before starting another.'));
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id, loadSessions]);
+  }, [activateConversation, mode, profile?.organizationId, profile?.id, searchScope, sessionSearch, sessionFilter, loadSessions]);
 
   const addFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
@@ -902,18 +1141,21 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       const nextStatus = data.turn_run.status;
       setActiveTurn(current => current ? { ...current, status: nextStatus, startedAt: data.turn_run?.started_at ?? current.startedAt } : current);
       if (nextStatus === 'completed') {
-        await selectSession(conversationId);
-        setActiveTurn(null);
-        setError(null);
+        if (await selectSession(conversationId, true)) {
+          clearSubmittedFiles(activeTurn.submittedFileIds);
+          setActiveTurn(null);
+          setError(null);
+        }
       } else if (nextStatus === 'running') {
         setError(null);
       } else if (nextStatus === 'cancel_requested') {
         setError(null);
       } else {
-        await selectSession(conversationId);
-        setError(nextStatus === 'cancelled'
-          ? 'The request was cancelled before further work started. You can restore the prompt and retry as a new request.'
-          : 'The durable Bob request failed. Restore the prompt to retry with a new request ID.');
+        if (await selectSession(conversationId, true)) {
+          setError(nextStatus === 'cancelled'
+            ? 'The request was cancelled before further work started. You can restore the prompt and retry as a new request.'
+            : 'The durable Bob request failed. Restore the prompt to retry with a new request ID.');
+        }
       }
     } catch (err) {
       if (edgeFunctionErrorStatus(err) === 404) {
@@ -1001,8 +1243,15 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (historyErr) throw historyErr;
     if (!history || history.length === 0) return false;
     setMessages(history as BobMessage[]);
-    await Promise.all([loadAttachments(targetConversationId), loadAuditEvents(targetConversationId), loadGovernedActions(targetConversationId)]);
-    setPendingFiles([]);
+    const [session] = await Promise.all([
+      fetchSession(targetConversationId),
+      loadAttachments(targetConversationId),
+      loadAuditEvents(targetConversationId),
+      loadGovernedActions(targetConversationId),
+    ]);
+    setActiveSession(current => current?.id === targetConversationId ? session : current);
+    setSessions(current => current.map(item => item.id === targetConversationId ? session : item));
+    void loadSessions({ search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter });
     return true;
   };
 
@@ -1032,6 +1281,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     const optimisticId = `optimistic-${Date.now()}`;
     const requestId = crypto.randomUUID();
     const attachmentNames = pendingFiles.map(item => item.file.name);
+    const submittedFileIds = pendingFiles.map(item => item.id);
     setMessages((prev) => [
       ...prev,
       { id: optimisticId, role: 'user', content: attachmentNames.length ? `${message || 'Please review the attached file(s).'}\n\nAttached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
@@ -1068,6 +1318,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         message: message || 'Please review the attached file(s).',
         startedAt: new Date().toISOString(),
         accepted: false,
+        submittedFileIds,
       });
       durableRequestStarted = true;
       const data = await invokeEnqueue(deliveryBody);
@@ -1093,8 +1344,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           },
         ]);
         await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
-        setPendingFiles([]);
       }
+      if (hadHistory || data?.reply) clearSubmittedFiles(submittedFileIds);
       setActiveTurn(null);
     } catch (err) {
       if (durableRequestStarted) markDeliveryUnconfirmed(requestId, err);
@@ -1132,10 +1383,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
         const nextStatus = data.turn_run.status;
         if (nextStatus === 'completed') {
-          await selectSession(conversationId);
+          const refreshed = await selectSession(conversationId, true);
           if (!stopped) {
-            setActiveTurn(null);
-            setError(null);
+            if (refreshed) {
+              clearSubmittedFiles(activeTurn.submittedFileIds);
+              setActiveTurn(null);
+              setError(null);
+            } else {
+              setActiveTurn(current => current?.requestId === activeTurn.requestId
+                ? { ...current, status: 'completed' }
+                : current);
+            }
           }
           return;
         }
@@ -1161,7 +1419,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       stopped = true;
       window.clearInterval(interval);
     };
-  }, [activeTurn?.accepted, activeTurn?.requestId, activeTurn?.status, context, conversationId, mode, open, selectSession]);
+  }, [activeTurn?.accepted, activeTurn?.requestId, activeTurn?.status, clearSubmittedFiles, context, conversationId, mode, open, selectSession]);
 
   const focusComposer = () => {
     window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -1263,7 +1521,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     >
       <header className="bob-panel-header">
         {fullscreen && <button ref={closeButtonRef} type="button" className="bob-fullscreen-back" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} aria-label="Back to the field portal"><ChevronLeft size={22} aria-hidden="true" /><span>Back</span></button>}
-        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{currentModeConfig.label}</strong><small><ShieldCheck size={12} /> {currentModeConfig.badge}</small></div></div>
+        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{currentModeConfig.label}</strong><small><ShieldCheck size={12} /> {currentModeConfig.badge}</small>{activeSession && <small aria-label="Conversation reference">{activeSession.human_reference}</small>}</div></div>
         <div className="bob-panel-header-actions">
           {(fullscreen || !sidebarOpen) && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} />{fullscreen && <span>New chat</span>}</button>}
           {!fullscreen && <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>}
@@ -1281,7 +1539,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             activeId={conversationId}
             search={sessionSearch}
             searchScope={searchScope}
-            onScope={(scope) => { setSearchScope(scope); void searchWorkspace(sessionSearch, scope); }}
+            onScope={(scope) => { if (scope !== searchScope) { sessionRequestRef.current += 1; setSearchScope(scope); void searchWorkspace(sessionSearch, scope); } }}
             onSearch={(value) => void searchWorkspace(value, searchScope)}
             results={globalResults}
             onResult={(result) => { if (result.conversationId) void selectSession(result.conversationId); }}
@@ -1289,15 +1547,28 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             onNew={() => void startNewConversation()}
             renamingId={renamingId}
             renameValue={renameValue}
-            onRenameStart={(id, title) => { setRenamingId(id); setRenameValue(title); }}
+            renameBusy={renameBusy}
+            onRenameStart={(id, title) => { setError(null); setSessionNotice(null); setRenamingId(id); setRenameValue(title); }}
             onRenameChange={setRenameValue}
-            onRenameCommit={(id) => { void renameSession(id, renameValue); setRenamingId(null); }}
+            onRenameCommit={(id, confirmUnchanged) => void renameSession(id, renameValue, confirmUnchanged)}
             onRenameCancel={() => setRenamingId(null)}
             filter={sessionFilter}
-            onFilter={setSessionFilter}
+            onFilter={(filter) => { if (filter !== sessionFilter) { sessionRequestRef.current += 1; setSessionFilter(filter); } }}
             onTogglePin={(session) => void updateSession(session.id, { pinned: !session.pinned })}
             onArchive={(session) => void updateSession(session.id, { archived_at: session.archived_at ? null : new Date().toISOString() })}
+            listLoading={sessionListLoading}
+            listError={sessionListError}
+            hasMore={hasMoreSessions}
+            onLoadMore={() => void loadSessions(
+              { search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter },
+              sessionCursorRef.current,
+            )}
+            onRetry={() => void loadSessions(
+              { search: searchScope === 'chats' ? sessionSearch.trim() : '', filter: sessionFilter },
+              failedSessionCursorRef.current,
+            )}
             busy={loading || sending}
+            sending={sending}
             onDismiss={() => setSidebarOpen(false)}
             width={sidebarWidth}
           />
@@ -1311,6 +1582,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           {/* Idle stays a screen-reader status only; a visible pill appears when Bob is actually working, waiting, or paused. */}
           <div className={`bob-work-state state-${workState.tone} ${workState.tone === 'idle' ? 'sr-only' : ''}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
 
+          {sessionNotice && <div className="bob-session-notice" role="status">{sessionNotice}</div>}
           {error && (
             <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
           )}
@@ -1691,25 +1963,28 @@ function SessionSidebar(props: {
   onNew: () => void;
   renamingId: string | null;
   renameValue: string;
+  renameBusy: boolean;
   onRenameStart: (id: string, title: string) => void;
   onRenameChange: (value: string) => void;
-  onRenameCommit: (id: string) => void;
+  onRenameCommit: (id: string, confirmUnchanged?: boolean) => void;
   onRenameCancel: () => void;
   filter: SessionFilter;
   onFilter: (filter: SessionFilter) => void;
   onTogglePin: (session: BobSessionSummary) => void;
   onArchive: (session: BobSessionSummary) => void;
+  listLoading: boolean;
+  listError: string | null;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onRetry: () => void;
   busy: boolean;
+  sending: boolean;
   onDismiss: () => void;
   width: number;
 }) {
-  const term = props.search.trim().toLowerCase();
-  const visible = props.filter === 'archived'
+  const filtered = props.filter === 'archived'
     ? props.sessions.filter(session => Boolean(session.archived_at))
     : props.sessions.filter(session => !session.archived_at && (props.filter !== 'pinned' || session.pinned));
-  const filtered = term
-    ? visible.filter(session => (session.title ?? 'Untitled session').toLowerCase().includes(term))
-    : visible;
 
   const groups = filtered.reduce<Record<string, BobSessionSummary[]>>((acc, session) => {
     const key = session.pinned && props.filter !== 'archived' ? 'Pinned' : sessionGroupLabel(session.updated_at);
@@ -1730,7 +2005,7 @@ function SessionSidebar(props: {
 
       <div className="bob-sidebar-search">
         <Search size={14} />
-        <input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search chats" aria-label="Search chats" />
+        <input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search chats or reference" aria-label="Search chats" maxLength={props.searchScope === 'chats' ? 160 : undefined} />
       </div>
 
       <div className="bob-search-scopes" aria-label="Search scope">
@@ -1750,7 +2025,7 @@ function SessionSidebar(props: {
       {props.searchScope !== 'chats' && props.search.trim().length >= 2 ? (
         <div className="bob-global-results" aria-label="Search results">
           {props.results.length === 0 ? <p className="bob-sidebar-empty">No {props.searchScope} match that search.</p> : props.results.map(result => (
-            <button key={`${result.type}-${result.id}`} type="button" onClick={() => props.onResult(result)} disabled={!result.conversationId}>
+            <button key={`${result.type}-${result.id}`} type="button" onClick={() => props.onResult(result)} disabled={!result.conversationId || props.sending}>
               <span>{result.type}</span>
               <strong>{result.title}</strong>
               <small>{result.detail}</small>
@@ -1758,9 +2033,11 @@ function SessionSidebar(props: {
           ))}
         </div>
       ) : <div className="bob-sidebar-list">
-        {filtered.length === 0 ? (
-          <p className="bob-sidebar-empty">{props.sessions.length === 0 ? 'No sessions yet.' : 'No chats match that search.'}</p>
-        ) : (
+        {props.listError && <div className="bob-session-list-error" role="alert">{props.listError} <button type="button" onClick={props.onRetry}>Retry loading chats</button></div>}
+        {props.listLoading && <p className="bob-sidebar-empty" role="status">Loading chats...</p>}
+        {!props.listLoading && !props.listError && filtered.length === 0 ? (
+          <p className="bob-sidebar-empty">{props.search.trim() ? 'No chats match that search.' : 'No sessions in this filter.'}</p>
+        ) : filtered.length > 0 ? (
           Object.entries(groups).sort(([left], [right]) => left === 'Pinned' ? -1 : right === 'Pinned' ? 1 : 0).map(([group, rows]) => (
             <section key={group}>
               <h3>{group}</h3>
@@ -1772,18 +2049,24 @@ function SessionSidebar(props: {
                       value={props.renameValue}
                       autoFocus
                       aria-label="Session title"
+                      maxLength={160}
+                      disabled={props.renameBusy}
                       onChange={(event) => props.onRenameChange(event.target.value)}
                       onBlur={() => props.onRenameCommit(session.id)}
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter') props.onRenameCommit(session.id);
-                        if (event.key === 'Escape') props.onRenameCancel();
+                        if (event.key === 'Enter') props.onRenameCommit(session.id, true);
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          props.onRenameCancel();
+                        }
                       }}
                     />
                   ) : (
                     <>
                       <button type="button" className="bob-session-open" onClick={() => props.onSelect(session.id)} disabled={props.busy}>
                         <strong>{session.pinned && <Pin size={11} />} {session.title || 'Untitled session'}</strong>
-                        <small>{new Date(session.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                        <small>{session.human_reference} · {new Date(session.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
                       </button>
                       <div className="bob-session-row-actions">
                         <button type="button" aria-label={`Rename ${session.title || 'Untitled session'}`} onClick={() => props.onRenameStart(session.id, session.title ?? '')}><Pencil size={13} /></button>
@@ -1796,7 +2079,8 @@ function SessionSidebar(props: {
               ))}
             </section>
           ))
-        )}
+        ) : null}
+        {props.hasMore && <button type="button" className="bob-sidebar-more" onClick={props.onLoadMore} disabled={props.listLoading}>Load more chats</button>}
       </div>}
     </aside>
   );

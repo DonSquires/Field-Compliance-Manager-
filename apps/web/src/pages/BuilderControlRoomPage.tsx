@@ -26,8 +26,14 @@ interface BuilderProject {
   name: string;
 }
 
+interface BuilderCursor {
+  created_at: string;
+  id: string;
+}
+
 interface BuilderJob {
   id: string;
+  human_reference?: string | null;
   organization_id: string;
   project_id: string;
   title: string;
@@ -157,6 +163,14 @@ function autopilotNotice(data: { autopilot?: unknown; autopilot_error?: unknown 
   return created;
 }
 
+function creationNotice(data: { job?: unknown; duplicate?: unknown; autopilot?: unknown; autopilot_error?: unknown } | null, description: string) {
+  const reference = asText(asRecord(data?.job)?.human_reference) ?? 'reference unavailable';
+  const receipt = data?.duplicate === true
+    ? `Existing Builder job ${reference} returned; no duplicate was created.`
+    : `${description} ${reference}.`;
+  return autopilotNotice(data, receipt);
+}
+
 function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   if (builderSuccessorId(job)) return 'Open the newer job to inspect its current outcome. Do not rerun this historical attempt.';
   if (job.status === 'cancelled') return 'This job was cancelled. No approval or retry is required; its steps and errors are historical.';
@@ -250,6 +264,13 @@ const PROMPT_TEMPLATES = [
 const TEMPLATE_PLACEHOLDER = /\[[^\]\n]{3,}\]/;
 const hasTemplatePlaceholders = (value: string) => TEMPLATE_PLACEHOLDER.test(String(value || ''));
 
+type JobRename = { revision: number; title: string };
+
+function preserveNewerJobName(job: BuilderJob, started: ReadonlyMap<string, JobRename>, latest: ReadonlyMap<string, JobRename>) {
+  const rename = latest.get(job.id);
+  return rename && rename.revision !== (started.get(job.id)?.revision ?? 0) ? { ...job, title: rename.title } : job;
+}
+
 const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; onOpenVibe?: () => void }> = ({ onOpenBob, onOpenVibe }) => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
@@ -260,9 +281,20 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [contextSnapshot, setContextSnapshot] = useState<BuilderContextSnapshot | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<BuilderCursor | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupMessage, setLookupMessage] = useState<string | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [nameCursor, setNameCursor] = useState<BuilderCursor | null>(null);
+  const [nameSearchLoading, setNameSearchLoading] = useState(false);
+  const [nameSearchMessage, setNameSearchMessage] = useState<string | null>(null);
+  const [nameSearchError, setNameSearchError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, { expectedTitle: string; value: string }>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [approvalComment, setApprovalComment] = useState('');
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('task');
@@ -284,6 +316,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [changedFiles, setChangedFiles] = useState<{ manifestId: string | null; files: LiveChangedFile[]; total: number | null; error: string | null } | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
+  const listGeneration = useRef(0);
+  const loadedPageCount = useRef(1);
+  const loadingMoreRef = useRef(false);
+  const lookupGeneration = useRef(0);
+  const nameSearchGeneration = useRef(0);
+  const jobRenameRevisions = useRef(new Map<string, JobRename>());
+  const remoteSearchActive = useRef(false);
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -321,30 +362,165 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   }, []);
 
   const loadList = useCallback(async () => {
+    const generation = ++listGeneration.current;
+    const renamesAtStart = new Map(jobRenameRevisions.current);
     setLoading(true);
     setError(null);
+    setPageError(null);
     try {
       const data = await invoke({ action: 'list' });
       const nextProjects = (data?.projects ?? []) as BuilderProject[];
-      const nextJobs = (data?.jobs ?? []) as BuilderJob[];
+      const nextJobs = [...((data?.jobs ?? []) as BuilderJob[])];
+      let cursor = (data?.next_cursor ?? null) as BuilderCursor | null;
+      let pages = 1;
+      while (pages < loadedPageCount.current && cursor) {
+        const page = await invoke({ action: 'list', cursor });
+        if (generation !== listGeneration.current) return null;
+        const known = new Set(nextJobs.map(job => job.id));
+        nextJobs.push(...((page?.jobs ?? []) as BuilderJob[]).filter(job => !known.has(job.id)));
+        cursor = (page?.next_cursor ?? null) as BuilderCursor | null;
+        pages += 1;
+      }
+      if (generation !== listGeneration.current) return null;
+      const selected = selectedIdRef.current;
+      if (selected && !nextJobs.some(job => job.id === selected)) {
+        const selectedData = await invoke({ action: 'get', job_id: selected });
+        if (generation !== listGeneration.current) return null;
+        if (selectedIdRef.current !== selected) {
+          setPageError('Selection changed during refresh. Refresh again to update the loaded jobs.');
+          return null;
+        }
+        if (!selectedData?.job) throw new Error('The selected Builder job could not be refreshed.');
+        nextJobs.push(selectedData.job as BuilderJob);
+      }
       setProjects(nextProjects);
-      setJobs(nextJobs);
+      setJobs(nextJobs.map(job => preserveNewerJobName(job, renamesAtStart, jobRenameRevisions.current)));
+      setNextCursor(cursor);
+      loadedPageCount.current = pages;
+      if (remoteSearchActive.current) {
+        lookupGeneration.current += 1;
+        nameSearchGeneration.current += 1;
+        remoteSearchActive.current = false;
+        setLookupLoading(false);
+        setLookupMessage(null);
+        setLookupError(null);
+        setNameCursor(null);
+        setNameSearchLoading(false);
+        setNameSearchError(null);
+        setNameSearchMessage('Search result pages were reset by refresh. Search all again to reload them.');
+      }
       setForm(current => ({ ...current, projectId: current.projectId || nextProjects[0]?.id || '' }));
       setSelectedId(current => current && nextJobs.some(job => job.id === current) ? current : nextJobs[0]?.id ?? null);
       return nextJobs;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Builder activity could not be loaded.');
+      if (generation === listGeneration.current) setError(loadError instanceof Error ? loadError.message : 'Builder activity could not be loaded.');
       return null;
     } finally {
-      setLoading(false);
+      if (generation === listGeneration.current) setLoading(false);
     }
   }, [invoke]);
 
+  const loadOlderJobs = async () => {
+    if (!nextCursor || loading || loadingMoreRef.current) return;
+    const generation = listGeneration.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setPageError(null);
+    try {
+      const data = await invoke({ action: 'list', cursor: nextCursor });
+      if (generation !== listGeneration.current) return;
+      const older = (data?.jobs ?? []) as BuilderJob[];
+      setJobs(current => {
+        const known = new Set(current.map(job => job.id));
+        return [...current, ...older.filter(job => !known.has(job.id))];
+      });
+      setNextCursor((data?.next_cursor ?? null) as BuilderCursor | null);
+      loadedPageCount.current += 1;
+    } catch (loadError) {
+      if (generation === listGeneration.current) setPageError(loadError instanceof Error ? loadError.message : 'Older Builder jobs could not be loaded.');
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
+
+  const changeSearch = (value: string) => {
+    lookupGeneration.current += 1;
+    nameSearchGeneration.current += 1;
+    remoteSearchActive.current = false;
+    searchQueryRef.current = value;
+    setLookupLoading(false);
+    setLookupMessage(null);
+    setLookupError(null);
+    setNameCursor(null);
+    setNameSearchLoading(false);
+    setNameSearchMessage(null);
+    setNameSearchError(null);
+    setSearchQuery(value);
+  };
+
+  const findNames = async (cursor: BuilderCursor | null = null) => {
+    const query = searchQuery.trim();
+    if (!query || query.length > 200 || nameSearchLoading) return;
+    const generation = ++nameSearchGeneration.current;
+    const renamesAtStart = new Map(jobRenameRevisions.current);
+    remoteSearchActive.current = true;
+    setNameSearchLoading(true);
+    setNameSearchMessage(null);
+    setNameSearchError(null);
+    try {
+      const data = await invoke({ action: 'search_names', query, ...(cursor ? { cursor } : {}) });
+      if (generation !== nameSearchGeneration.current || searchQueryRef.current.trim() !== query) return;
+      const matches = ((data?.jobs ?? []) as BuilderJob[]).map(job => preserveNewerJobName(job, renamesAtStart, jobRenameRevisions.current));
+      setJobs(current => {
+        const byId = new Map(current.map(job => [job.id, job]));
+        for (const job of matches) byId.set(job.id, { ...byId.get(job.id), ...job });
+        return [...byId.values()];
+      });
+      setNameCursor((data?.next_cursor ?? null) as BuilderCursor | null);
+      setNameSearchMessage(matches.length ? `Loaded ${matches.length} matching job name${matches.length === 1 ? '' : 's'}.` : 'No more accessible job names matched.');
+    } catch (searchFailure) {
+      if (generation === nameSearchGeneration.current) setNameSearchError(searchFailure instanceof Error ? searchFailure.message : 'Builder name search failed.');
+    } finally {
+      if (generation === nameSearchGeneration.current) setNameSearchLoading(false);
+    }
+  };
+
+  const findReference = async () => {
+    const reference = searchQuery.trim().toUpperCase();
+    if (!/^BB-[1-9]\d{0,18}$/.test(reference) || lookupLoading) return;
+    const generation = ++lookupGeneration.current;
+    const renamesAtStart = new Map(jobRenameRevisions.current);
+    remoteSearchActive.current = true;
+    setLookupLoading(true);
+    setLookupMessage(null);
+    setLookupError(null);
+    try {
+      const data = await invoke({ action: 'lookup_reference', reference });
+      if (generation !== lookupGeneration.current || searchQueryRef.current.trim().toUpperCase() !== reference) return;
+      const returnedJob = data?.job as BuilderJob | null;
+      const job = returnedJob ? preserveNewerJobName(returnedJob, renamesAtStart, jobRenameRevisions.current) : null;
+      if (!job) {
+        setLookupMessage(`No accessible Builder job found for ${reference}.`);
+        return;
+      }
+      setJobs(current => current.some(existing => existing.id === job.id)
+        ? current.map(existing => existing.id === job.id ? { ...existing, ...job } : existing)
+        : [...current, job]);
+      setLookupMessage(`Found ${reference}.`);
+    } catch (lookupFailure) {
+      if (generation === lookupGeneration.current) setLookupError(lookupFailure instanceof Error ? lookupFailure.message : 'Builder reference lookup failed.');
+    } finally {
+      if (generation === lookupGeneration.current) setLookupLoading(false);
+    }
+  };
+
   const loadSnapshot = useCallback(async (jobId: string, options: { live?: boolean } = {}) => {
+    const renameRevision = jobRenameRevisions.current.get(jobId)?.revision ?? 0;
     try {
       const data = await invoke({ action: 'get', job_id: jobId, ...(options.live ? { live_poll: true } : {}) });
       // A slower response for a previously selected job must not overwrite the current selection.
-      if (selectedIdRef.current !== jobId) return false;
+      if (selectedIdRef.current !== jobId || (jobRenameRevisions.current.get(jobId)?.revision ?? 0) !== renameRevision) return false;
       const next = data as BuilderSnapshot;
       setSnapshot(next);
       setObservedAt(next.telemetry?.observed_at ?? new Date().toISOString());
@@ -352,7 +528,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
       return true;
     } catch (loadError) {
       if (options.live) throw loadError;
-      if (selectedIdRef.current !== jobId) return false;
+      if (selectedIdRef.current !== jobId || (jobRenameRevisions.current.get(jobId)?.revision ?? 0) !== renameRevision) return false;
       setSnapshot(null);
       setError(loadError instanceof Error ? loadError.message : 'Builder job could not be loaded.');
       return false;
@@ -508,7 +684,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         autopilot: form.autopilot,
       });
       setShowCreate(false);
-      setNotice(autopilotNotice(data, 'Builder job created at the pinned commit.'));
+      setNotice(creationNotice(data, 'Builder job created at the pinned commit:'));
       await loadList();
       if (data?.job?.id) setSelectedId(data.job.id);
     } catch (createError) {
@@ -528,7 +704,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
       backend_required: proposal.backend_required, code_review_mode: form.codeReviewMode,
       requested_action: 'prepare_change', target_environment: 'development', autopilot: form.autopilot,
     });
-    setNotice(autopilotNotice(data, 'Builder job created from the Bob Builder chat proposal.'));
+    setNotice(creationNotice(data, 'Builder job created from the Bob Builder chat proposal:'));
     await loadList();
     const jobId = typeof data?.job?.id === 'string' ? data.job.id : null;
     if (jobId) setSelectedId(jobId);
@@ -690,7 +866,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     try {
       const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: selectedJob.frontend_required, backend_required: selectedJob.backend_required, code_review_mode: selectedJob.code_review_mode, autopilot: true });
       setFollowupTask('');
-      setNotice(autopilotNotice(data, 'Builder follow-up created from the verified workspace commit.'));
+      setNotice(creationNotice(data, 'Builder follow-up created from the verified workspace commit:'));
       await loadList();
       if (data?.job?.id) setSelectedId(data.job.id);
     } catch (followupError) {
@@ -777,6 +953,40 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const savedPatchRetry = failedFrontendPatchRetryCandidate(liveSnapshot, currentUserId);
   const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
   const failedStepCount = snapshot?.steps.filter(step => step.status === 'failed' || step.status === 'blocked').length ?? 0;
+  const renameDraft = selectedJob ? renameDrafts[selectedJob.id] : undefined;
+
+  const saveJobName = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedJob || !renameDraft || busy) return;
+    const title = renameDraft.value.trim();
+    if (!title || Array.from(title).length > 200) return;
+    const jobId = selectedJob.id;
+    const previousReference = selectedJob.human_reference;
+    setBusy('rename');
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await invoke({ action: 'rename', job_id: jobId, expected_title: renameDraft.expectedTitle, title });
+      const renamed = data?.job as BuilderJob | undefined;
+      if (!renamed || renamed.id !== jobId || renamed.title !== title || !renamed.human_reference
+        || (previousReference && renamed.human_reference !== previousReference)) {
+        throw new Error('The saved name and reference could not be confirmed. Refresh before retrying.');
+      }
+      jobRenameRevisions.current.set(jobId, { revision: (jobRenameRevisions.current.get(jobId)?.revision ?? 0) + 1, title: renamed.title });
+      setJobs(current => current.map(job => job.id === jobId ? { ...job, ...renamed } : job));
+      setSnapshot(current => current?.job.id === jobId ? { ...current, job: { ...current.job, ...renamed } } : current);
+      setRenameDrafts(current => {
+        const next = { ...current };
+        delete next[jobId];
+        return next;
+      });
+      setNotice(`Name saved for ${renamed.human_reference}.`);
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : 'Builder job name could not be saved.');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className={`builder-page ${bobOpen ? 'has-agent-dock' : 'is-agent-hidden'}`}>
@@ -792,7 +1002,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
 
       <ChangeRequestQueue onOpenBob={onOpenBob} />
       <section className="builder-summary" aria-label="Builder summary">
-        <div><Workflow size={18} /><span>Jobs</span><strong>{jobs.length}</strong></div>
+        <div><Workflow size={18} /><span>Loaded jobs</span><strong>{jobs.length}</strong></div>
         <div><Play size={18} /><span>Active</span><strong>{pendingJobs}</strong></div>
         <div><ShieldCheck size={18} /><span>Awaiting humans</span><strong>{approvalJobs}</strong></div>
         <div><FileCode2 size={18} /><span>Projects</span><strong>{projects.length}</strong></div>
@@ -842,12 +1052,12 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
               <input
                 type="text"
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Job ID, branch, title, commit or error…"
+                onChange={e => changeSearch(e.target.value)}
+                placeholder="Reference, job ID, branch, title, commit or error…"
                 aria-label="Filter jobs"
               />
               {searchQuery && (
-                <button type="button" className="builder-clear-btn" onClick={() => setSearchQuery('')} aria-label="Clear filter">
+                <button type="button" className="builder-clear-btn" onClick={() => changeSearch('')} aria-label="Clear filter">
                   <X size={12} />
                 </button>
               )}
@@ -866,7 +1076,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
           </div>
 
           <div className="builder-list-summary">
-            Showing {filteredJobs.length} of {jobs.length} jobs
+            Showing {filteredJobs.length} of {jobs.length} loaded jobs. Filters and counts apply to loaded jobs.
             {searchMatchesElsewhere > 0 && (
               <button type="button" className="builder-search-elsewhere" onClick={() => { setActiveTab('all'); setScopeFilter('all'); }}>
                 {searchMatchesElsewhere} more match{searchMatchesElsewhere === 1 ? '' : 'es'} outside this tab · Show all
@@ -875,13 +1085,11 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
           </div>
 
           {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : activeTab === 'issues' ? 'No actionable issues' : 'No jobs matching filter'}</div> : (
-            <div className="builder-list">{filteredJobs.map(job => {
-              const jobIndex = jobs.length - jobs.findIndex(j => j.id === job.id);
-              return (
+            <div className="builder-list">{filteredJobs.map(job => (
               <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => { setSelectedId(job.id); setMobileWorkspaceView('workbench'); }}>
                 <span className={`builder-state state-${job.status}`} />
                 <div>
-                  <strong><span className="builder-job-num">#{jobIndex}</span>{job.title}</strong>
+                  <strong><span className="builder-job-num">{job.human_reference ?? 'Reference unavailable'}</span>{job.title}</strong>
                   <div className="builder-job-tags">
                     {String(job.title).toLowerCase().startsWith('repair') && (
                       <span className="builder-tag tag-self-heal">Self-heal</span>
@@ -902,14 +1110,59 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
                 <div><span>{builderSuccessorId(job) ? 'Continued' : plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
                 <ChevronRight size={16} />
               </button>
-            );})}</div>
+            ))}</div>
           )}
+          {/^BB-[1-9]\d{0,18}$/i.test(searchQuery.trim()) && <div className="builder-history-actions">
+            <button type="button" onClick={() => void findReference()} disabled={lookupLoading}>
+              {lookupLoading ? 'Searching all jobs…' : 'Find reference in all jobs'}
+            </button>
+          </div>}
+          {lookupMessage && <p className="builder-history-feedback" role="status">{lookupMessage}</p>}
+          {lookupError && <p className="builder-history-feedback is-error" role="alert">{lookupError}</p>}
+          {searchQuery.trim() && searchQuery.trim().length <= 200 && <div className="builder-history-actions">
+            <button type="button" onClick={() => void findNames()} disabled={nameSearchLoading}>
+              {nameSearchLoading ? 'Searching job names…' : 'Search all job names'}
+            </button>
+            {nameCursor && <button type="button" onClick={() => void findNames(nameCursor)} disabled={nameSearchLoading}>
+              Load more name matches
+            </button>}
+          </div>}
+          {nameSearchMessage && <p className="builder-history-feedback" role="status">{nameSearchMessage}</p>}
+          {nameSearchError && <p className="builder-history-feedback is-error" role="alert">{nameSearchError}</p>}
+          {pageError && <p className="builder-history-feedback is-error" role="alert">{pageError}</p>}
+          {nextCursor && <div className="builder-history-actions">
+            <button type="button" onClick={() => void loadOlderJobs()} disabled={loading || loadingMore}>
+              {loadingMore ? 'Loading older jobs…' : 'Load older jobs'}
+            </button>
+          </div>}
         </section>
 
         <section className={`builder-detail ${mobileWorkspaceView === 'workbench' ? 'is-mobile-active' : ''}`}>
           {!selectedJob || !snapshot || snapshot.job.id !== selectedJob.id ? <div className="builder-empty"><FileCode2 size={20} /> Select a job to inspect</div> : <>
             <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{successorId ? 'Continued' : plainWords(selectedJob.status, 'Unknown status')}</span></div>
+            {renameDraft ? <form className="builder-name-editor" onSubmit={saveJobName}>
+              <label>Job name<input value={renameDraft.value} onChange={event => {
+                const value = event.target.value;
+                setRenameDrafts(current => ({ ...current, [selectedJob.id]: { ...renameDraft, value } }));
+              }} aria-describedby="builder-name-help" disabled={busy === 'rename'} autoFocus /></label>
+              <small id="builder-name-help">Use 1 to 200 characters. The reference stays the same.</small>
+              <div>
+                <button type="submit" disabled={Boolean(busy) || !renameDraft.value.trim() || Array.from(renameDraft.value.trim()).length > 200}>
+                  {busy === 'rename' ? 'Saving…' : 'Save name'}
+                </button>
+                <button type="button" disabled={busy === 'rename'} onClick={() => setRenameDrafts(current => {
+                  const next = { ...current };
+                  delete next[selectedJob.id];
+                  return next;
+                })}>Cancel</button>
+              </div>
+            </form> : <div className="builder-history-actions">
+              <button type="button" onClick={() => setRenameDrafts(current => ({
+                ...current, [selectedJob.id]: { expectedTitle: selectedJob.title, value: selectedJob.title },
+              }))}>Edit job name</button>
+            </div>}
             <div className="builder-job-meta">
+              <span>Reference: {selectedJob.human_reference ?? 'unavailable'}</span>
               <span>Commit <code>{selectedJob.target_sha.slice(0, 12)}</code></span>
               <span>{selectedJob.workspace_branch ?? 'Workspace not created'}</span>
               <span>{selectedJob.frontend_required ? 'Frontend' : null}{selectedJob.frontend_required && selectedJob.backend_required ? ' + ' : null}{selectedJob.backend_required ? 'Backend' : null}</span>
@@ -919,7 +1172,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
             </div>
             {successorId && <div className="builder-notice" role="status">
               <span>This attempt continued as <code>{successorId.slice(0, 8)}</code>. Its outcome is recorded on the newer job.</span>
-              <button type="button" onClick={() => { setActiveTab('all'); setScopeFilter('all'); setSearchQuery(''); setSelectedId(successorId); }}>Open newer job</button>
+              <button type="button" onClick={() => { setActiveTab('all'); setScopeFilter('all'); changeSearch(''); setSelectedId(successorId); }}>Open newer job</button>
             </div>}
             <BuilderLiveActivity
               job={selectedJob}

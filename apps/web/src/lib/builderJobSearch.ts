@@ -1,5 +1,6 @@
 export interface SearchableBuilderJob {
   id: string;
+  human_reference?: string | null;
   title: string;
   status: string;
   current_step_name?: string | null;
@@ -20,7 +21,7 @@ const compact = (value: string) => value.toLowerCase().replace(/[^0-9a-z]/g, '')
 export function jobMatchesSearch(job: SearchableBuilderJob, rawQuery: string) {
   const query = rawQuery.toLowerCase().trim().replace(/^#/, '');
   if (!query) return true;
-  const text = [job.title, job.current_step_name, job.status, job.last_error, job.target_sha, job.workspace_branch, job.branch_name, job.workspace_pull_request_url, job.id]
+  const text = [job.human_reference, job.title, job.current_step_name, job.status, job.last_error, job.target_sha, job.workspace_branch, job.branch_name, job.workspace_pull_request_url, job.id]
     .map(value => String(value ?? '').toLowerCase());
   if (text.some(value => value.includes(query))) return true;
   const idQuery = compact(query.replace(/^(?:bob\/)?job-/, ''));

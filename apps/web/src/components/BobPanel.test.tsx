@@ -22,10 +22,53 @@ let perceptionFieldHistory: Array<Record<string, unknown>> = [];
 let feedbackHistory: Array<Record<string, unknown>> = [];
 let feedbackLoadFailure = false;
 let profileRole = 'grand_master';
+let profileOrganizationId = 'org-1';
+
+function fixtureSession(row: Record<string, unknown>, index: number) {
+  return {
+    id: typeof row.id === 'string' ? row.id : `fixture-${index}`,
+    title: typeof row.title === 'string' ? row.title : null,
+    human_reference: `BOB-${index + 1}`,
+    organization_id: 'org-1',
+    user_id: 'user-1',
+    module_key: 'operations',
+    pinned: false,
+    archived_at: null,
+    created_at: '2026-09-02T05:00:00.000Z',
+    updated_at: '2026-09-02T06:00:00.000Z',
+    ...row,
+  };
+}
+
+async function fixtureRpc(name: string, args: Record<string, unknown> = {}) {
+  if (name === 'bob_list_conversations') {
+    const term = String(args.p_search ?? '').trim().toLowerCase();
+    const results = conversationList.map(fixtureSession).filter(row =>
+      row.organization_id === args.p_organization_id &&
+      row.user_id === 'user-1' &&
+      row.module_key === args.p_module_key &&
+      (args.p_filter === 'archived' ? row.archived_at !== null
+        : row.archived_at === null && (args.p_filter !== 'pinned' || row.pinned)) &&
+      (!term || String(row.title ?? '').toLowerCase().includes(term) || String(row.human_reference).toLowerCase().includes(term)) &&
+      (!args.p_cursor_updated_at || String(row.updated_at) < String(args.p_cursor_updated_at)
+        || (row.updated_at === args.p_cursor_updated_at && String(row.id) < String(args.p_cursor_id)))
+    ).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.id).localeCompare(String(a.id)));
+    return { data: results.slice(0, Number(args.p_page_size) + 1), error: null };
+  }
+  if (name === 'bob_rename_conversation') {
+    const index = conversationList.findIndex(row => row.id === args.p_conversation_id);
+    if (index < 0) return { data: null, error: { message: 'Conversation unavailable.' } };
+    const row = fixtureSession(conversationList[index], index);
+    if (row.title !== args.p_expected_title) return { data: null, error: { message: 'Title changed; refresh before saving.' } };
+    conversationList[index] = { ...row, title: args.p_title, updated_at: '2030-01-01T00:00:00.000Z' };
+    return { data: conversationList[index], error: null };
+  }
+  return { data: null, error: null };
+}
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
-    profile: { id: 'user-1', organizationId: 'org-1', role: profileRole },
+    profile: { id: 'user-1', organizationId: profileOrganizationId, role: profileRole },
   }),
 }));
 
@@ -40,6 +83,7 @@ vi.mock('../lib/supabase', () => ({
 
 describe('BobPanel', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -64,23 +108,35 @@ describe('BobPanel', () => {
     feedbackHistory = [];
     feedbackLoadFailure = false;
     profileRole = 'grand_master';
+    profileOrganizationId = 'org-1';
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'bob_conversations') {
-        // limit() is awaited directly by the session list and unwrapped by maybeSingle() for the active session.
-        const limitResult = {
-          maybeSingle: async () => ({ data: { id: 'conversation-1' }, error: null }),
-          then: (resolve: (value: { data: unknown; error: null }) => unknown) => resolve({ data: conversationList, error: null }),
-        };
+        let limit = 100;
+        const filters: Record<string, unknown> = {};
         const query = {
-          eq: () => query,
-          order: () => ({ limit: () => limitResult }),
+          eq: (column: string, value: unknown) => { filters[column] = value; return query; },
+          order: () => query,
+          limit: (value: number) => { limit = value; return query; },
+          maybeSingle: async () => {
+            const rows = conversationList.map(fixtureSession);
+            const selected = filters.id ? rows.find(row => row.id === filters.id) : rows[0];
+            const implicit = !rows.length && (!filters.id || filters.id === 'conversation-1')
+              ? fixtureSession({ id: 'conversation-1', title: 'Bob Operations' }, 0) : null;
+            return { data: selected ?? implicit, error: null };
+          },
+          then: (resolve: (value: { data: unknown; error: null }) => unknown) =>
+            resolve({ data: conversationList.slice(0, limit).map(fixtureSession), error: null }),
         };
         return {
           select: () => query,
-          insert: () => ({
+          insert: (rows: Array<Record<string, unknown>>) => ({
             select: () => ({
-              single: async () => ({ data: { id: 'conversation-1' }, error: null }),
+              single: async () => {
+                const created = fixtureSession({ ...rows[0], id: `conversation-${conversationList.length + 2}` }, conversationList.length + 1);
+                conversationList.unshift(created);
+                return { data: created, error: null };
+              },
             }),
           }),
           update: () => ({ eq: async () => ({ error: null }) }),
@@ -183,7 +239,7 @@ describe('BobPanel', () => {
     });
 
     mockInvoke.mockResolvedValue({ data: { reply: 'ok' }, error: null });
-    mockRpc.mockResolvedValue({ data: null, error: null });
+    mockRpc.mockImplementation(fixtureRpc);
     mockStorageFrom.mockReturnValue({
       upload: vi.fn().mockResolvedValue({ error: null }),
       remove: vi.fn().mockResolvedValue({ error: null }),
@@ -736,6 +792,139 @@ describe('BobPanel', () => {
     }));
   });
 
+  it('keeps new attachments staged when an earlier queued turn completes', async () => {
+    let finishStatus!: (result: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+    const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+    let requestId = '';
+    const storageApi = { upload: vi.fn().mockResolvedValue({ error: null }), remove: vi.fn().mockResolvedValue({ error: null }) };
+    mockStorageFrom.mockReturnValue(storageApi);
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      requestId = String(options?.body?.request_id);
+      if (options?.body?.operation === 'status') return statusResult;
+      return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    const fileInput = await screen.findByLabelText('Attach evidence files');
+    fireEvent.change(fileInput, { target: { files: [new File(['first'], 'submitted.txt', { type: 'text/plain' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(requestId).not.toBe(''));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Attach files' })).toHaveProperty('disabled', false));
+
+    fireEvent.change(fileInput, { target: { files: [new File(['next'], 'next-draft.txt', { type: 'text/plain' })] } });
+    messageHistory = [{
+      id: 'completed-answer', role: 'assistant', content: 'First request completed.',
+      confidence: null, flagged: false, created_at: '2026-11-10T00:00:01.000Z', metadata: {},
+    }];
+    await act(async () => {
+      finishStatus({ data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+      await statusResult;
+    });
+
+    await screen.findByText('First request completed.');
+    const tray = screen.getByLabelText('Attached files');
+    expect(within(tray).getByText('next-draft.txt')).toBeTruthy();
+    expect(within(tray).queryByText('submitted.txt')).toBeNull();
+  });
+
+  it('remembers submitted attachments when the current running conversation is reopened', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Review reports', human_reference: 'BOB-1' }];
+    let finishStatus!: (result: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+    const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+    let requestId = '';
+    const storageApi = { upload: vi.fn().mockResolvedValue({ error: null }), remove: vi.fn().mockResolvedValue({ error: null }) };
+    mockStorageFrom.mockReturnValue(storageApi);
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      requestId = String(options?.body?.request_id);
+      if (options?.body?.operation === 'status') return statusResult;
+      turnRunHistory = [{ request_id: requestId, status: 'running', started_at: '2026-11-10T00:00:00.000Z' }];
+      return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    const fileInput = await screen.findByLabelText('Attach evidence files');
+    fireEvent.change(fileInput, { target: { files: [new File(['first'], 'sent-before-reopen.txt', { type: 'text/plain' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(requestId).not.toBe(''));
+    const currentSession = await screen.findByRole('button', { name: /Review reports.*BOB-1/ });
+    await waitFor(() => expect(currentSession).toHaveProperty('disabled', false));
+    fireEvent.click(currentSession);
+    await waitFor(() => expect(screen.getByText('running')).toBeTruthy());
+    fireEvent.change(fileInput, { target: { files: [new File(['next'], 'draft-after-reopen.txt', { type: 'text/plain' })] } });
+    messageHistory = [{
+      id: 'completed-answer', role: 'assistant', content: 'Reopened request completed.',
+      confidence: null, flagged: false, created_at: '2026-11-10T00:00:01.000Z', metadata: {},
+    }];
+    turnRunHistory = [];
+    await act(async () => {
+      finishStatus({ data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+      await statusResult;
+    });
+
+    await screen.findByText('Reopened request completed.');
+    const tray = screen.getByLabelText('Attached files');
+    expect(within(tray).getByText('draft-after-reopen.txt')).toBeTruthy();
+    expect(within(tray).queryByText('sent-before-reopen.txt')).toBeNull();
+  });
+
+  it('keeps attachments staged after reopening a conversation with a running turn', async () => {
+    let finishStatus!: (result: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+    const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+    const requestId = '12345678-1234-4234-8234-123456789abc';
+    turnRunHistory = [{ request_id: requestId, status: 'running', started_at: '2026-11-10T00:00:00.000Z' }];
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) =>
+      options?.body?.operation === 'status' ? statusResult : Promise.resolve({ data: null, error: null }));
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByText('running');
+    fireEvent.change(screen.getByLabelText('Attach evidence files'), {
+      target: { files: [new File(['draft'], 'restored-draft.txt', { type: 'text/plain' })] },
+    });
+    messageHistory = [{
+      id: 'completed-answer', role: 'assistant', content: 'Restored request completed.',
+      confidence: null, flagged: false, created_at: '2026-11-10T00:00:01.000Z', metadata: {},
+    }];
+    turnRunHistory = [];
+    await act(async () => {
+      finishStatus({ data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+      await statusResult;
+    });
+
+    await screen.findByText('Restored request completed.');
+    expect(within(screen.getByLabelText('Attached files')).getByText('restored-draft.txt')).toBeTruthy();
+  });
+
+  it('keeps staged attachments when the user manually checks a completed request', async () => {
+    const requestId = '12345678-1234-4234-8234-123456789abc';
+    turnRunHistory = [{ request_id: requestId, status: 'running', started_at: '2026-11-10T00:00:00.000Z' }];
+    let statusCalls = 0;
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      if (options?.body?.operation !== 'status') return Promise.resolve({ data: null, error: null });
+      statusCalls += 1;
+      if (statusCalls === 1) return new Promise(() => undefined);
+      turnRunHistory = [];
+      messageHistory = [{
+        id: 'completed-answer', role: 'assistant', content: 'Manually checked request completed.',
+        confidence: null, flagged: false, created_at: '2026-11-10T00:00:01.000Z', metadata: {},
+      }];
+      return Promise.resolve({ data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByText('running');
+    await waitFor(() => expect(statusCalls).toBe(1));
+    fireEvent.change(screen.getByLabelText('Attach evidence files'), {
+      target: { files: [new File(['draft'], 'manual-check-draft.txt', { type: 'text/plain' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
+
+    await screen.findByText('Manually checked request completed.');
+    expect(within(screen.getByLabelText('Attached files')).getByText('manual-check-draft.txt')).toBeTruthy();
+  });
+
   it('unlocks an undelivered turn only after the server confirms it has no record, without offering a resend', async () => {
     let enqueueCalls = 0;
     const enqueuedRequestIds: unknown[] = [];
@@ -1144,7 +1333,762 @@ describe('BobPanel', () => {
     fireEvent.change(await screen.findByLabelText('Search chats'), { target: { value: 'roster' } });
 
     expect(screen.queryByText('Zone compliance review')).toBeNull();
-    expect(screen.getByText('Roster gap analysis')).toBeTruthy();
+    expect(await screen.findByText('Roster gap analysis')).toBeTruthy();
+  });
+
+  it('shows the active conversation reference and lets the owner page past 100 chats', async () => {
+    setViewport(1400);
+    conversationList = Array.from({ length: 125 }, (_, index) => ({
+      id: index === 0 ? 'conversation-1' : `conversation-${String(index + 1).padStart(3, '0')}`,
+      title: `Request ${index + 1}`,
+      human_reference: `BOB-${index + 1}`,
+      created_at: '2026-09-02T05:00:00.000Z',
+      updated_at: new Date(Date.UTC(2026, 10, 9) - index * 60_000).toISOString(),
+    }));
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect((await screen.findByLabelText('Conversation reference')).textContent).toContain('BOB-1');
+    expect(await screen.findByText('Request 1')).toBeTruthy();
+    expect(screen.queryByText('Request 101')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more chats' }));
+    await screen.findByText('Request 100');
+    fireEvent.click(screen.getByRole('button', { name: 'Load more chats' }));
+    expect(await screen.findByText('Request 125')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Load more chats' })).toBeNull();
+  });
+
+  it('finds older conversations by their reference and by literal title without loading preceding pages', async () => {
+    setViewport(1400);
+    conversationList = Array.from({ length: 125 }, (_, index) => ({
+      id: index === 0 ? 'conversation-1' : `conversation-${String(index + 1).padStart(3, '0')}`,
+      title: index === 124 ? 'Old 100% literal_rate' : `Request ${index + 1}`,
+      human_reference: `BOB-${index + 1}`,
+      updated_at: new Date(Date.UTC(2026, 10, 9) - index * 60_000).toISOString(),
+    }));
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByText('Request 1');
+    expect(screen.queryByText('Old 100% literal_rate')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'BOB-125' } });
+    expect(await screen.findByText('Old 100% literal_rate')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: '100% literal_rate' } });
+    expect(await screen.findByText('Old 100% literal_rate')).toBeTruthy();
+  });
+
+  it('does not strand the chat list when the active filter is clicked while loading', async () => {
+    setViewport(1400);
+    const row = fixtureSession({ id: 'conversation-1', title: 'Loading conversation' }, 0);
+    let resolveList!: (value: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const pending = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { resolveList = resolve; });
+    conversationList = [row];
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'bob_list_conversations' ? pending : fixtureRpc(name, args));
+    render(<BobPanel open onClose={() => undefined} />);
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('bob_list_conversations', expect.anything()));
+    fireEvent.click(within(screen.getByLabelText('Session filters')).getByRole('button', { name: 'all' }));
+    await act(async () => { resolveList({ data: [row], error: null }); await pending; });
+    expect(await screen.findByText('Loading conversation')).toBeTruthy();
+  });
+
+  it.each([
+    { change: 'workspace', organizationId: 'org-1', mode: 'builder' as const },
+    { change: 'organization', organizationId: 'org-2', mode: 'operations' as const },
+  ])('does not restore the previous $change when its conversation lookup finishes late', async ({ organizationId, mode }) => {
+    setViewport(1400);
+    const oldSession = fixtureSession({ id: 'old', title: 'Old scope', human_reference: 'BOB-1' }, 0);
+    const newSession = fixtureSession({
+      id: 'new', title: 'New scope', human_reference: 'BOB-2', organization_id: organizationId, module_key: mode,
+    }, 1);
+    conversationList = [oldSession, newSession];
+    let resolveOld!: (value: { data: Record<string, unknown>; error: null }) => void;
+    const oldLookup = new Promise<{ data: Record<string, unknown>; error: null }>(resolve => { resolveOld = resolve; });
+    let oldLookupStarted = false;
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_conversations') return originalFrom(table);
+      const filters: Record<string, unknown> = {};
+      const query = {
+        eq: (field: string, value: unknown) => { filters[field] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        maybeSingle: () => {
+          if (filters.organization_id === 'org-1' && filters.module_key === 'operations') {
+            oldLookupStarted = true;
+            return oldLookup;
+          }
+          return Promise.resolve({ data: newSession, error: null });
+        },
+      };
+      return { select: () => query };
+    });
+
+    const { rerender } = render(<BobPanel open onClose={() => undefined} mode="operations" />);
+    await waitFor(() => expect(oldLookupStarted).toBe(true));
+    profileOrganizationId = organizationId;
+    rerender(<BobPanel open onClose={() => undefined} mode={mode} />);
+    await waitFor(() => expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2'));
+    await act(async () => { resolveOld({ data: oldSession, error: null }); await oldLookup; });
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2');
+    expect(screen.queryByText('Old scope')).toBeNull();
+  });
+
+  it('does not create an old-workspace conversation after switching workspaces', async () => {
+    setViewport(1400);
+    const newSession = fixtureSession({
+      id: 'new', title: 'Builder scope', human_reference: 'BOB-2', module_key: 'builder',
+    }, 1);
+    conversationList = [newSession];
+    let resolveOld!: (value: { data: null; error: null }) => void;
+    const oldLookup = new Promise<{ data: null; error: null }>(resolve => { resolveOld = resolve; });
+    let oldLookupStarted = false;
+    const insert = vi.fn(() => ({
+      select: () => ({ single: async () => ({ data: fixtureSession({ id: 'unexpected' }, 2), error: null }) }),
+    }));
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_conversations') return originalFrom(table);
+      const filters: Record<string, unknown> = {};
+      const query = {
+        eq: (field: string, value: unknown) => { filters[field] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        maybeSingle: () => {
+          if (filters.module_key === 'operations') {
+            oldLookupStarted = true;
+            return oldLookup;
+          }
+          return Promise.resolve({ data: newSession, error: null });
+        },
+      };
+      return { select: () => query, insert };
+    });
+
+    const { rerender } = render(<BobPanel open onClose={() => undefined} mode="operations" />);
+    await waitFor(() => expect(oldLookupStarted).toBe(true));
+    rerender(<BobPanel open onClose={() => undefined} mode="builder" />);
+    await waitFor(() => expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2'));
+    await act(async () => { resolveOld({ data: null, error: null }); await oldLookup; });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it('confirms an edited conversation name against its reference before showing it saved', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Old name', human_reference: 'BOB-1' }];
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Old name' }));
+    const input = screen.getByLabelText('Session title');
+    fireEvent.change(input, { target: { value: 'Site investigation' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText('Name saved for BOB-1.')).toBeTruthy();
+    expect(await screen.findByText('Site investigation')).toBeTruthy();
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-1');
+  });
+
+  it('lets an owner explicitly keep the current generic conversation name', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Bob Operations', human_reference: 'BOB-1' }];
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Bob Operations' }));
+    fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Enter' });
+
+    expect(await screen.findByText('Name saved for BOB-1.')).toBeTruthy();
+    expect(mockRpc).toHaveBeenCalledWith('bob_rename_conversation', expect.objectContaining({
+      p_expected_title: 'Bob Operations', p_title: 'Bob Operations',
+    }));
+  });
+
+  it('keeps the previous name and shows an error when the rename is not saved', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Old name', human_reference: 'BOB-1' }];
+    const onClose = vi.fn();
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'bob_rename_conversation'
+        ? Promise.resolve({ data: null, error: { message: 'Rename was denied.' } })
+        : fixtureRpc(name, args));
+    render(<BobPanel open onClose={onClose} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Old name' }));
+    const input = screen.getByLabelText('Session title');
+    fireEvent.change(input, { target: { value: 'Not saved' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Rename was denied.');
+    expect((screen.getByLabelText('Session title') as HTMLInputElement).value).toBe('Not saved');
+    fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText('Old name')).toBeTruthy();
+    expect(screen.queryByText('Name saved for BOB-1.')).toBeNull();
+  });
+
+  it('keeps a renamed conversation when an older history page finishes afterward', async () => {
+    setViewport(1400);
+    conversationList = Array.from({ length: 51 }, (_, index) => ({
+      id: index === 0 ? 'conversation-1' : `conversation-${index + 1}`,
+      title: index === 0 ? 'Old name' : `Request ${index + 1}`,
+      human_reference: `BOB-${index + 1}`,
+      updated_at: new Date(Date.UTC(2026, 10, 9) - index * 60_000).toISOString(),
+    }));
+    const old = fixtureSession(conversationList[0], 0);
+    let resolveOlder!: (value: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const older = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { resolveOlder = resolve; });
+    let olderStarted = false;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_list_conversations' && args.p_cursor_updated_at) {
+        olderStarted = true;
+        return older;
+      }
+      return fixtureRpc(name, args);
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more chats' }));
+    await waitFor(() => expect(olderStarted).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Old name' }));
+    fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'New name' } });
+    fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Enter' });
+    await screen.findByText('Name saved for BOB-1.');
+    await act(async () => { resolveOlder({ data: [old], error: null }); await older; });
+    expect(await screen.findByText('New name')).toBeTruthy();
+    expect(screen.queryByText('Old name')).toBeNull();
+  });
+
+  it('does not replace a newer chat search with a delayed older search', async () => {
+    setViewport(1400);
+    const first = fixtureSession({ id: 'conversation-1', title: 'First result', human_reference: 'BOB-1' }, 0);
+    const second = fixtureSession({ id: 'conversation-2', title: 'Second result', human_reference: 'BOB-2' }, 1);
+    conversationList = [first, second];
+    let resolveFirst!: (value: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const firstSearch = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { resolveFirst = resolve; });
+    let firstStarted = false;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_list_conversations' && args.p_search === 'first') {
+        firstStarted = true;
+        return firstSearch;
+      }
+      return fixtureRpc(name, args);
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.change(await screen.findByLabelText('Search chats'), { target: { value: 'first' } });
+    await waitFor(() => expect(firstStarted).toBe(true));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'second' } });
+    expect(await screen.findByText('Second result')).toBeTruthy();
+    await act(async () => { resolveFirst({ data: [first], error: null }); await firstSearch; });
+    expect(screen.getByText('Second result')).toBeTruthy();
+    expect(screen.queryByText('First result')).toBeNull();
+  });
+
+  it('keeps the current search when an earlier conversation rename finishes', async () => {
+    setViewport(1400);
+    const first = fixtureSession({ id: 'conversation-1', title: 'First result', human_reference: 'BOB-1' }, 0);
+    const second = fixtureSession({ id: 'conversation-2', title: 'Second result', human_reference: 'BOB-2' }, 1);
+    conversationList = [first, second];
+    let finishRename!: (value: { data: Record<string, unknown>; error: null }) => void;
+    const pendingRename = new Promise<{ data: Record<string, unknown>; error: null }>(resolve => { finishRename = resolve; });
+    let renameStarted = false;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_rename_conversation') {
+        renameStarted = true;
+        return pendingRename;
+      }
+      return fixtureRpc(name, args);
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename First result' }));
+    fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'Renamed first' } });
+    fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Enter' });
+    await waitFor(() => expect(renameStarted).toBe(true));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'second' } });
+    expect(await screen.findByText('Second result')).toBeTruthy();
+
+    const renamed = { ...first, title: 'Renamed first', updated_at: '2030-01-01T00:00:00.000Z' };
+    conversationList[0] = renamed;
+    await act(async () => { finishRename({ data: renamed, error: null }); await pendingRename; });
+    await waitFor(() => expect(screen.getByText('Second result')).toBeTruthy());
+    expect((screen.getByLabelText('Search chats') as HTMLInputElement).value).toBe('second');
+    expect(screen.queryByText('Renamed first')).toBeNull();
+  });
+
+  it('retries a failed older chat page without losing already loaded history', async () => {
+    setViewport(1400);
+    conversationList = Array.from({ length: 51 }, (_, index) => ({
+      id: index === 0 ? 'conversation-1' : `conversation-${index + 1}`,
+      title: `Request ${index + 1}`,
+      human_reference: `BOB-${index + 1}`,
+      updated_at: new Date(Date.UTC(2026, 10, 9) - index * 60_000).toISOString(),
+    }));
+    let fail = true;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_list_conversations' && args.p_cursor_updated_at && fail) {
+        fail = false;
+        return Promise.resolve({ data: null, error: { message: 'Older chats unavailable' } });
+      }
+      return fixtureRpc(name, args);
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more chats' }));
+    expect(await screen.findByText(/Older chats unavailable/)).toBeTruthy();
+    expect(screen.getByText('Request 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading chats' }));
+    expect(await screen.findByText('Request 51')).toBeTruthy();
+    expect(screen.getByText('Request 1')).toBeTruthy();
+  });
+
+  it('reports an unconfirmed reference instead of claiming a new conversation started', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Existing work', human_reference: 'BOB-1' }];
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      const source = originalFrom(table);
+      if (table !== 'bob_conversations') return source;
+      return {
+        ...source,
+        insert: () => ({ select: () => ({ single: async () => ({
+          data: fixtureSession({ id: 'new', human_reference: null }, 1), error: null,
+        }) }) }),
+      };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByText('Existing work');
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/could not confirm the conversation and its reference/i);
+    expect(screen.queryByText(/Started BOB-/)).toBeNull();
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-1');
+  });
+
+  it('refreshes the automatic conversation name after the first turn is persisted', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Bob Operations', human_reference: 'BOB-1' }];
+    const old = fixtureSession(conversationList[0], 0);
+    let resolveOldList!: (value: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const oldList = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { resolveOldList = resolve; });
+    let listStarted = false;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_list_conversations' && !listStarted) {
+        listStarted = true;
+        return oldList;
+      }
+      return fixtureRpc(name, args);
+    });
+    mockInvoke.mockImplementation(async (name: string) => {
+      if (name === 'onspace-ai-chat') {
+        conversationList[0] = { ...conversationList[0], title: 'Investigate late reports' };
+        messageHistory = [{
+          id: 'message-1', role: 'user', content: 'Investigate late reports', confidence: null,
+          flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {},
+        }];
+      }
+      return { data: { reply: 'I will investigate.' }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    await waitFor(() => expect(listStarted).toBe(true));
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Investigate late reports' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockFrom.mock.calls.filter(([table]) => table === 'bob_conversations').length).toBeGreaterThan(1));
+    await act(async () => { resolveOldList({ data: [old], error: null }); await oldList; });
+    expect(await screen.findByText('Investigate late reports', { selector: 'strong' })).toBeTruthy();
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-1');
+  });
+
+  it('refreshes an automatic name after a queued turn completes while history is loading', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Bob Operations', human_reference: 'BOB-1' }];
+    const old = fixtureSession(conversationList[0], 0);
+    let resolveOldList!: (value: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const oldList = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { resolveOldList = resolve; });
+    let listStarted = false;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name === 'bob_list_conversations' && !listStarted) {
+        listStarted = true;
+        return oldList;
+      }
+      return fixtureRpc(name, args);
+    });
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      const requestId = String(options?.body?.request_id);
+      if (options?.body?.operation === 'status') {
+        conversationList[0] = { ...conversationList[0], title: 'Investigate queued work' };
+        messageHistory = [{
+          id: 'message-1', role: 'user', content: 'Investigate queued work', confidence: null,
+          flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {},
+        }];
+        return { data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+      }
+      return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    await waitFor(() => expect(listStarted).toBe(true));
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Investigate queued work' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockFrom.mock.calls.filter(([table]) => table === 'bob_conversations').length).toBeGreaterThan(1));
+    await act(async () => { resolveOldList({ data: [old], error: null }); await oldList; });
+    expect(await screen.findByText('Investigate queued work', { selector: 'strong' })).toBeTruthy();
+  });
+
+  it('keeps a completed request recoverable when its conversation cannot be refreshed', async () => {
+    setViewport(1400);
+    const session = fixtureSession({ id: 'conversation-1', title: 'Review reports', human_reference: 'BOB-1' }, 0);
+    conversationList = [session];
+    let refreshAvailable = false;
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_conversations') return originalFrom(table);
+      const filters: Record<string, unknown> = {};
+      const query = {
+        eq: (field: string, value: unknown) => { filters[field] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        maybeSingle: async () => filters.id && !refreshAvailable
+          ? { data: null, error: { message: 'Conversation refresh unavailable' } }
+          : { data: session, error: null },
+      };
+      return { select: () => query };
+    });
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      const requestId = String(options?.body?.request_id);
+      const status = options?.body?.operation === 'status' ? 'completed' : 'queued';
+      return { data: { turn_run: { request_id: requestId, status, started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Review the reports' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Conversation refresh unavailable');
+    expect(screen.getByRole('region', { name: 'Bob request recovery' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Check status' })).toBeTruthy();
+
+    refreshAvailable = true;
+    messageHistory = [{
+      id: 'answer-1', role: 'assistant', content: 'The report review is complete.', confidence: null,
+      flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {},
+    }];
+    fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
+    expect(await screen.findByText('The report review is complete.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Bob request recovery' })).toBeNull();
+  });
+
+  it('keeps the completed request receipt when loading its attachments fails', async () => {
+    setViewport(1400);
+    conversationList = [{ id: 'conversation-1', title: 'Review reports', human_reference: 'BOB-1' }];
+    let turnCompleted = false;
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_attachments' || !turnCompleted) return originalFrom(table);
+      return { select: () => ({ eq: () => ({ order: async () => ({
+        data: null, error: { message: 'Conversation attachments unavailable' },
+      }) }) }) };
+    });
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      const requestId = String(options?.body?.request_id);
+      const status = options?.body?.operation === 'status' ? 'completed' : 'queued';
+      if (status === 'completed') turnCompleted = true;
+      return { data: { turn_run: { request_id: requestId, status, started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Review the reports' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Conversation attachments unavailable');
+    expect(screen.getByRole('region', { name: 'Bob request recovery' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Check status' })).toBeTruthy();
+  });
+
+  it('does not reopen the previous conversation when its queued turn finishes during a new selection', async () => {
+    setViewport(1400);
+    const first = fixtureSession({ id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' }, 0);
+    const second = fixtureSession({ id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' }, 1);
+    conversationList = [first, second];
+    let finishFirst!: (value: { data: Record<string, unknown>; error: null }) => void;
+    let finishSecond!: (value: { data: Record<string, unknown>; error: null }) => void;
+    let finishStatus!: (value: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+    const firstLookup = new Promise<{ data: Record<string, unknown>; error: null }>(resolve => { finishFirst = resolve; });
+    const secondLookup = new Promise<{ data: Record<string, unknown>; error: null }>(resolve => { finishSecond = resolve; });
+    const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+    let secondLookupStarted = false;
+    let statusRequestId = '';
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_conversations') return originalFrom(table);
+      const filters: Record<string, unknown> = {};
+      const query = {
+        eq: (field: string, value: unknown) => { filters[field] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        maybeSingle: () => {
+          if (filters.id === second.id) { secondLookupStarted = true; return secondLookup; }
+          if (filters.id === first.id) return firstLookup;
+          return Promise.resolve({ data: first, error: null });
+        },
+      };
+      return { select: () => query };
+    });
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      const requestId = String(options?.body?.request_id);
+      if (options?.body?.operation === 'status') {
+        statusRequestId = requestId;
+        return statusResult;
+      }
+      return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Review the first conversation' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(statusRequestId).not.toBe(''));
+    const openSecond = await screen.findByRole('button', { name: /Second conversation.*BOB-2/ });
+    await waitFor(() => expect(openSecond.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(openSecond);
+    await waitFor(() => expect(secondLookupStarted).toBe(true));
+    await act(async () => {
+      finishStatus({ data: { turn_run: { request_id: statusRequestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+      await statusResult;
+    });
+    await act(async () => { finishSecond({ data: second, error: null }); await secondLookup; });
+    await waitFor(() => expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2'));
+    await act(async () => { finishFirst({ data: first, error: null }); await firstLookup; });
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2');
+  });
+
+  it('resumes recovery for the displayed conversation when a new selection fails', async () => {
+    setViewport(1400);
+    const first = fixtureSession({ id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' }, 0);
+    const second = fixtureSession({ id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' }, 1);
+    conversationList = [first, second];
+    let finishStatus!: (value: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+    const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+    let statusRequestId = '';
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_conversations') return originalFrom(table);
+      const filters: Record<string, unknown> = {};
+      const query = {
+        eq: (field: string, value: unknown) => { filters[field] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        maybeSingle: async () => filters.id === second.id
+          ? { data: null, error: { message: 'Other conversation unavailable' } }
+          : { data: first, error: null },
+      };
+      return { select: () => query };
+    });
+    mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+      if (name !== 'onspace-ai-chat') return { data: null, error: null };
+      const requestId = String(options?.body?.request_id);
+      if (options?.body?.operation === 'status') { statusRequestId = requestId; return statusResult; }
+      return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Review the first conversation' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(statusRequestId).not.toBe(''));
+    const openSecond = await screen.findByRole('button', { name: /Second conversation.*BOB-2/ });
+    await waitFor(() => expect(openSecond.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(openSecond);
+    expect((await screen.findByRole('alert')).textContent).toContain('Other conversation unavailable');
+
+    messageHistory = [{ id: 'answer-1', role: 'assistant', content: 'First conversation completed.', confidence: null,
+      flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {} }];
+    await act(async () => {
+      finishStatus({ data: { turn_run: { request_id: statusRequestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+      await statusResult;
+    });
+    expect(await screen.findByText('First conversation completed.')).toBeTruthy();
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-1');
+  });
+
+  it('does not show attachments from an older selection after switching through search results', async () => {
+    setViewport(1400);
+    conversationList = [
+      { id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' },
+      { id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' },
+    ];
+    const firstAttachment = { id: 'file-1', file_name: 'first-private.pdf', file_type: 'application/pdf', file_size_bytes: 100,
+      processing_state: 'extracted', extraction_summary: null, confidence: null, created_at: '2026-11-10T00:00:00.000Z' };
+    const secondAttachment = { ...firstAttachment, id: 'file-2', file_name: 'second-visible.pdf' };
+    let delayFirst = false;
+    let firstStarted = false;
+    let finishFirst!: (result: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const firstResponse = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { finishFirst = resolve; });
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_attachments') return originalFrom(table);
+      return { select: () => ({ eq: (field: string, value: string) => {
+        if (field === 'organization_id') return { ilike: () => ({ order: () => ({ limit: async () => ({
+          data: [
+            { id: 'result-1', file_name: 'first evidence', processing_state: 'extracted', conversation_id: 'conversation-1' },
+            { id: 'result-2', file_name: 'second evidence', processing_state: 'extracted', conversation_id: 'conversation-2' },
+          ], error: null,
+        }) }) }) };
+        return { order: () => {
+          if (value === 'conversation-1' && delayFirst) { firstStarted = true; return firstResponse; }
+          return Promise.resolve({ data: value === 'conversation-1' ? [firstAttachment] : [secondAttachment], error: null });
+        } };
+      } }) };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Files' }));
+    await screen.findByText('first-private.pdf');
+    delayFirst = true;
+    fireEvent.click(screen.getByRole('button', { name: 'files' }));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'evidence' } });
+    fireEvent.click(await screen.findByRole('button', { name: /first evidence/ }));
+    await waitFor(() => expect(firstStarted).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: /second evidence/ }));
+    await screen.findByText('second-visible.pdf');
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2');
+
+    await act(async () => { finishFirst({ data: [firstAttachment], error: null }); await firstResponse; });
+    expect(screen.getByText('second-visible.pdf')).toBeTruthy();
+    expect(screen.queryByText('first-private.pdf')).toBeNull();
+  });
+
+  it('prevents a file search result from switching conversations while a turn is sending', async () => {
+    setViewport(1400);
+    conversationList = [
+      { id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' },
+      { id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' },
+    ];
+    let finishSend!: (result: { data: { reply: string }; error: null }) => void;
+    const sendResult = new Promise<{ data: { reply: string }; error: null }>(resolve => { finishSend = resolve; });
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_attachments') return originalFrom(table);
+      return { ...originalFrom(table), select: () => ({ eq: (field: string) => field === 'organization_id'
+        ? { ilike: () => ({ order: () => ({ limit: async () => ({ data: [
+          { id: 'result-2', file_name: 'second evidence', processing_state: 'extracted', conversation_id: 'conversation-2' },
+        ], error: null }) }) }) }
+        : { order: async () => ({ data: [], error: null }) } }) };
+    });
+    mockInvoke.mockImplementation((name: string) => name === 'onspace-ai-chat'
+      ? sendResult : Promise.resolve({ data: null, error: null }));
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.click(screen.getByRole('button', { name: 'files' }));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'evidence' } });
+    const result = await screen.findByRole('button', { name: /second evidence/ });
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), {
+      target: { value: 'Review the first conversation' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(result).toHaveProperty('disabled', true);
+    fireEvent.click(result);
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-1');
+    await act(async () => { finishSend({ data: { reply: 'First reply' }, error: null }); await sendResult; });
+    await waitFor(() => expect(result).toHaveProperty('disabled', false));
+  });
+
+  it('does not let the initial conversation load replace a newer search selection', async () => {
+    setViewport(1400);
+    conversationList = [
+      { id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' },
+      { id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' },
+    ];
+    const firstMessage = { id: 'message-1', role: 'assistant', content: 'First conversation answer', confidence: null,
+      flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {} };
+    const secondMessage = { ...firstMessage, id: 'message-2', content: 'Second conversation answer' };
+    let finishFirst!: (result: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const firstResponse = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { finishFirst = resolve; });
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'bob_messages') return { select: () => ({ eq: (_field: string, value: string) => ({
+        order: () => value === 'conversation-1' ? firstResponse : Promise.resolve({ data: [secondMessage], error: null }),
+      }) }) };
+      if (table !== 'bob_attachments') return originalFrom(table);
+      return { ...originalFrom(table), select: () => ({ eq: (field: string) => field === 'organization_id'
+        ? { ilike: () => ({ order: () => ({ limit: async () => ({ data: [
+          { id: 'result-2', file_name: 'second evidence', processing_state: 'extracted', conversation_id: 'conversation-2' },
+        ], error: null }) }) }) }
+        : { order: async () => ({ data: [], error: null }) } }) };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.click(screen.getByRole('button', { name: 'files' }));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'evidence' } });
+    fireEvent.click(await screen.findByRole('button', { name: /second evidence/ }));
+    await screen.findByText('Second conversation answer');
+    expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2');
+
+    await act(async () => { finishFirst({ data: [firstMessage], error: null }); await firstResponse; });
+    expect(screen.getByText('Second conversation answer')).toBeTruthy();
+    expect(screen.queryByText('First conversation answer')).toBeNull();
+  });
+
+  it('does not display the previous conversation files while the selected conversation is loading', async () => {
+    setViewport(1400);
+    conversationList = [
+      { id: 'conversation-1', title: 'First conversation', human_reference: 'BOB-1' },
+      { id: 'conversation-2', title: 'Second conversation', human_reference: 'BOB-2' },
+    ];
+    const firstAttachment = { id: 'file-1', file_name: 'first-private.pdf', file_type: 'application/pdf', file_size_bytes: 100,
+      processing_state: 'extracted', extraction_summary: null, confidence: null, created_at: '2026-11-10T00:00:00.000Z' };
+    const secondAttachment = { ...firstAttachment, id: 'file-2', file_name: 'second-visible.pdf' };
+    let finishSecond!: (result: { data: Array<Record<string, unknown>>; error: null }) => void;
+    const secondResponse = new Promise<{ data: Array<Record<string, unknown>>; error: null }>(resolve => { finishSecond = resolve; });
+    const originalFrom = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'bob_attachments') return originalFrom(table);
+      return { select: () => ({ eq: (field: string, value: string) => {
+        if (field === 'organization_id') return { ilike: () => ({ order: () => ({ limit: async () => ({ data: [
+          { id: 'result-2', file_name: 'second evidence', processing_state: 'extracted', conversation_id: 'conversation-2' },
+        ], error: null }) }) }) };
+        return { order: () => value === 'conversation-2'
+          ? secondResponse : Promise.resolve({ data: [firstAttachment], error: null }) };
+      } }) };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    await screen.findByLabelText('Conversation reference');
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Files' }));
+    await screen.findByText('first-private.pdf');
+    fireEvent.click(screen.getByRole('button', { name: 'files' }));
+    fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'evidence' } });
+    fireEvent.click(await screen.findByRole('button', { name: /second evidence/ }));
+    await waitFor(() => expect(screen.getByLabelText('Conversation reference').textContent).toContain('BOB-2'));
+    expect(screen.queryByText('first-private.pdf')).toBeNull();
+
+    await act(async () => { finishSecond({ data: [secondAttachment], error: null }); await secondResponse; });
+    expect(await screen.findByText('second-visible.pdf')).toBeTruthy();
   });
 
   it('resizes expanded desktop panes within their bounded widths', async () => {
@@ -1292,10 +2236,13 @@ describe('BobPanel', () => {
       authority_state: 'verified_candidate',
       review_required: true,
     }];
-    mockRpc.mockResolvedValueOnce({
-      data: { ...perceptionFieldHistory[0], authority_state: 'human_approved', review_required: false },
-      error: null,
-    });
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'review_perception_evidence_field'
+        ? Promise.resolve({
+          data: { ...perceptionFieldHistory[0], authority_state: 'human_approved', review_required: false },
+          error: null,
+        })
+        : fixtureRpc(name, args));
 
     render(<BobPanel open onClose={() => undefined} />);
     fireEvent.click(await screen.findByLabelText('Open document studio'));

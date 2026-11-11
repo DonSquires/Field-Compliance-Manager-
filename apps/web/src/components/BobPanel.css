@@ -450,6 +450,32 @@
   font-size: 12px;
 }
 
+.bob-sidebar-more,
+.bob-session-list-error button {
+  padding: 8px 10px;
+  border: 1px solid #416073;
+  border-radius: 5px;
+  color: #dce8ef;
+  background: #102838;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bob-sidebar-more:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.bob-session-list-error,
+.bob-session-notice {
+  color: #dce8ef;
+  font-size: 12px;
+}
+
+.bob-session-notice {
+  margin: 8px 12px 0;
+}
+
 .bob-session-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
