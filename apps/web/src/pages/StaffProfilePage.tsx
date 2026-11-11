@@ -126,6 +126,7 @@ const StaffProfilePage: React.FC = () => {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentInputKey, setDocumentInputKey] = useState(0);
   const [readinessReview, setReadinessReview] = useState<{ next: boolean; note: string } | null>(null);
+  const [verifyDraft, setVerifyDraft] = useState<{ requestId: string; credentialId: string; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; notes: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -661,6 +662,45 @@ const StaffProfilePage: React.FC = () => {
     setSaving(false);
   };
 
+  const openVerifyCredential = (row: RecordRow) => {
+    setError(null);
+    setVerifyDraft({
+      requestId: crypto.randomUUID(),
+      credentialId: String(row.id),
+      credentialNumber: typeof row.credential_number === 'string' ? row.credential_number : '',
+      issuingAuthority: typeof row.issuing_authority === 'string' ? row.issuing_authority : '',
+      issuedDate: typeof row.issued_date === 'string' ? row.issued_date : '',
+      expiryDate: typeof row.expiry_date === 'string' ? row.expiry_date : '',
+      notes: '',
+    });
+  };
+
+  const verifyCredential = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!verifyDraft) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    const { data, error: verifyError } = await supabase.rpc('verify_staff_credential', {
+      p_client_request_id: verifyDraft.requestId,
+      p_credential_id: verifyDraft.credentialId,
+      p_credential_number: verifyDraft.credentialNumber.trim(),
+      p_issuing_authority: verifyDraft.issuingAuthority.trim(),
+      p_issued_date: verifyDraft.issuedDate || null,
+      p_expiry_date: verifyDraft.expiryDate || null,
+      p_evidence_notes: verifyDraft.notes.trim(),
+    });
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (verifyError) setError(verifyError.message);
+    else if (!receipt?.verified) setError('The credential was not confirmed as verified. Refresh the profile and try again.');
+    else {
+      setNotice(`${displayName} credential verified and audited.`);
+      setVerifyDraft(null);
+      await loadProfile();
+    }
+    setSaving(false);
+  };
+
   const requirementName = (id: unknown) => text(inductionRequirements.find((item) => item.id === id)?.induction_name, 'Site induction');
   const recordCollections: Record<RecordKind, RecordRow[]> = { credential: credentials, skill: skills, training, document: documents, induction: inductions, asset: assets, timesheet: timesheets, leave, case: cases };
   const selectedRecord = recordKind && recordId ? recordCollections[recordKind]?.find((item) => item.id === recordId) ?? null : null;
@@ -871,9 +911,11 @@ const StaffProfilePage: React.FC = () => {
 
         {recordKind && recordId && <aside className="staff-profile-detail" aria-label="Selected record details">
           <header><div><span>{plainWords(recordKind)}</span><h2>Record details</h2></div><button type="button" onClick={() => { const next = new URLSearchParams(location.search); next.delete('recordKind'); next.delete('record'); navigate({ pathname: location.pathname, search: next.toString() }, { replace: true }); }} aria-label="Close record details">×</button></header>
-          {selectedRecord ? <dl>{Object.entries(selectedRecord).filter(([key]) => !['id', 'storage_path'].includes(key)).map(([key, value]) => <div key={key}><dt>{plainWords(key)}</dt><dd>{value == null || value === '' ? 'Not recorded' : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}</dd></div>)}</dl> : <p role="alert">This record is unavailable or you do not have permission to view it.</p>}
+          {selectedRecord ? <dl>{Object.entries(selectedRecord).filter(([key]) => !['id', 'storage_path'].includes(key)).map(([key, value]) => <div key={key}><dt>{plainWords(key)}</dt><dd>{value == null || value === '' ? 'Not recorded' : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : key === 'credential_type' ? credentialTypeLabel(String(value)) : String(value)}</dd></div>)}</dl> : <p role="alert">This record is unavailable or you do not have permission to view it.</p>}
+          {recordKind === 'credential' && canManagePay && selectedRecord && !selectedRecord.verified && <div className="staff-profile-detail-actions"><p>Check the credential against its source document or the issuing authority's register, then record what you checked.</p><button type="button" className="btn btn-primary" onClick={() => openVerifyCredential(selectedRecord)}>Verify credential</button></div>}
         </aside>}
       </main>
+      {verifyDraft && <div className="staff-profile-dialog-backdrop"><form className="staff-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-verify-credential-title" onSubmit={verifyCredential}><header><div><span>Credential</span><h2 id="staff-verify-credential-title">Verify credential</h2></div><button type="button" onClick={() => setVerifyDraft(null)} aria-label="Close credential verification">×</button></header><p>Confirm the details match the evidence. Verified, current credentials count toward work readiness and roster eligibility.</p><label><span>Credential number</span><input required value={verifyDraft.credentialNumber} onChange={(event) => setVerifyDraft({ ...verifyDraft, credentialNumber: event.target.value })} /></label><label><span>Issuing authority</span><input required value={verifyDraft.issuingAuthority} onChange={(event) => setVerifyDraft({ ...verifyDraft, issuingAuthority: event.target.value })} /></label><label><span>Issue date</span><input type="date" max={verifyDraft.expiryDate || undefined} value={verifyDraft.issuedDate} onChange={(event) => setVerifyDraft({ ...verifyDraft, issuedDate: event.target.value })} /></label><label><span>Expiry date</span><input type="date" min={verifyDraft.issuedDate || undefined} value={verifyDraft.expiryDate} onChange={(event) => setVerifyDraft({ ...verifyDraft, expiryDate: event.target.value })} /></label><label><span>What you checked (10+ characters)</span><textarea required minLength={10} rows={3} value={verifyDraft.notes} onChange={(event) => setVerifyDraft({ ...verifyDraft, notes: event.target.value })} /></label>{error && <p role="alert">{error}</p>}<footer><button type="button" className="btn btn-secondary" onClick={() => setVerifyDraft(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !verifyDraft.credentialNumber.trim() || !verifyDraft.issuingAuthority.trim() || verifyDraft.notes.trim().length < 10}>{saving ? 'Verifying…' : 'Confirm verification'}</button></footer></form></div>}
       {readinessReview && <div className="staff-profile-dialog-backdrop"><form className="staff-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-readiness-title" onSubmit={saveReadiness}><header><div><span>Roster eligibility</span><h2 id="staff-readiness-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'The server will recheck identity, employment, credentials and readiness blockers before allowing roster work.' : 'Removing readiness blocks new roster assignment without deleting employment or evidence records.'}</p><label><span>Readiness review notes</span><textarea required rows={4} value={readinessReview.note} onChange={(event) => setReadinessReview({ ...readinessReview, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessReview.note.trim()}>{saving ? 'Saving…' : 'Confirm readiness'}</button></footer></form></div>}
     </div>
   );
