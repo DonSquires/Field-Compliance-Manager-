@@ -271,6 +271,7 @@ export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; st
         <ShieldAlert size={17} aria-hidden="true" />
         <div>
           <strong>{needsAck ? (briefing.changed_since_acknowledgement ? 'Safety briefing updated — read and confirm' : 'Read and confirm the safety briefing') : `Safety briefing: ${briefing.item_count} item${briefing.item_count === 1 ? '' : 's'}`}</strong>
+          {!needsAck && briefing.acknowledged_via === 'admin_phone' && <small>Confirmed by phone with operations</small>}
           {notice && <small>{notice}</small>}
           {error && <small role="alert">Safety updates could not be checked: {error}</small>}
         </div>

@@ -128,6 +128,30 @@ as compliance observations).
   branch-authorised replacement staff member. Preserve the original assignment
   and decision in audit; never transfer recorded attendance or finalised payroll.
 
+### Owner direction 2026-11-12: operations starts and finishes the shift by phone
+
+- **Record admin start** on the roster starts the officer's real shift in their
+  portal (status in progress, actual start at the recorded time) and notifies
+  them. **Record admin finish** finishes it through the supervisor close path:
+  open breaks end, reached stops complete, unreached stops are skipped, and open
+  dispatch jobs or welfare alerts must be closed first. Both are reasoned,
+  audited and idempotent. This supersedes the 2026-11-09 design in which these
+  were only separate reported times; those earlier rows remain as reported times.
+- The administrator must confirm they spoke with the officer by phone and covered
+  the site, its risks and the safety briefing. That confirmation is stored as the
+  shift's safety-briefing acknowledgement (`acknowledged_via = admin_phone`,
+  recorded by the administrator) and replaces the officer's own pre-start
+  briefing confirmation and start-position check for that shift. If the briefing
+  changes afterwards, the officer must confirm the new version as usual.
+- An admin start is refused while the officer still has another shift in
+  progress; operations finishes that shift first, so a back-dated start never
+  overlaps it. The generic shift-change notice is suppressed for these actions
+  because each sends its own "Operations started/finished your shift" notice.
+- The officer's location is captured from their own device once their portal
+  reports against the started shift; the roster shows "waiting for the officer's
+  device" until then. An administrator's phone confirmation is not GPS proof of
+  presence, and static-post arrival remains the officer's own evidence.
+
 ### Owner direction 2026-10-25: roster placement and Workshop labour
 
 - Imported forestry assignments belong in the ordinary staff/work-unit roster

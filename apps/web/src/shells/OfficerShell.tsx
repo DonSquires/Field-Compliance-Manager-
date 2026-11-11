@@ -296,6 +296,11 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
   }, [location.pathname, activeShift, grantedModules, moduleStatus, canAccessOfficerModule, moduleFromUrl, navigate]);
 
   useEffect(() => {
+    // A newly started shift (including one operations started remotely) records its first location immediately.
+    lastBreadcrumbAtRef.current = null;
+  }, [activeShift?.id]);
+
+  useEffect(() => {
     if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
     const ownerUserId = profile.id;
     const recordsBreadcrumbs = canRecordOfficerBreadcrumbs(profile.role);

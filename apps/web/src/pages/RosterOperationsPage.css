@@ -719,3 +719,4 @@
 .roster-dialog .roster-contact-review{display:flex;align-items:center;gap:8px}
 .roster-dialog .roster-contact-review input{width:18px;height:18px;flex:none}
 .roster-contact-error{padding:10px;border:1px solid #b54747;border-radius:6px;color:var(--color-text-primary,#e7eef5);background:var(--color-bg-elevated,#35191b)}
+.roster-dialog .roster-dialog-check{display:flex;align-items:flex-start;gap:10px}.roster-dialog .roster-dialog-check input{width:auto;flex:none;margin-top:2px}.roster-dialog .roster-dialog-check>span{color:inherit;font-size:14px;font-weight:600;text-transform:none}

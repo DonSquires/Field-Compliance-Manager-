@@ -46,6 +46,7 @@ export interface SafetyBriefing {
   acknowledgement_required: boolean;
   acknowledged: boolean;
   acknowledged_at: string | null;
+  acknowledged_via?: 'officer_portal' | 'admin_phone' | null;
   changed_since_acknowledgement: boolean;
   is_assigned_officer: boolean;
 }
