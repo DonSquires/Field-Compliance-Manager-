@@ -2012,33 +2012,42 @@ export type Database = {
         Row: {
           archived_at: string | null
           created_at: string
+          human_reference: string | null
+          human_reference_number: number
           id: string
           module_key: string
           organization_id: string
           pinned: boolean
           title: string | null
+          title_manually_set: boolean
           updated_at: string
           user_id: string
         }
         Insert: {
           archived_at?: string | null
           created_at?: string
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           module_key?: string
           organization_id: string
           pinned?: boolean
           title?: string | null
+          title_manually_set?: boolean
           updated_at?: string
           user_id: string
         }
         Update: {
           archived_at?: string | null
           created_at?: string
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           module_key?: string
           organization_id?: string
           pinned?: boolean
           title?: string | null
+          title_manually_set?: boolean
           updated_at?: string
           user_id?: string
         }
@@ -4643,6 +4652,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -4692,6 +4703,8 @@ export type Database = {
           description?: string | null
           error_count?: number | null
           frontend_required?: boolean
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           last_error?: string | null
           organization_id: string
@@ -4741,6 +4754,8 @@ export type Database = {
           description?: string | null
           error_count?: number | null
           frontend_required?: boolean
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           last_error?: string | null
           organization_id?: string
@@ -5111,6 +5126,8 @@ export type Database = {
           created_at: string
           created_by: string
           head_sha: string | null
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_activity_at: string
           pr_number: number | null
@@ -5120,6 +5137,7 @@ export type Database = {
           preview_status: string
           status: string
           title: string
+          title_manually_set: boolean
           updated_at: string
         }
         Insert: {
@@ -5130,6 +5148,8 @@ export type Database = {
           created_at?: string
           created_by: string
           head_sha?: string | null
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           last_activity_at?: string
           pr_number?: number | null
@@ -5139,6 +5159,7 @@ export type Database = {
           preview_status?: string
           status?: string
           title?: string
+          title_manually_set?: boolean
           updated_at?: string
         }
         Update: {
@@ -5149,6 +5170,8 @@ export type Database = {
           created_at?: string
           created_by?: string
           head_sha?: string | null
+          human_reference?: string | null
+          human_reference_number?: number
           id?: string
           last_activity_at?: string
           pr_number?: number | null
@@ -5158,6 +5181,7 @@ export type Database = {
           preview_status?: string
           status?: string
           title?: string
+          title_manually_set?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -29335,6 +29359,7 @@ export type Database = {
       safety_briefing_acknowledgements: {
         Row: {
           acknowledged_at: string
+          acknowledged_via: string
           briefing_hash: string
           client_request_id: string
           gps_lat: number | null
@@ -29344,11 +29369,13 @@ export type Database = {
           item_count: number
           officer_user_id: string
           organization_id: string
+          recorded_by: string | null
           shift_id: string
           shift_stop_id: string | null
         }
         Insert: {
           acknowledged_at?: string
+          acknowledged_via?: string
           briefing_hash: string
           client_request_id: string
           gps_lat?: number | null
@@ -29358,11 +29385,13 @@ export type Database = {
           item_count?: number
           officer_user_id: string
           organization_id: string
+          recorded_by?: string | null
           shift_id: string
           shift_stop_id?: string | null
         }
         Update: {
           acknowledged_at?: string
+          acknowledged_via?: string
           briefing_hash?: string
           client_request_id?: string
           gps_lat?: number | null
@@ -29372,6 +29401,7 @@ export type Database = {
           item_count?: number
           officer_user_id?: string
           organization_id?: string
+          recorded_by?: string | null
           shift_id?: string
           shift_stop_id?: string | null
         }
@@ -29381,6 +29411,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "safety_briefing_acknowledgements_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
           {
@@ -30103,6 +30140,7 @@ export type Database = {
       }
       shift_admin_attendance_events: {
         Row: {
+          applied_to_shift: boolean
           client_request_id: string
           created_at: string
           created_by: string
@@ -30113,8 +30151,10 @@ export type Database = {
           recorded_at: string
           request_fingerprint: Json
           shift_id: string
+          site_briefed_by_phone: boolean
         }
         Insert: {
+          applied_to_shift?: boolean
           client_request_id: string
           created_at?: string
           created_by: string
@@ -30125,8 +30165,10 @@ export type Database = {
           recorded_at: string
           request_fingerprint: Json
           shift_id: string
+          site_briefed_by_phone?: boolean
         }
         Update: {
+          applied_to_shift?: boolean
           client_request_id?: string
           created_at?: string
           created_by?: string
@@ -30137,6 +30179,7 @@ export type Database = {
           recorded_at?: string
           request_fingerprint?: Json
           shift_id?: string
+          site_briefed_by_phone?: boolean
         }
         Relationships: [
           {
@@ -38003,6 +38046,26 @@ export type Database = {
         Args: { include_fks?: boolean; table_names?: string[] }
         Returns: Json
       }
+      bob_list_conversations: {
+        Args: {
+          p_cursor_id: string
+          p_cursor_updated_at: string
+          p_filter: string
+          p_module_key: string
+          p_organization_id: string
+          p_page_size: number
+          p_search: string
+        }
+        Returns: {
+          archived_at: string
+          created_at: string
+          human_reference: string
+          id: string
+          pinned: boolean
+          title: string
+          updated_at: string
+        }[]
+      }
       bob_match_knowledge: {
         Args: {
           match_count?: number
@@ -38057,6 +38120,35 @@ export type Database = {
           search_terms: string
         }
         Returns: Json
+      }
+      bob_rename_conversation: {
+        Args: {
+          p_conversation_id: string
+          p_expected_title: string
+          p_module_key: string
+          p_organization_id: string
+          p_title: string
+        }
+        Returns: {
+          archived_at: string | null
+          created_at: string
+          human_reference: string | null
+          human_reference_number: number
+          id: string
+          module_key: string
+          organization_id: string
+          pinned: boolean
+          title: string | null
+          title_manually_set: boolean
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bob_conversations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       bob_search_reference_documents: {
         Args: {
@@ -38126,6 +38218,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38216,6 +38310,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38274,6 +38370,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38350,6 +38448,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38408,6 +38508,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38466,6 +38568,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38528,6 +38632,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38586,6 +38692,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38648,6 +38756,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38706,6 +38816,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -38937,6 +39049,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39070,6 +39184,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39128,6 +39244,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39195,6 +39313,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39260,6 +39380,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39330,6 +39452,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39402,6 +39526,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39460,6 +39586,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39518,6 +39646,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39617,6 +39747,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39681,6 +39813,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39747,6 +39881,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39830,6 +39966,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39929,6 +40067,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -39991,6 +40131,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40049,6 +40191,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40111,6 +40255,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40245,6 +40391,72 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "builder_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_rename_job: {
+        Args: {
+          p_actor_user_id: string
+          p_expected_title: string
+          p_job_id: string
+          p_organization_id: string
+          p_title: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_revision: Json | null
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -40448,6 +40660,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40511,6 +40725,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40579,6 +40795,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40642,6 +40860,8 @@ export type Database = {
           description: string | null
           error_count: number | null
           frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
           id: string
           last_error: string | null
           organization_id: string
@@ -40854,6 +41074,41 @@ export type Database = {
       builder_vibe_redeem_preview_ticket: {
         Args: { p_session_id: string; p_ticket: string }
         Returns: string
+      }
+      builder_vibe_rename_session: {
+        Args: {
+          p_expected_title: string
+          p_session_id: string
+          p_title: string
+        }
+        Returns: {
+          base_sha: string | null
+          branch: string | null
+          changed_files: string[]
+          closed_at: string | null
+          created_at: string
+          created_by: string
+          head_sha: string | null
+          human_reference: string | null
+          human_reference_number: number
+          id: string
+          last_activity_at: string
+          pr_number: number | null
+          pr_url: string | null
+          preview_detail: string | null
+          preview_requested: boolean
+          preview_status: string
+          status: string
+          title: string
+          title_manually_set: boolean
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_vibe_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       builder_vibe_require_owner: { Args: never; Returns: string }
       builder_vibe_send: {
@@ -45133,6 +45388,8 @@ export type Database = {
           admin_start: string
           admin_start_by: string
           admin_start_reason: string
+          location_address: string
+          location_captured_at: string
           shift_id: string
         }[]
       }
@@ -49680,6 +49937,7 @@ export type Database = {
           p_reason: string
           p_recorded_at: string
           p_shift_id: string
+          p_site_briefed_by_phone?: boolean
         }
         Returns: Json
       }
