@@ -877,11 +877,11 @@ const ScopedBobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode 
   }, [open, workspaceExpanded, presentation]);
 
   useLayoutEffect(() => {
-    if (!open || (presentation === 'docked' && studioOpen)) return;
+    if (!open || loading || (presentation === 'docked' && studioOpen)) return;
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [messages, open, presentation, studioOpen]);
+  }, [messages, loading, open, presentation, studioOpen]);
 
   useEffect(() => () => {
     mediaRecorderRef.current?.state === 'recording' && mediaRecorderRef.current.stop();
