@@ -5,6 +5,8 @@
   // This shared release engine is Node CommonJS, so keep it on the built-in JS/TS language service.
   "deno.disablePaths": ["./supabase/functions/_shared/builder-release-engineer.js"],
   "deno.lint": true,
+  // Load project Agent Skills (.claude/skills, including the vendored ui-ux-pro-max) in Copilot chat.
+  "chat.useAgentSkills": true,
   "camel.ls.java.home": "C:\\Users\\squir\\.jdks\\temurin-21",
   "java.configuration.runtimes": [
     {
