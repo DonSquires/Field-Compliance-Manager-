@@ -31,6 +31,15 @@ interface Timesheet {
   submitted_at: string | null;
 }
 
+interface TimesheetWorkEntry {
+  id: string;
+  date: string;
+  description: string;
+  calculated_minutes: number;
+  actual_hours: number; // Added missing property
+  // ... other properties
+}
+
 type WorkPreview =
   | { key: string; status: 'loading' }
   | { key: string; status: 'ready'; entries: TimesheetWorkEntry[] }
@@ -152,6 +161,7 @@ const OfficerTimesheetPage: React.FC = () => {
   }, [profile?.id, profile?.organizationId, periodValid, previewKey, previewRetry, form.periodStart, form.periodEnd]);
 
   const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
+const paidHours = workEntries.reduce((total, entry) => total + entry.actual_hours, 0);
   const shiftCount = workEntries.filter((entry) => entry.source_type === 'shift').length;
   const jobCount = workEntries.length - shiftCount;
   const rejectedForPeriod = timesheets.find((timesheet) => timesheet.status === 'rejected' && timesheet.period_start === form.periodStart && timesheet.period_end === form.periodEnd);
@@ -328,19 +338,32 @@ const OfficerTimesheetPage: React.FC = () => {
                   <td>{hours(timesheetWorkedHours(t))}</td>
                   <td>{hours(timesheetPaidHours(t))}</td>
                   <td>{hours(t.overtime_hours)}</td>
-                  <td>
-                    <span className={`status-badge status-${t.status}`}>{timesheetStatusLabel(t.status)}</span>
-                    {t.submitted_at && <small className="timesheet-review-note">{submittedWords(t.submitted_at)}</small>}
-                    {t.review_notes && <small className="timesheet-review-note"><strong>Review note:</strong> {t.review_notes}{t.approved_at ? ` · ${new Date(t.approved_at).toLocaleString('en-NZ')}` : ''}</small>}
-                  </td>
+                              <td>
+              <span className={`status-badge status-${t.status}`}>{timesheetStatusLabel(t.status)}</span>
+              {t.submitted_at && <small className="timesheet-review-note">{submittedWords(t.submitted_at)}</small>}
+              {t.review_notes && <small className="timesheet-review-note"><strong>Review note:</strong> {t.review_notes}{t.approved_at ? ` · ${new Date(t.approved_at).toLocaleString('en-NZ')}` : ''}</small>}
+              <div className="action-buttons">
+                {t.status === 'pending' && <button className="btn btn-sm btn-secondary" onClick={() => handleApproveTimesheet(t.id)}>Approve</button>}
+                {t.status === 'approved' && <button className="btn btn-sm btn-danger" onClick={() => handleCancelTimesheet(t.id)}>Cancel</button>}
+                <button className="btn btn-sm btn-primary" onClick={() => handleEditTimesheet(t.id)}>Edit</button>
+              </div>
+            </td>
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+                     </tbody>
+         </table>
+       </div>
+       <div className="totals">
+         <div>
+           <strong>Total hours worked:</strong> {hours(workedMinutes)}
+         </div>
+         <div>
+           <strong>Total paid hours:</strong> {hours(paidHours)}
+         </div>
+       </div>
+     </div>
+   );
+  };
 
-export default OfficerTimesheetPage;
+ export default OfficerTimesheetPage;
