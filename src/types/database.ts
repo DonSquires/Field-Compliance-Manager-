@@ -55641,6 +55641,24 @@ export type Database = {
         Args: { p_receipt_id: string; p_sha256?: string }
         Returns: Json
       }
+      verify_staff_credential: {
+        Args: {
+          p_client_request_id: string
+          p_credential_id: string
+          p_credential_number: string
+          p_evidence_notes: string
+          p_expiry_date: string
+          p_issued_date: string
+          p_issuing_authority: string
+        }
+        Returns: {
+          credential_id: string
+          replayed: boolean
+          staff_id: string
+          verified: boolean
+          verified_at: string
+        }[]
+      }
       website_post_admin_organization: { Args: never; Returns: string }
       wf_approve_job: {
         Args: {
