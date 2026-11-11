@@ -37,7 +37,11 @@ git show -s --format='%an <%ae>%n%cn <%ce>' HEAD
 Do not use local placeholders such as `don@squires.local`. A commit that is
 already on `main` cannot be repaired by changing repository files afterward;
 create the next release commit with the verified identity so the complete tree
-can deploy. Bob Builder's isolated publication lane must fail closed when its
+can deploy. Merge pull requests with `gh pr merge <n> --rebase`, which keeps the
+verified commit author. A squash merge is authored by GitHub as the account's
+primary email (`DonSquires <squires.don@gmail.com>`), and Bob's VPS release lane
+refuses that branch head, so merged code stops reaching the VPS (2026-11-12:
+squash merges #469-#481 held the lane for about 20 hours). Bob Builder's isolated publication lane must fail closed when its
 configured identity or the actual branch-head identity is not the exact
 verified GitHub identity. Never weaken Vercel protection, push directly to
 `main`, or bypass the GitHub pull-request path.
