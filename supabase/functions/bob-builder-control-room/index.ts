@@ -12,6 +12,8 @@ const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? Deno.env.get('FCM
 const CAN_BUILD = new Set(['grand_master', 'master']);
 const ARTIFACT_PREVIEW_LIMIT_BYTES = 256 * 1024;
 const ARTIFACT_PREVIEW_TYPES = new Set(['application/json', 'text/markdown', 'text/plain', 'text/x-diff']);
+const JOB_PAGE_SIZE = 100;
+const JOB_LIST_COLUMNS = 'id, human_reference, organization_id, project_id, title, status, current_step_name, target_sha, workspace_branch, branch_name, workspace_pull_request_url, frontend_required, backend_required, code_review_mode, code_review_status, last_error, autopilot_requested_by, autopilot_state, created_at, updated_at';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -28,7 +30,7 @@ function strings(value: unknown, maximum: number) {
 
 function safeJob(job: Record<string, unknown> | null) {
   if (!job) return null;
-  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'workspace_branch', 'workspace_head_sha', 'workspace_published_at', 'workspace_published_head_sha', 'workspace_pull_request_url', 'workspace_pull_request_head_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'autopilot_requested_by', 'autopilot_state', 'autopilot_report', 'autopilot_updated_at', 'autopilot_reported_at', 'created_at', 'updated_at'];
+  const keys = ['id', 'human_reference', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'workspace_branch', 'workspace_head_sha', 'workspace_published_at', 'workspace_published_head_sha', 'workspace_pull_request_url', 'workspace_pull_request_head_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'autopilot_requested_by', 'autopilot_state', 'autopilot_report', 'autopilot_updated_at', 'autopilot_reported_at', 'created_at', 'updated_at'];
   return Object.fromEntries(keys.map(key => [key, job[key]]));
 }
 
@@ -181,13 +183,14 @@ serve(async req => {
   if (authError || !user) return json({ error: 'Unauthorized' }, 401);
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   stage = 'load_profile';
-  const { data: profile, error: profileError } = await admin.from('user_profiles').select('role, organization_id, authorized_organization_ids, email').eq('id', user.id).single();
+  const { data: profile, error: profileError } = await admin.from('user_profiles').select('role, organization_id, authorized_organization_ids, email, deactivated_at').eq('id', user.id).single();
   if (profileError || !profile) return json({ error: 'Builder identity could not be loaded' }, 503);
   const role = resolveEffectiveRole(user.email ?? profile?.email, profile?.role);
   if (!profile || !CAN_BUILD.has(role)) return json({ error: 'Forbidden' }, 403);
 
   const body = await req.json().catch(() => ({}));
   const action = typeof body.action === 'string' ? body.action : '';
+  if (action === 'rename' && profile.deactivated_at !== null) return json({ error: 'An active Builder identity is required' }, 403);
   const requestedOrgId = typeof body.organization_id === 'string' ? body.organization_id : null;
   const allowedOrganizations = new Set([profile.organization_id, ...strings(profile.authorized_organization_ids, 200)].filter(Boolean));
   const canAccessOrganization = (organizationId: string | null) => role === 'grand_master' || Boolean(organizationId && allowedOrganizations.has(organizationId));
@@ -312,11 +315,31 @@ serve(async req => {
     return json({ tailnet: result.payload }, result.ok ? 200 : result.status);
   }
 
-  if (action === 'list') {
-    stage = 'list_builder_state';
+  if (action === 'list' || action === 'search_names') {
+    stage = action === 'list' ? 'list_builder_state' : 'search_builder_names';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
+    const nameQuery = action === 'search_names' && typeof body.query === 'string' ? body.query.trim() : '';
+    if (action === 'search_names' && (!nameQuery || nameQuery.length > 200)) {
+      return json({ error: 'Enter a Builder job name of at most 200 characters' }, 400);
+    }
+    let cursor: { created_at: string; id: string } | null = null;
+    if (body.cursor != null) {
+      const value = body.cursor;
+      if (!value || typeof value !== 'object' || Array.isArray(value)
+        || typeof value.created_at !== 'string'
+        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value.created_at)
+        || !Number.isFinite(Date.parse(value.created_at))
+        || typeof value.id !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.id)) {
+        return json({ error: 'Invalid Builder history cursor' }, 400);
+      }
+      cursor = { created_at: value.created_at, id: value.id };
+    }
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
-    let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, status, current_step_name, target_sha, frontend_required, backend_required, code_review_mode, code_review_status, last_error, autopilot_requested_by, autopilot_state, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
+    let jobsQuery = admin.from('builder_jobs').select(JOB_LIST_COLUMNS)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(JOB_PAGE_SIZE + 1);
+    if (action === 'search_names') jobsQuery = jobsQuery.filter('title', 'imatch', nameQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (cursor) jobsQuery = jobsQuery.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
     if (organizations) {
       projectsQuery = projectsQuery.in('organization_id', organizations);
       jobsQuery = jobsQuery.in('organization_id', organizations);
@@ -325,7 +348,26 @@ serve(async req => {
     const failed = Boolean(projects.error || jobs.error);
     await audit(profile.organization_id, failed ? 'failed' : 'listed');
     if (failed) return json({ error: 'Builder activity could not be loaded' }, 503);
-    return json({ projects: projects.data ?? [], jobs: (jobs.data ?? []).map(job => safeJob(job)) });
+    const rows = jobs.data ?? [];
+    const page = rows.slice(0, JOB_PAGE_SIZE);
+    const last = page.at(-1);
+    return json({
+      projects: projects.data ?? [],
+      jobs: page.map(job => safeJob(job)),
+      next_cursor: rows.length > JOB_PAGE_SIZE && last ? { created_at: last.created_at, id: last.id } : null,
+    });
+  }
+
+  if (action === 'lookup_reference') {
+    stage = 'lookup_builder_reference';
+    const reference = typeof body.reference === 'string' ? body.reference.trim().toUpperCase() : '';
+    if (!/^BB-[1-9]\d{0,18}$/.test(reference)) return json({ error: 'Enter a valid Builder reference' }, 400);
+    let query = admin.from('builder_jobs').select(JOB_LIST_COLUMNS).eq('human_reference', reference).limit(1);
+    if (role !== 'grand_master') query = query.in('organization_id', [...allowedOrganizations]);
+    const { data, error } = await query;
+    await audit(profile.organization_id, error ? 'reference_lookup_failed' : 'reference_looked_up');
+    if (error) return json({ error: 'Builder reference could not be looked up' }, 503);
+    return json({ job: safeJob(data?.[0] ?? null) });
   }
 
   if (action === 'create') {
@@ -406,6 +448,32 @@ serve(async req => {
   stage = 'load_builder_job';
   const { data: job } = await admin.from('builder_jobs').select('id, organization_id').eq('id', jobId).single();
   if (!job || !canAccessOrganization(job.organization_id)) return json({ error: 'Builder job is unavailable' }, 404);
+
+  if (action === 'rename') {
+    stage = 'rename_builder_job';
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const expectedTitle = typeof body.expected_title === 'string' ? body.expected_title : null;
+    if (!title || Array.from(title).length > 200 || expectedTitle === null) {
+      return json({ error: 'Enter a Builder job name of 1 to 200 characters and its current name' }, 400);
+    }
+    const { data: renamed, error: renameError } = await admin.rpc('builder_rename_job', {
+      p_job_id: jobId,
+      p_organization_id: job.organization_id,
+      p_actor_user_id: user.id,
+      p_expected_title: expectedTitle,
+      p_title: title,
+    }).single();
+    if (renameError) {
+      if (renameError.code === 'PT409') return json({ error: 'Builder job title changed; refresh before saving' }, 409);
+      console.error(`[${FUNCTION_NAME}] rename failed`, { code: renameError.code });
+      return json({ error: 'Builder job could not be renamed' }, 503);
+    }
+    if (!renamed || renamed.id !== jobId) {
+      console.error(`[${FUNCTION_NAME}] rename returned an invalid receipt`);
+      return json({ error: 'Builder job rename could not be confirmed' }, 503);
+    }
+    return json({ job: safeJob(renamed as Record<string, unknown>) });
+  }
 
   if (action === 'context_snapshot') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ context: null, unavailable: true, error: 'Builder execution host is unavailable' });

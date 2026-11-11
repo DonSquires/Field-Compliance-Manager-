@@ -11,6 +11,57 @@ npm run test:e2e:human
 
 The default run uses the existing Supabase fixtures. It covers the admin shell and officer entry point on the configured desktop and mobile Playwright projects.
 
+## Vibe Builder history
+
+The platform owner can reopen an open Vibe session and see its latest
+conversation first. **Load earlier messages** retrieves older pages in
+chronological order without a total history cutoff; the reading position is
+preserved when a page is added, and new messages do not pull a reader away from
+older activity. **Load older sessions** retrieves more open sessions. Closing a
+session removes it from the open list, but **Show closed sessions** lets the
+platform owner browse closed history without allowing new work in those
+sessions. Search looks across accessible open and closed sessions for literal
+text in either the name or `VB-` reference, and matching results can be paged.
+Session owners can edit names without changing their references. A name
+explicitly supplied at creation or saved later is retained even if it matches
+the default untitled name.
+
+Drafts are kept separately by session only while the page remains open. A
+session with an unsent draft cannot be closed from that page. If a session is
+closed elsewhere or is absent after a reload, its draft can be copied from the
+**Unsent drafts** recovery area. Attachment selections cannot move to another
+session; if their session becomes unavailable, clear the local selection to
+continue. Already uploaded files remain private in their original session.
+If the session becomes unavailable while a send is being confirmed, the
+message may already have been saved; the draft and file selections are kept for
+review rather than silently discarded.
+
+When checking this flow, use a dedicated authorized test identity and fixture
+data. Verify a conversation longer than 600 messages, more than 50 open
+sessions and more than 100 closed sessions, name/reference search, repeated
+timestamps, a live message during loading, a session switch,
+an unsent draft when another tab closes its session, and a failed page request
+followed by retry, including with mobile preview open. If live updates
+disconnect, the page warns that data may be stale and offers a reload.
+Conversation reload reconciles the already-loaded range and newly missed
+messages while retaining expanded steps and the reading position. Session
+reload retains the selected session and drafts, refreshes loaded session state,
+reconciles loaded closures and deletions in both visible lists, and retains
+previously loaded closed sessions. Paging restarts from the newest sessions so
+moved activity is not skipped. A successful refresh clears its own
+error without hiding a separate failed older-page request or input error.
+Check mobile live-follow with a tall composer and confirm errors actually
+appear inside the viewport without moving a reader. **Refresh** also reconciles
+the conversation while connected. Filtered realtime deletion events depend on
+the database's replica identity and may not be delivered; do not treat the
+synthetic browser event as proof of live deletion delivery.
+
+Known existing attachment limitation: registered-file removal deletes the
+storage object before deleting its database record. If the session has closed
+without the page noticing, the record deletion can fail after the object is
+gone. Clearing a local recovery selection does not fix that separate
+storage/database consistency risk.
+
 ## Bob's automatic production verification
 
 Owner ruling 2026-10-27 (Don Squires, owner): Bob runs Dr Bob himself after

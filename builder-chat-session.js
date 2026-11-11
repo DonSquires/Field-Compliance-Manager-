@@ -34,7 +34,7 @@ const BUILDER_CHAT_LIMITS = Object.freeze({
 });
 const HISTORY_MESSAGES = 24;
 const READ_TOOLS = ['list_dir', 'read_file', 'outline', 'search', 'git_log', 'read_canon', 'atlas', 'live_count'];
-const JOB_COLUMNS = 'id, title, status, autopilot_state, workspace_branch, workspace_pull_request_url, requested_action, target_environment, created_at, updated_at';
+const JOB_COLUMNS = 'id, human_reference, title, status, autopilot_state, workspace_branch, workspace_pull_request_url, requested_action, target_environment, created_at, updated_at';
 // A reply may not tell the owner work was started on his behalf: this chat only proposes.
 const ACTION_CLAIM = /\b(?:i|i've|bob|we)\b[^.!?\n]{0,24}\b(?:created|opened|started|queued|launched|kicked off|submitted|approved|merged|deployed|shipped|cancelled)\b[^.!?\n]{0,48}\b(?:jobs?|pull requests?|PRs?|branch(?:es)?|builds?|deploy(?:ment)?s?|releases?|gates?)\b/i;
 
@@ -185,7 +185,7 @@ function ensureChatCheckout({ workspaceRoot, sourceDirFor, resolveHead }) {
 
 function jobSummary(job) {
   return {
-    id: job.id, title: job.title, status: job.status, autopilot: job.autopilot_state || null,
+    id: job.id, human_reference: job.human_reference || null, title: job.title, status: job.status, autopilot: job.autopilot_state || null,
     branch: job.workspace_branch || null, pull_request: job.workspace_pull_request_url || null, updated_at: job.updated_at,
   };
 }
@@ -251,11 +251,16 @@ function createBuilderChatTools({ supabase, workspacePath, limits, platformTools
   tools.job_status = async (args = {}) => {
     // Small models name the argument id/job_id/branch as often as job.
     const key = String(args.job || args.job_id || args.id || args.branch || '').trim().toLowerCase().replace(/^bob\/job-/, '');
-    if (key.length < 6 || !/^[0-9a-f-]+$/.test(key)) return { error: 'give a job id (at least 6 hex characters) or its bob/job-… branch' };
-    const { data, error } = await supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(200);
+    const isReference = /^bb-[1-9]\d{0,18}$/.test(key);
+    if (!isReference && (key.length < 6 || !/^[0-9a-f-]+$/.test(key))) return { error: 'give a job id (at least 6 hex characters), a BB- reference, or its bob/job-… branch' };
+    const jobs = supabase.from('builder_jobs').select(JOB_COLUMNS);
+    const { data, error } = isReference
+      ? await jobs.eq('human_reference', key.toUpperCase()).limit(1)
+      : await jobs.order('updated_at', { ascending: false }).limit(200);
     if (error) return { error: `job ledger read failed: ${error.message}` };
     const compact = value => String(value || '').replace(/-/g, '');
-    const match = (data || []).find(row => compact(row.id).startsWith(compact(key)) || compact(row.workspace_branch).endsWith(compact(key)));
+    const match = isReference ? (data || [])[0]
+      : (data || []).find(row => compact(row.id).startsWith(compact(key)) || compact(row.workspace_branch).endsWith(compact(key)));
     if (!match) return { error: `no Builder job matches ${key}` };
     const [steps, approvals] = await Promise.all([
       supabase.from('builder_job_steps').select('step_id, status, ordinal_position, error').eq('job_id', match.id).order('ordinal_position'),
@@ -311,7 +316,7 @@ function createBuilderChatTools({ supabase, workspacePath, limits, platformTools
 const LEDGER_TOOLS = ['owner_queue', 'list_jobs', 'job_status'];
 const OWNER_ACTION = /\b(?:waiting (?:on|for) me|what(?:'s| is) (?:waiting|pending|blocked|left|outstanding)|my queue|owner queue|(?:pending|outstanding) (?:approvals?|gates?|reviews?|prs?|pull requests?)|anything (?:waiting|pending|blocked|for me)|needs? (?:my )?(?:approval|review|decision)|what do i need to (?:do|approve|review))\b/i;
 const JOB_STATUS = /\b(?:(?:jobs?|gates?|queue|builds?|release) status|status (?:of|for) (?:the |my |this |that )?(?:jobs?|builds?|queue|gates?|release)|how (?:is|are) (?:the |my |this |that )?(?:jobs?|builds?) (?:going|doing)|where (?:is|are) (?:the |my |this |that )?(?:jobs?|builds?) (?:at|up to))\b/i;
-const JOB_REF = /\b(?:bob\/job-)?((?=[0-9a-f-]*\d)[0-9a-f]{8}[0-9a-f-]{0,28})\b/i;
+const JOB_REF = /\b(?:(BB-[1-9]\d{0,18})|(?:bob\/job-)?((?=[0-9a-f-]*\d)[0-9a-f]{8}[0-9a-f-]{0,28}))\b/i;
 // Edit requests open with an imperative verb ("Build status badges…", "Update the job status colour");
 // investigation questions ask why/how/where about code. Neither is answered from the ledger alone.
 const IMPERATIVE = /^(?:(?:please|can you|could you|would you|bob,?|hey bob,?)\s+)*(?:fix|build|add|create|change|update|implement|redesign|refactor|propose|investigate|plan|remove|delete|rename|move|make|style|restyle|show|display|wire|replace|improve|clean|write|design|draft|migrate)\b/i;
@@ -349,7 +354,7 @@ function statusIntent(text) {
   const ref = value.match(JOB_REF);
   const owner = OWNER_ACTION.test(value);
   const status = JOB_STATUS.test(value);
-  if (ref && (status || /\bstatus\b|\bwhere\b|\bhow\b|\bstuck\b|\bblocked\b|\bdone\b/i.test(value))) return { kind: 'job', job: ref[1] };
+  if (ref && (status || /\bstatus\b|\bwhere\b|\bhow\b|\bstuck\b|\bblocked\b|\bdone\b/i.test(value))) return { kind: 'job', job: ref[1] || ref[2] };
   if (owner) return { kind: 'owner' };
   if (status) return { kind: 'jobs' };
   return null;
@@ -362,7 +367,7 @@ function isStatusQuestion(text) {
 function formatJobStatus(result) {
   if (!result || result.error || !result.job) return null;
   const job = result.job;
-  const lines = [`${job.title || 'Untitled job'} (${String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}.`];
+  const lines = [`${job.title || 'Untitled job'} (${job.human_reference || String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}.`];
   const steps = (result.steps || []).map(step => `${step.step}:${step.status}`).join(', ');
   if (steps) lines.push(`Steps: ${steps}.`);
   const pending = (result.approvals || []).filter(row => row.status === 'pending').map(row => String(row.gate || '').replace(/_/g, ' '));
@@ -374,14 +379,14 @@ function formatJobStatus(result) {
 function formatJobList(result) {
   if (!result || result.error || !Array.isArray(result.jobs)) return null;
   if (!result.jobs.length) return 'The job ledger has no Builder jobs to report.';
-  return `Recent Builder jobs:\n${result.jobs.map(job => `- ${job.title || 'Untitled job'} (${String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}${job.pull_request ? ` — ${job.pull_request}` : ''}`).join('\n')}`;
+  return `Recent Builder jobs:\n${result.jobs.map(job => `- ${job.title || 'Untitled job'} (${job.human_reference || String(job.id || '').slice(0, 8)}): ${job.status}${job.autopilot ? `, autopilot ${job.autopilot}` : ''}${job.pull_request ? ` — ${job.pull_request}` : ''}`).join('\n')}`;
 }
 
 const LEDGER_FORMATTERS = { owner_queue: queue => formatOwnerQueue(queue), job_status: formatJobStatus, list_jobs: formatJobList };
 
 function formatOwnerQueue(queue) {
   if (!queue || queue.error) return null;
-  const name = job => `${job?.title || 'Untitled job'} (${String(job?.id || '').slice(0, 8)})`;
+  const name = job => `${job?.title || 'Untitled job'} (${job?.human_reference || String(job?.id || '').slice(0, 8)})`;
   const sections = [];
   const gates = queue.approval_gates || [];
   if (gates.length) sections.push(`Approval gates waiting on you (decide in the Builder queue):\n${gates.map(row => `- ${name(row.job)}: ${String(row.gate || '').replace(/_/g, ' ')}`).join('\n')}`);
@@ -412,7 +417,7 @@ function builderChatNativeTools(tools) {
     find_files: { description: 'Discover tracked filenames/paths by a short case-insensitive fragment. Does not search contents. Read owning source from the returned paths.', parameters: { type: 'object', properties: { name: { type: 'string', minLength: 2, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['name'], additionalProperties: false } },
     list_jobs: { description: 'List recent Builder jobs from the job ledger (newest first).', parameters: { type: 'object', properties: { status: text, limit: { type: 'integer', minimum: 1, maximum: 25 } }, additionalProperties: false } },
     owner_queue: { description: 'Everything waiting on the owner: pending approval gates, published pull requests to review, jobs awaiting a human, and recently blocked jobs. Use for "what is waiting on me" questions.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
-    job_status: { description: 'Read one Builder job with its steps and approval gates. job is an id, id prefix or bob/job-… branch.', parameters: { type: 'object', properties: { job: { type: 'string', minLength: 6 } }, required: ['job'], additionalProperties: false } },
+    job_status: { description: 'Read one Builder job with its steps and approval gates. job is a BB- reference, id, id prefix or bob/job-… branch.', parameters: { type: 'object', properties: { job: { type: 'string', minLength: 4 } }, required: ['job'], additionalProperties: false } },
     propose_job: {
       description: 'Propose a Builder job for the owner to confirm. Only the owner creates it. Use after investigating.',
       parameters: { type: 'object', properties: {

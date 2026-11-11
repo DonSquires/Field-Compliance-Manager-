@@ -16,6 +16,9 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-whole-job-acceptan
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-vibe-attachments-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./retrospective-noise-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-vibe-recovery-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./bob-human-references-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./bob-human-references-postgrest.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-control-room-postgrest.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./dispatch-attendance-activity-reports.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-routine-retry-migration.test');
 

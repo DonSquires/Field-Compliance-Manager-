@@ -51,5 +51,6 @@ test('jobs created or continued from the control room are driven by Bob, and an 
   assert.match(controlRoom, /admin\.rpc\('builder_autopilot_bind', \{ _job_id: jobId, _requested_by: user\.id/);
   // The drive action sits after the per-job organisation access check, so it cannot bind a foreign job.
   assert.ok(controlRoom.indexOf("if (action === 'drive')") > controlRoom.indexOf("if (!job || !canAccessOrganization(job.organization_id))"));
-  assert.match(controlRoom, /autopilot_requested_by, autopilot_state, created_at, updated_at'\)/, 'the queue list carries autopilot ownership');
+  assert.match(controlRoom, /const JOB_LIST_COLUMNS = '[^']*autopilot_requested_by, autopilot_state, created_at, updated_at';/, 'the queue list carries autopilot ownership');
+  assert.match(controlRoom, /admin\.from\('builder_jobs'\)\.select\(JOB_LIST_COLUMNS\)/);
 });
