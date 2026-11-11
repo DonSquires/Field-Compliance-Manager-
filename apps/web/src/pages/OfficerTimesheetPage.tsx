@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase';
 import { loadOfficerTimesheetWork, resubmitRejectedTimesheetFromWork, submitOfficerTimesheetFromWork, type TimesheetWorkEntry } from '../lib/officerTimesheetWork';
 import { plainWords, plural, submittedWords } from '../lib/rosterWords';
 import { timesheetMismatchReasons } from '../lib/timesheetTolerances';
+import { timesheetPaidHours, timesheetWorkedHours } from '../lib/timesheetHours';
 import './PageStyles.css';
 
 interface Timesheet {
@@ -21,6 +22,7 @@ interface Timesheet {
   period_start: string;
   period_end: string;
   scheduled_hours: number | null;
+  work_derived_hours: number | null;
   actual_hours: number | null;
   overtime_hours: number;
   status: string;
@@ -55,7 +57,7 @@ export const hoursAndMinutes = (minutes: number) => `${Math.floor(minutes / 60)}
 const dateWords = (value: string) => new Date(value).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
 const timeWords = (value: string) => new Date(value).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' });
 const hours = (value: number | null | undefined) => value == null ? '–' : `${Number(value).toFixed(2)} h`;
-const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status, review_notes, approved_at, submitted_at';
+const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, work_derived_hours, actual_hours, overtime_hours, status, review_notes, approved_at, submitted_at';
 
 const OfficerTimesheetPage: React.FC = () => {
   const location = useLocation();
@@ -299,19 +301,20 @@ const OfficerTimesheetPage: React.FC = () => {
             <tr>
               <th>Period</th>
               <th>Rostered</th>
-              <th>Worked</th>
+              <th>Hours worked</th>
+              <th>Paid hours</th>
               <th>Overtime</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {refreshingList ? (
-              <tr><td colSpan={5} className="text-center">Refreshing the timesheet list…</td></tr>
+              <tr><td colSpan={6} className="text-center">Refreshing the timesheet list…</td></tr>
             ) : listUnavailable ? (
-              <tr><td colSpan={5} className="text-center">Timesheets could not be loaded.</td></tr>
+              <tr><td colSpan={6} className="text-center">Timesheets could not be loaded.</td></tr>
             ) : timesheets.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center">
+                <td colSpan={6} className="text-center">
                   Nothing sent yet. Your first timesheet will appear here once you send it.
                 </td>
               </tr>
@@ -322,7 +325,8 @@ const OfficerTimesheetPage: React.FC = () => {
                     {new Date(t.period_start).toLocaleDateString()} – {new Date(t.period_end).toLocaleDateString()}
                   </td>
                   <td>{hours(t.scheduled_hours)}</td>
-                  <td>{hours(t.actual_hours)}</td>
+                  <td>{hours(timesheetWorkedHours(t))}</td>
+                  <td>{hours(timesheetPaidHours(t))}</td>
                   <td>{hours(t.overtime_hours)}</td>
                   <td>
                     <span className={`status-badge status-${t.status}`}>{timesheetStatusLabel(t.status)}</span>

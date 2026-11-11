@@ -15,6 +15,7 @@ import { plainWords } from '../lib/rosterWords';
 import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode, type ServiceCode } from '../lib/payCatalog';
 import { PayCodeSelect } from '../components/PayCodeSelect';
 import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
+import { timesheetPaidHours, timesheetWorkedHours } from '../lib/timesheetHours';
 import { ServiceCodeSelect } from '../components/ServiceCodeSelect';
 import { useWorkforceScope, workforceWeek } from '../lib/workforceScope';
 import './PageStyles.css';
@@ -776,7 +777,7 @@ const TimesheetsPage: React.FC = () => {
               <div className="reports-table-wrapper">
                 <table className="reports-table timesheets-table">
                   <caption className="sr-only">Timesheet reconciliation and approval queue</caption>
-                  <thead><tr><th scope="col">Staff</th><th scope="col">Organization / place</th><th scope="col">Period</th><th scope="col">Service</th><th scope="col">Scheduled</th><th scope="col">Worked</th><th scope="col">Overtime</th><th scope="col">Adjustment</th><th scope="col">Pay</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                  <thead><tr><th scope="col">Staff</th><th scope="col">Organization / place</th><th scope="col">Period</th><th scope="col">Service</th><th scope="col">Scheduled</th><th scope="col">Hours worked</th><th scope="col">Paid hours</th><th scope="col">Overtime</th><th scope="col">Adjustment</th><th scope="col">Pay</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
                   <tbody>
                     {filteredTimesheets.map((row) => (
                       <tr key={row.id} className={timesheetSummaryMismatchReasons(row.work_summary).length ? 'timesheet-mismatch' : undefined}>
@@ -789,7 +790,8 @@ const TimesheetsPage: React.FC = () => {
                         <td>{row.period_start === row.period_end ? dayText(row.period_start) : `${dayText(row.period_start)} – ${dayText(row.period_end)}`}<small className="timesheet-mismatch-note">{timesheetSummaryMismatchReasons(row.work_summary).join('; ')}</small></td>
                         <td>{row.shift?.service_type ? serviceLabel(row.shift.service_type) : '—'}</td>
                         <td>{hours(row.scheduled_hours)}</td>
-                        <td>{hours(row.actual_hours)}</td>
+                        <td>{hours(timesheetWorkedHours(row))}</td>
+                        <td>{hours(timesheetPaidHours(row))}</td>
                         <td>{hours(row.overtime_hours)}</td>
                         <td>{hours(row.adjustment_hours)}</td>
                         <td>{row.pay_code_override || row.hourly_rate_override != null ? <span title="Pay override on this timesheet only">{row.pay_code_override ?? 'Rule code'}{row.hourly_rate_override != null ? ` · $${Number(row.hourly_rate_override).toFixed(2)}` : ''}</span> : 'From pay rate'}</td>
@@ -957,7 +959,7 @@ const TimesheetsPage: React.FC = () => {
               <p><strong>Places:</strong></p>
               <ul>{(timesheetProvenance[printingTimesheet.id] ?? []).filter((source) => source.location_name || source.zone_name || source.work_unit_name).map((source, index) => <li key={`${source.shift_id ?? 'source'}-${index}`}>{[source.work_unit_name, source.location_name, source.zone_name, source.service_type ? serviceLabel(source.service_type) : null].filter(Boolean).join(' · ')}</li>)}</ul>
               {!(timesheetProvenance[printingTimesheet.id] ?? []).some((source) => source.location_name || source.zone_name) && <p>{provenanceError ? 'Place details were unavailable when this snapshot was created.' : 'No linked shift place was returned for this timesheet.'}</p>}
-              <p><strong>Hours:</strong> {hours(printingTimesheet.actual_hours)} worked · {hours(printingTimesheet.overtime_hours)} overtime · {hours(printingTimesheet.adjustment_hours)} adjustment</p>
+              <p><strong>Hours:</strong> {hours(timesheetWorkedHours(printingTimesheet))} worked · {hours(timesheetPaidHours(printingTimesheet))} paid · {hours(printingTimesheet.overtime_hours)} overtime · {hours(printingTimesheet.adjustment_hours)} adjustment</p>
               {printingTimesheet.payroll_snapshot && <p><strong>Payroll snapshot:</strong> {String(printingTimesheet.payroll_snapshot.pay_code ?? 'No pay code')} · {hours(Number(printingTimesheet.payroll_snapshot.hours))} hours · ${Number(printingTimesheet.payroll_snapshot.hourly_rate ?? 0).toFixed(2)}/h · ${Number(printingTimesheet.payroll_snapshot.gross_amount ?? 0).toFixed(2)} gross</p>}
               {printingTimesheet.review_notes && <p><strong>Review note:</strong> {printingTimesheet.review_notes}</p>}
               <p className="timesheet-dialog-note">This is a printable snapshot of recorded timesheet and linked work data. Administrative payable corrections do not verify physical attendance.</p>
