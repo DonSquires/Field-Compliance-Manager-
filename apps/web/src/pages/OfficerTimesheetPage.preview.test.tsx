@@ -111,6 +111,21 @@ describe('timesheet work preview', () => {
     expect((screen.getByRole('button', { name: 'Send for approval' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('shows hours worked and paid hours separately on each sent timesheet', async () => {
+    mocked.read.mockResolvedValue({ data: [{
+      id: 'sheet-1', period_start: '2026-08-24', period_end: '2026-08-30', scheduled_hours: 8,
+      work_derived_hours: 7.5, actual_hours: 8, adjustment_hours: 0.5, overtime_hours: 0,
+      status: 'approved', review_notes: null, approved_at: null, submitted_at: null,
+    }], error: null });
+    render(<OfficerTimesheetPage />);
+    const row = (await screen.findByText('Approved')).closest('tr') as HTMLTableRowElement;
+    const headers = [...row.closest('table')!.querySelectorAll('thead th')].map((cell) => cell.textContent);
+    const cells = [...row.querySelectorAll('td')].map((cell) => cell.textContent);
+    expect(cells[headers.indexOf('Hours worked')]).toBe('7.50 h');
+    expect(cells[headers.indexOf('Paid hours')]).toBe('8.00 h');
+    expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
+  });
+
   it('does not send when no staff profile is linked', async () => {
     mocked.staff.mockResolvedValue({ data: [], error: null });
     render(<OfficerTimesheetPage />);
