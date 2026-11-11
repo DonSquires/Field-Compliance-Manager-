@@ -125,6 +125,41 @@ test('per-shift timesheets confirm matching hours and recover a missed replaceme
   expect(correction).not.toHaveProperty('p_actual_start');
 });
 
+test('shift hours show rostered, unpaid break and pay hours with totals for the filtered shifts', async ({ page }) => {
+  const base = { organization_id: '33333333-3333-4333-8333-333333333333',
+    staff_id: '22222222-2222-4222-8222-222222222222', staff_name: 'Ana Ngata',
+    officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'static_guarding',
+    scheduled_start: '2026-08-28T08:00:00Z', scheduled_end: '2026-08-28T16:30:00Z',
+    updated_at: '2026-08-29T08:00:00Z', unpaid_minutes: 30, planned_unpaid_minutes: 30,
+    recorded_unpaid_minutes: 30, correction_updated_at: null, correction_reason: null,
+    start_mismatch: false, finish_mismatch: false, unpaid_break_mismatch: false, pay_rate: 30, charge_rate: 45 };
+  const rows = [
+    { ...base, id: '11111111-1111-4111-8111-111111111120', status: 'completed', hours_status: 'confirmed',
+      actual_start: base.scheduled_start, actual_end: base.scheduled_end, payable_start: base.scheduled_start, payable_end: base.scheduled_end },
+    { ...base, id: '11111111-1111-4111-8111-111111111121', status: 'completed', hours_status: 'review', start_mismatch: true, charge_rate: null,
+      actual_start: '2026-08-28T09:00:00Z', actual_end: base.scheduled_end, payable_start: '2026-08-28T09:00:00Z', payable_end: base.scheduled_end },
+  ];
+  await page.route('**/rest/v1/rpc/get_timesheet_shift_rows', async (route) => route.fulfill({ status: 200, json: rows }));
+  await signInAsAdmin(page, '/admin/timesheets');
+  const confirmed = page.getByRole('row').filter({ hasText: 'Hours auto-confirmed' });
+  await expect(confirmed.getByRole('cell', { name: '8.5 hours', exact: true })).toBeVisible();
+  await expect(confirmed.getByRole('cell', { name: /^30 minutes/ })).toBeVisible();
+  await expect(confirmed.getByRole('cell', { name: '8 hours', exact: true })).toBeVisible();
+  const totals = page.getByRole('group', { name: 'Totals for the shifts shown' });
+  await expect(totals).toContainText('Shifts2');
+  await expect(totals).toContainText('Rostered17 hours');
+  await expect(totals).toContainText('Worked15 hours');
+  await expect(totals).toContainText('Pay hours15 hours');
+  await expect(totals).toContainText('Pay$450.00');
+  await expect(totals).toContainText('Charge$360.00');
+  await expect(totals).toContainText('Charge rate missing for 1 shift');
+  await page.getByLabel('Shift hours status').selectOption('confirmed');
+  await expect(totals).toContainText('Shifts1');
+  await expect(totals).toContainText('Rostered8.5 hours');
+  await expect(totals).toContainText('Pay$240.00');
+  await expect(totals).not.toContainText('missing');
+});
+
 async function openStaffProfile(page: Page, name = 'Ana Ngata', staffId = '22222222-2222-4222-8222-222222222222') {
   await page.getByRole('row', { name: new RegExp(name) }).getByRole('button', { name: 'Open profile ↗' }).click();
   await page.waitForURL(new RegExp(`profile=${staffId}`));

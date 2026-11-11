@@ -16,6 +16,7 @@ import { loadPayCodes, loadServiceCatalog, serviceLabel, type PayCode, type Serv
 import { PayCodeSelect } from '../components/PayCodeSelect';
 import { timesheetSummaryMismatchReasons } from '../lib/timesheetTolerances';
 import { timesheetPaidHours, timesheetWorkedHours } from '../lib/timesheetHours';
+import { formatHours, formatMinutes, formatMoney, shiftHoursFigures, shiftHoursTotals } from '../lib/shiftHoursTotals';
 import { ServiceCodeSelect } from '../components/ServiceCodeSelect';
 import { useWorkforceScope, workforceWeek } from '../lib/workforceScope';
 import './PageStyles.css';
@@ -126,6 +127,9 @@ interface ShiftHoursRow extends ShiftRecord {
   start_mismatch: boolean;
   finish_mismatch: boolean;
   unpaid_break_mismatch: boolean;
+  /** Present only for organisation administrators; null when no hourly rate rule matches the shift. */
+  pay_rate?: number | null;
+  charge_rate?: number | null;
 }
 interface ShiftHoursStaff { staff_id: string; user_id: string; display_name: string | null }
 const SHIFT_HOURS_LABELS = { confirmed: 'Hours auto-confirmed', review: 'Needs review', missed: 'Missed shift', pending: 'Not finished' };
@@ -685,6 +689,9 @@ const TimesheetsPage: React.FC = () => {
 
   const editable = editingTimesheet ? !workingInBranch && EDITABLE_TIMESHEET.has(editingTimesheet.status) && !editingTimesheet.payroll_export_batch_id : false;
   const staffLink = (staffId: string) => `/admin/people-hr?profile=${staffId}&profileTab=employment`;
+  const visibleShiftRows = shiftHoursRows.filter((row) => (staffFilter === 'all' || row.staff_id === staffFilter) && (statusFilter === 'all' || row.hours_status === statusFilter));
+  const shiftTotals = shiftHoursTotals(visibleShiftRows);
+  const shiftCount = (count: number) => `${count} ${count === 1 ? 'shift' : 'shifts'}`;
 
   return (
     <div className="page-container timesheets-page">
@@ -732,24 +739,36 @@ const TimesheetsPage: React.FC = () => {
               <label className="filter-field">Hours status<select aria-label="Shift hours status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
                 <option value="all">All statuses</option>{Object.entries(SHIFT_HOURS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select></label>
+              {shiftHoursRows.length > 0 && <dl className="shift-hours-totals" role="group" aria-label="Totals for the shifts shown">
+                <div><dt>Shifts</dt><dd>{shiftTotals.shifts}</dd></div>
+                <div><dt>Rostered</dt><dd>{formatHours(shiftTotals.rosteredHours)}</dd></div>
+                <div><dt>Worked</dt><dd>{formatHours(shiftTotals.workedHours)}</dd></div>
+                <div><dt>Pay hours</dt><dd>{formatHours(shiftTotals.payHours)}</dd></div>
+                {shiftTotals.ratesVisible && <>
+                  <div><dt>Charge</dt><dd>{formatMoney(shiftTotals.chargeAmount)}{shiftTotals.missingChargeRate > 0 && <small>Charge rate missing for {shiftCount(shiftTotals.missingChargeRate)}</small>}</dd></div>
+                  <div><dt>Pay</dt><dd>{formatMoney(shiftTotals.payAmount)}{shiftTotals.missingPayRate > 0 && <small>Pay rate missing for {shiftCount(shiftTotals.missingPayRate)}</small>}</dd></div>
+                </>}
+              </dl>}
             </div>
             {loading ? <div className="timesheets-empty" role="status">Loading shift hours…</div> : shiftHoursRows.length === 0 ? <div className="timesheets-empty">No shifts in this period.</div> :
               <div className="reports-table-wrapper"><table className="reports-table timesheets-table">
-                <caption className="sr-only">One timesheet entry per shift</caption>
-                <thead><tr><th>Staff member</th><th>Service</th><th>Rostered start / finish</th><th>Recorded start / finish</th><th>Payable start / finish</th><th>Unpaid break</th><th>Hours review</th><th>Actions</th></tr></thead>
-                <tbody>{shiftHoursRows.filter((row) => (staffFilter === 'all' || row.staff_id === staffFilter) && (statusFilter === 'all' || row.hours_status === statusFilter)).map((row) =>
+                <caption className="sr-only">One timesheet entry per shift. Pay hours are payable finish minus start, less the unpaid break.</caption>
+                <thead><tr><th>Staff member</th><th>Service</th><th>Rostered start / finish</th><th>Recorded start / finish</th><th>Payable start / finish</th><th>Rostered hours</th><th>Unpaid break</th><th>Pay hours</th><th>Hours review</th><th>Actions</th></tr></thead>
+                <tbody>{visibleShiftRows.map((row) => { const figures = shiftHoursFigures(row); return (
                   <tr key={row.id} className={`shift-hours-${row.hours_status}`}>
                     <td>{row.staff_name ?? 'Staff identity unavailable'}</td><td>{serviceLabel(row.service_type)}</td>
                     <td>{when(row.scheduled_start)}<br />{when(row.scheduled_end)}</td>
-                    <td>{when(row.actual_start)}<br />{when(row.actual_end)}</td>
+                    <td>{when(row.actual_start)}<br />{when(row.actual_end)}{figures.workedHours !== null && <small>Worked {formatHours(figures.workedHours)}</small>}</td>
                     <td>{when(row.payable_start)}<br />{when(row.payable_end)}</td>
-                    <td>{Number(row.unpaid_minutes).toFixed(0)} min<small>Recorded {Number(row.recorded_unpaid_minutes).toFixed(1)} · planned {row.planned_unpaid_minutes}</small></td>
+                    <td>{formatHours(figures.rosteredHours)}</td>
+                    <td>{formatMinutes(figures.unpaidMinutes)}<small>Recorded {Number(row.recorded_unpaid_minutes).toFixed(1)} · planned {row.planned_unpaid_minutes}</small></td>
+                    <td>{formatHours(figures.payHours)}</td>
                     <td><strong>{SHIFT_HOURS_LABELS[row.hours_status]}</strong>{row.manual_update && <small>Manual timesheet update</small>}
                       {row.manual_update && <small>Manual payable update</small>}
                       {row.hours_status === 'review' && <small>{row.correction_reason ?? [row.start_mismatch && 'Start differs', row.finish_mismatch && 'Finish differs', row.unpaid_break_mismatch && 'Unpaid break differs'].filter(Boolean).join('; ')}</small>}
                     </td>
                     <td>{isAdmin && ['review', 'missed'].includes(row.hours_status) && <button className="icon-btn" type="button" aria-label={`Edit shift hours for ${row.staff_name ?? 'staff member'}`} title="Edit payable shift hours" onClick={() => openHoursEdit(row)}><Edit3 size={16} /></button>}</td>
-                  </tr>)}</tbody>
+                  </tr>); })}</tbody>
               </table></div>}
           </> : <>
           <div className="timesheets-filters">

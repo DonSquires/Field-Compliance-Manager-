@@ -31,6 +31,11 @@
 .timesheets-filters .filter-field { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#8fa3b8; }
 .timesheets-filters .filter-field select,
 .timesheets-filters .filter-field input { padding:6px 8px; border-radius:4px; border:1px solid #2a3b4d; background:#111d2c; color:#e7eef5; font-size:13px; }
+.shift-hours-totals { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4); margin:0 0 0 auto; padding:var(--space-2) var(--space-3); border:1px solid var(--color-border); border-radius:var(--radius-sm); background:var(--color-bg-surface); }
+.shift-hours-totals div { display:flex; flex-direction:column; gap:2px; }
+.shift-hours-totals dt { color:var(--color-text-muted); font-size:var(--font-size-label); }
+.shift-hours-totals dd { margin:0; color:var(--color-text-primary); font-size:var(--font-size-body); font-weight:700; font-variant-numeric:tabular-nums; }
+.shift-hours-totals dd small { display:block; color:var(--color-text-secondary); font-size:var(--font-size-label); font-weight:400; }
 
 .timesheets-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:48px 20px; color:#8fa3b8; text-align:center; }
 .timesheets-empty strong { color:#e7eef5; font-size:15px; }
@@ -93,6 +98,7 @@
   .timesheets-toolbar { flex-wrap:wrap; padding:12px 14px; }
   .timesheets-section { padding:12px 14px; }
   .timesheets-filters { flex-direction:column; align-items:stretch; }
+  .shift-hours-totals { margin-left:0; }
   .timesheets-filters .search-field input { width:100%; }
   .timesheet-dialog { width:calc(100vw - 24px); max-height:calc(100vh - 24px); }
   .timesheet-dialog .form-row { flex-direction:column; }
