@@ -828,6 +828,53 @@ describe('BobPanel', () => {
     expect(within(tray).queryByText('submitted.txt')).toBeNull();
   });
 
+  it('keeps the thread on the latest reply after a queued turn completes', async () => {
+    const scrollPositions = new WeakMap<Element, number>();
+    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const topDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) { return this.querySelectorAll('article').length * 100; },
+    });
+    Object.defineProperty(Element.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: Element) { return scrollPositions.get(this) ?? 0; },
+      set(this: Element, value: number) { scrollPositions.set(this, value); },
+    });
+    try {
+      let finishStatus!: (result: { data: { turn_run: Record<string, unknown> }; error: null }) => void;
+      const statusResult = new Promise<{ data: { turn_run: Record<string, unknown> }; error: null }>(resolve => { finishStatus = resolve; });
+      let requestId = '';
+      mockInvoke.mockImplementation(async (name: string, options?: { body?: Record<string, unknown> }) => {
+        if (name !== 'onspace-ai-chat') return { data: null, error: null };
+        requestId = String(options?.body?.request_id);
+        if (options?.body?.operation === 'status') return statusResult;
+        return { data: { turn_run: { request_id: requestId, status: 'queued', started_at: '2026-11-10T00:00:00.000Z' } }, error: null };
+      });
+
+      const { container } = render(<BobPanel open onClose={() => undefined} />);
+      fireEvent.change(await screen.findByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Summarise the night shift.' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(requestId).not.toBe(''));
+
+      messageHistory = [
+        { id: 'question', role: 'user', content: 'Summarise the night shift.', confidence: null, flagged: false, created_at: '2026-11-10T00:00:00.000Z', metadata: {} },
+        { id: 'answer', role: 'assistant', content: 'Night shift summary ready.', confidence: null, flagged: false, created_at: '2026-11-10T00:00:01.000Z', metadata: {} },
+      ];
+      finishStatus({ data: { turn_run: { request_id: requestId, status: 'completed', started_at: '2026-11-10T00:00:00.000Z' } }, error: null });
+
+      await screen.findByText('Night shift summary ready.');
+      const stream = container.ownerDocument.querySelector('.bob-message-stream') as HTMLElement;
+      await waitFor(() => expect(stream.scrollTop).toBe(stream.scrollHeight));
+      expect(stream.scrollHeight).toBeGreaterThan(0);
+    } finally {
+      if (heightDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', heightDescriptor);
+      else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      if (topDescriptor) Object.defineProperty(Element.prototype, 'scrollTop', topDescriptor);
+      else delete (Element.prototype as { scrollTop?: number }).scrollTop;
+    }
+  });
+
   it('remembers submitted attachments when the current running conversation is reopened', async () => {
     setViewport(1400);
     conversationList = [{ id: 'conversation-1', title: 'Review reports', human_reference: 'BOB-1' }];
