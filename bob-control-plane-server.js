@@ -21,6 +21,7 @@ const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, mode
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
+const { finaliseOrphanedModelRuns } = require('./builder-model-run-reaper');
 const { planRoutineIntake, routinePacketAutomationStatus, routineRepairBrief, routineRepairStillDriven, routineSignature } = require('./builder-routine-intake');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
@@ -1509,6 +1510,12 @@ async function autopilotOnce() {
     await startRoutineRepairs();
     await reconcileInvalidSelfHealDeployments();
     await reconcileStaleBuilderJobs();
+    try {
+      const { finalised } = await finaliseOrphanedModelRuns({ supabase: builderSupabase, staleAfterMs: staleBuilderRunMs, isExecuting: jobId => runningBuilderJobs.has(jobId) });
+      if (finalised.length) record('autopilot', 'builder.model_run.orphans_finalised', 'builder', { count: finalised.length, run_ids: finalised, stale_after_ms: staleBuilderRunMs });
+    } catch (error) {
+      record('autopilot', 'builder.model_run.orphan_sweep_failed', 'builder', { error: String(error.message || error).slice(0, 300) });
+    }
     try {
       await retireOldBuilderWorkspaces();
     } catch (error) {
