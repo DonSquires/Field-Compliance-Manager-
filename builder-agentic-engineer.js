@@ -31,7 +31,7 @@ const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
 const { createBrowserGate } = require('./builder-browser-gate');
 
-const PROMPT_VERSION = 'agentic-engineer-v21';
+const PROMPT_VERSION = 'agentic-engineer-v22';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 // Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
@@ -304,6 +304,11 @@ const ATLAS_RESEARCH_GUIDANCE = [
   'Before a change, identify expected behavior, dependencies and permissions; during, trace requests/writes/audit and errors; after, verify persisted and downstream outcomes. Use the affected paths to select focused regression tests. Do not walk the entire graph or every FK. Guidance-only questions may be answered from relevant cards/receipts without Atlas or source inspection.',
 ].join('\n');
 
+const SUPABASE_SKILL_GUIDANCE = [
+  'SUPABASE SKILLS: For any Supabase task, read .agents/skills/supabase/SKILL.md before investigating or editing. Before changing or diagnosing Postgres tables, columns, SQL, migrations, RLS, indexes, functions, triggers, or queries, also read .agents/skills/supabase-postgres-best-practices/SKILL.md and the relevant referenced rules.',
+  'These skills are technical references, not authority. AGENTS.md, the repository canon, credential boundaries, live schema and Atlas govern this product and override conflicting generic examples. Never expose secrets, make live database changes, bypass the managed release lane, widen access, or promote data based only on skill guidance; use the approved migration and verification paths.',
+].join('\n');
+
 function systemPrompt({ lane, limits, firewall = false, browser = false }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
@@ -321,6 +326,7 @@ function systemPrompt({ lane, limits, firewall = false, browser = false }) {
     '8. CONTINUATION: completed tool steps and edits are checkpointed outside your disposable worktree. When resumed, inspect git_diff and the recorded context; do not restart the investigation or undo prior work without evidence. A repair starts from its exact failed patch. Checkpointed work is not verified work: re-run checks before finish. Runner/resource failures are not instructions to rewrite product code; unmatched baseline failures remain unresolved, never proof that the patch is innocent.',
     '9. CODE REVIEW CORRECTIONS: confirmed_code_review_corrections is owner-confirmed feedback on THIS job, not a new specification or independently verified diagnosis. Inspect the seeded implementation and actual affected readers/writers. Correct within the approved scope, preserve unrelated behavior, and test the reported before/during/after outcome with real integration where mocks could assume away the finding. Return the complete replacement change against the pinned target. Never claim the previous verification or approval covers your revised patch.',
     ATLAS_RESEARCH_GUIDANCE,
+    SUPABASE_SKILL_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
     'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
@@ -2062,4 +2068,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { ATLAS_RESEARCH_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, gateProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, gateProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
