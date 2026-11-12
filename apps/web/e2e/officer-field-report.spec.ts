@@ -65,6 +65,22 @@ test('an unconfirmed report receipt preserves evidence for retry', async ({ page
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
+test('officer can submit a health and safety report', async ({ page }) => {
+  test.setTimeout(60_000);
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer/report');
+  await expect(page.getByRole('heading', { name: 'Field report', exact: true })).toBeVisible();
+  await page.getByLabel('Report type').selectOption('health_safety');
+  await page.getByLabel('Title').fill('Unsafe access lighting');
+  await page.getByLabel('Description').fill('Lighting failed during the evening patrol and reduced visibility at the controlled entrance.');
+  await page.getByLabel('Immediate action taken').fill('Used the alternate entrance and notified the supervisor.');
+  const submit = page.getByRole('button', { name: 'Submit report' });
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(page.getByText(/Report confirmed · receipt/)).toBeVisible();
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
 test('review notification opens the exact report with the supervisor outcome', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page, '/officer/report?report=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');

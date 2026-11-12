@@ -14,7 +14,7 @@ const { lookup } = require('node:dns/promises');
 const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
-const { humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
+const { humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
@@ -130,7 +130,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text. apply_patch accepts a git unified diff or a "*** Begin Patch" / "*** Update File: <path>" envelope.',
     '- generate_visual_baselines {paths, reason}  1-6 exact existing Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/, only after a visual assertion reports a mismatch on an intentionally changed spec. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     '- human_test {reason, rerun?}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Complete evidence for unchanged UI files is reused; set rerun: true only when the owner requests a fresh walk or the test environment changed. Returns passed/failed/skipped, failing tests, findings and an evidence directory. Not a live tenant test or merge approval.',
-    '- browser_test {specs: ["e2e/example.spec.ts"], revision: "worktree"|"base", reason} runs 1-6 exact existing Playwright specs offline in the same isolated browser worker. Use revision "base" to reproduce on the pinned base without changing the branch, then "worktree" to test a repair. This targeted check never replaces the full human_test or fresh publication verification.',
+    '- browser_test {specs: ["e2e/example.spec.ts"], revision: "worktree"|"base", reason} runs 1-6 existing Playwright specs offline; paths may be e2e/... or apps/web/e2e/... and are normalized to the exact workspace spec. Use revision "base" to reproduce on the pinned base without changing the branch, then "worktree" to test a repair. This targeted check never replaces the full human_test or fresh publication verification.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
@@ -1310,8 +1310,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const revision = args?.revision;
     const requestedSpecs = Array.isArray(args?.specs) ? args.specs : [];
     const validRevision = ['worktree', 'base'].includes(revision);
-    const validRequest = validRevision && requestedSpecs.length > 0 && requestedSpecs.length <= 6 && requestedSpecs.every(isBrowserSpecPath);
-    const key = validRequest ? browserVerificationKey(requestedSpecs) : INVALID_BROWSER_KEY;
+    const normalizedSpecs = requestedSpecs.map(normalizeBrowserSpecPath);
+    const validRequest = validRevision && requestedSpecs.length > 0 && requestedSpecs.length <= 6 && normalizedSpecs.every(Boolean);
+    const canonicalSpecs = normalizedSpecs.filter(Boolean);
+    const key = validRequest ? browserVerificationKey(canonicalSpecs) : INVALID_BROWSER_KEY;
     let checked;
     try {
       if (!validRevision) throw new Error('Choose browser_test revision "worktree" or "base".');
@@ -1319,7 +1321,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       const changedFiles = changedVsBase();
       const fingerprint = revision === 'base' ? baseSha : uiFingerprint(humanTestInputFiles(changedFiles));
       const execute = async target => {
-        const specs = validateBrowserSpecs(target, args.specs);
+        const specs = validateBrowserSpecs(target, validRequest ? canonicalSpecs : requestedSpecs);
         await store.post(session.id, {
           role: 'system', kind: 'status',
           content: `Running ${specs.length} targeted browser spec(s) on the ${revision === 'base' ? 'pinned base' : 'current worktree'} using offline fixtures.`,

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
+const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
 const { dockerArguments, workerCommand, workerNetwork } = require('../worker-executor');
 
 const attachment = findings => ({ name: 'human-test-report.json', contentType: 'application/json', body: Buffer.from(JSON.stringify({ findings })).toString('base64') });
@@ -108,7 +108,7 @@ test('runs the vibe-human-qa worker offline and maps its report back to the host
   assert.equal(path.dirname(result.evidence_directory), path.join(path.dirname(ws), '.human-test-runs'));
 });
 
-test('targeted Playwright specs use the same offline worker and do not claim a full walk', async t => {
+test('targeted Playwright specs accept repo-root paths and use the same offline worker', async t => {
   const ws = workspace();
   t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
   const spec = 'e2e/greeting.spec.ts';
@@ -121,7 +121,7 @@ test('targeted Playwright specs use the same offline worker and do not claim a f
     }));
     return { status: 'succeeded' };
   };
-  const result = await runVibeHumanTest({ workspacePath: ws, specs: [spec], reason: 'targeted check', image: 'img', execute });
+  const result = await runVibeHumanTest({ workspacePath: ws, specs: [`apps/web/${spec}`], reason: 'targeted check', image: 'img', execute });
   assert.equal(result.ok, true);
   assert.equal(result.complete, true);
   assert.equal(result.scope, 'targeted');
@@ -130,6 +130,25 @@ test('targeted Playwright specs use the same offline worker and do not claim a f
   assert.deepEqual(request.environment, { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' });
   assert.equal(fs.readFileSync(path.join(request.artifactDir, 'specs.txt'), 'utf8'), `${spec}\n`);
   assert.match(result.note, /does not replace the full human walk/);
+});
+
+test('Builder targeted Playwright specs accept repo-root paths and normalize them for the worker', async t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  const spec = 'e2e/greeting.spec.ts';
+  fs.writeFileSync(path.join(ws, 'apps/web', spec), '');
+  let request;
+  const execute = async options => {
+    request = options;
+    fs.writeFileSync(path.join(options.artifactDir, 'results.json'), JSON.stringify({
+      errors: [], suites: [{ specs: [{ file: 'greeting.spec.ts', title: 'greeting', tests: [{ status: 'expected', results: [{}] }] }] }],
+    }));
+    return { status: 'succeeded' };
+  };
+  const result = await runBrowserSpecs({ workspacePath: ws, specs: [`apps/web/${spec}`], reason: 'Builder targeted check', image: 'img', execute });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.specs, [spec]);
+  assert.equal(fs.readFileSync(path.join(request.artifactDir, 'specs.txt'), 'utf8'), `${spec}\n`);
 });
 
 test('targeted browser paths must be existing, regular, bounded spec files', async t => {
