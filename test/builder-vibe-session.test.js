@@ -2949,3 +2949,339 @@ test('Vibe external tiers are configuration: owner-approved providers append aft
   assert.equal(vibe.applyVibeRouting({}, { allowCloud: true }).routing_reason, 'private_first_owner_approved_ollama_cloud');
   assert.deepEqual(vibe.applyVibeRouting({}, { allowCloud: false, externals: ['anthropic'] }).chain, ['gpu_workstation', 'ollama']);
 });
+
+// Live-repo truth: a session follows current main and never reuses a finished pull request.
+function commitOnMain(repo, file, content, message) {
+  fs.mkdirSync(path.dirname(path.join(repo.dir, file)), { recursive: true });
+  fs.writeFileSync(path.join(repo.dir, file), content);
+  git(repo.dir, ['add', '-A']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', message]);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
+function rebaseMergeVibeBranch(repo, baseSha) {
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'cherry-pick', `${baseSha}..bob/vibe-1a2b3c4d`]);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
+test('a turn starts from current main: the pinned base moves forward before Bob works', async t => {
+  verifiedFixtureIdentity(t);
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+    { tool: 'reply', args: { message: 'looked' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  const firstBase = store.state.session.base_sha;
+  commitOnMain(repo, 'apps/web/src/landed.ts', 'export const landed = true;\n', 'other work landed on main');
+  await vibe.processVibeMessage({ store, message: ownerMessage('look again'), deps });
+  const ws = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  assert.notEqual(firstBase, repo.sha);
+  assert.equal(store.state.session.base_sha, repo.sha);
+  assert.ok(fs.existsSync(path.join(ws, 'apps/web/src/landed.ts')), 'the workspace sees work merged to main after the session started');
+  assert.ok(fs.existsSync(path.join(ws, 'apps/web/src/one.ts')), 'the session keeps its own unshipped change');
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/one.ts']);
+  assert.ok(store.state.rows.some(row => row.kind === 'status' && /Brought the branch up to date with main/.test(row.content)));
+});
+
+test('a sync conflict on a turn warns and keeps working on the earlier base without losing work', async t => {
+  verifiedFixtureIdentity(t);
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"mine"' } },
+    { tool: 'reply', args: { message: 'mine' } },
+    { tool: 'reply', args: { message: 'looked' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('edit'), deps });
+  const base = store.state.session.base_sha;
+  const head = store.state.session.head_sha;
+  commitOnMain(repo, 'apps/web/src/hello.ts', 'export const hello = "theirs";\n', 'conflicting main change');
+  await vibe.processVibeMessage({ store, message: ownerMessage('look again'), deps });
+  const ws = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  assert.equal(store.state.session.base_sha, base);
+  assert.equal(git(ws, ['rev-parse', 'HEAD']), head);
+  assert.equal(git(ws, ['status', '--porcelain']), '', 'no rebase is left half-applied');
+  assert.ok(store.state.rows.some(row => row.kind === 'error' && /conflicts with main.*apps\/web\/src\/hello\.ts/s.test(row.content)));
+});
+
+test('ship refuses when the existing pull request state cannot be read', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/7', number: 7 }),
+    readPullRequest: async () => ({ state: 'unknown' }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  Object.assign(store.state.session, { pr_url: 'https://github.com/o/r/pull/7', pr_number: 7, status: 'shipped' });
+  const refused = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(refused.error, true);
+  assert.match(refused.reply, /could not confirm the state of pull request #7/);
+  assert.equal(published.length, 0);
+});
+
+test('ship pushes to an open pull request after bringing the branch up to date with main', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const opened = [];
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async args => { opened.push(args); return { url: 'https://github.com/o/r/pull/7', number: 7 }; },
+    readPullRequest: async () => ({ state: 'open', headSha: published.at(-1)?.head }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  const firstHead = published[0].head;
+  commitOnMain(repo, 'apps/web/src/landed.ts', 'export const landed = true;\n', 'other work landed on main');
+  const again = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(again.error, undefined, again.reply);
+  assert.equal(opened.length, 1, 'an open pull request is reused');
+  assert.equal(published.length, 2);
+  assert.equal(published[1].replaceOwnHistory, true, 'a rebased branch may replace only tips this workspace produced');
+  assert.notEqual(published[1].head, firstHead);
+  assert.equal(git(repo.dir, ['rev-parse', `${published[1].head}^`]), repo.sha);
+  assert.equal(store.state.session.base_sha, repo.sha);
+  assert.match(again.reply, /Pushed the latest changes to pull request/);
+});
+
+test('ship never pushes onto a merged pull request: it rebases onto main and opens a new one', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const opened = [];
+  const prs = {};
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+    { tool: 'write_file', args: { path: 'apps/web/src/two.ts', content: 'export const two = 2;\n' } },
+    { tool: 'reply', args: { message: 'two' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async args => { const number = 7 + opened.length; opened.push(args); prs[number] = { state: 'open', headSha: args.head }; return { url: `https://github.com/o/r/pull/${number}`, number }; },
+    readPullRequest: async ({ url }) => prs[Number(url.split('/').pop())] || { state: 'unknown' },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  rebaseMergeVibeBranch(repo, store.state.session.base_sha);
+  prs[7] = { state: 'merged', headSha: published[0].head };
+  await vibe.processVibeMessage({ store, message: ownerMessage('add two'), deps });
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined, shipped.reply);
+  assert.equal(opened.length, 2, 'a merged pull request is never reused');
+  assert.match(shipped.reply, /pull request #7 was already merged/i);
+  assert.match(shipped.reply, /pull\/8/);
+  assert.equal(store.state.session.pr_number, 8);
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/two.ts'], 'work already on main is not shipped again');
+  assert.equal(git(repo.dir, ['rev-parse', `${published[1].head}^`]), repo.sha);
+});
+
+test('ship with nothing left after the merged pull request closes the session as complete', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const prs = {};
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async args => { prs[7] = { state: 'open', headSha: args.head }; return { url: 'https://github.com/o/r/pull/7', number: 7 }; },
+    readPullRequest: async ({ url }) => prs[Number(url.split('/').pop())] || { state: 'unknown' },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  rebaseMergeVibeBranch(repo, store.state.session.base_sha);
+  prs[7] = { state: 'merged', headSha: published[0].head };
+  const done = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(published.length, 1, 'nothing is pushed');
+  assert.match(done.reply, /already on main/);
+  assert.equal(store.state.session.status, 'closed');
+  assert.ok(store.state.rows.some(row => row.role === 'bob' && /already on main/.test(row.content)), 'the completion reply is posted');
+});
+
+test('ship refuses when the branch conflicts with current main and pushes nothing', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"mine"' } },
+    { tool: 'reply', args: { message: 'mine' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/7', number: 7 }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('edit'), deps });
+  const head = store.state.session.head_sha;
+  commitOnMain(repo, 'apps/web/src/hello.ts', 'export const hello = "theirs";\n', 'conflicting main change');
+  const refused = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(refused.error, true);
+  assert.match(refused.reply, /conflicts with main.*apps\/web\/src\/hello\.ts/s);
+  assert.equal(published.length, 0);
+  assert.equal(git(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), ['rev-parse', 'HEAD']), head);
+});
+
+function reconcileStore(sessions) {
+  const state = { sessions: sessions.map(session => ({ ...session })), rows: [] };
+  return {
+    state,
+    async shippedSessions() { return state.sessions.filter(session => session.status === 'shipped').map(session => ({ ...session })); },
+    async updateSession(id, patch, { onlyIfStatus } = {}) {
+      const session = state.sessions.find(entry => entry.id === id);
+      if (!session || (onlyIfStatus && session.status !== onlyIfStatus)) return false;
+      Object.assign(session, patch);
+      return true;
+    },
+    async post(id, row) { state.rows.push({ session_id: id, ...row }); },
+  };
+}
+
+test('reconcile closes a shipped session whose pull request merged and reopens stranded or closed work', async t => {
+  const { repo, workspaceRoot } = setup([]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const ids = ['aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002', 'cccccccc-0000-4000-8000-000000000003', 'dddddddd-0000-4000-8000-000000000004'];
+  const heads = {};
+  for (const [index, id] of ids.entries()) {
+    const ws = vibe.ensureVibeWorkspace({ workspaceRoot, session: { id, base_sha: null }, sourceDirFor: () => repo.dir, resolveHead: () => repo.sha });
+    fs.writeFileSync(path.join(ws.workspacePath, `file-${index}.txt`), `${index}\n`);
+    git(ws.workspacePath, ['add', '-A']);
+    git(ws.workspacePath, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', `work ${index}`]);
+    heads[id] = git(ws.workspacePath, ['rev-parse', 'HEAD']);
+  }
+  const baseSha = repo.sha;
+  // Session 1 merged exactly; session 2 merged, then got a later commit that never reached main.
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'cherry-pick', heads[ids[0]], heads[ids[1]]]);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+  const prHead2 = heads[ids[1]];
+  const ws2 = vibe.vibeWorkspacePath(workspaceRoot, ids[1]);
+  fs.writeFileSync(path.join(ws2, 'late.txt'), 'late\n');
+  git(ws2, ['add', '-A']);
+  git(ws2, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'late work after merge']);
+  heads[ids[1]] = git(ws2, ['rev-parse', 'HEAD']);
+  const store = reconcileStore(ids.map((id, index) => ({
+    id, human_reference: `VB-${index + 1}`, status: 'shipped', base_sha: baseSha, head_sha: heads[id],
+    pr_url: `https://github.com/o/r/pull/${index + 1}`, pr_number: index + 1,
+  })));
+  const states = {
+    1: { state: 'merged', headSha: heads[ids[0]] },
+    2: { state: 'merged', headSha: prHead2 },
+    3: { state: 'closed' },
+    4: { state: 'open', headSha: heads[ids[3]] },
+  };
+  const result = await vibe.reconcileShippedSessions({
+    store, workspaceRoot, sourceDirFor: () => repo.dir, resolveHead: () => repo.sha,
+    readPullRequest: async ({ url }) => states[Number(url.split('/').pop())],
+  });
+  const byId = Object.fromEntries(store.state.sessions.map(session => [session.id, session]));
+  assert.equal(byId[ids[0]].status, 'closed');
+  assert.equal(byId[ids[1]].status, 'open');
+  assert.equal(byId[ids[1]].pr_url, null);
+  assert.equal(byId[ids[2]].status, 'open');
+  assert.equal(byId[ids[2]].pr_url, null);
+  assert.equal(byId[ids[3]].status, 'shipped');
+  assert.deepEqual(result, { checked: 4, closed: 1, reopened: 2 });
+  const posted = id => store.state.rows.filter(row => row.session_id === id).map(row => row.content).join('\n');
+  assert.match(posted(ids[0]), /#1 was merged into main.*complete/s);
+  assert.match(posted(ids[1]), /#2 was merged.*1 later commit.*not on main/s);
+  assert.match(posted(ids[2]), /#3 was closed without merging/);
+  assert.equal(posted(ids[3]), '');
+});
+
+function squashMergeVibeBranch(repo, workspacePath, files) {
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(repo.dir, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo.dir, file), fs.readFileSync(path.join(workspacePath, file)));
+  }
+  git(repo.dir, ['add', '-A']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'Squashed vibe work (#7)']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
+test('after a squash merge, later work replays only the commits made after the merged head', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const opened = [];
+  const prs = {};
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"blue"' } },
+    { tool: 'reply', args: { message: 'blue' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"blue"', new_text: '"green"' } },
+    { tool: 'reply', args: { message: 'green' } },
+    { tool: 'write_file', args: { path: 'apps/web/src/two.ts', content: 'export const two = 2;\n' } },
+    { tool: 'reply', args: { message: 'two' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async args => { const number = 7 + opened.length; opened.push(args); prs[number] = { state: 'open', headSha: args.head }; return { url: `https://github.com/o/r/pull/${number}`, number }; },
+    readPullRequest: async ({ url }) => prs[Number(url.split('/').pop())] || { state: 'unknown' },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('make it blue'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('no, green'), deps });
+  await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  const ws = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  squashMergeVibeBranch(repo, ws, ['apps/web/src/hello.ts']);
+  prs[7] = { state: 'merged', headSha: published[0].head };
+  await vibe.processVibeMessage({ store, message: ownerMessage('add two'), deps });
+  assert.ok(!store.state.rows.some(row => row.kind === 'error' && /conflicts with main/.test(row.content)), 'squashed work is not replayed onto main');
+  assert.equal(store.state.session.base_sha, repo.sha);
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined, shipped.reply);
+  assert.equal(opened.length, 2);
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/two.ts']);
+  assert.equal(git(repo.dir, ['rev-parse', `${published[1].head}^`]), repo.sha);
+});
+
+test('a failed ship after clearing a finished pull request leaves the session open, not shipped without a PR', async t => {
+  verifiedFixtureIdentity(t);
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/src/one.ts', content: 'export const one = 1;\n' } },
+    { tool: 'reply', args: { message: 'one' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async () => { throw new Error('push refused'); },
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/8', number: 8 }),
+    readPullRequest: async () => ({ state: 'closed', headSha: null }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('add one'), deps });
+  Object.assign(store.state.session, { pr_url: 'https://github.com/o/r/pull/7', pr_number: 7, status: 'shipped' });
+  await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(store.state.session.pr_url, null);
+  assert.equal(store.state.session.status, 'open');
+});
+
+test('reconcile counts only commits made after a squash-merged pull request head', async t => {
+  const { repo, workspaceRoot } = setup([]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const id = 'eeeeeeee-0000-4000-8000-000000000005';
+  const ws = vibe.ensureVibeWorkspace({ workspaceRoot, session: { id, base_sha: null }, sourceDirFor: () => repo.dir, resolveHead: () => repo.sha });
+  const commit = (file, content, message) => {
+    fs.writeFileSync(path.join(ws.workspacePath, file), content);
+    git(ws.workspacePath, ['add', '-A']);
+    git(ws.workspacePath, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', message]);
+    return git(ws.workspacePath, ['rev-parse', 'HEAD']);
+  };
+  const baseSha = repo.sha;
+  commit('colour.txt', 'blue\n', 'blue');
+  const prHead = commit('colour.txt', 'green\n', 'green');
+  squashMergeVibeBranch(repo, ws.workspacePath, ['colour.txt']);
+  const head = commit('late.txt', 'late\n', 'late work');
+  const store = reconcileStore([{ id, human_reference: 'VB-5', status: 'shipped', base_sha: baseSha, head_sha: head, pr_url: 'https://github.com/o/r/pull/7', pr_number: 7 }]);
+  await vibe.reconcileShippedSessions({ store, workspaceRoot, sourceDirFor: () => repo.dir, resolveHead: () => repo.sha, readPullRequest: async () => ({ state: 'merged', headSha: prHead }) });
+  assert.equal(store.state.sessions[0].status, 'open');
+  assert.match(store.state.rows.map(row => row.content).join('\n'), /#7 was merged, but 1 later commit/);
+});

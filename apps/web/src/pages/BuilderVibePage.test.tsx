@@ -139,6 +139,21 @@ it('shows the stored Vibe reference in the session list and selected session', a
   expect(screen.getByText('Reference: VB-105')).toBeTruthy();
 });
 
+it('links a shipped session to the GitHub Actions runs for its own branch', async () => {
+  wireRealtime();
+  rpc.mockResolvedValue({ data: true, error: null });
+  const prUrl = 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/421';
+  const active = { ...session('s', 'Shipped session'), branch: 'bob/vibe-8effb979', pr_url: prUrl };
+  const shipped = { ...message('m1', 1, 'bob', 'message', 'Opened the pull request'), payload: { pr_url: prUrl } };
+  from.mockImplementation((table: string) => pagedQuery(table === 'builder_vibe_sessions' ? [active] : [shipped]));
+
+  render(<BuilderVibePage />);
+  await screen.findByText('Opened the pull request');
+  const actions = 'https://github.com/DonSquires/Field-Compliance-Manager-/actions?query=branch%3Abob%2Fvibe-8effb979';
+  expect(screen.getByRole('link', { name: 'Checks' }).getAttribute('href')).toBe(actions);
+  expect(screen.getByRole('link', { name: 'GitHub Actions checks' }).getAttribute('href')).toBe(actions);
+});
+
 it('saves an edited Vibe session name without changing its reference', async () => {
   wireRealtime();
   const active = { ...session('s', 'Original session'), created_by: 'owner-id', human_reference: 'VB-105' };

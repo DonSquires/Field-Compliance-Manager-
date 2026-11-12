@@ -241,24 +241,43 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, body =
   }
 }
 
-function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null, requireVerifiedIdentity = false }) {
+// A rebased branch may replace the remote tip only when this workspace's own branch history once
+// held that tip. Anything another actor pushed is never overwritten.
+function leaseForOwnHistory({ workspacePath, branchName, head, remoteArgs, transport }) {
+  const remoteSha = (git(workspacePath, [...remoteArgs.auth, 'ls-remote', remoteArgs.remote, `refs/heads/${branchName}`], transport).split(/\s+/)[0] || '');
+  if (!remoteSha || remoteSha === head) return [];
+  try {
+    git(workspacePath, ['merge-base', '--is-ancestor', remoteSha, head]);
+    return [];
+  } catch { /* not a fast-forward: only a tip this workspace produced may be replaced */ }
+  const own = new Set(git(workspacePath, ['reflog', 'show', '--format=%H', `refs/heads/${branchName}`]).split('\n').filter(Boolean));
+  if (!own.has(remoteSha)) throw new Error(`Remote branch ${branchName} is at ${remoteSha.slice(0, 10)}, which this workspace did not produce; refusing to overwrite it`);
+  return [`--force-with-lease=refs/heads/${branchName}:${remoteSha}`];
+}
+
+function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null, requireVerifiedIdentity = false, replaceOwnHistory = false }) {
   if (!isPublishableBranch(branchName) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before publication');
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
   if (requireVerifiedIdentity) assertVerifiedCommitIdentity(workspacePath, head);
+  let remote;
+  let auth = [];
   if (pushUrl) {
     // Credentials travel per invocation, never inside the remote URL or .git/config.
     const credentialFreeHttp = /^https?:\/\/[^\s@]+$/.test(String(pushUrl));
     const credentialFreeGithubSsh = /^git@github\.com:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(String(pushUrl));
     if (!credentialFreeHttp && !credentialFreeGithubSsh) throw new Error('Builder push URL must be a credential-free URL');
-    git(workspacePath, [...(pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : []), 'push', pushUrl, `HEAD:refs/heads/${branchName}`], sshOptions(sshCommand));
-    return { branchName, head, remote: pushUrl };
+    remote = pushUrl;
+    auth = pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : [];
+  } else {
+    if (!git(workspacePath, ['remote', 'get-url', 'origin'])) throw new Error('Builder workspace has no origin remote');
+    remote = 'origin';
   }
-  const remote = git(workspacePath, ['remote', 'get-url', 'origin']);
-  if (!remote) throw new Error('Builder workspace has no origin remote');
-  git(workspacePath, ['push', 'origin', `HEAD:refs/heads/${branchName}`], sshOptions(sshCommand));
-  return { branchName, head, remote };
+  const transport = sshOptions(sshCommand);
+  const lease = replaceOwnHistory ? leaseForOwnHistory({ workspacePath, branchName, head, remoteArgs: { remote, auth }, transport }) : [];
+  git(workspacePath, [...auth, 'push', ...lease, remote, `HEAD:refs/heads/${branchName}`], transport);
+  return { branchName, head, remote: pushUrl || git(workspacePath, ['remote', 'get-url', 'origin']) };
 }
 
 // ── GitHub host adapter ───────────────────────────────────────────────────────
@@ -341,8 +360,8 @@ async function readGitHubPullRequestState({ url, githubToken, owner, repo, fetch
   if (data.merged === true || data.merged_at) {
     return { state: 'merged', mergeSha: data.merge_commit_sha ?? null, mergedAt: data.merged_at ?? null, mergedBy: data.merged_by?.login ?? null, headSha: data.head?.sha ?? null, baseRef: data.base?.ref ?? null };
   }
-  if (data.state === 'closed') return { state: 'closed', closedAt: data.closed_at ?? null };
-  return { state: 'open', draft: data.draft === true };
+  if (data.state === 'closed') return { state: 'closed', closedAt: data.closed_at ?? null, headSha: data.head?.sha ?? null };
+  return { state: 'open', draft: data.draft === true, headSha: data.head?.sha ?? null };
 }
 
 async function githubGraphql({ fetchImpl, githubToken, query, variables }) {

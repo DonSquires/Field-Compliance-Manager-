@@ -434,8 +434,8 @@ test('Bob refuses a changed-head, closed, or non-main GitHub pull request', asyn
 test('readGitHubPullRequestState reports merged, closed and open PRs only for the configured repository', async () => {
   const pulls = {
     1: { merged: true, merged_at: '2026-10-25T02:40:00Z', merge_commit_sha: 'c'.repeat(40), merged_by: { login: 'DonSquires' }, head: { sha: 'd'.repeat(40) }, base: { ref: 'main' }, state: 'closed' },
-    2: { merged: false, merged_at: null, state: 'closed', closed_at: '2026-10-24T00:00:00Z' },
-    3: { merged: false, state: 'open', draft: true },
+    2: { merged: false, merged_at: null, state: 'closed', closed_at: '2026-10-24T00:00:00Z', head: { sha: 'e'.repeat(40) } },
+    3: { merged: false, state: 'open', draft: true, head: { sha: 'f'.repeat(40) } },
   };
   const requested = [];
   const fetchImpl = async (url) => {
@@ -445,11 +445,54 @@ test('readGitHubPullRequestState reports merged, closed and open PRs only for th
   };
   const read = (url) => readGitHubPullRequestState({ url, githubToken: 'token', owner: 'Owner', repo: 'repo', fetchImpl });
   assert.deepEqual(await read('https://github.com/owner/repo/pull/1'), { state: 'merged', mergeSha: 'c'.repeat(40), mergedAt: '2026-10-25T02:40:00Z', mergedBy: 'DonSquires', headSha: 'd'.repeat(40), baseRef: 'main' });
-  assert.deepEqual(await read('https://github.com/owner/repo/pull/2'), { state: 'closed', closedAt: '2026-10-24T00:00:00Z' });
-  assert.deepEqual(await read('https://github.com/owner/repo/pull/3'), { state: 'open', draft: true });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/2'), { state: 'closed', closedAt: '2026-10-24T00:00:00Z', headSha: 'e'.repeat(40) });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/3'), { state: 'open', draft: true, headSha: 'f'.repeat(40) });
   assert.equal((await read('https://github.com/owner/repo/pull/4')).state, 'unknown');
   assert.equal((await read('https://github.com/someone/else/pull/1')).state, 'unknown');
   assert.equal((await readGitHubPullRequestState({ url: 'https://github.com/owner/repo/pull/1', githubToken: '', owner: 'owner', repo: 'repo', fetchImpl })).state, 'unknown');
   assert.equal(requested.length, 4, 'foreign or unconfigured PRs are never fetched');
   assert.ok(requested.every(url => url.startsWith('https://api.github.com/repos/Owner/repo/pulls/')));
+});
+
+test('publication may replace only remote branch tips this workspace produced itself', () => {
+  const repo = fixture();
+  const previousName = process.env.BOB_BUILDER_GIT_NAME;
+  const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
+  try {
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
+    const remote = path.join(repo.root, '.remote.git');
+    git(repo.root, ['init', '-q', '--bare', remote]);
+    git(repo.root, ['remote', 'add', 'origin', remote]);
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '42345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
+    const first = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: 'Bob Builder: first', requireVerifiedIdentity: true });
+    publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: first.commitSha, replaceOwnHistory: true });
+    const remoteHead = () => git(repo.root, ['ls-remote', remote, `refs/heads/${workspace.branchName}`]).split(/\s+/)[0];
+    assert.equal(remoteHead(), first.commitSha);
+
+    fs.writeFileSync(path.join(repo.root, 'apps/web/src/main-only.ts'), 'export const mainOnly = true;\n');
+    git(repo.root, ['add', 'apps/web/src/main-only.ts']);
+    git(repo.root, ['commit', '-qm', 'main moved']);
+    const main = git(repo.root, ['rev-parse', 'HEAD']);
+    git(workspace.workspacePath, ['-c', 'user.name=Don Squires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'rebase', '-q', main]);
+    const rebased = git(workspace.workspacePath, ['rev-parse', 'HEAD']);
+    assert.throws(() => publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: rebased }), /rejected|non-fast-forward|failed to push/i);
+    publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: rebased, replaceOwnHistory: true });
+    assert.equal(remoteHead(), rebased);
+
+    git(repo.root, ['commit', '-q', '--allow-empty', '-m', 'someone else pushed this']);
+    const foreign = git(repo.root, ['rev-parse', 'HEAD']);
+    git(repo.root, ['push', '-q', '--force', remote, `${foreign}:refs/heads/${workspace.branchName}`]);
+    assert.throws(
+      () => publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: rebased, replaceOwnHistory: true }),
+      /did not produce/
+    );
+    assert.equal(remoteHead(), foreign, 'a tip this workspace never had is never overwritten');
+  } finally {
+    if (previousName === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
+    else process.env.BOB_BUILDER_GIT_NAME = previousName;
+    if (previousEmail === undefined) delete process.env.BOB_BUILDER_GIT_EMAIL;
+    else process.env.BOB_BUILDER_GIT_EMAIL = previousEmail;
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
 });

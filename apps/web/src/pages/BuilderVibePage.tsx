@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { AlertTriangle, ListChecks, ChevronDown, ChevronRight, ExternalLink, FileDiff, FileText, GitPullRequest, Image as ImageIcon, Loader2, Lock, MonitorPlay, Paperclip, Plus, RefreshCw, Send, Sparkles, SquareTerminal, Undo2, Wrench, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { githubChecksUrl } from '../lib/githubLinks';
 import './BuilderVibePage.css';
 
 export interface VibeSession {
@@ -207,12 +208,13 @@ function StepsBlock({ steps, live, open, onToggle }: { steps: VibeMessage[]; liv
   );
 }
 
-function MessageBlock({ message }: { message: VibeMessage }) {
+function MessageBlock({ message, branch }: { message: VibeMessage; branch?: string | null }) {
   if (message.kind === 'diff') return <DiffBlock message={message} />;
   const owner = message.role === 'owner';
   const system = message.role === 'system';
   const action = typeof message.payload.action === 'string' ? message.payload.action : 'message';
   const prUrl = typeof message.payload.pr_url === 'string' ? message.payload.pr_url : null;
+  const checksUrl = githubChecksUrl(prUrl, branch);
   const attachments = Array.isArray(message.payload.attachments) ? message.payload.attachments as VibeAttachmentSummary[] : [];
   const attachmentContext = Array.isArray(message.payload.attachment_context) ? message.payload.attachment_context as Array<{ file_name?: string; context?: string }> : [];
   return (
@@ -233,6 +235,7 @@ function MessageBlock({ message }: { message: VibeMessage }) {
           {attachmentContext.map((item, index) => <p key={`${item.file_name || 'attachment'}-${index}`}>{item.context}</p>)}
         </details>}
         {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><GitPullRequest size={14} />Open pull request</a>}
+        {checksUrl && <a href={checksUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><ListChecks size={14} />GitHub Actions checks</a>}
         {owner && message.status && message.status !== 'done' && <span className={`vibe-msg__state is-${message.status}`}>{message.status === 'queued' ? 'Waiting for Bob' : message.status === 'claimed' ? 'Bob is on it' : attachmentContext.length ? 'Coding turn stopped after attachment analysis — see Bob’s error below. Continue with a new message; these files remain in session history.' : 'Turn failed — see Bob’s error below.'}</span>}
       </div>
     </div>
@@ -1369,6 +1372,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                 <button type="button" className="vibe-btn" onClick={() => send('revert')} disabled={selected.status === 'closed' || !hasChanges || working || isBusy || attachments.length > 0} title="Undo Bob's last change"><Undo2 size={15} />Undo</button>
                 <button type="button" className="vibe-btn vibe-btn--primary" onClick={() => send('ship')} disabled={selected.status === 'closed' || !hasChanges || working || isBusy || attachments.length > 0}><GitPullRequest size={15} />{selected.pr_url ? 'Update PR' : 'Ship as PR'}</button>
                 {selected.pr_url && <a className="vibe-btn" href={selected.pr_url} target="_blank" rel="noreferrer"><ExternalLink size={15} />PR</a>}
+                {githubChecksUrl(selected.pr_url, selected.branch) && <a className="vibe-btn" href={githubChecksUrl(selected.pr_url, selected.branch) as string} target="_blank" rel="noreferrer" title="GitHub Actions runs for this branch"><ListChecks size={15} />Checks</a>}
                 <button type="button" className="vibe-btn vibe-btn--ghost" onClick={closeSession} aria-label="Close session" disabled={selected.status === 'closed' || attachments.length > 0 || isBusy}><X size={15} /></button>
                 <button type="button" className="vibe-btn vibe-only-mobile" onClick={() => setMobilePane('preview')}><MonitorPlay size={15} />Preview</button>
               </div>
@@ -1386,7 +1390,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                       for (const step of item.steps) open ? next.delete(step.id) : next.add(step.id);
                       return next;
                     })} />
-                : <MessageBlock key={item.message.id} message={item.message} />)}
+                : <MessageBlock key={item.message.id} message={item.message} branch={selected.branch} />)}
               {working && <div className="vibe-working" role="status"><Loader2 size={15} className="vibe-spin" />{STATUS_LABEL[selected.status === 'shipping' ? 'shipping' : 'working']}…</div>}
               <div ref={threadEnd} />
             </div>
