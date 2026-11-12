@@ -300,6 +300,25 @@ test('in-app Bob ranks every configured provider per role unless the role chain 
   assert.deepEqual(status.auto_routing.pinned_roles, ['verifier']);
 });
 
+test('Anthropic OpenAI-compatible requests omit the unsupported temperature parameter', async () => {
+  const requests = [];
+  const gateway = createModelGateway({
+    env: { ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_OPENAI_BASE_URL: 'https://claude.example/v1', ANTHROPIC_MODEL: 'claude-sonnet-5-5', BOB_ROUTE_PLANNER: 'anthropic' },
+    fetchImpl: async (url, init = {}) => {
+      if (url.endsWith('/models')) return { ok: true, status: 200 };
+      requests.push(JSON.parse(init.body));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] }) };
+    },
+    logger: { warn() {} },
+  });
+
+  const result = await gateway.chatJson('planner', [{ role: 'user', content: 'hi' }]);
+
+  assert.equal(result.provider, 'anthropic');
+  assert.equal(Object.hasOwn(requests[0], 'temperature'), false);
+  assert.equal(requests[0].response_format, undefined);
+});
+
 test('the routing migration keeps the tables service-only and seeds every surface', () => {
   const dir = path.join(__dirname, '..', 'supabase', 'migrations');
   const file = fs.readdirSync(dir).find(name => name.endsWith('_bob_model_auto_routing.sql'));
