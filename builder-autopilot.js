@@ -815,23 +815,35 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         // Main has moved past the pinned commit (someone may already have fixed the checks, or the
         // failures were the verifier's): try the same brief once on the current main before anything
         // else. A job that is itself an automatic re-open is not re-opened again.
+        // A refused continuation (for example the requester cannot approve Builder work, live job
+        // BB-182) must stop the job visibly; thrown, it was retried every minute forever.
+        let refused = null;
+        const continueAs = async (spec) => {
+          try { return await actions.createJob(spec); } catch (error) { refused = plain(error instanceof Error ? error.message : error, 300); return null; }
+        };
         if ((baseline || run?.reason === 'attempt_ceiling') && mainMoved && !isRepairJob(job) && !isReopenedJob(job) && job.autopilot_source !== 'main_monitor' && typeof actions.createJob === 'function') {
-          const reopened = await actions.createJob(reopenSpec(job));
-          await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
-          log({ job: job.id, resumed_as: reopened.id, reason: `${baseline ? 'red baseline' : 'attempt ceiling'} at an older commit; main has moved` });
-          outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
-          continue;
+          const reopened = await continueAs(reopenSpec(job));
+          if (reopened) {
+            await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
+            log({ job: job.id, resumed_as: reopened.id, reason: `${baseline ? 'red baseline' : 'attempt ceiling'} at an older commit; main has moved` });
+            outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
+            continue;
+          }
         }
-        if (baseline && !isRepairJob(job) && job.autopilot_source !== 'main_monitor' && typeof actions.createJob === 'function') {
-          const repair = await actions.createJob(repairJobFor(job, baseline));
-          await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
-          log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });
-          outcomes.push({ job: job.id, outcome: 'repairing', repair_job: repair.id });
-          continue;
+        if (!refused && baseline && !isRepairJob(job) && job.autopilot_source !== 'main_monitor' && typeof actions.createJob === 'function') {
+          const repair = await continueAs(repairJobFor(job, baseline));
+          if (repair) {
+            await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
+            log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });
+            outcomes.push({ job: job.id, outcome: 'repairing', repair_job: repair.id });
+            continue;
+          }
         }
-        if (typeof actions.fail === 'function') await actions.fail(job.id, stopReason);
-        await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: stopReason }));
-        outcomes.push({ job: job.id, outcome: 'blocked', reason: stopReason });
+        const finalReason = refused ? `${stopReason}; Bob could not continue it as a new job: ${refused}` : stopReason;
+        if (refused) log({ job: job.id, continuation_refused: refused });
+        if (typeof actions.fail === 'function') await actions.fail(job.id, finalReason);
+        await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: finalReason }));
+        outcomes.push({ job: job.id, outcome: 'blocked', reason: finalReason });
         continue;
       }
       // action_failed on a retryable step is retried on the next tick; the attempt ceiling turns it into a block.
