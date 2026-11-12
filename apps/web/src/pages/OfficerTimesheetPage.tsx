@@ -36,7 +36,13 @@ interface TimesheetWorkEntry {
   date: string;
   description: string;
   calculated_minutes: number;
-  actual_hours: number; // Added missing property
+  actual_hours: number;
+  source_type: string;
+  source_id: string;
+  metadata: Record<string, any>;
+  started_at: string;
+  ended_at: string;
+  label: string;
   // ... other properties
 }
 
