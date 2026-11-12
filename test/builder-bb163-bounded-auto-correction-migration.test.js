@@ -109,7 +109,7 @@ test('BB-163 correction is atomic, bounded, same-job, and preserves step attempt
         ('${step(2)}','${job}','ui_design','completed',2,'design'),
         ('${step(3)}','${job}','frontend_implementation','completed',2,'patch'),
         ('${step(4)}','${job}','backend_implementation','skipped',0,'No backend scope requested'),
-        ('${step(5)}','${job}','test_suite','completed',0,'Whole-job acceptance incomplete: DR-1 missing a changed regression test with a passing worker command.'),
+        ('${step(5)}','${job}','test_suite','completed',0,'Worker verification completed; acceptance receipt is recorded in the autopilot report.'),
         ('${step(6)}','${job}','security_review','completed',1,'Independent security review passed'),
         ('${step(7)}','${job}','code_review','pending',0,NULL),
         ('${step(8)}','${job}','release_prep','pending',0,NULL);
@@ -124,11 +124,14 @@ test('BB-163 correction is atomic, bounded, same-job, and preserves step attempt
 
     const blockers = 'Whole-job acceptance incomplete: DR-1 missing a changed regression test with a passing worker command.';
     fails(`SELECT public.builder_autopilot_begin_bb163_correction('${job}', 'A different Builder failure');`, /acceptance blocker is required/);
+    sql(`UPDATE public.builder_job_steps SET result_summary='${blockers}' WHERE job_id='${job}' AND step_id='test_suite';`);
     sql(`INSERT INTO public.builder_worker_runs(job_id,status) VALUES ('${job}','running');`);
     fails(`SELECT public.builder_autopilot_begin_bb163_correction('${job}', '${blockers}');`, /acceptance gap is not idle/);
     sql(`DELETE FROM public.builder_worker_runs WHERE job_id='${job}'; UPDATE public.builder_jobs SET workspace_published_at=now() WHERE id='${job}';`);
     fails(`SELECT public.builder_autopilot_begin_bb163_correction('${job}', '${blockers}');`, /unpublished BB-163 job/);
-    sql(`UPDATE public.builder_jobs SET workspace_published_at=NULL WHERE id='${job}';`);
+    sql(`UPDATE public.builder_jobs SET workspace_published_at=NULL WHERE id='${job}';
+      UPDATE public.builder_job_steps SET result_summary='Worker verification completed; acceptance receipt is recorded in the autopilot report.'
+      WHERE job_id='${job}' AND step_id='test_suite';`);
     sql(`INSERT INTO public.builder_jobs(id,organization_id,human_reference,status,autopilot_state,autopilot_source,repair_risk,autopilot_report)
       VALUES ('0bb16300-0000-4000-8000-000000000165','${org}','BB-163','security_review','blocked','routine_monitor','routine',
         '{"state":"blocked","text":"Whole-job acceptance incomplete: duplicate"}');`);
@@ -163,7 +166,7 @@ test('BB-163 correction is atomic, bounded, same-job, and preserves step attempt
           WHEN step_id IN ('product_analysis','ui_design','frontend_implementation','test_suite','security_review') THEN 'completed'
           ELSE 'pending' END,
           attempt_count=CASE WHEN step_id='frontend_implementation' THEN ${attempt} ELSE attempt_count END,
-          result_summary=CASE WHEN step_id='test_suite' THEN '${blockers}' ELSE result_summary END
+          result_summary=CASE WHEN step_id='test_suite' THEN 'Worker verification completed; acceptance receipt is recorded in the autopilot report.' ELSE result_summary END
         WHERE job_id='${job}';
       `);
       assert.equal(JSON.parse(sql(`SELECT public.builder_autopilot_begin_bb163_correction('${job}', '${blockers}');`)).round, round);
@@ -179,7 +182,8 @@ test('BB-163 correction is atomic, bounded, same-job, and preserves step attempt
       UPDATE public.builder_jobs SET status='security_review' WHERE id='${job}';
       UPDATE public.builder_job_steps SET status=CASE WHEN step_id='backend_implementation' THEN 'skipped'
         WHEN step_id IN ('product_analysis','ui_design','frontend_implementation','test_suite','security_review') THEN 'completed'
-        ELSE 'pending' END
+        ELSE 'pending' END,
+        result_summary=CASE WHEN step_id='test_suite' THEN 'Worker verification completed; acceptance receipt is recorded in the autopilot report.' ELSE result_summary END
       WHERE job_id='${job}';
     `);
     assert.equal(JSON.parse(sql(`SELECT public.builder_autopilot_begin_bb163_correction('${job}', '${blockers}');`)).outcome, 'parked');

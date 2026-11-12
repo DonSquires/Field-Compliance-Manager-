@@ -60,9 +60,8 @@ BEGIN
   SELECT * INTO v_test
   FROM public.builder_job_steps
   WHERE job_id = _job_id AND step_id = 'test_suite';
-  IF v_test.id IS NULL OR v_test.status IS DISTINCT FROM 'completed'
-     OR v_test.result_summary NOT LIKE 'Whole-job acceptance incomplete:%' THEN
-    RAISE EXCEPTION 'The test-suite acceptance blocker is not recorded';
+  IF v_test.id IS NULL OR v_test.status IS DISTINCT FROM 'completed' THEN
+    RAISE EXCEPTION 'The test-suite verification step is not complete';
   END IF;
 
   IF (SELECT count(*) FROM public.builder_job_steps
