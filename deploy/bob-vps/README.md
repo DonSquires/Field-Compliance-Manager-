@@ -120,8 +120,8 @@ the primary workforce and OpenAI is the paid last resort. Use
 `BOB_BUILDER_ROUTE_ANALYSIS=gpu_workstation,ollama,openai`,
 `BOB_BUILDER_ROUTE_AUTHOR=gpu_workstation,ollama,openai`, and
 `BOB_BUILDER_ROUTE_REVIEW=gpu_workstation,ollama,openai` to pin those chains.
-The code defaults are now `gpu_workstation,ollama_cloud,anthropic,openai` for
-analysis and authoring, and `anthropic,gpu_workstation,ollama_cloud,openai` for the
+The current static defaults are `gpu_workstation,ollama,ollama_cloud,anthropic,openai` for
+analysis and authoring, and `anthropic,gpu_workstation,ollama,ollama_cloud,openai` for the
 independent (security) review (owner direction 2026-11-10: Claude is the
 security-review engine; it is skipped until `ANTHROPIC_API_KEY` is set in
 `/var/lib/bob/control-plane.env`). OmniRoute joins a chain only when
@@ -153,12 +153,15 @@ tier, after both in-house tiers and before OpenAI. Set `OLLAMA_API_TOKEN` (never
 optionally `BOB_OLLAMA_CLOUD_MODELS` (see the default below,
 the models the current plan serves; `/api/tags` also lists paid-plan models that fail at request
 time), `OLLAMA_CLOUD_BASE_URL` (default `https://ollama.com`) and `BOB_OLLAMA_CLOUD_NUM_CTX`.
-The default chain is `gpu_workstation,ollama,ollama_cloud,openai`; any `BOB_BUILDER_ROUTE_*`
-override must list `ollama_cloud` or it is skipped. Restricted work never leaves local compute.
-Owner direction 2026-10-21 (a stronger model, any way that benefits the project): the VPS CPU
-tier leaves the unrestricted chains (21-day evidence: 0–3% of analysis/UX runs passed while each
-attempt cost 2–7 minutes). The code default and the live env are now
-`BOB_BUILDER_ROUTE_ANALYSIS|AUTHOR|REVIEW=gpu_workstation,ollama_cloud,openai`, and the cloud
+Owner direction 2026-11-11 supersedes the 2026-10-21 VPS exclusion: the laptop GPU is first and
+VPS Ollama is its private fallback for every laptop-first job, before any hosted tier. The
+historical 21-day result (0–3% of analysis/UX runs passed while an attempt cost 2–7 minutes) is
+why VPS remains fallback-only, not a primary provider. Static defaults are
+`gpu_workstation,ollama,ollama_cloud,anthropic,openai`; security review starts with Anthropic,
+then uses GPU and VPS before other hosted tiers. Auto-routing may rank models within providers
+but preserves GPU→VPS ordering. `BOB_BUILDER_ROUTE_*` and `BOB_ROUTE_*` environment overrides
+pin their routes and must be updated through the managed environment change path if they omit
+VPS Ollama. Restricted work remains on GPU/VPS only. The cloud
 allowlist default is `gpt-oss:120b,deepseek-v4-pro:0813,nemotron-3-ultra,kimi-k2.7-code,kimi-k3,mistral-large-4,gemma4:31b,gpt-oss:20b`
 (Ollama Pro access probed 2026-10-21 and ordered by a replay of a real analyst brief: the first three
 returned valid grounded specs, the Kimi and Mistral models could exhaust the 16384-token cap;

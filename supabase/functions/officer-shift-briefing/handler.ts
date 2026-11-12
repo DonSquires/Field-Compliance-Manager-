@@ -120,13 +120,13 @@ export async function handleOfficerShiftBriefing(req: Request): Promise<Response
       try {
         const response = await fetch(`${controlBase}/api/bob/officer/privacy`, {
           method: 'POST', headers: { Authorization: `Bearer ${controlToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields }), redirect: 'error', signal: AbortSignal.timeout(90_000),
+          body: JSON.stringify({ fields }), redirect: 'error', signal: AbortSignal.timeout(140_000),
         });
         if (!response.ok) throw new Error('Private review unavailable');
         const result = row(await response.json()), reviewed = row(result.fields), receipt = row(result.privacy);
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(Object.entries(fields))));
         const sourceHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-        if (!['checked', 'partly_withheld'].includes(text(receipt.status)) || receipt.provider !== 'gpu_workstation'
+        if (!['checked', 'partly_withheld'].includes(text(receipt.status)) || !['gpu_workstation', 'ollama'].includes(text(receipt.provider))
           || receipt.source_hash !== sourceHash || !text(receipt.model)
           || Object.keys(reviewed).length !== Object.keys(fields).length
           || Object.keys(fields).some((key) => !Object.hasOwn(reviewed, key) || (reviewed[key] !== null && typeof reviewed[key] !== 'string')

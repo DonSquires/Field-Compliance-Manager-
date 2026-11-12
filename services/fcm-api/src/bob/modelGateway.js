@@ -36,6 +36,13 @@ function parseChain(raw, fallback) {
   return list.length ? list : fallback;
 }
 
+function ensureVpsFallback(chain) {
+  if (!chain.includes('gpu_workstation')) return chain;
+  const result = chain.filter(provider => provider !== 'vps_ollama');
+  result.splice(result.indexOf('gpu_workstation') + 1, 0, 'vps_ollama');
+  return result;
+}
+
 function isReasoningModel(model, override) {
   if (override === 'true') return true;
   if (override === 'false') return false;
@@ -115,19 +122,16 @@ function createGatewayConfig(env = process.env) {
       },
     },
   };
-  const defaultChain = ['gpu_workstation', 'openai', ...(providers.anthropic.apiKey ? ['anthropic'] : [])];
+  const defaultChain = ['gpu_workstation', 'vps_ollama', 'openai', ...(providers.anthropic.apiKey ? ['anthropic'] : [])];
   return {
     providers,
-    // In-house first (owner ruling 2026-09-26): every role tries the laptop GPU when the link is
-    // up, then OpenAI. The VPS Ollama is CPU-only and too slow for the chat turn budget, so it
-    // joins a chat chain only when configured explicitly (BOB_ROUTE_*). plan.js escalates to the
-    // next provider when a local author's plan is unparseable or the verifier blocks it. Claude is the
-    // last resort (owner direction 2026-11-10): an empty OpenAI balance degrades to it, not to failure.
+    // Owner direction 2026-11-11: every laptop-first role falls back to private VPS Ollama before hosted providers.
+    // Explicit BOB_ROUTE_* chains remain operator pins. Claude remains the final configured fallback.
     chains: {
-      planner: parseChain(env.BOB_ROUTE_PLANNER, defaultChain),
-      verifier: parseChain(env.BOB_ROUTE_VERIFIER, defaultChain),
-      subagent: parseChain(env.BOB_ROUTE_SUBAGENT, defaultChain),
-      synthesis: parseChain(env.BOB_ROUTE_SYNTHESIS, defaultChain),
+      planner: ensureVpsFallback(parseChain(env.BOB_ROUTE_PLANNER, defaultChain)),
+      verifier: ensureVpsFallback(parseChain(env.BOB_ROUTE_VERIFIER, defaultChain)),
+      subagent: ensureVpsFallback(parseChain(env.BOB_ROUTE_SUBAGENT, defaultChain)),
+      synthesis: ensureVpsFallback(parseChain(env.BOB_ROUTE_SYNTHESIS, defaultChain)),
     },
     timeoutMs: Math.max(5000, Number(env.BOB_MODEL_TIMEOUT_MS || env.OPENAI_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)),
     temperature: Number.isFinite(Number.parseFloat(env.BOB_PLAN_TEMPERATURE)) ? Number.parseFloat(env.BOB_PLAN_TEMPERATURE) : 0.6,
@@ -279,7 +283,16 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
       const candidates = names.map((name) => providerFor(name, role)).filter(Boolean).map((provider) => ({ provider: provider.name, model: provider.model }));
       const ranked = await router.rank({ candidates, surface: 'in_app', role });
       if (!ranked || !ranked.ordered.length) return base;
-      const chain = [...new Set(ranked.ordered.map((entry) => entry.provider))];
+      let chain = [...new Set(ranked.ordered.map((entry) => entry.provider))];
+      if (chain.includes('gpu_workstation') && !chain.includes('vps_ollama') && providerFor('vps_ollama', role)) {
+        chain.splice(chain.indexOf('gpu_workstation') + 1, 0, 'vps_ollama');
+      }
+      const laptopIndex = chain.indexOf('gpu_workstation');
+      if (laptopIndex >= 0 && chain.includes('vps_ollama')) {
+        const beforeLaptop = chain.slice(0, laptopIndex).filter(provider => provider !== 'vps_ollama');
+        const remaining = chain.filter(provider => provider !== 'gpu_workstation' && provider !== 'vps_ollama');
+        chain = [...beforeLaptop, 'gpu_workstation', 'vps_ollama', ...remaining];
+      }
       lastRanked[role] = { chain, taskClass: ranked.task_class, ranked: ranked.ordered, policy: ranked.policy };
       return chain;
     } catch (error) {

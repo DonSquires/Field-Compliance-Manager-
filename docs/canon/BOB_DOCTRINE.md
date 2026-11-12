@@ -1,5 +1,18 @@
 # Bob Doctrine — reconciled
 
+## Owner ruling 2026-11-11: VPS is the private laptop fallback
+
+For every laptop-GPU-first Builder job, VPS Ollama is the next private provider.
+Static routes are GPU → VPS Ollama → any permitted hosted tiers. Auto-routing
+may rank models within each provider and preserve its task-specific external
+reviewer, but must not place another provider between laptop GPU candidates and
+VPS Ollama. Restricted work remains local-only. The officer privacy Oracle is
+GPU → VPS Ollama only: no hosted provider may receive briefing or H&S text. A
+complete review must be produced by one private provider and model; provider
+failure, invalid findings or timeout restarts the whole review on the next
+private provider, otherwise the briefing stays withheld. This supersedes the
+2026-10-21 exclusion of VPS Ollama from unrestricted laptop-first chains.
+
 > Canon (reconciled). Sources: GitLab lineage `docs/bob/BOB_CORE_ENGINE_NORTH_STAR.md`
 > (ratified), `docs/BOB_ARCHITECTURE.md`, `docs/bob/BOB_RUNTIME_CONTRACT_V2.md`,
 > `docs/bob/BOB_COCKPIT_NORTH_STAR.md`, `docs/BOB_AGENTIC_CONTRACT.md`,

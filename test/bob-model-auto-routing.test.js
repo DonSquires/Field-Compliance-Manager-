@@ -270,13 +270,15 @@ test('vibe ranking only reorders candidates the owner already permitted', async 
 test('in-app Bob ranks every configured provider per role unless the role chain is pinned', async () => {
   const env = {
     OPENAI_API_KEY: 'test-key', ANTHROPIC_API_KEY: 'test-key', GPU_WORKSTATION_URL: 'http://gpu', GPU_WORKSTATION_MODEL: 'qwen',
+    OLLAMA_URL: 'http://vps-ollama', BOB_OLLAMA_PLAN_MODEL: 'llama', BOB_OLLAMA_CHAT_MODEL: 'llama',
     BOB_ROUTE_VERIFIER: 'openai',
   };
   const seen = [];
   const router = {
     async rank(request) {
       seen.push(request);
-      return { ordered: request.candidates.filter(entry => entry.provider === 'anthropic').concat(request.candidates.filter(entry => entry.provider !== 'anthropic')), excluded: [], task_class: 'planning', policy: null };
+      return { ordered: request.candidates.filter(entry => entry.provider === 'anthropic')
+        .concat(request.candidates.filter(entry => !['anthropic', 'vps_ollama'].includes(entry.provider))), excluded: [{ provider: 'vps_ollama', reason: 'policy_excluded' }], task_class: 'planning', policy: null };
     },
     observe() {},
   };
@@ -290,7 +292,7 @@ test('in-app Bob ranks every configured provider per role unless the role chain 
   assert.equal(planned.provider, 'anthropic');
   assert.equal(seen[0].surface, 'in_app');
   assert.equal(seen[0].role, 'planner');
-  assert.deepEqual(gateway.chainAfter('planner', 'anthropic'), ['gpu_workstation', 'openai']);
+  assert.deepEqual(gateway.chainAfter('planner', 'anthropic'), ['gpu_workstation', 'vps_ollama', 'anthropic', 'openai']);
 
   const verified = await gateway.chatJson('verifier', [{ role: 'user', content: 'hi' }]);
   assert.equal(verified.provider, 'openai', 'a pinned role keeps its env chain');

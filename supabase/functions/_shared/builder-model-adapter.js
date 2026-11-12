@@ -77,8 +77,10 @@ function parseChain(raw, fallback) {
 // OpenAI, and leads the independent (security) review chains. An unconfigured provider is skipped by health, so
 // these defaults are inert until ANTHROPIC_API_KEY is set. OmniRoute (which can reach free
 // third-party tiers) joins a chain when BOB_BUILDER_ROUTE_* names it or the auto router ranks it.
-const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OPENAI]);
-const SECURITY_FIRST = Object.freeze([PROVIDERS.ANTHROPIC, PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+// Owner direction 2026-11-11 supersedes the 2026-10-21 VPS exclusion: GPU-first jobs use private VPS
+// Ollama next. Auto-routing may rank models within providers but preserves this local fallback pair.
+const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OPENAI]);
+const SECURITY_FIRST = Object.freeze([PROVIDERS.ANTHROPIC, PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
 const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
 
 function localOnly(chain) {
@@ -86,15 +88,22 @@ function localOnly(chain) {
   return local.length ? local : [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION];
 }
 
+function ensureVpsFallback(chain) {
+  if (!chain.includes(PROVIDERS.GPU_WORKSTATION)) return chain;
+  const result = chain.filter(provider => provider !== PROVIDERS.OLLAMA);
+  result.splice(result.indexOf(PROVIDERS.GPU_WORKSTATION) + 1, 0, PROVIDERS.OLLAMA);
+  return result;
+}
+
 function routingChains(env = process.env) {
   return {
     // Restricted data never leaves Bob's own compute, whatever the environment asks for.
-    restricted: localOnly(parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION])),
-    local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [...IN_HOUSE_FIRST]),
-    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [...IN_HOUSE_FIRST]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...SECURITY_FIRST]),
-    security: parseChain(env.BOB_BUILDER_ROUTE_SECURITY, [...SECURITY_FIRST]),
-    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [...IN_HOUSE_FIRST])
+    restricted: ensureVpsFallback(localOnly(parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA]))),
+    local: ensureVpsFallback(parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [...IN_HOUSE_FIRST])),
+    author: ensureVpsFallback(parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [...IN_HOUSE_FIRST])),
+    review: ensureVpsFallback(parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...SECURITY_FIRST])),
+    security: ensureVpsFallback(parseChain(env.BOB_BUILDER_ROUTE_SECURITY, [...SECURITY_FIRST])),
+    analysis: ensureVpsFallback(parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [...IN_HOUSE_FIRST]))
   };
 }
 
@@ -448,6 +457,19 @@ async function routedCandidates(modelRequest, { health = null, avoid = [], start
   let ordered = ranked.ordered
     .filter(candidate => !restricted || !EXTERNAL_PROVIDERS.has(candidate.provider))
     .map(({ provider, model }) => ({ provider, model }));
+  const rankedLaptop = ordered.some(candidate => candidate.provider === PROVIDERS.GPU_WORKSTATION);
+  const vpsFallbacks = staticCandidates.filter(candidate => candidate.provider === PROVIDERS.OLLAMA);
+  if (rankedLaptop && vpsFallbacks.length && !ordered.some(candidate => candidate.provider === PROVIDERS.OLLAMA)) {
+    ordered.push(...vpsFallbacks);
+  }
+  const laptopIndex = ordered.findIndex(candidate => candidate.provider === PROVIDERS.GPU_WORKSTATION);
+  if (laptopIndex >= 0) {
+    const beforeLaptop = ordered.slice(0, laptopIndex).filter(candidate => candidate.provider !== PROVIDERS.OLLAMA);
+    const laptopModels = ordered.filter(candidate => candidate.provider === PROVIDERS.GPU_WORKSTATION);
+    const vpsModels = ordered.filter(candidate => candidate.provider === PROVIDERS.OLLAMA);
+    const remaining = ordered.filter(candidate => candidate.provider !== PROVIDERS.GPU_WORKSTATION && candidate.provider !== PROVIDERS.OLLAMA);
+    ordered = [...beforeLaptop, ...laptopModels, ...vpsModels, ...remaining];
+  }
   if (startAfter) {
     const last = ordered.map(candidate => candidate.provider).lastIndexOf(startAfter);
     if (last >= 0) ordered = ordered.slice(last + 1);
