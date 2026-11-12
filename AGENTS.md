@@ -29,22 +29,24 @@ pushing a commit intended for release, every agent must use the verified
 GitHub identity:
 
 ```bash
-git config user.name "Don Squires"
-git config user.email "256263525+DonSquires@users.noreply.github.com"
+git config user.name "DonSquires"
+git config user.email "squires.don@gmail.com"
+git config commit.gpgsign true
 git show -s --format='%an <%ae>%n%cn <%ce>' HEAD
 ```
 
-Do not use local placeholders such as `don@squires.local`. A commit that is
-already on `main` cannot be repaired by changing repository files afterward;
-create the next release commit with the verified identity so the complete tree
-can deploy. Merge pull requests with `gh pr merge <n> --rebase`, which keeps the
-verified commit author. A squash merge is authored by GitHub as the account's
-primary email (`DonSquires <squires.don@gmail.com>`), and Bob's VPS release lane
-refuses that branch head, so merged code stops reaching the VPS (2026-11-12:
-squash merges #469-#481 held the lane for about 20 hours). Bob Builder's isolated publication lane must fail closed when its
-configured identity or the actual branch-head identity is not the exact
-verified GitHub identity. Never weaken Vercel protection, push directly to
-`main`, or bypass the GitHub pull-request path.
+Codespaces signing accepts `DonSquires <squires.don@gmail.com>` as the verified
+author and supplies `GitHub <noreply@github.com>` as committer. It rejects the
+account's noreply address as an author. Preserve signing; do not disable it to
+work around an identity mismatch. Do not use local placeholders such as
+`don@squires.local`. A commit that is already on `main` cannot be repaired by
+changing repository files afterward; create the next release commit with the
+verified identity so the complete tree can deploy. Merge pull requests with
+`gh pr merge <n> --rebase`, which keeps the verified commit author. Bob Builder's
+isolated publication lane must fail closed when its configured author or the
+actual branch-head author is not the exact verified GitHub identity. Never
+weaken Vercel protection, push directly to `main`, or bypass the GitHub
+pull-request path.
 
 **Single target build (owner ruling, 2026-09-15).** Field Compliance Manager is
 the only product being built in this repository. GitLab, FreedomCamp-Manager /

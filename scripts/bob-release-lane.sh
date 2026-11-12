@@ -75,8 +75,8 @@ fetch_err="$("${FETCH_ENV[@]}" git -C "$REPO_DIR" "${FETCH_CONFIG[@]}" fetch -q 
   }
 HEAD_SHA="$(git -C "$REPO_DIR" rev-parse refs/remotes/release-lane/main)"
 
-VERIFIED_GITHUB_NAME="Don Squires"
-VERIFIED_GITHUB_EMAIL="256263525+DonSquires@users.noreply.github.com"
+VERIFIED_GITHUB_NAME="DonSquires"
+VERIFIED_GITHUB_EMAIL="squires.don@gmail.com"
 verify_main_author() {
   local actual
   actual="$(git -C "$REPO_DIR" show -s --format='%an <%ae>' "$HEAD_SHA")" || {
