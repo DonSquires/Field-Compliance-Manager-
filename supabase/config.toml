@@ -446,3 +446,8 @@ verify_jwt = false
 
 [functions.bob-refresh-canonical-ta-names]
 verify_jwt = false
+
+# Server-only Gemini transport. The handler requires the exact service-role
+# credential before reading a body or using Google's Supabase-hosted secret.
+[functions.bob-gemini-gateway]
+verify_jwt = false

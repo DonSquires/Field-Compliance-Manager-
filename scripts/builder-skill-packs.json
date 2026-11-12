@@ -1,0 +1,33 @@
+[
+  {
+    "source": "mattpocock/skills",
+    "revision": "5863806dd4e15c63174bee4e7515a4256792ecfa",
+    "slug": "mattpocock",
+    "label": "Matt Pocock engineering",
+    "licensePath": "LICENSE",
+    "expectedCount": 38
+  },
+  {
+    "source": "anthropics/skills",
+    "revision": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
+    "slug": "anthropic",
+    "label": "Anthropic Claude",
+    "expectedCount": 20
+  },
+  {
+    "source": "blader/humanizer",
+    "revision": "b48c832f0f809c1b5658edbb838c2521b72f2413",
+    "slug": "humanizer",
+    "label": "Humanizer",
+    "licensePath": "LICENSE",
+    "expectedCount": 1
+  },
+  {
+    "source": "coreyhaines31/marketingskills",
+    "revision": "1f837447b20bb6f0e72d87b80ece1c221c362c7d",
+    "slug": "corey_growth",
+    "label": "Corey Haines growth and marketing",
+    "licensePath": "LICENSE",
+    "expectedCount": 53
+  }
+]

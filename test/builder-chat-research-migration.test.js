@@ -11,6 +11,7 @@ const pmMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations
 const memoryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025171000_builder_chat_self_memory.sql'), 'utf8');
 
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-chat-revision-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-skill-packs.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-chat-code-changes-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-whole-job-acceptance-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-vibe-attachments-migration.test');
