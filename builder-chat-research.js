@@ -41,8 +41,22 @@ function publisherKey(url) {
   return /^(?:co|com|org|govt|ac)\.[a-z]{2}$/.test(suffix) ? parts.slice(-3).join('.') : suffix;
 }
 
-async function boundedJson(response) {
-  if (!response.ok) throw new Error(`Ollama research HTTP ${response.status}`);
+async function providerError(response, endpoint) {
+  let detail = '';
+  try {
+    const text = (await response.text()).slice(0, 2000);
+    try { detail = String(JSON.parse(text)?.error ?? ''); } catch { detail = text; }
+  } catch { /* the status alone is still reported */ }
+  detail = detail.replace(/\s+/g, ' ').trim().slice(0, 200);
+  const error = new Error(response.status === 429
+    ? `Ollama Cloud usage limit reached (HTTP 429) on ${endpoint}: add usage credits or upgrade at https://ollama.com/settings, or retry after the limit resets.${detail ? ` Provider said: ${detail}` : ''}`
+    : `Ollama ${endpoint} HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+  error.status = response.status;
+  return error;
+}
+
+async function boundedJson(response, endpoint = 'research') {
+  if (!response.ok) throw await providerError(response, endpoint);
   if (!response.body) throw new Error('Ollama research returned no response body');
   const reader = response.body.getReader();
   const chunks = [];
@@ -129,7 +143,7 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
     return boundedJson(await fetchImpl(`https://ollama.com/api/${endpoint}`, {
       method: endpoint === 'tags' ? 'GET' : 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       ...(endpoint === 'tags' ? {} : { body: JSON.stringify(body) }), redirect: 'error', signal: AbortSignal.timeout(Math.min(timeout, remaining)),
-    }));
+    }), endpoint);
   };
   await post({
     role: 'system', kind: 'status', content: 'Ollama Cloud research: only this approved question and selected files are eligible. Earlier chat, repository source and credentials are excluded. No metered providers.',
@@ -180,8 +194,10 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
   }
   const urls = message.payload.research_urls || [];
   if (!Array.isArray(urls) || urls.length > 6) throw new Error('Research accepts up to six public source URLs');
-  const toFetch = new Set(urls.map(publicUrl));
+  const requested = new Set(urls.map(publicUrl));
+  const toFetch = new Set(requested);
   let excludedSearchResults = 0;
+  const unfetchedSources = [];
   if (message.payload.web_search === true) {
     const search = await api('web_search', { query: message.content, max_results: 6 });
     for (const result of search.results || []) {
@@ -190,8 +206,17 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
     }
   }
   for (const url of toFetch) {
-    const page = await api('web_fetch', { url });
-    if (typeof page.content !== 'string' || !page.content.trim()) throw new Error('Research source returned no readable content');
+    let page;
+    try {
+      page = await api('web_fetch', { url });
+      if (typeof page.content !== 'string' || !page.content.trim()) throw new Error('Research source returned no readable content');
+    } catch (error) {
+      // An account-level limit or an explicitly requested source is fatal; a dead search hit is not.
+      if (error.status === 429) throw error;
+      if (requested.has(url)) throw new Error(`${error.message} (source ${url})`, { cause: error });
+      unfetchedSources.push({ url, error: error.message });
+      continue;
+    }
     sources.push({
       id: `web-${sources.length + 1}`, url, title: String(page.title || new URL(url).hostname).slice(0, 200),
       publisher: new URL(url).hostname, verified_publisher: verifiedPublisher(url),
@@ -288,11 +313,12 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
           ...(pm ? { purpose: message.payload.pm_purpose, model, prompt_version: PM_PROMPT_VERSION, fallback_allowed: false, evidence_summary_sha256: consent.evidence_summary_sha256, memory_receipts: memoryReceipts } : {}),
           sources: sources.map(({ content: _content, ...source }) => source), claims: checked.claims,
           image_observations: sources.filter(source => source.transfer === 'raw_image').map(source => ({ source_id: source.id, description: source.content })),
-          failures, excluded_search_results: excludedSearchResults, raw_documents_sent: false, raw_images_sent: images.length,
+          failures, excluded_search_results: excludedSearchResults, unfetched_sources: unfetchedSources, raw_documents_sent: false, raw_images_sent: images.length,
         },
       };
     } catch (error) {
       if (pm) throw new Error(`Assigned cloud PM model ${model} failed: ${error.message}. No automatic fallback`, { cause: error });
+      if (error.status === 429) throw error;
       failures.push({ model, error: error.message });
       await post({ role: 'system', kind: 'status', content: `${model} did not complete validated research; trying the next approved candidate.`, payload: { message_id: message.id, model, reason: error.message } });
     }

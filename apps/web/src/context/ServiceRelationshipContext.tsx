@@ -94,6 +94,8 @@ interface ServiceRelationshipContextValue {
 const LOCATION_REFRESH_MS = 30_000;
 const ADDRESS_REFRESH_MS = 30_000;
 const GEOFENCE_RESOLUTION_TIMEOUT_MS = 15_000;
+// Matches the geolocation maximumAge: a fix this recent is reused instead of asking the device again.
+const FRESH_FIX_MS = 5_000;
 
 const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue>({
   agreements: [],
@@ -146,6 +148,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationMode, setLocationMode] = useState<'manual' | 'gps'>('manual');
   const locationRequestRef = useRef(0);
+  const lastFixRef = useRef<{ coordinates: { lat: number; lng: number }; at: number } | null>(null);
 
   const refetch = useCallback(async () => {
     if (!profile?.organizationId) {
@@ -376,6 +379,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     // Admin selection is deliberate. Only field/scan shells opt into GPS resolution.
     if (locationMode !== 'gps' || !organizationId || profile?.role.startsWith('client_')) {
       setLocationStatus('idle');
+      lastFixRef.current = null;
       setCurrentCoordinates(null);
       setCurrentAddress(null);
       setGeofenceResolution(null);
@@ -509,27 +513,39 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       }
     };
 
+    const applyFix = (coordinates: { lat: number; lng: number }, requestId: number) => {
+      latestCoordinates = coordinates;
+      setCurrentCoordinates(coordinates);
+      setLocationError(null);
+      scheduleAddressRefresh();
+      if (!serviceContextReady) {
+        lastFixRef.current = { coordinates, at: Date.now() };
+        setLocationStatus('locating');
+        return;
+      }
+      lastFixRef.current = null;
+      void resolveGeofence(coordinates, requestId);
+    };
+
     const requestCurrentLocation = () => {
       if (!active || geofenceRequestInFlight) return;
       geofenceRequestInFlight = true;
       if (!hasResolution) setLocationStatus('locating');
       const requestId = locationRequestRef.current + 1;
       locationRequestRef.current = requestId;
+      // A fix that arrived while the service context was still loading is resolved now, not re-requested.
+      const fresh = lastFixRef.current;
+      if (serviceContextReady && fresh && Date.now() - fresh.at <= FRESH_FIX_MS) {
+        applyFix(fresh.coordinates, requestId);
+        return;
+      }
       navigator.geolocation.getCurrentPosition((position) => {
         if (!active || requestId !== locationRequestRef.current) {
           geofenceRequestInFlight = false;
           return;
         }
         const coordinates = { lat: position.coords.latitude, lng: position.coords.longitude };
-        latestCoordinates = coordinates;
-        setCurrentCoordinates(coordinates);
-        setLocationError(null);
-        scheduleAddressRefresh();
-        if (!serviceContextReady) {
-          setLocationStatus('locating');
-          return;
-        }
-        void resolveGeofence(coordinates, requestId);
+        applyFix(coordinates, requestId);
       }, (positionError) => {
         if (!active || requestId !== locationRequestRef.current) return;
         geofenceRequestInFlight = false;

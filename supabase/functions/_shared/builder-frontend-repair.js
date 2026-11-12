@@ -1,7 +1,8 @@
 const {
   buildModelRunRequest,
   executeBuilderModelRun,
-  contentMetadata
+  contentMetadata,
+  parseArtifactJson
 } = require('./builder-model-adapter');
 const {
   parseFrontendProposal,
@@ -58,7 +59,7 @@ async function loadJsonArtifact(supabase, artifactId, jobId, expectedType) {
   const content = Buffer.from(await object.arrayBuffer()).toString('utf8');
   if (contentMetadata(content).checksum !== artifact.checksum) throw new Error(`${expectedType} artifact integrity check failed`);
   try {
-    return JSON.parse(content);
+    return parseArtifactJson(content);
   } catch {
     throw new Error(`${expectedType} artifact is not valid JSON`);
   }

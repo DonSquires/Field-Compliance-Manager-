@@ -5,7 +5,8 @@ const { execFileSync } = require('node:child_process');
 const {
   buildModelRunRequest,
   executeBuilderModelRun,
-  contentMetadata
+  contentMetadata,
+  parseArtifactJson
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
 const { laneAllows } = require('../../../builder-path-policy');
@@ -98,7 +99,7 @@ async function loadVerifiedProductSpecification(supabase, artifactId, jobId) {
     throw new Error('product specification artifact integrity check failed');
   }
   try {
-    return { artifact, specification: JSON.parse(content) };
+    return { artifact, specification: parseArtifactJson(content) };
   } catch {
     throw new Error('product specification artifact is not valid JSON');
   }

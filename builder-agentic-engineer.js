@@ -1569,7 +1569,9 @@ async function heartbeatAgenticReceipt(supabase, receiptId, { provider, model, t
     updated_at: new Date().toISOString(),
     usage_metadata: { phase: 'authoring', turn, changed_file_count: changedFileCount }
   }).eq('id', receiptId);
-  if (error) throw new Error('agentic run provenance heartbeat failed');
+  // A heartbeat is progress telemetry; losing one must not discard the author's work.
+  if (error) return { ok: false, error: `agentic run provenance heartbeat failed for ${provider}/${model || 'provider_default'}: ${error.message || error.code || 'unknown database error'}` };
+  return { ok: true };
 }
 
 async function finishAgenticReceipt(supabase, receiptId, { ok, turns, usage, error }) {
@@ -1812,12 +1814,13 @@ async function runAgenticEngineer({
     }
     turns++;
     const base = activeRequest();
-    await heartbeatAgenticReceipt(supabase, agenticReceiptId, {
+    const heartbeat = await heartbeatAgenticReceipt(supabase, agenticReceiptId, {
       provider: base.provider,
       model: base.model_name,
       turn: turns,
       changedFileCount: tools.__changedFiles().length
     });
+    if (heartbeat && !heartbeat.ok) log({ turn: turns, provenance_warning: heartbeat.error });
     const isOpenAI = candidates[active].provider === 'openai';
     const activeHealth = health?.[candidates[active].provider] || {};
     const localContext = activeHealth.num_ctx;

@@ -6,7 +6,8 @@ const { validatePatchText } = require('../../../frontend-worker');
 const {
   buildModelRunRequest,
   executeBuilderModelRun,
-  contentMetadata
+  contentMetadata,
+  parseArtifactJson
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
 const { loadCodeReviewSeed } = require('../../../builder-artifact-read');
@@ -80,7 +81,7 @@ async function loadVerifiedUxPlan(supabase, artifactId, jobId) {
   const content = Buffer.from(await object.arrayBuffer()).toString('utf8');
   if (contentMetadata(content).checksum !== artifact.checksum) throw new Error('UX design artifact integrity check failed');
   try {
-    return { artifact, designPlan: JSON.parse(content) };
+    return { artifact, designPlan: parseArtifactJson(content) };
   } catch {
     throw new Error('UX design artifact is not valid JSON');
   }

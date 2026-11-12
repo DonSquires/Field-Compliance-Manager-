@@ -217,6 +217,12 @@ function contentMetadata(content) {
   };
 }
 
+// Model output is often stored verbatim inside a ```json fence; the producer's parser accepts it,
+// so every downstream reader of the same artifact must too.
+function parseArtifactJson(content) {
+  return JSON.parse(String(content).trim().replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, ''));
+}
+
 async function persistModelArtifact({ supabase, modelRunId, modelRequest, gatewayData, artifactType = null }) {
   if (typeof gatewayData?.content !== 'string' || !gatewayData.content) {
     return { success: false, error: 'model gateway returned no artifact content' };
@@ -633,6 +639,7 @@ module.exports = {
   buildModelRunRequest,
   resolveArtifactType,
   contentMetadata,
+  parseArtifactJson,
   persistModelArtifact,
   callModelGateway,
   fetchModelHealth,

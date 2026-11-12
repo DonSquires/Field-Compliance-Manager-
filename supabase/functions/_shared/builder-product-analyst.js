@@ -119,8 +119,11 @@ function requiredSourceScope(taskDescription) {
     .map(file => file.replace(/[.,;:!?]+$/, '')))];
 }
 
+// A routine repair boundary says "Do not redesign ..."; a forbidden action must not count as the request.
+const NEGATED_CLAUSE = /\b(?:do not|don't|dont|must not|should not|never|without|avoid|no)\b[^.;\n]*/gi;
+
 function isBroadUiRedesign(taskDescription) {
-  const task = String(taskDescription || '');
+  const task = String(taskDescription || '').replace(NEGATED_CLAUSE, ' ');
   return /\b(?:redesign|rebuild|design from scratch|professional(?:ise|ize)?)\b/i.test(task)
     && /\b(?:ui|ux|user experience|workspace|studio|chat|page|interface)\b/i.test(task);
 }
