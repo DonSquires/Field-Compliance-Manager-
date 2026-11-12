@@ -30145,11 +30145,20 @@ export type Database = {
           created_at: string
           created_by: string
           event_type: string
+          finish_location_accuracy_m: number | null
+          finish_location_address: string | null
+          finish_location_gps_log_id: string | null
+          finish_location_lat: number | null
+          finish_location_lng: number | null
+          finish_location_recorded_at: string | null
           id: string
+          officer_safety_confirmed: boolean
           organization_id: string
           reason: string
           recorded_at: string
+          released_dispatch_job_ids: string[]
           request_fingerprint: Json
+          resolved_welfare_alert_ids: string[]
           shift_id: string
           site_briefed_by_phone: boolean
         }
@@ -30159,11 +30168,20 @@ export type Database = {
           created_at?: string
           created_by: string
           event_type: string
+          finish_location_accuracy_m?: number | null
+          finish_location_address?: string | null
+          finish_location_gps_log_id?: string | null
+          finish_location_lat?: number | null
+          finish_location_lng?: number | null
+          finish_location_recorded_at?: string | null
           id?: string
+          officer_safety_confirmed?: boolean
           organization_id: string
           reason: string
           recorded_at: string
+          released_dispatch_job_ids?: string[]
           request_fingerprint: Json
+          resolved_welfare_alert_ids?: string[]
           shift_id: string
           site_briefed_by_phone?: boolean
         }
@@ -30173,11 +30191,20 @@ export type Database = {
           created_at?: string
           created_by?: string
           event_type?: string
+          finish_location_accuracy_m?: number | null
+          finish_location_address?: string | null
+          finish_location_gps_log_id?: string | null
+          finish_location_lat?: number | null
+          finish_location_lng?: number | null
+          finish_location_recorded_at?: string | null
           id?: string
+          officer_safety_confirmed?: boolean
           organization_id?: string
           reason?: string
           recorded_at?: string
+          released_dispatch_job_ids?: string[]
           request_fingerprint?: Json
+          resolved_welfare_alert_ids?: string[]
           shift_id?: string
           site_briefed_by_phone?: boolean
         }
@@ -30187,6 +30214,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_admin_attendance_events_finish_location_gps_log_id_fkey"
+            columns: ["finish_location_gps_log_id"]
+            isOneToOne: false
+            referencedRelation: "officer_gps_log"
             referencedColumns: ["id"]
           },
           {
@@ -44541,6 +44575,10 @@ export type Database = {
         Returns: boolean
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
+      get_admin_shift_finish_preview: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
       get_agreement_billing_basis_summary: {
         Args: { p_from?: string; p_service_agreement_id: string; p_to?: string }
         Returns: Json
@@ -45388,6 +45426,12 @@ export type Database = {
           admin_start: string
           admin_start_by: string
           admin_start_reason: string
+          finish_location_address: string
+          finish_location_captured_at: string
+          finish_location_lat: number
+          finish_location_lng: number
+          finish_released_dispatch_jobs: number
+          finish_resolved_welfare_alerts: number
           location_address: string
           location_captured_at: string
           shift_id: string
@@ -49934,6 +49978,7 @@ export type Database = {
           p_client_request_id: string
           p_event_type: string
           p_expected_updated_at: string
+          p_officer_safety_confirmed?: boolean
           p_reason: string
           p_recorded_at: string
           p_shift_id: string
