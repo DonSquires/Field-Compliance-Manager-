@@ -791,7 +791,7 @@ function syncWithMain({ workspacePath, baseSha, deps, mergedHead = null }) {
   const identity = builderCommitIdentity();
   const onto = /^[0-9a-f]{40}$/.test(String(mergedHead)) && isAncestor(workspacePath, mergedHead, previousHead) ? ['--onto', main, mergedHead] : [main];
   try {
-    git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, '-c', 'commit.gpgsign=false', 'rebase', '--no-autostash', ...onto]);
+    git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, 'rebase', '--no-autostash', ...onto]);
   } catch (error) {
     let conflicts = [];
     try { conflicts = git(workspacePath, ['diff', '--name-only', '--diff-filter=U']).split('\n').filter(Boolean); } catch { /* reported below */ }
@@ -883,7 +883,7 @@ function commitTurn({ workspacePath, message, identity }) {
   git(workspacePath, ['add', '-A']);
   if (!git(workspacePath, ['diff', '--cached', '--name-only'])) return null;
   const subject = `vibe: ${String(message || 'update').split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 64) || 'update'}`;
-  git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-m', subject, '-m', 'Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>']);
+  git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, 'commit', '--no-verify', '-m', subject, '-m', 'Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>']);
   return git(workspacePath, ['rev-parse', 'HEAD']);
 }
 

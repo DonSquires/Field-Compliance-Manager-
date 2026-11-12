@@ -185,11 +185,13 @@ on local models whatever the rows say, and Vibe still uses only the providers
 static chains stand.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 or the GitHub publication credentials used by this deployment. For GitHub
-publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the
-verified name and email (the account's `id+login@users.noreply.github.com` form
-is supported). The Builder refuses to create a GitHub commit without the
-explicit email, because an unverified author causes Vercel to reject the
-preview before the app is built. The worker image `fcm/bob-worker:current`
+publication, set `BOB_BUILDER_GIT_NAME=DonSquires` and
+`BOB_BUILDER_GIT_EMAIL=squires.don@gmail.com`, the author identity accepted by
+the Codespaces signer and verified by GitHub. The account's noreply address is
+not accepted by that signer as an author. Preserve commit signing; the Builder
+refuses publication when the configured author does not match the verified
+identity, because an unverified author causes Vercel to reject the preview
+before the app is built. The worker image `fcm/bob-worker:current`
 built as below. Bob autopilot
 (`builder-autopilot.js`) runs inside the control plane whenever those are set:
 `BOB_BUILDER_AUTOPILOT=false` disables it, `BOB_BUILDER_AUTOPILOT_INTERVAL_MS`
