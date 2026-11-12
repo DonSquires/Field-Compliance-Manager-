@@ -20,7 +20,7 @@ const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault
 const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { getDefaultModelRouter } = require('./services/fcm-api/src/bob/modelRouter');
 
-const PROMPT_VERSION = 'vibe-v23';
+const PROMPT_VERSION = 'vibe-v24';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
