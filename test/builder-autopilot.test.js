@@ -810,6 +810,28 @@ test('at the attempt ceiling a job pinned behind main is re-opened once on curre
   assert.match(again.calls.find(([name]) => name === 'record')[3].text, /What you can do: tell Bob "try again"/);
 });
 
+test('a refused continuation blocks the job visibly instead of retrying the refusal every tick', async () => {
+  const job = { id: 'job-x', organization_id: 'org-1', project_id: 'proj-1', status: 'analysis_pending', autopilot_state: 'driving', autopilot_source: 'routine_monitor', autopilot_requested_by: 'field-reporter', title: 'Routine repair: /officer', task_description: 'brief', frontend_required: true, backend_required: false, target_sha: 'c'.repeat(40) };
+  const refusal = 'autopilot could not open a job: Parent autopilot requester cannot approve Builder work for this organisation';
+  for (const run of [
+    { paused: true, reason: 'attempt_ceiling', detail: 'product_analysis failed 6 times (ceiling 6); last failure: model output failed validation' },
+    { paused: true, reason: 'blocked', detail: 'repository red at the pinned commit: src/pages/Example.guard.test.ts also fails without this patch' },
+  ]) {
+    const actions = actionsRecorder({ run });
+    actions.mainHead = async () => 'e'.repeat(40);
+    actions.createJob = async () => { throw new Error(refusal); };
+    const failed = [];
+    actions.fail = async (jobId, reason) => { failed.push(reason); };
+    const outcome = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+    assert.equal(outcome[0].outcome, 'blocked', JSON.stringify(outcome));
+    assert.match(outcome[0].reason, /could not continue it as a new job: .*requester cannot approve/);
+    assert.equal(failed.length, 1);
+    const recorded = actions.calls.find(([name]) => name === 'record');
+    assert.equal(recorded[2], 'blocked');
+    assert.match(recorded[3].text, /requester cannot approve/);
+  }
+});
+
 test('a blocked main-monitor repair is handed back to the health monitor when main moves, not re-run on fixed code', async () => {
   const job = {
     id: 'main-health-job',
