@@ -286,7 +286,7 @@ function fakeModel(turns) {
 const LAPTOP_OFF = Object.freeze({
   gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
   ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
-  // Owner direction 2026-10-21: the VPS CPU left the unrestricted chains; Ollama Cloud is the next tier.
+  // Owner direction 2026-11-11: VPS Ollama is the laptop's private fallback before hosted tiers.
   ollama_cloud: { configured: true, healthy: true, models: ['gpt-oss:120b', 'deepseek-v4-pro:0813'], ready_model: 'gpt-oss:120b' },
   openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] },
 });
@@ -678,7 +678,7 @@ test('a provider that runs out of turns mid-change hands off to the next provide
   }
 });
 
-test('an operator can explicitly select GPU-first authoring and it escalates directly to OpenAI', async () => {
+test('GPU context overflow falls back to private VPS Ollama before hosted providers', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const job = { id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7e', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
@@ -686,7 +686,7 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
   const seen = [];
   const callModel = async ({ modelRequest }) => {
     seen.push({ provider: modelRequest.provider, model: modelRequest.model_name, effort: modelRequest.request.reasoning_effort ?? null });
-    // The laptop answers the first turn, then its window overflows (413) -> escalate; OpenAI finishes the job.
+    // The laptop answers the first turn, then its window overflows (413) -> VPS Ollama finishes the job.
     if (modelRequest.provider === 'gpu_workstation') {
       if (seen.filter(s => s.provider === 'gpu_workstation').length === 1) return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js' } }), model: 'qwen2.5-coder:7b' } };
       return { ok: false, status: 413, error: 'prompt exceeds the gpu_workstation context window (32768 tokens)' };
@@ -709,14 +709,14 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
     else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
   }
   assert.equal(result.ok, true, JSON.stringify(result.error));
-  // A window overflow compacts the transcript hard and retries the laptop once; the second overflow
-  // escalates directly to the strong provider instead of waiting on the VPS CPU.
-  assert.deepEqual(seen.slice(0, 4).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'gpu_workstation', 'openai']);
+  // A window overflow compacts and retries the laptop once; the second overflow
+  // falls back to private VPS Ollama before hosted tiers.
+  assert.deepEqual(seen.slice(0, 4).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'gpu_workstation', 'ollama']);
   assert.equal(seen[0].model, 'qwen2.5-coder:7b');
   assert.equal(seen[0].effort, null, 'local models get no OpenAI reasoning params');
-  assert.equal(seen[3].effort, 'high');
-  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'openai']);
-  assert.equal(result.routing.provider, 'openai');
+  assert.equal(seen[3].effort, null, 'VPS Ollama does not receive OpenAI reasoning parameters');
+  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.equal(result.routing.provider, 'ollama');
   assert.equal(result.routing.escalated, true);
   // Resuming past the failed local provider skips it entirely on the next attempt.
   const seen2 = [];
@@ -728,7 +728,7 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
     if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
     else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
   }
-  assert.deepEqual(seen2, ['openai']);
+  assert.deepEqual(seen2, ['ollama']);
   assert.equal(result2.no_change, true);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
@@ -761,9 +761,8 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
   assert.equal(result.proposal.lane, 'backend');
   // Every turn went to the gateway as a strong multi-turn request with the conversation attached.
-  // Laptop off: authoring falls to Ollama Cloud, the first outsourced tier before OpenAI (owner direction
-  // 2026-10-21 removed the VPS CPU from unrestricted chains).
-  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama_cloud' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to Ollama Cloud');
+  // With the GPU offline, the private VPS is the first fallback and uses no OpenAI-only parameters.
+  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama' && request.request.reasoning_effort === undefined), 'VPS Ollama receives the conversation without OpenAI-only reasoning_effort');
   const firstTest = JSON.parse(seen[4].request.messages.at(-1).content).tool_result;
   assert.equal(firstTest.exit_code, 1, 'the failing test ran inside the worktree');
   const refused = JSON.parse(seen[5].request.messages.at(-1).content).tool_result;
@@ -1658,10 +1657,10 @@ test('a dropped gateway connection mid-run is retried on the same turn; three in
   assert.equal(seen[2], seen[3]);
 
   const seen2 = [];
-  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { seen2.push(1); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
+  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { seen2.push(modelRequest.provider); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
   assert.equal(result2.ok, false);
   assert.match(result2.error, /model unavailable/);
-  assert.equal(seen2.length, 6, 'with the GPU offline: three VPS CPU failures escalate to OpenAI, and three more there end the run');
+  assert.deepEqual(seen2, ['ollama', 'ollama', 'ollama', 'ollama_cloud', 'ollama_cloud', 'ollama_cloud', 'openai', 'openai', 'openai'], 'with the GPU offline, failures follow the private VPS, then hosted fallback order');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
@@ -1809,7 +1808,7 @@ test('distinct unedited exploration hands off early enough for the next allowed 
       },
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(providers.filter(provider => provider === 'ollama_cloud').length, 13);
+    assert.ok(providers.indexOf('ollama') >= 0 && providers.indexOf('ollama_cloud') > providers.indexOf('ollama') && providers.indexOf('openai') > providers.indexOf('ollama_cloud'), 'handoff proceeds from private VPS to hosted fallback tiers');
     assert.equal(paidTurn, 4, 'the next model can read, edit, test and finish within the original total budget');
     assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
     assert.equal(result.proposal.verified_runs[0].exit_code, 0);
@@ -1965,6 +1964,6 @@ for (const [shape, timedOutResponse] of TIMEOUT_SHAPES) {
       else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
     }
     assert.equal(result.ok, true, JSON.stringify(result.error));
-    assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'openai']);
+    assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'ollama']);
   });
 }
