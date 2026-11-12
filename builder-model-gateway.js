@@ -300,6 +300,8 @@ function createModelGatewayConfig(env = process.env) {
       // Its OpenAI-compatible endpoint rejects response_format json_object (live 2026-11-11: "Input should
       // be 'json_schema'"); Bob's prompts already demand JSON and every caller validates the output.
       jsonMode: false,
+      // Current Claude models reject it outright (live 2026-11-12: "`temperature` is deprecated for this model").
+      temperature: false,
       models: parseModelAllowlist(env.BOB_ANTHROPIC_MODELS, 'claude-opus-5-5,claude-sonnet-5-5,claude-opus-4-8,claude-sonnet-4-6,claude-haiku-5-5')
     },
     // OmniRoute: an owner-run OpenAI-compatible gateway that fans out to many providers, including
@@ -384,7 +386,7 @@ function buildProviderBody({ input, config, model, nativeTools = false }) {
     body.max_completion_tokens = Math.min(Number(input.max_output_tokens) || config.maxOutputTokens, config.maxOutputTokens);
   } else {
     body.max_tokens = Math.min(Number(input.max_output_tokens) || 16000, 16000);
-    body.temperature = typeof input.temperature === 'number' ? input.temperature : 0.2;
+    if (config[input.provider]?.temperature !== false) body.temperature = typeof input.temperature === 'number' ? input.temperature : 0.2;
   }
   return body;
 }

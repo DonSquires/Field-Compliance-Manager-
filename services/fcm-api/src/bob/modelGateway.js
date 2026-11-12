@@ -92,6 +92,8 @@ function createGatewayConfig(env = process.env) {
       apiKey: env.ANTHROPIC_API_KEY || '',
       // Rejects response_format json_object (live 2026-11-11); prompts demand JSON and replies are parsed.
       jsonMode: false,
+      // Current Claude models reject it outright (live 2026-11-12: "`temperature` is deprecated for this model").
+      temperature: false,
       models: {
         planner: env.ANTHROPIC_PLAN_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
         verifier: env.ANTHROPIC_VERIFY_MODEL || env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
@@ -196,7 +198,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
       body.reasoning_effort = options.reasoningEffort || (provider.reasoningEffort ? provider.reasoningEffort[role] : undefined) || 'medium';
     } else {
       body.max_tokens = options.maxTokens || (role === 'planner' || role === 'synthesis' ? 6000 : 1500);
-      body.temperature = typeof options.temperature === 'number' ? options.temperature : config.temperature;
+      if (provider.temperature !== false) body.temperature = typeof options.temperature === 'number' ? options.temperature : config.temperature;
     }
     return body;
   }

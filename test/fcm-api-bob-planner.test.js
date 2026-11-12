@@ -534,6 +534,25 @@ test('planTurn returns 502 with attempts when every provider fails', async () =>
   assert.equal(result.body.attempts[0].error, 'http_500');
 });
 
+test('in-app Bob sends Claude no temperature, so Anthropic does not reject every turn', async () => {
+  const bodies = [];
+  const gateway = createModelGateway({
+    env: { ANTHROPIC_API_KEY: 'k', ANTHROPIC_PLAN_MODEL: 'claude-haiku-5-5', BOB_ROUTE_PLANNER: 'anthropic' },
+    fetchImpl: fakeFetch([
+      async (url, body) => {
+        if (!url.endsWith('/chat/completions')) return null;
+        bodies.push(body);
+        if ('temperature' in body) return jsonResponse(400, { error: { message: '`temperature` is deprecated for this model.' } });
+        return jsonResponse(200, { choices: [{ message: { content: '{"action":"answer","reply":"ok"}' }, finish_reason: 'stop' }] });
+      },
+    ]),
+  });
+  const result = await gateway.chatJson('planner', [{ role: 'user', content: 'hi' }]);
+  assert.equal(result.provider, 'anthropic');
+  assert.equal(bodies.length, 1);
+  assert.equal('temperature' in bodies[0], false);
+});
+
 test('gateway retries an empty or length-truncated planner completion once with low effort and a bigger budget', async () => {
   const bodies = [];
   const gateway = createModelGateway({
@@ -805,6 +824,7 @@ test('in-app Bob adds Claude as the last resort only when its key is set, and Om
   assert.equal(withClaude.providers.anthropic.models.planner, 'claude-opus-5-5');
   assert.equal(withClaude.providers.anthropic.baseUrl, 'https://api.anthropic.com/v1');
   assert.equal(withClaude.providers.anthropic.jsonMode, false, 'Anthropic rejects response_format json_object');
+  assert.equal(withClaude.providers.anthropic.temperature, false, 'current Claude models reject temperature (live 2026-11-12)');
   const routed = createGatewayConfig({ OMNIROUTE_BASE_URL: 'http://omniroute.example/v1/', BOB_ROUTE_PLANNER: 'omniroute,gpu_workstation' });
   assert.deepEqual(routed.chains.planner, ['omniroute', 'gpu_workstation']);
   assert.equal(routed.providers.omniroute.baseUrl, 'http://omniroute.example/v1');
