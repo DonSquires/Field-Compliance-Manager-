@@ -27,7 +27,8 @@ const picture = (now: Date) => ({
 
 test('the live officer map shows who is where, how safe they are, and keeps its view', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['dispatch'] });
+  await page.addInitScript(() => window.localStorage.setItem('fcm.map.baseLayer', 'aerial'));
   const calls: Array<Record<string, unknown>> = [];
   await page.route('**/rest/v1/rpc/get_live_officer_positions', async (route) => {
     calls.push(JSON.parse(route.request().postData() ?? '{}'));
@@ -80,7 +81,7 @@ test('the live officer map shows who is where, how safe they are, and keeps its 
 
 test('the live officer map says plainly when nobody is on shift and nothing has reported', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['dispatch'] });
   await page.route('**/rest/v1/rpc/get_live_officer_positions', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ organization_id: '41414141-4141-4141-8141-414141414141', reach: ['41414141-4141-4141-8141-414141414141'], since: new Date().toISOString(), refreshed_at: new Date().toISOString(), officers: [] }) }));
   await page.route('**/functions/v1/linz-map-tile**', async (route) => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') }));
   await signInAsAdmin(page, '/admin/field-ops?area=live-map');
