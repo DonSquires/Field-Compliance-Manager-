@@ -507,7 +507,7 @@ test('the browser gate refuses a patch-only Playwright failure, extends the run 
       browserTest, callModel: model.callModel,
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(result.routing.prompt_version, 'agentic-engineer-v21');
+    assert.equal(result.routing.prompt_version, 'agentic-engineer-v22');
     assert.match(model.seen[0].request.messages[0].content, /browser_test \{reason\}/);
     assert.match(model.seen[0].request.messages[0].content, /finish runs the same browser gate/);
     const refusal = JSON.stringify(model.seen[2].request.messages.at(-1));
@@ -1740,6 +1740,19 @@ test('the opening packet is fitted to a local model window: the build map keeps 
   const total = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS }).length + opening.packet.length;
   const promptBudgetChars = (24576 - 8192 - 512) * 3;
   assert.ok(total <= promptBudgetChars * 0.8, `system+packet ${total} chars`);
+});
+
+test('Builder system prompt routes Supabase work through repository-installed skills', () => {
+  const prompt = require('../builder-agentic-engineer').systemPrompt({ lane: 'backend', limits: DEFAULT_LIMITS });
+  assert.match(prompt, /\.agents\/skills\/supabase\/SKILL\.md/);
+  assert.match(prompt, /\.agents\/skills\/supabase-postgres-best-practices\/SKILL\.md/);
+  assert.match(prompt, /AGENTS\.md, the repository canon, credential boundaries, live schema and Atlas govern this product/);
+  const root = path.resolve(__dirname, '..');
+  const tools = createTools({ workspacePath: root, repoRoot: root, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  for (const skill of ['supabase', 'supabase-postgres-best-practices']) {
+    const result = tools.read_file({ path: `.agents/skills/${skill}/SKILL.md` });
+    assert.match(result.content, new RegExp(`name: ${skill}`));
+  }
 });
 
 test('a rerun child works in its bound parent worktree even when the shared clone has moved on (live job f6df4b84)', async () => {

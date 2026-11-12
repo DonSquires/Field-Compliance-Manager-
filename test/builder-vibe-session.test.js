@@ -1052,6 +1052,26 @@ test('an owner message edits the branch, commits the turn and replies', async ()
   assert.ok(!model.calls[0].request.output_schema.properties.tool.enum.includes('__policyCheck'));
 });
 
+test('Vibe edits and verifies backend source in its full-stack session', async t => {
+  const backendPath = 'services/fcm-api/src/bob/vibe_backend_fixture.js';
+  const { store, model, deps, workspaceRoot, repo } = setup([
+    { thought: 'Create the backend helper.', tool: 'write_file', args: { path: backendPath, content: 'module.exports = { ready: true };\n' } },
+    { thought: 'Check the backend file parses.', tool: 'run', args: { command: `node --check ${backendPath}` } },
+    { thought: 'Report the verified backend change.', tool: 'reply', args: { message: 'Created and syntax-checked the backend helper.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('Create a backend helper and verify it.'), deps });
+  assert.equal(outcome.error, undefined, outcome.reply);
+  const workspace = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  assert.equal(fs.readFileSync(path.join(workspace, backendPath), 'utf8'), 'module.exports = { ready: true };\n');
+  assert.deepEqual(store.state.session.changed_files, [backendPath]);
+  const backendCheck = store.state.rows.map(row => row.payload).find(payload => payload?.tool === 'run' && payload.args?.command === `node --check ${backendPath}`);
+  assert.equal(backendCheck?.ok, true, 'the backend check ran successfully before the Vibe turn was committed');
+  assert.deepEqual(git(workspace, ['show', '--name-only', '--format=', 'HEAD']).split('\n').filter(Boolean), [backendPath]);
+  assert.match(vibe.vibeSystemPrompt(), /Full-stack scope: backend work is supported/);
+});
+
 test('dependency preparation does not become a false protected-edit refusal', async () => {
   const { store, deps, workspaceRoot } = setup([], {
     prepareWorkspace: async workspace => fs.unlinkSync(path.join(workspace, 'apps/web/node_modules/.gitkeep')),
@@ -1805,6 +1825,9 @@ test('Vibe can recover from a repeated broad search without disabling its loop g
   assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
   assert.match(vibe.vibeSystemPrompt(), /routing\/RoleRouter.tsx/);
   assert.match(vibe.vibeSystemPrompt(), /pages\/StaffProfilePage/);
+  assert.match(vibe.vibeSystemPrompt(), /\.agents\/skills\/supabase\/SKILL\.md/);
+  assert.match(vibe.vibeSystemPrompt(), /\.agents\/skills\/supabase-postgres-best-practices\/SKILL\.md/);
+  assert.match(vibe.vibeSystemPrompt(), /AGENTS\.md, the repository canon, credential boundaries, live schema and Atlas govern this product/);
   assert.match(vibe.vibeSystemPrompt(), /React hooks may only be called at the top level/);
   assert.match(vibe.vibeSystemPrompt(), /Preserve existing tests and imports/);
   assert.match(vibe.vibeSystemPrompt(), /run tool forces NODE_ENV=test/);
