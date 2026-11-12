@@ -100,7 +100,20 @@ function timestampMicros(value: string): bigint | null {
 }
 
 function requestId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const cryptoApi = typeof crypto === 'undefined' ? null : crypto;
+  const randomUUID = cryptoApi && 'randomUUID' in cryptoApi ? cryptoApi.randomUUID : undefined;
+  if (typeof randomUUID === 'function') return randomUUID.call(cryptoApi);
+  if (cryptoApi) {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const value = Math.floor(Math.random() * 16);
+    return (character === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+  });
 }
 
 function vibeFileType(file: File): string | null {
@@ -208,7 +221,16 @@ function StepsBlock({ steps, live, open, onToggle }: { steps: VibeMessage[]; liv
   );
 }
 
-function MessageBlock({ message, branch }: { message: VibeMessage; branch?: string | null }) {
+function MessageBlock({ message, branch, onRecover, onRefresh, canRecover = false, recovering = false, recoveryQueued = false, recoveryConflict = false }: {
+  message: VibeMessage;
+  branch?: string | null;
+  onRecover?: (message: VibeMessage) => void;
+  onRefresh?: () => void;
+  canRecover?: boolean;
+  recovering?: boolean;
+  recoveryQueued?: boolean;
+  recoveryConflict?: boolean;
+}) {
   if (message.kind === 'diff') return <DiffBlock message={message} />;
   const owner = message.role === 'owner';
   const system = message.role === 'system';
@@ -237,6 +259,18 @@ function MessageBlock({ message, branch }: { message: VibeMessage; branch?: stri
         {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><GitPullRequest size={14} />Open pull request</a>}
         {checksUrl && <a href={checksUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><ListChecks size={14} />GitHub Actions checks</a>}
         {owner && message.status && message.status !== 'done' && <span className={`vibe-msg__state is-${message.status}`}>{message.status === 'queued' ? 'Waiting for Bob' : message.status === 'claimed' ? 'Bob is on it' : attachmentContext.length ? 'Coding turn stopped after attachment analysis — see Bob’s error below. Continue with a new message; these files remain in session history.' : 'Turn failed — see Bob’s error below.'}</span>}
+        {canRecover && onRecover && !recoveryConflict && <div className="vibe-msg__recovery">
+          <p className="vibe-msg__state">Retries this original request on the same branch. Existing edits remain; verification and approval gates still apply.</p>
+          <button type="button" className="vibe-btn" onClick={() => onRecover(message)} disabled={recovering}>
+            {recovering ? <Loader2 size={14} className="vibe-spin" /> : <RefreshCw size={14} />}
+            {recovering ? 'Queueing recovery…' : 'Retry failed turn'}
+          </button>
+        </div>}
+        {recoveryConflict && <div className="vibe-msg__recovery" role="status">
+          <p className="vibe-msg__state">This turn is no longer eligible for recovery. Refresh the conversation to check its current status.</p>
+          {onRefresh && <button type="button" className="vibe-btn" onClick={onRefresh}>Refresh turn status</button>}
+        </div>}
+        {recoveryQueued && <span className="vibe-msg__state" role="status">Recovery queued on the existing branch. Bob will rerun the original turn and its verification.</span>}
       </div>
     </div>
   );
@@ -345,6 +379,19 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
   const detachedAttachments = attachments.length > 0 && (attachmentSessionId !== selected?.id || selected?.status === 'closed');
   const working = selected?.status === 'working' || selected?.status === 'shipping' || messages.some((message) => message.role === 'owner' && (message.status === 'queued' || message.status === 'claimed'));
   const thread = useMemo(() => groupThread(messages), [messages]);
+  const latestOwnerTurn = [...messages].reverse().find((message) => message.role === 'owner'
+    && message.kind === 'message' && (message.payload.action ?? 'message') === 'message') ?? null;
+  const latestRecoveryError = latestOwnerTurn
+    ? [...messages].reverse().find((message) => message.role === 'bob' && message.kind === 'error' && message.seq > latestOwnerTurn.seq)
+    : null;
+  const recoveryRequests = useRef(new Map<string, string>());
+  const [recoveryQueuedMessageId, setRecoveryQueuedMessageId] = useState<string | null>(null);
+  const [recoveryConflict, setRecoveryConflict] = useState<{ messageId: string; headSha: string } | null>(null);
+  const recoverableTurnId = selected && selected.created_by === profile?.id && selected.status === 'open' && !selected.pr_url
+    && /^[0-9a-f]{40}$/.test(selected.head_sha ?? '') && latestOwnerTurn?.status === 'failed'
+    && Boolean(latestRecoveryError && /^(?:Changes are not verified:|The automatic continuation |The execution budget )/.test(latestRecoveryError.content))
+    && !(recoveryConflict?.messageId === latestOwnerTurn.id && recoveryConflict.headSha === selected.head_sha)
+    ? latestOwnerTurn.id : null;
 
   useEffect(() => {
     if (detachedDrafts.length || detachedAttachments) setRecoveryDismissed(false);
@@ -940,6 +987,36 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
     }
   }, []);
 
+  const recoverFailedTurn = (message: VibeMessage) => {
+    if (!selected || !profile?.id || selected.created_by !== profile.id || recoverableTurnId !== message.id || !selected.head_sha) return;
+    const recoveryKey = `${selected.id}:${message.id}:${selected.head_sha}`;
+    const requestIdValue = recoveryRequests.current.get(recoveryKey) ?? requestId();
+    recoveryRequests.current.set(recoveryKey, requestIdValue);
+    const sessionId = selected.id;
+    const expectedHead = selected.head_sha;
+    void run(`recover-vibe-${message.id}`, async () => {
+      const { data, error: recoveryError, response } = await supabase.functions.invoke('bob-builder-control-room', {
+        body: { action: 'recover_vibe_turn', session_id: sessionId, message_id: message.id, expected_head: expectedHead, request_id: requestIdValue },
+      });
+      if (recoveryError && response?.status === 409) {
+        recoveryRequests.current.delete(recoveryKey);
+        setRecoveryConflict({ messageId: message.id, headSha: expectedHead });
+        reloadConversation();
+        reloadSessions();
+        return;
+      }
+      if (recoveryError && response?.status === 403) throw new Error('Recovery is not authorized for this account. Refresh the conversation and check your Builder access.');
+      if (recoveryError && response?.status === 404) throw new Error('This Vibe session is unavailable. Refresh the session list before trying again.');
+      if (recoveryError) throw new Error('Recovery could not be confirmed. Refresh the conversation, then retry the same turn.');
+      const result = data?.recovery?.result;
+      if (result !== 'scheduled' && result !== 'already_scheduled') throw new Error('The recovery queue did not confirm the turn. Refresh the conversation before retrying.');
+      recoveryRequests.current.delete(recoveryKey);
+      setRecoveryQueuedMessageId(message.id);
+      reloadConversation();
+      reloadSessions();
+    });
+  };
+
   const newSession = (title?: string) => run('new', async () => {
     if (attachments.length) throw new Error('Send or remove the staged attachments before starting another session.');
     const { data, error: openError } = await supabase.rpc('builder_vibe_session_open', { p_title: title || null });
@@ -1390,7 +1467,13 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                       for (const step of item.steps) open ? next.delete(step.id) : next.add(step.id);
                       return next;
                     })} />
-                : <MessageBlock key={item.message.id} message={item.message} branch={selected.branch} />)}
+                : <MessageBlock key={item.message.id} message={item.message} branch={selected.branch}
+                  canRecover={recoverableTurnId === item.message.id}
+                  recovering={isBusy}
+                  recoveryQueued={recoveryQueuedMessageId === item.message.id && item.message.status !== 'done'}
+                  recoveryConflict={recoveryConflict?.messageId === item.message.id && recoveryConflict.headSha === selected.head_sha}
+                  onRecover={recoverFailedTurn}
+                  onRefresh={reloadConversation} />)}
               {working && <div className="vibe-working" role="status"><Loader2 size={15} className="vibe-spin" />{STATUS_LABEL[selected.status === 'shipping' ? 'shipping' : 'working']}…</div>}
               <div ref={threadEnd} />
             </div>

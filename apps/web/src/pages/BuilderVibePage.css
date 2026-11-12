@@ -112,6 +112,7 @@
 .vibe-msg__link { display: inline-flex; align-items: center; gap: 6px; color: var(--vibe-accent); font-size: 0.85rem; }
 .vibe-msg__state { font-size: 0.72rem; color: var(--vibe-muted); }
 .vibe-msg__state.is-failed { color: var(--vibe-bad); }
+.vibe-msg__recovery { display: grid; justify-items: start; gap: 6px; margin-top: 2px; }
 .vibe-msg__attachments { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; color: #c1d7e5; font-size: 0.78rem; }
 .vibe-msg__attachments li { display: flex; align-items: center; gap: 6px; }
 .vibe-msg__attachments span { overflow-wrap: anywhere; }

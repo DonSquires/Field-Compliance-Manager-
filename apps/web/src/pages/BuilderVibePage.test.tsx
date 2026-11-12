@@ -108,6 +108,65 @@ it('opens the latest messages and can page back past 600 without losing their or
   expect(screen.getByText('Message 1').compareDocumentPosition(screen.getByText('Message 705')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 }, 15000);
 
+it('offers failed-turn recovery only to the session owner and reuses the request id after an uncertain failure', async () => {
+  wireRealtime();
+  rpc.mockResolvedValue({ data: true, error: null });
+  const active = { ...session('s', 'Recover failed turn'), created_by: 'owner-id', head_sha: 'a'.repeat(40) };
+  const ownerTurn = { ...message('owner-turn', 1, 'owner', 'message', 'Inspect the agreement'), status: 'failed' as const };
+  const failure = message('failure', 2, 'bob', 'error', 'The execution budget was reached before this turn was verified.');
+  from.mockImplementation((table: string) => pagedQuery(table === 'builder_vibe_sessions' ? [active] : [{ ...ownerTurn }, { ...failure }]));
+  functionsInvoke.mockResolvedValueOnce({ data: null, error: { message: 'Network response was lost' } })
+    .mockResolvedValueOnce({ data: { recovery: { result: 'scheduled' } }, error: null });
+
+  render(<BuilderVibePage />);
+  await screen.findByText(ownerTurn.content);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry failed turn' }));
+  await screen.findByText('Recovery could not be confirmed. Refresh the conversation, then retry the same turn.');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry failed turn' }));
+  expect((await screen.findByRole('status')).textContent).toContain('Recovery queued on the existing branch.');
+
+  const calls = functionsInvoke.mock.calls.filter(([name]) => name === 'bob-builder-control-room');
+  expect(calls).toHaveLength(2);
+  expect(calls[0][1].body).toMatchObject({
+    action: 'recover_vibe_turn', session_id: 's', message_id: 'owner-turn', expected_head: 'a'.repeat(40),
+  });
+  expect(calls[0][1].body.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(calls[1][1].body.request_id).toBe(calls[0][1].body.request_id);
+});
+
+it('does not expose failed-turn recovery when the signed-in user does not own the session', async () => {
+  wireRealtime();
+  rpc.mockResolvedValue({ data: true, error: null });
+  const active = { ...session('s', 'Another owner’s session'), created_by: 'someone-else', head_sha: 'a'.repeat(40) };
+  const ownerTurn = { ...message('owner-turn', 1, 'owner', 'message', 'Inspect the agreement'), status: 'failed' as const };
+  const failure = message('failure', 2, 'bob', 'error', 'The execution budget was reached before this turn was verified.');
+  from.mockImplementation((table: string) => pagedQuery(table === 'builder_vibe_sessions' ? [active] : [{ ...ownerTurn }, { ...failure }]));
+
+  render(<BuilderVibePage />);
+  await screen.findByText(ownerTurn.content);
+  expect(screen.queryByRole('button', { name: 'Retry failed turn' })).toBeNull();
+  expect(functionsInvoke).not.toHaveBeenCalled();
+});
+
+it('blocks repeat recovery after the backend rejects the turn as ineligible', async () => {
+  wireRealtime();
+  rpc.mockResolvedValue({ data: true, error: null });
+  const active = { ...session('s', 'Conflict on recovery'), created_by: 'owner-id', head_sha: 'a'.repeat(40) };
+  const ownerTurn = { ...message('owner-turn', 1, 'owner', 'message', 'Inspect the agreement'), status: 'failed' as const };
+  const failure = message('failure', 2, 'bob', 'error', 'The execution budget was reached before this turn was verified.');
+  from.mockImplementation((table: string) => pagedQuery(table === 'builder_vibe_sessions' ? [active] : [{ ...ownerTurn }, { ...failure }]));
+  functionsInvoke.mockResolvedValue({ data: null, error: { message: 'Edge Function returned a non-2xx status code' }, response: { status: 409 } });
+
+  render(<BuilderVibePage />);
+  await screen.findByText(ownerTurn.content);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry failed turn' }));
+
+  expect(await screen.findByText('This turn is no longer eligible for recovery. Refresh the conversation to check its current status.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Refresh turn status' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Retry failed turn' })).toBeNull();
+  expect(functionsInvoke).toHaveBeenCalledTimes(1);
+});
+
 it('can browse beyond 50 sessions even when activity timestamps tie', async () => {
   wireRealtime();
   rpc.mockResolvedValue({ data: true, error: null });
