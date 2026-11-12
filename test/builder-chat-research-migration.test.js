@@ -22,6 +22,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-control-room-postg
 if (process.env.BOB_TEST_POSTGRES === '1') require('./dispatch-attendance-activity-reports.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-routine-retry-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-admin-remote-start-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-admin-finish-override-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./verify-staff-credential.test');
 
 test('PM RPC adds immutable purpose/summary approval without exposing browser write grants', () => {
