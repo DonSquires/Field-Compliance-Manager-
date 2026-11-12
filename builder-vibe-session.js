@@ -19,6 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { getDefaultModelRouter } = require('./services/fcm-api/src/bob/modelRouter');
+const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
 const PROMPT_VERSION = 'vibe-v24';
 const VIBE_LIMITS = Object.freeze({
@@ -134,7 +135,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
-    '- read_canon {} | read_notes {limit?} | write_note {text}',
+    '- read_canon {} | read_notes {limit?} | write_note {text} | retrieve_knowledge {query,limit?} (guidance only)',
     '- firewall_status {}  the VPS firewall: Bob chains, ufw, tailscale peers, worker network (bob-workers 172.31.250.0/24; your test runs have network incl. the tailnet)',
     '- firewall_change {op: add|remove, rule: {chain: input|worker_egress, action: allow|deny, protocol?: tcp|udp|all, port?, source? (input), destination? (worker_egress), comment}, purpose}  applies LIVE immediately and is audited (owner ruling 2026-10-21). Only change the firewall when the owner asked or a task truly needs it; say exactly what you changed. Lockouts of SSH/80/443/Tailscale are refused.',
     '- tailnet_status {} | tailnet_acl {op: get|set, policy?, if_match?, purpose?}  Tailscale devices and ACL policy (strict JSON string). set validates first, needs the etag from get, is LIVE and audited, requires an explicit unrestricted grant to the configured owner, and preserves existing Tailscale SSH rules (only when credentials are configured).',
@@ -148,14 +149,14 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
 // lists the approved external providers in escalation order (e.g. "ollama_cloud,anthropic,omniroute");
 // each one receives the same egress receipts, structured-JSON transport and attachment withholding.
 const VIBE_PRIVATE_PROVIDERS = Object.freeze(['gpu_workstation', 'ollama']);
-const VIBE_EXTERNAL_LABELS = Object.freeze({ ollama_cloud: 'Ollama Cloud', anthropic: 'Anthropic Claude', omniroute: 'OmniRoute' });
+const VIBE_EXTERNAL_LABELS = Object.freeze({ ollama_cloud: 'Ollama Cloud', openai: 'OpenAI', anthropic: 'Anthropic Claude', gemini: 'Google Gemini', omniroute: 'OmniRoute' });
 const isVibeExternal = provider => EXTERNAL_PROVIDERS.has(provider);
 const externalLabel = provider => VIBE_EXTERNAL_LABELS[provider] || provider;
 const providerTier = provider => (isVibeExternal(provider) ? `owner-approved ${externalLabel(provider)}` : 'local');
 
 function vibeExternalProviders(env = process.env) {
   const listed = String(env.BOB_VIBE_EXTERNAL_PROVIDERS || '').split(',').map(item => item.trim())
-    .filter(item => isVibeExternal(item) && item !== 'openai');
+    .filter(item => isVibeExternal(item));
   if (/^(1|true|yes)$/i.test(String(env.BOB_VIBE_ALLOW_OLLAMA_CLOUD || '')) && !listed.includes('ollama_cloud')) listed.unshift('ollama_cloud');
   return [...new Set(listed)];
 }
@@ -262,6 +263,7 @@ function vibeToolSchema(tools) {
   const text = { type: 'string' };
   const nonEmpty = { type: 'string', minLength: 1 };
   const contracts = {
+    retrieve_knowledge: KNOWLEDGE_CONTRACT,
     find_files: { properties: { name: { type: 'string', minLength: 2, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['name'] },
     write_file: { properties: { path: nonEmpty, content: text }, required: ['path', 'content'] },
     replace_in_file: { properties: { path: nonEmpty, old_text: nonEmpty, new_text: text, all: { type: 'boolean' } }, required: ['path', 'old_text', 'new_text'] },
@@ -301,6 +303,7 @@ function vibeNativeTools(tools) {
   const path = { type: 'string', minLength: 1 };
   const integer = { type: 'integer', minimum: 1 };
   const readers = {
+    retrieve_knowledge: KNOWLEDGE_CONTRACT,
     list_dir: { properties: { path }, required: ['path'] },
     read_file: { properties: { path, start_line: integer, end_line: integer }, required: ['path'] },
     outline: { properties: { path, pattern: text }, required: ['path'] },

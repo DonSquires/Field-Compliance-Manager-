@@ -48,14 +48,11 @@ function createKnowledgeTool({ supabase, embed, now = () => new Date().toISOStri
     }
     if (!rows) {
       if (!terms.length) return { error: 'Use at least one specific keyword of three or more letters for knowledge discovery.', code: 'QUERY_TOO_BROAD', degradation };
-      const filters = terms.flatMap(term => ['key', 'title', 'content'].map(field => `${field}.ilike.*${term}*`)).join(',');
       try {
-        const result = await supabase.from('bob_knowledge_cards').select(COLUMNS)
-          .is('organization_id', null).eq('is_active', true).or(filters).order('key').limit(40).abortSignal(AbortSignal.timeout(15_000));
+        const result = await supabase.rpc('bob_search_platform_knowledge', { p_terms: terms, p_limit: limit })
+          .abortSignal(AbortSignal.timeout(15_000));
         if (result.error) throw new Error('knowledge query failed');
-        const score = row => terms.reduce((sum, term) => sum + (String(row.title).toLowerCase().includes(term) ? 4 : 0)
-          + (String(row.key).toLowerCase().includes(term) ? 3 : 0) + (String(row.content).toLowerCase().includes(term) ? 1 : 0), 0);
-        rows = (result.data || []).sort((a, b) => score(b) - score(a) || String(a.key).localeCompare(String(b.key))).slice(0, limit);
+        rows = (result.data || []).slice(0, limit);
       } catch {
         return { error: 'Canonical knowledge retrieval failed; no knowledge is claimed loaded.', code: 'KNOWLEDGE_READ_FAILED', degradation };
       }
@@ -72,7 +69,7 @@ function createKnowledgeTool({ supabase, embed, now = () => new Date().toISOStri
         ...(scores.has(row.id) ? { similarity: scores.get(row.id) } : {}),
       };
     });
-    return { cards, retrieval: { path, degradation, scope: 'active_platform_canonical_only', observed_at: now(), candidate_cap: path === 'keyword' ? 40 : limit },
+    return { cards, retrieval: { path, degradation, scope: 'active_platform_canonical_only', observed_at: now(), candidate_cap: limit },
       limitation: 'Canonical guidance, not live evidence. Similarity/keyword matches do not prove relevance; verify source and schema before acting. Experience notes and tenant cards are excluded.' };
   };
 }

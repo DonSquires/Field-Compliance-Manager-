@@ -234,14 +234,76 @@ under these egress controls:
 - Ollama Cloud receives structured JSON requests, never native tool
   definitions, and each escalation posts a session status with
   `external_egress: true`.
-- OpenAI remains forbidden for Vibe prompts and tool results. Owner direction
-  2026-11-10 approves Anthropic Claude and OmniRoute as further external Vibe
-  escalations, but only when the control plane lists them in
+- Owner direction 2026-11-13 supersedes the earlier Vibe OpenAI prohibition:
+  OpenAI and Gemini join the previously approved Anthropic Claude, Ollama
+  Cloud and OmniRoute as optional external Vibe escalations, but only when
+  the control plane lists them in
   `BOB_VIBE_EXTERNAL_PROVIDERS` (escalation order, e.g.
-  `ollama_cloud,anthropic`); each one is held to every control above (after the
+  `ollama_cloud,anthropic,openai,gemini`); each one is held to every control above (after the
   private candidates, JSON requests only, attachment withholding, per-model
   egress receipts with `external_egress: true`). A provider key's presence
   alone does not authorize egress; the flag or list and these controls do.
+
+### Gemini and imported Builder skills (2026-11-13)
+
+The Builder gateway supports Gemini through Google's OpenAI-compatible API.
+Set `GEMINI_API_KEY` on the server for direct transport, or explicitly set
+`BOB_GEMINI_USE_SUPABASE_PROXY=1` to call the service-only
+`bob-gemini-gateway` Edge Function using the existing server-side
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The latter keeps
+`GEMINI_API_KEY` (or the owner-approved existing `GOOGLE_API_TOKEN`) inside
+Supabase. It never retrieves secret plaintext through the management API or
+copies it into a worker, browser, prompt or receipt. The function validates
+the exact service credential, uses a fixed Google endpoint, rejects redirects
+and accepts only bounded text JSON. JWT-gateway verification is disabled
+because service credentials need not be JWTs; handler authentication is not.
+
+`BOB_GEMINI_MODELS` bounds model selection. Model discovery must succeed
+before Gemini receives a prompt; a Maps/Vision-restricted Google token may
+not authorize Gemini. The generic external `bob_model_catalog` row permits
+existing data-driven Builder routing without inventing measured quality.
+Vibe remains separately opt-in. The in-app Bob API model chain is unchanged.
+Deploy the function and merged migration through the governed release lane
+before enabling the proxy in the control plane; then verify a synthetic
+completion, not just model listing. Record only credential class, provider,
+HTTP status and the redacted success/failure result.
+
+The four pinned skill packs comprise 38 Matt Pocock engineering skills, 20
+Anthropic skills, one Humanizer skill and 53 Corey Haines growth skills (112
+total). VS Code/Copilot-compatible local installation uses the owner's
+canonical `~/.agents/skills` directory and may require a new chat/editor
+skill-index refresh. Installation on disk is not proof that this chat has
+activated a skill.
+
+[Pack metadata](../scripts/builder-skill-packs.json) records immutable upstream
+commits and expected counts. The
+[seed generator](../scripts/generate-builder-skill-cards.mjs) verifies each
+installed SKILL.md against that pinned public source, allowing only CRLF/LF
+checkout conversion, and preserves the original hash and license. Run it
+against an empty CLI-created migration:
+
+```text
+node scripts/generate-builder-skill-cards.mjs --output supabase/migrations/<new_version>_builder_external_skill_packs.sql
+```
+
+The seed adds global guidance cards only, idempotently; it does not overwrite
+tenant cards or model-catalog overrides. Two Anthropic entries,
+`doc-coauthoring` and `template-skill`, are reference-only because no file
+redistribution license was verified. The other 110 include licensed source
+instructions. Existing knowledge retrieval bounds excerpts and preserves
+provenance and truncation markers. Bob Builder and Vibe's shared author tools
+now expose `retrieve_knowledge`; the in-app Bob knowledge path is unchanged.
+Keyword fallback uses the service-only, security-invoker
+`bob_search_platform_knowledge` RPC: it ranks all active global matches before
+limiting, rather than losing relevant cards behind an alphabetical candidate
+cap. Deploy its migration before updating the control plane.
+Supporting third-party scripts/resources are not installed on worker images
+by seeding cards, and retrieval does not authorize their execution.
+
+Do not call publisher-prefixed Ollama names a free Cloud tier. Synthetic
+probes of the seven supplied names returned 404; advertised `gpt-oss:20b` and
+`gemma4:31b` returned 429, not completed inference. No new Ollama defaults are
+enabled from those results. Existing account-quota cooldowns still apply.
 
 Vibe file attachments are stored in the private `bob-uploads` bucket under the
 owner's `desktop/{user_id}/vibe/{session_id}/` path and are registered against
@@ -316,6 +378,8 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 
 | Credential | Where it may be used | Purpose | Must not be used for |
 |---|---|---|---|
+| `OPENAI_API_KEY` (owner direction 2026-11-13 also approves explicitly configured Vibe use) | Existing server-side model gateways; Vibe only when named in `BOB_VIBE_EXTERNAL_PROVIDERS` | Metered fallback after private compute, within existing egress and spend controls | Restricted/local-only work, implicit attachment consent, browser, prompts, logs, repository files |
+| `GEMINI_API_KEY` / `GOOGLE_API_TOKEN` (owner direction 2026-11-13) | Supabase `bob-gemini-gateway`; `GEMINI_API_KEY` may alternatively configure the control-plane gateway directly | Gemini inference for approved unrestricted Builder work; Vibe only when explicitly configured; existing Google-token permissions must be verified, not assumed | Restricted/local-only work, arbitrary Google endpoints, Vision/Maps permission treated as Gemini access, browser, workers, prompts, logs, repository files |
 | `SUPABASE_ACCESS_TOKEN` (Supabase Management token; the Codespaces secret of the same name is the valid one, `FIELD_COMPLIANCE_CODESPACE` was rejected with 401 on 2026-10-21) | Codespaces terminal; the VPS release lane (`/var/lib/bob/release-lane.env`) and control plane (`/var/lib/bob/control-plane.env`, with `SUPABASE_PROJECT_REF`) | Applying merged migrations with a ledger row, deploying changed edge functions, regenerating `schema.sql` and `src/types/database.ts`, explicitly approved bounded seed SQL | Edge Function runtime, browser, Bob prompt, ordinary live data API header |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Functions/server-side diagnostics and explicitly approved Codespaces read checks | Bypassed-RLS server-side reads, governed service operations, Atlas checks | Browser/frontend, external web research, issue text, screenshots |
 | `SUPABASE_ANON_KEY` | Supabase client/Edge Function caller client | Establish caller-authenticated Supabase context | Privileged database access |

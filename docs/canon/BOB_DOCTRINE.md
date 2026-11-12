@@ -314,6 +314,22 @@ failures or claiming production success from static backend verification.
 
 ## 2. The two rails (the only legitimate constraints)
 
+**Owner-approved Builder providers and skills, 2026-11-13.** The owner asked
+Bob Builder and Vibe Builder to try the supplied Ollama model names and use
+OpenAI, Anthropic and Gemini with existing server-side credentials. This
+supersedes the earlier Vibe-specific OpenAI prohibition, not the private-first,
+restricted-data, attachment-consent, spend or release boundaries. External
+Vibe providers still require explicit control-plane configuration. A provider
+listing or enabled Google API is not proof of working inference, sufficient
+quota, a free tier, or Gemini permission. Missing/denied credentials must
+remain visible; never rotate model names to evade exhausted account credits.
+
+The requested Matt Pocock, Anthropic Claude, Humanizer and Corey Haines skill
+packs are source-pinned reference guidance shared through platform knowledge.
+They do not outrank this canon or grant script execution, connector access,
+business-record writes or deployment authority. Preserve source, hash and
+license; an unverified license permits a source-reference card only.
+
 **Owner-approved Vibe attachment context, 2026-10-25.** Attachment messages
 remain private by default. The owner may opt in per message after reviewing
 the selected files and confirming they contain no personal, confidential,

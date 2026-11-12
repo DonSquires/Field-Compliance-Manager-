@@ -41,15 +41,25 @@ test('vector retrieval uses platform scope and rechecks active provenance before
 });
 
 test('keyword fallback is explicit, bounded, scoped, ranked and does not accept raw filter injection', async () => {
-  const db = database([{ data: [{ ...CARD, id: 'less', title: 'Unrelated', key: 'other', content: 'discovery' }, CARD] }]);
+  const db = database([{ data: [CARD, { ...CARD, id: 'less', title: 'Unrelated', key: 'other', content: 'discovery' }] }]);
   const result = await createKnowledgeTool({ supabase: db, embed: async () => { throw new Error('secret endpoint'); } })({ query: 'discovery),(organization_id.eq.other)', limit: 2 });
   assert.equal(result.retrieval.path, 'keyword');
   assert.equal(result.retrieval.degradation, 'private_embedding_or_vector_read_failed');
   assert.equal(result.cards[0].id, CARD.id);
-  assert.ok(db.calls.some(call => call[0] === 'limit' && call[1] === 40));
-  assert.ok(db.calls.some(call => call[0] === 'is' && call[1] === 'organization_id'));
-  assert.doesNotMatch(db.calls.find(call => call[0] === 'or')[1], /\(|\)|organization_id\.eq/);
+  const rpc = db.calls.find(call => call[0] === 'rpc');
+  assert.equal(rpc?.[1], 'bob_search_platform_knowledge');
+  assert.ok(rpc[2].p_terms.every(term => /^[a-z0-9_]{3,}$/.test(term)));
+  assert.equal(rpc[2].p_limit, 2);
+  assert.equal(result.retrieval.candidate_cap, 2);
+  assert.equal(db.calls.some(call => call[0] === 'or'), false);
   assert.doesNotMatch(JSON.stringify(result), /secret endpoint/);
+});
+
+test('keyword retrieval ranks in the database before limiting, not after an alphabetical subset', async () => {
+  const db = database([{ data: [{ ...CARD, key: 'agent_skill_mattpocock_code_review' }] }]);
+  const result = await createKnowledgeTool({ supabase: db })({ query: 'code review', limit: 1 });
+  assert.equal(result.cards[0].key, 'agent_skill_mattpocock_code_review');
+  assert.deepEqual(db.calls.find(call => call[0] === 'rpc'), ['rpc', 'bob_search_platform_knowledge', { p_terms: ['code', 'review'], p_limit: 1 }]);
 });
 
 test('truncation preserves full-content hashes and limits total returned bodies', async () => {
@@ -79,4 +89,21 @@ test('Builder chat exposes injected retrieval with the same schema in native and
   assert.deepEqual(definition.parameters.required, ['query']);
   assert.equal(definition.parameters.additionalProperties, false);
   assert.equal(createBuilderChatTools({}).retrieve_knowledge, undefined);
+});
+
+test('shared Builder and Vibe author tools retrieve platform skills with provenance', async () => {
+  const { createTools, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+  const { vibeNativeTools } = require('../builder-vibe-session');
+  const db = database([{ data: [{ ...CARD, key: 'skill_humanizer', title: 'Humanizer writing guidance' }] }]);
+  const tools = createTools({
+    workspacePath: __dirname, repoRoot: __dirname, lane: 'backend',
+    supabase: db, limits: DEFAULT_LIMITS, log: () => {},
+  });
+  assert.equal(typeof tools.retrieve_knowledge, 'function');
+  const result = await tools.retrieve_knowledge({ query: 'humanizer' });
+  assert.equal(result.cards[0].key, 'skill_humanizer');
+  assert.equal(result.retrieval.scope, 'active_platform_canonical_only');
+  const definition = vibeNativeTools(tools).find(entry => entry.function.name === 'retrieve_knowledge');
+  assert.deepEqual(definition.function.parameters.required, ['query']);
+  assert.equal(definition.function.parameters.additionalProperties, false);
 });

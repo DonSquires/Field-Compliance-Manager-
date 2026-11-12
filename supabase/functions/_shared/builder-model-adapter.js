@@ -7,6 +7,7 @@ const PROVIDERS = Object.freeze({
   GPU_WORKSTATION: 'gpu_workstation',
   OLLAMA_CLOUD: 'ollama_cloud',
   ANTHROPIC: 'anthropic',
+  GEMINI: 'gemini',
   OMNIROUTE: 'omniroute'
 });
 
@@ -20,7 +21,7 @@ const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementa
 const REVIEW_WORKLOADS = new Set(['independent_code_review']);
 const SECURITY_WORKLOADS = new Set(['security_review']);
 const LOCAL_PROVIDERS = new Set([PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]);
-const HOSTED_LONG_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
+const HOSTED_LONG_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.GEMINI, PROVIDERS.OMNIROUTE]);
 
 // OpenAI answers within the 90 s that suits an edge-style caller; an in-house model may need
 // ~100 s just to load cold on the VPS CPU (llama3.1:8b, job 73560f1c timed out at 90 s) and then
@@ -79,7 +80,7 @@ function parseChain(raw, fallback) {
 // third-party tiers) joins a chain when BOB_BUILDER_ROUTE_* names it or the auto router ranks it.
 const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.ANTHROPIC, PROVIDERS.OPENAI]);
 const SECURITY_FIRST = Object.freeze([PROVIDERS.ANTHROPIC, PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
-const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI, PROVIDERS.ANTHROPIC, PROVIDERS.OMNIROUTE]);
+const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI, PROVIDERS.ANTHROPIC, PROVIDERS.GEMINI, PROVIDERS.OMNIROUTE]);
 
 function localOnly(chain) {
   const local = chain.filter(provider => !EXTERNAL_PROVIDERS.has(provider));

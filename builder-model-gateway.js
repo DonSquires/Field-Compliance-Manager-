@@ -1,3 +1,4 @@
+const { createHash } = require('node:crypto');
 const { planningTimeoutFor } = require('./supabase/functions/_shared/builder-model-adapter');
 const DEFAULT_MAX_PROMPT_CHARS = 1_200_000; // ~300k tokens: room for a real working set, the way a coding agent holds one
 const ALLOWED_BUILDER_MODES = new Set([
@@ -24,7 +25,7 @@ const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 // 'openai' transport kind; the provider name, not the kind, decides routing and egress policy.
 const PROVIDER_KINDS = Object.freeze({
   openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama', ollama_cloud: 'ollama_cloud',
-  anthropic: 'openai', omniroute: 'openai'
+  anthropic: 'openai', gemini: 'openai', omniroute: 'openai'
 });
 const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
@@ -43,7 +44,9 @@ const CHARS_PER_TOKEN = 3.5;
 const healthCache = new Map();
 const busyLocalProviders = new Set();
 const toolCapabilityCache = new Map();
-const healthKey = (name, provider) => JSON.stringify([name, provider.baseUrl]);
+const healthKey = (name, provider) => JSON.stringify([
+  name, provider.baseUrl, createHash('sha256').update(provider.apiKey || '').digest('hex'),
+]);
 const toolCapabilityKey = (provider, model) => JSON.stringify([provider.baseUrl, model]);
 
 async function nativeToolCapability(provider, model, fetchImpl, signal) {
@@ -141,16 +144,21 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
     if (!hostedProviderConfigured(providerConfig)) return { name, configured: false, healthy: false, installed: [] };
     const cached = healthCache.get(cacheKey);
     if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
-    // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
+    // Legacy hosted transports may not expose discovery. Gemini must verify its
+    // credential (including the Supabase proxy) before any prompt is sent.
     let installed = [];
+    let reason = null;
     try {
       const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: authHeaders(providerConfig), signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3) });
       const data = response.ok ? await response.json().catch(() => null) : null;
       installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
-    } catch { signal?.throwIfAborted(); installed = []; }
+      if (!response.ok) reason = `model_discovery_http_${response.status}`;
+    } catch { signal?.throwIfAborted(); installed = []; reason = 'model_discovery_unavailable'; }
     signal?.throwIfAborted();
-    healthCache.set(cacheKey, { healthy: true, installed, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
-    return { name, configured: true, healthy: true, installed, cached: false };
+    const healthy = name !== 'gemini' || installed.length > 0;
+    reason = healthy ? null : reason || 'model_discovery_empty_or_invalid';
+    healthCache.set(cacheKey, { healthy, installed, reason, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
+    return { name, configured: true, healthy, installed, reason, cached: false };
   }
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
@@ -244,6 +252,7 @@ function createModelGatewayConfig(env = process.env) {
   const maxOutputTokens = Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192));
   const vramMb = Number(env.BOB_GPU_VRAM_MB || 8192);
   const headroomMb = Number(env.BOB_GPU_HEADROOM_MB || 2048);
+  const geminiProxy = env.BOB_GEMINI_USE_SUPABASE_PROXY === '1' && !env.GEMINI_API_KEY;
   if (!Number.isFinite(vramMb) || !Number.isFinite(headroomMb) || headroomMb < 1024 || vramMb <= headroomMb) {
     throw new Error('GPU memory configuration must reserve at least 1024 MiB and leave a positive model budget');
   }
@@ -303,6 +312,14 @@ function createModelGatewayConfig(env = process.env) {
       // Current Claude models reject it outright (live 2026-11-12: "`temperature` is deprecated for this model").
       temperature: false,
       models: parseModelAllowlist(env.BOB_ANTHROPIC_MODELS, 'claude-opus-5-5,claude-sonnet-5-5,claude-opus-4-8,claude-sonnet-4-6,claude-haiku-5-5')
+    },
+    gemini: {
+      kind: 'openai',
+      apiKey: geminiProxy ? env.SUPABASE_SERVICE_ROLE_KEY || '' : env.GEMINI_API_KEY || '',
+      baseUrl: geminiProxy
+        ? (env.SUPABASE_URL ? `${env.SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/bob-gemini-gateway` : '')
+        : (env.GEMINI_OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, ''),
+      models: parseModelAllowlist(env.BOB_GEMINI_MODELS, 'gemini-4-hydrogen,gemini-3.1-flash-lite')
     },
     // OmniRoute: an owner-run OpenAI-compatible gateway that fans out to many providers, including
     // free third-party tiers (owner accepted that data boundary 2026-11-10). Unconfigured until
@@ -420,7 +437,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   }
   if (signal?.aborted) return cancelled();
   if (probe.reason === 'quota_exhausted') return { status: 429, body: { error: `${input.provider} account has no remaining quota or credits; skipped until it is topped up`, code: 'provider_quota' } };
-  if (OLLAMA_API_KINDS.has(providerConfig.kind) && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
+  if ((OLLAMA_API_KINDS.has(providerConfig.kind) || input.provider === 'gemini') && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable or model discovery was denied`, code: 'provider_unavailable' } };
   const eligible = eligibleLocalModels(providerConfig, probe);
   const model = input.model ? resolveProviderModel(config, input.provider, input.model, probe.installed ?? null)
     : bestAvailableModel(eligible, probe.installed ?? null);
