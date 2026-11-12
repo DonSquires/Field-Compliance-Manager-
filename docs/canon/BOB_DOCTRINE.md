@@ -52,6 +52,19 @@ is not semantic acceptance: independent review must compare the full outcomes,
 required workflow evidence and original/correction brief with the actual patch
 and tests. Narrow passing commands alone do not prove a full workflow repair.
 
+**BB-163 bounded auto-correction, owner ruling 2026-11-12.** For the existing
+routine `/admin/roster` repair BB-163 only, Bob may make up to three same-job
+correction rounds in response to its recorded acceptance or review blockers.
+A round includes the correction, worker verification, and applicable
+acceptance checks; model retries and individual test runs are not separate
+rounds. Bob preserves attempt counts and records each round in the job report
+and audit history. If the third correction still fails, Bob parks the same job
+for Don with the unresolved blocker and evidence. A passing acceptance check
+does not itself approve or release the change: all security, independent
+review, approval, and release gates remain in force. This is a one-job
+exception; every other job keeps the owner-confirmation rule for same-job
+corrections.
+
 **Prototype engineering scope, owner direction 2026-10-26.** The owner permits
 inspection and correction throughout Builder Chat, Bob Builder, Vibe Builder
 and their build stack, including measured changes to in-house/cloud models, to
