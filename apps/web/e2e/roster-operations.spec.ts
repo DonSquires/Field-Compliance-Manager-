@@ -85,19 +85,27 @@ test('roster admin start and finish drive the officer shift after a phone briefi
         const events: Array<Record<string, unknown>> = [];
         const requests: Array<Record<string, unknown>> = [];
         const shift: Record<string, unknown> = { id: shiftId, officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'patrol', scheduled_start: '2026-08-27T22:00:00.000Z', scheduled_end: '2026-08-28T06:00:00.000Z', status: 'accepted', shift_health: null, total_stops: 0, notes: null, actual_start: null, actual_end: null, ended_reason: null, updated_at: '2026-08-30T19:00:00.000Z' };
+        const finishLocation = { recorded_at: '2026-08-28T20:40:00.000Z', lat: -41.29, lng: 173.27, accuracy_m: 8, address: '65 Tipahi Street, Nelson South' };
+        let failNextFinish = true;
         await page.route('**/rest/v1/shifts*', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([shift]) }));
         await page.route('**/rest/v1/rpc/get_roster_admin_attendance', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(events) }));
+        await page.route('**/rest/v1/rpc/get_admin_shift_finish_preview', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ shift_id: shiftId, open_dispatch_jobs: 1, open_welfare_alerts: 1, last_location: { recorded_at: finishLocation.recorded_at, address: finishLocation.address, accuracy_m: 8 } }) }));
         await page.route('**/rest/v1/rpc/record_admin_shift_attendance', async (route) => {
                 const request = route.request().postDataJSON();
                 requests.push(request);
                 const isStart = request.p_event_type === 'admin_start';
+                if (!isStart && failNextFinish) {
+                        failNextFinish = false;
+                        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: '57014', message: 'canceling statement due to statement timeout', details: null, hint: null }) });
+                        return;
+                }
                 if (isStart) Object.assign(shift, { status: 'in_progress', actual_start: request.p_recorded_at, updated_at: '2026-08-30T20:05:00.000Z' });
                 else Object.assign(shift, { status: 'completed', actual_end: request.p_recorded_at, ended_reason: 'supervisor_closed', updated_at: '2026-08-30T21:05:00.000Z' });
                 const previous = events[0] ?? { shift_id: shiftId, location_captured_at: null, location_address: null };
                 events.splice(0, events.length, isStart
                         ? { ...previous, admin_start: request.p_recorded_at, admin_start_reason: request.p_reason, admin_start_by: 'Morgan Reed' }
-                        : { ...previous, admin_finish: request.p_recorded_at, admin_finish_reason: request.p_reason, admin_finish_by: 'Morgan Reed' });
-                await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ event_id: `admin-event-${requests.length}`, shift_id: shiftId, event_type: request.p_event_type, recorded_at: request.p_recorded_at, replayed: false, source: isStart ? 'admin_started_officer_shift' : 'admin_finished_officer_shift', shift_status: shift.status }) });
+                        : { ...previous, admin_finish: request.p_recorded_at, admin_finish_reason: request.p_reason, admin_finish_by: 'Morgan Reed', finish_location_captured_at: finishLocation.recorded_at, finish_location_address: finishLocation.address, finish_released_dispatch_jobs: 1, finish_resolved_welfare_alerts: 1 });
+                await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ event_id: `admin-event-${requests.length}`, shift_id: shiftId, event_type: request.p_event_type, recorded_at: request.p_recorded_at, replayed: false, source: isStart ? 'admin_started_officer_shift' : 'admin_finished_officer_shift', shift_status: shift.status, ...(isStart ? {} : { released_dispatch_jobs: 1, resolved_welfare_alerts: 1, finish_location: finishLocation }) }) });
         });
         await signInAsAdmin(page, '/admin/roster');
         await page.locator('.roster-board .roster-shift').filter({ hasText: 'patrol' }).first().click();
@@ -121,12 +129,26 @@ test('roster admin start and finish drive the officer shift after a phone briefi
         await inspector.getByRole('button', { name: 'Record admin finish' }).click();
         const finishDialog = page.getByRole('dialog', { name: /^Finish .*shift$/ });
         await expect(finishDialog).toContainText('unreached stops are skipped');
+        await expect(finishDialog).toContainText('forgot to log off');
+        await expect(finishDialog).toContainText('1 open dispatch job will return to the dispatch queue');
+        await expect(finishDialog).toContainText('1 open welfare alert will be resolved');
+        await expect(finishDialog).toContainText('65 Tipahi Street, Nelson South');
         await finishDialog.getByLabel('Shift finished at').fill('2026-08-29T09:00');
         await finishDialog.getByLabel('Reason (required, kept in the audit trail)').fill('Officer phoned to say they had left the site.');
-        await finishDialog.getByRole('button', { name: 'Finish shift' }).click();
+        const finishButton = finishDialog.getByRole('button', { name: 'Finish shift' });
+        await expect(finishButton).toBeDisabled();
+        await finishDialog.getByLabel(/I have checked the officer is safe/).check();
+        await finishButton.click();
         await expect.poll(() => requests.length).toBe(2);
-        expect(requests[1]).toMatchObject({ p_event_type: 'admin_finish', p_site_briefed_by_phone: false, p_reason: 'Officer phoned to say they had left the site.' });
+        await expect(finishDialog.getByRole('alert')).toContainText('Wait a few seconds and try again');
+        await finishButton.click();
+        await expect.poll(() => requests.length).toBe(3);
+        expect(requests[2]).toMatchObject({ p_event_type: 'admin_finish', p_site_briefed_by_phone: false, p_officer_safety_confirmed: true, p_reason: 'Officer phoned to say they had left the site.' });
+        expect(requests[2].p_client_request_id).toBe(requests[1].p_client_request_id);
+        await expect(page.getByRole('status').filter({ hasText: 'Shift finished for the officer' })).toContainText('1 dispatch job returned to the queue; 1 welfare alert resolved; last GPS breadcrumb');
         await expect(inspector.getByText('Finished by operations')).toBeVisible();
+        await expect(inspector).toContainText('Last GPS breadcrumb');
+        await expect(inspector).toContainText('65 Tipahi Street, Nelson South');
         await expect(inspector.getByRole('button', { name: 'Record admin finish' })).toHaveCount(0);
 });
 

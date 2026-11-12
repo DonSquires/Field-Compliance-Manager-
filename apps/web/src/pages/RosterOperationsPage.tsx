@@ -89,9 +89,16 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
   if (person.credentialRisk === 'expiring') return `Credential expires ${person.credentialExpiry ? dayWords(person.credentialExpiry) : 'soon'}`;
   return 'Recorded credentials verified';
 };
-interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; updated_at: string; admin_start?: string | null; admin_start_reason?: string | null; admin_start_by?: string | null; admin_finish?: string | null; admin_finish_reason?: string | null; admin_finish_by?: string | null; location_captured_at?: string | null; location_address?: string | null; }
-interface AdminAttendanceTimes { shift_id: string; admin_start: string | null; admin_start_reason: string | null; admin_start_by: string | null; admin_finish: string | null; admin_finish_reason: string | null; admin_finish_by: string | null; location_captured_at: string | null; location_address: string | null; }
-interface AdminAttendanceDialog { shift: Shift; eventType: 'admin_start' | 'admin_finish'; recordedAt: string; reason: string; siteBriefedByPhone: boolean; clientRequestId: string; }
+interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; updated_at: string; admin_start?: string | null; admin_start_reason?: string | null; admin_start_by?: string | null; admin_finish?: string | null; admin_finish_reason?: string | null; admin_finish_by?: string | null; location_captured_at?: string | null; location_address?: string | null; finish_location_captured_at?: string | null; finish_location_address?: string | null; finish_released_dispatch_jobs?: number | null; finish_resolved_welfare_alerts?: number | null; }
+interface AdminAttendanceTimes { shift_id: string; admin_start: string | null; admin_start_reason: string | null; admin_start_by: string | null; admin_finish: string | null; admin_finish_reason: string | null; admin_finish_by: string | null; location_captured_at: string | null; location_address: string | null; finish_location_captured_at?: string | null; finish_location_address?: string | null; finish_released_dispatch_jobs?: number | null; finish_resolved_welfare_alerts?: number | null; }
+interface AdminFinishPreview { open_dispatch_jobs: number; open_welfare_alerts: number; last_location: { recorded_at: string; address: string | null; accuracy_m: number | null } | null; }
+interface AdminAttendanceDialog { shift: Shift; eventType: 'admin_start' | 'admin_finish'; recordedAt: string; reason: string; siteBriefedByPhone: boolean; officerSafetyConfirmed: boolean; clientRequestId: string; finishPreview?: AdminFinishPreview | null; finishPreviewError?: string | null; }
+const adminAttendanceErrorMessage = (failure: unknown) => {
+  const { code, message } = (failure ?? {}) as { code?: string; message?: string };
+  if (code === '57014' || code === '55P03') return 'The shift is busy being updated by another action. Wait a few seconds and try again.';
+  return typeof message === 'string' && message.trim() ? message : 'The admin-recorded time could not be saved.';
+};
+const shortTime = (value: string) => new Date(value).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; patrol_route?: { primary_staff_id: string | null } | { primary_staff_id: string | null }[] | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
 interface RosterContact { contact_name: string | null; contact_phone: string | null; version: string; }
 interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; planned_break_minutes: number; break_unpaid: boolean; contact?: RosterContact | RosterContact[] | null; external_refs?: ImportedLabourRefs | null; }
@@ -349,6 +356,10 @@ const RosterOperationsPage: React.FC = () => {
     if (!isStart && recordedStart && recordedAt <= new Date(recordedStart)) {
       setError('The finish time must be after the shift started.'); return;
     }
+    const openWelfareAlerts = adminAttendanceDialog.finishPreview?.open_welfare_alerts ?? 0;
+    if (!isStart && openWelfareAlerts > 0 && !adminAttendanceDialog.officerSafetyConfirmed) {
+      setError('Confirm you have checked the officer is safe before finishing a shift with open welfare alerts.'); return;
+    }
     setSaving(true); setError(null);
     try {
       const { data, error: recordError } = await supabase.rpc('record_admin_shift_attendance', {
@@ -359,23 +370,40 @@ const RosterOperationsPage: React.FC = () => {
         p_recorded_at: recordedAt.toISOString(),
         p_reason: adminAttendanceDialog.reason.trim(),
         p_site_briefed_by_phone: isStart && adminAttendanceDialog.siteBriefedByPhone,
+        ...(!isStart && adminAttendanceDialog.officerSafetyConfirmed ? { p_officer_safety_confirmed: true } : {}),
       });
       if (recordError) throw recordError;
-      const receipt = data as { shift_id?: string; event_type?: string; source?: string; shift_status?: string } | null;
+      const receipt = data as { shift_id?: string; event_type?: string; source?: string; shift_status?: string; released_dispatch_jobs?: number; resolved_welfare_alerts?: number; finish_location?: { recorded_at: string; address: string | null } | null } | null;
       const expectedSource = isStart ? 'admin_started_officer_shift' : 'admin_finished_officer_shift';
       const expectedStatus = isStart ? 'in_progress' : 'completed';
       if (receipt?.shift_id !== adminAttendanceDialog.shift.id || receipt.event_type !== adminAttendanceDialog.eventType
         || receipt.source !== expectedSource || receipt.shift_status !== expectedStatus) {
         throw new Error('The shift change was not confirmed. Reload before trying again.');
       }
+      const finishDetails = [
+        receipt.released_dispatch_jobs ? `${plural(receipt.released_dispatch_jobs, 'dispatch job')} returned to the queue` : null,
+        receipt.resolved_welfare_alerts ? `${plural(receipt.resolved_welfare_alerts, 'welfare alert')} resolved` : null,
+        receipt.finish_location
+          ? `last GPS breadcrumb ${shortTime(receipt.finish_location.recorded_at)}${receipt.finish_location.address ? ` at ${receipt.finish_location.address}` : ''} recorded`
+          : 'no GPS breadcrumb was reported before the finish time',
+      ].filter(Boolean).join('; ');
       setNotice(isStart
         ? 'Shift started for the officer. They have been notified, and their location will be recorded when their app next reports.'
-        : 'Shift finished for the officer. Open breaks were ended and unreached stops were skipped.');
+        : `Shift finished for the officer. Open breaks were ended and unreached stops were skipped; ${finishDetails}.`);
       setAdminAttendanceDialog(null);
       void load();
     } catch (recordFailure) {
-      setError(recordFailure instanceof Error ? recordFailure.message : 'The admin-recorded time could not be saved.');
+      setError(adminAttendanceErrorMessage(recordFailure));
     } finally { setSaving(false); }
+  };
+
+  const openAdminFinish = async (shift: Shift) => {
+    setError(null);
+    setAdminAttendanceDialog({ shift, eventType: 'admin_finish', recordedAt: localInput(new Date()), reason: '', siteBriefedByPhone: false, officerSafetyConfirmed: false, clientRequestId: crypto.randomUUID(), finishPreview: null, finishPreviewError: null });
+    const { data, error: previewError } = await supabase.rpc('get_admin_shift_finish_preview', { p_shift_id: shift.id });
+    setAdminAttendanceDialog((current) => current && current.shift.id === shift.id && current.eventType === 'admin_finish'
+      ? { ...current, finishPreview: previewError ? null : (data as AdminFinishPreview), finishPreviewError: previewError ? adminAttendanceErrorMessage(previewError) : null }
+      : current);
   };
 
   const visibleStaff = staff.filter((person) => (!scope.staffId || person.staffId === scope.staffId) && (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
@@ -820,10 +848,19 @@ const RosterOperationsPage: React.FC = () => {
     {attendanceAction && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={acknowledgeAttendance} role="dialog" aria-modal="true" aria-labelledby="attendance-action-title"><header><div><span>Attendance control</span><h2 id="attendance-action-title">Acknowledge exception</h2></div><button type="button" onClick={() => setAttendanceAction(null)}><X /></button></header><p>Record the supervisor decision for this {attendanceAction.item.exception_type.replaceAll('_', ' ')} exception.</p><label><span>Action notes</span><textarea required rows={4} value={attendanceAction.notes} onChange={(event) => setAttendanceAction({ ...attendanceAction, notes: event.target.value })} /></label><footer><button type="button" onClick={() => setAttendanceAction(null)}>Cancel</button><button type="submit" disabled={saving || !attendanceAction.notes.trim()}>Acknowledge exception</button></footer></form></div>}
     {adminAttendanceDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={saveAdminAttendance} role="dialog" aria-modal="true" aria-labelledby="admin-attendance-title"><header><div><span>Operations on the officer&apos;s behalf</span><h2 id="admin-attendance-title">{adminAttendanceDialog.eventType === 'admin_start' ? 'Start' : 'Finish'} {selectedOfficer?.name ?? 'the officer'}&apos;s shift</h2></div><button type="button" onClick={() => setAdminAttendanceDialog(null)} aria-label="Close"><X /></button></header>{adminAttendanceDialog.eventType === 'admin_start'
       ? <p className="roster-dialog-note">This starts the shift in the officer&apos;s portal from the time below and notifies them. Your phone briefing replaces the site safety check they would otherwise confirm. Their location is recorded from their own device once their app reports.</p>
-      : <p className="roster-dialog-note">This finishes the shift at the time below: open breaks end, reached stops complete and unreached stops are skipped. Open dispatch jobs and welfare alerts must be closed first. The officer is notified.</p>}
+      : <><p className="roster-dialog-note">Use this when the officer could not finish their shift themselves, for example they forgot to log off or their phone went flat. It finishes the shift at the time below: open breaks end, reached stops complete and unreached stops are skipped. Open dispatch jobs go back to the dispatch queue, and the officer&apos;s last GPS breadcrumb at or before the finish time is recorded as their finish location. The officer is notified.</p>
+        <div className="roster-dialog-note" role="status" aria-live="polite">{adminAttendanceDialog.finishPreviewError
+          ? `Could not check open work: ${adminAttendanceDialog.finishPreviewError}`
+          : !adminAttendanceDialog.finishPreview ? 'Checking open dispatch jobs, welfare alerts and the last GPS breadcrumb…'
+          : <ul>
+            <li>{adminAttendanceDialog.finishPreview.open_dispatch_jobs ? `${plural(adminAttendanceDialog.finishPreview.open_dispatch_jobs, 'open dispatch job')} will return to the dispatch queue` : 'No open dispatch jobs'}</li>
+            <li>{adminAttendanceDialog.finishPreview.open_welfare_alerts ? `${plural(adminAttendanceDialog.finishPreview.open_welfare_alerts, 'open welfare alert')} will be resolved` : 'No open welfare alerts'}</li>
+            <li>{adminAttendanceDialog.finishPreview.last_location ? `Latest GPS breadcrumb: ${new Date(adminAttendanceDialog.finishPreview.last_location.recorded_at).toLocaleString('en-NZ')}${adminAttendanceDialog.finishPreview.last_location.address ? ` · ${adminAttendanceDialog.finishPreview.last_location.address}` : ''}` : 'No GPS breadcrumb reported during this shift'}</li>
+          </ul>}</div></>}
       <label><span>{adminAttendanceDialog.eventType === 'admin_start' ? 'Shift started at' : 'Shift finished at'}</span><input type="datetime-local" required value={adminAttendanceDialog.recordedAt} max={localInput(new Date())} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, recordedAt: event.target.value, clientRequestId: crypto.randomUUID() })} /></label>
       {adminAttendanceDialog.eventType === 'admin_start' && <label className="roster-dialog-check"><input type="checkbox" required checked={adminAttendanceDialog.siteBriefedByPhone} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, siteBriefedByPhone: event.target.checked, clientRequestId: crypto.randomUUID() })} /><span>I spoke with the officer by phone and covered the site, its risks and the safety briefing</span></label>}
-      <label><span>Reason (required, kept in the audit trail)</span><textarea required minLength={5} maxLength={1000} rows={4} value={adminAttendanceDialog.reason} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, reason: event.target.value, clientRequestId: crypto.randomUUID() })} /></label>{error && <p className="roster-dialog-error" role="alert">{error}</p>}<footer><button type="button" onClick={() => setAdminAttendanceDialog(null)} disabled={saving}>Cancel</button><button type="submit" disabled={saving || adminAttendanceDialog.reason.trim().length < 5 || (adminAttendanceDialog.eventType === 'admin_start' && !adminAttendanceDialog.siteBriefedByPhone)}><Save size={15} />{saving ? 'Saving…' : adminAttendanceDialog.eventType === 'admin_start' ? 'Start shift' : 'Finish shift'}</button></footer></form></div>}
+      {adminAttendanceDialog.eventType === 'admin_finish' && (adminAttendanceDialog.finishPreview?.open_welfare_alerts ?? 0) > 0 && <label className="roster-dialog-check"><input type="checkbox" required checked={adminAttendanceDialog.officerSafetyConfirmed} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, officerSafetyConfirmed: event.target.checked, clientRequestId: crypto.randomUUID() })} /><span>I have checked the officer is safe, so their open welfare alerts can be resolved</span></label>}
+      <label><span>Reason (required, kept in the audit trail)</span><textarea required minLength={5} maxLength={1000} rows={4} value={adminAttendanceDialog.reason} onChange={(event) => setAdminAttendanceDialog({ ...adminAttendanceDialog, reason: event.target.value, clientRequestId: crypto.randomUUID() })} /></label>{error && <p className="roster-dialog-error" role="alert">{error}</p>}<footer><button type="button" onClick={() => setAdminAttendanceDialog(null)} disabled={saving}>Cancel</button><button type="submit" disabled={saving || adminAttendanceDialog.reason.trim().length < 5 || (adminAttendanceDialog.eventType === 'admin_start' && !adminAttendanceDialog.siteBriefedByPhone) || (adminAttendanceDialog.eventType === 'admin_finish' && (adminAttendanceDialog.finishPreview?.open_welfare_alerts ?? 0) > 0 && !adminAttendanceDialog.officerSafetyConfirmed)}><Save size={15} />{saving ? 'Saving…' : adminAttendanceDialog.eventType === 'admin_start' ? 'Start shift' : 'Finish shift'}</button></footer></form></div>}
     {error && <div className="roster-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}{notice && <div className="roster-message is-success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
     {showCreate && staff.some((person) => person.workReady && person.credentialRisk !== 'clear') && <div className="roster-message is-warning" role="status"><AlertTriangle size={17} /><span>Credential-risk staff remain visible for planning context, but only credential-clear officers can be submitted for a new assignment.</span></div>}
     {!loading && rosterDataReady && workUnits.length === 0 && <section className="roster-context-banner roster-setup-banner" role="status"><div><span>Before you roster</span><strong>Nothing to roster against yet</strong><p>Every shift covers a work unit. Build a patrol run from a client agreement in Client Portfolios, or set up a static post or office work unit.{staff.length === 0 ? ' Add rosterable staff in People as well.' : ` ${plural(staff.length, 'staff member')} will be ready to schedule once a work unit exists.`}</p></div><div><button type="button" onClick={() => navigate('/admin/crm')}>Client Portfolios</button><button type="button" onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{staff.length === 0 && <button type="button" onClick={() => navigate('/admin/people-hr')}>People</button>}</div></section>}
@@ -934,14 +971,15 @@ const RosterOperationsPage: React.FC = () => {
         {selectedShift.admin_start && <div><dt>Started by operations</dt><dd>{new Date(selectedShift.admin_start).toLocaleString('en-NZ')} · {selectedShift.admin_start_by ?? 'Administrator'} · briefed by phone{selectedShift.admin_start_reason && <small>{selectedShift.admin_start_reason}</small>}</dd></div>}
         {selectedShift.admin_start && <div><dt>Officer location</dt><dd>{selectedShift.location_captured_at ? `${new Date(selectedShift.location_captured_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} · ${selectedShift.location_address ?? 'Address not resolved'}` : "Waiting for the officer's device to report"}</dd></div>}
         {selectedShift.admin_finish && <div><dt>Finished by operations</dt><dd>{new Date(selectedShift.admin_finish).toLocaleString('en-NZ')} · {selectedShift.admin_finish_by ?? 'Administrator'}{selectedShift.admin_finish_reason && <small>{selectedShift.admin_finish_reason}</small>}</dd></div>}
+        {selectedShift.admin_finish && <div><dt>Finish location</dt><dd>{selectedShift.finish_location_captured_at ? `Last GPS breadcrumb ${new Date(selectedShift.finish_location_captured_at).toLocaleString('en-NZ')} · ${selectedShift.finish_location_address ?? 'Address not resolved'}` : 'No GPS breadcrumb before the finish time'}{(selectedShift.finish_released_dispatch_jobs || selectedShift.finish_resolved_welfare_alerts) ? <small>{[selectedShift.finish_released_dispatch_jobs ? `${plural(selectedShift.finish_released_dispatch_jobs, 'dispatch job')} returned to the queue` : null, selectedShift.finish_resolved_welfare_alerts ? `${plural(selectedShift.finish_resolved_welfare_alerts, 'welfare alert')} resolved` : null].filter(Boolean).join(' · ')}</small> : null}</dd></div>}
         {selectedShift.status === 'completed' && <div><dt>How it ended</dt><dd>{endedWords(selectedShift.ended_reason)}</dd></div>}
         <div><dt>Stops</dt><dd>{selectedShift.total_stops === 0 ? 'None on this shift' : `${selectedShift.completed_stops ?? 0} of ${selectedShift.total_stops} done`}</dd></div>
         <div><dt>Health</dt><dd>{plainWords(selectedShift.shift_health, 'Not calculated yet')}</dd></div>
       </dl>
       {selectedShift.notes && <p>{selectedShift.notes}</p>}
       <footer>
-        {canRecordAdminStart && <button type="button" onClick={() => setAdminAttendanceDialog({ shift: selectedShift, eventType: 'admin_start', recordedAt: localInput(new Date()), reason: '', siteBriefedByPhone: false, clientRequestId: crypto.randomUUID() })}>Record admin start</button>}
-        {canRecordAdminFinish && <button type="button" onClick={() => setAdminAttendanceDialog({ shift: selectedShift, eventType: 'admin_finish', recordedAt: localInput(new Date()), reason: '', siteBriefedByPhone: false, clientRequestId: crypto.randomUUID() })}>Record admin finish</button>}
+        {canRecordAdminStart && <button type="button" onClick={() => setAdminAttendanceDialog({ shift: selectedShift, eventType: 'admin_start', recordedAt: localInput(new Date()), reason: '', siteBriefedByPhone: false, officerSafetyConfirmed: false, clientRequestId: crypto.randomUUID() })}>Record admin start</button>}
+        {canRecordAdminFinish && <button type="button" onClick={() => void openAdminFinish(selectedShift)}>Record admin finish</button>}
       </footer>
     </aside>}
     {selectedSlot && <aside className="roster-inspector roster-slot-inspector">
