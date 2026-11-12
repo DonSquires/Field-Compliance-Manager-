@@ -2134,11 +2134,12 @@ const vibeWorker = vibeEnabled ? createVibeWorker({
     prepareWorkspace: workspacePath => vibePreview.ensureWebDependencies(workspacePath),
     // Dr Bob's offline browser walk of the session branch (BOB_VIBE_HUMAN_TEST=0 disables it).
     humanTest: process.env.BOB_VIBE_HUMAN_TEST === '0' || !process.env.BOB_WORKER_IMAGE ? null : runVibeHumanTest,
-    publish: ({ workspacePath, branch, head }) => {
+    publish: ({ workspacePath, branch, head, replaceOwnHistory = false }) => {
       const target = builderGitTarget();
-      return publishWorkspaceBranch({ workspacePath, branchName: branch, expectedHeadSha: head, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand, requireVerifiedIdentity: true });
+      return publishWorkspaceBranch({ workspacePath, branchName: branch, expectedHeadSha: head, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand, requireVerifiedIdentity: true, replaceOwnHistory });
     },
     openPullRequest: ({ workspacePath, branch, head, title, body }) => createGitHubPullRequest({ workspacePath, branchName: branch, expectedHeadSha: head, title: `Bob vibe: ${title}`, body, githubToken, owner: githubOwner, repo: githubRepo, draft: false }),
+    readPullRequest: ({ url }) => readGitHubPullRequestState({ url, githubToken, owner: githubOwner, repo: githubRepo }),
   },
 }) : null;
 // Bob Builder chat: the Builder page's own conversation lane, independent of in-app Bob (onspace-ai-chat).

@@ -437,16 +437,24 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`session read failed: ${error.message}`);
       return data;
     },
-    async updateSession(sessionId, patch, { unlessClosed = false } = {}) {
+    async updateSession(sessionId, patch, { unlessClosed = false, onlyIfStatus = null } = {}) {
       const query = supabase.from('builder_vibe_sessions').update({ ...patch, updated_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq('id', sessionId);
-      if (unlessClosed) {
-        const { data, error } = await query.neq('status', 'closed').select('id').maybeSingle();
+      if (unlessClosed || onlyIfStatus) {
+        const guarded = onlyIfStatus ? query.eq('status', onlyIfStatus) : query.neq('status', 'closed');
+        const { data, error } = await guarded.select('id').maybeSingle();
         if (error) throw new Error(`session update failed: ${error.message}`);
         return Boolean(data);
       }
       const { error } = await query;
       if (error) throw new Error(`session update failed: ${error.message}`);
       return true;
+    },
+    async shippedSessions(limit = 50) {
+      const { data, error } = await supabase.from('builder_vibe_sessions')
+        .select('id,human_reference,status,base_sha,head_sha,pr_url,pr_number')
+        .eq('status', 'shipped').not('pr_url', 'is', null).order('updated_at', { ascending: true }).limit(limit);
+      if (error) throw new Error(`shipped session read failed: ${error.message}`);
+      return Array.isArray(data) ? data : [];
     },
     async continuationState(sessionId, messageSeq) {
       const [sessionResult, queuedResult] = await Promise.all([
@@ -763,6 +771,94 @@ function ensureVibeWorkspace({ workspaceRoot, session, sourceDirFor, resolveHead
   try { git(sourceDir, ['worktree', 'prune']); } catch { /* best effort */ }
   git(sourceDir, ['worktree', 'add', '--force', '-B', branch, workspacePath, baseSha]);
   return { workspacePath, branch, baseSha, created: true, recovered: Boolean(session.base_sha && session.head_sha && session.head_sha !== session.base_sha) };
+}
+
+const isAncestor = (repoDir, ancestor, descendant) => {
+  try { git(repoDir, ['merge-base', '--is-ancestor', ancestor, descendant]); return true; } catch { return false; }
+};
+
+// The session branch follows the live main: before Bob works or ships, the branch is rebased onto
+// the current main head. When its pull request already merged, only the commits made after the
+// merged head are replayed, so squash-merged work is never re-applied. A conflict leaves the
+// branch exactly as it was.
+function syncWithMain({ workspacePath, baseSha, deps, mergedHead = null }) {
+  const main = deps.resolveHead();
+  if (!/^[0-9a-f]{40}$/.test(String(main))) throw new Error('could not resolve the current main head');
+  if (!baseSha || main === baseSha) return { changed: false, baseSha, main };
+  deps.sourceDirFor(main);
+  if (git(workspacePath, ['status', '--porcelain'])) return { changed: false, baseSha, main, dirty: true };
+  const previousHead = git(workspacePath, ['rev-parse', 'HEAD']);
+  const identity = builderCommitIdentity();
+  const onto = /^[0-9a-f]{40}$/.test(String(mergedHead)) && isAncestor(workspacePath, mergedHead, previousHead) ? ['--onto', main, mergedHead] : [main];
+  try {
+    git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, '-c', 'commit.gpgsign=false', 'rebase', '--no-autostash', ...onto]);
+  } catch (error) {
+    let conflicts = [];
+    try { conflicts = git(workspacePath, ['diff', '--name-only', '--diff-filter=U']).split('\n').filter(Boolean); } catch { /* reported below */ }
+    try { git(workspacePath, ['rebase', '--abort']); } catch { /* restored below */ }
+    if (git(workspacePath, ['rev-parse', 'HEAD']) !== previousHead) git(workspacePath, ['reset', '--hard', previousHead]);
+    return { changed: false, baseSha, main, conflicts, error: clip(redactGitError(error && error.message), 300) };
+  }
+  return { changed: true, baseSha: main, previousBase: baseSha, previousHead, head: git(workspacePath, ['rev-parse', 'HEAD']) };
+}
+
+function describeSyncFailure(sync) {
+  return sync.conflicts?.length
+    ? `This branch conflicts with main ${sync.main.slice(0, 10)} in ${sync.conflicts.join(', ')}.`
+    : `This branch could not be brought up to date with main${sync.main ? ` ${sync.main.slice(0, 10)}` : ''}: ${sync.error || 'unknown error'}.`;
+}
+
+// Commits on `head` whose change is not on `main` (patch-equivalent or content-equal work counts as merged).
+// `since` is a merged pull request head: commits up to it are on main even when squash-merged.
+function unmergedCommits({ repoDir, main, head, since = null }) {
+  const limit = /^[0-9a-f]{40}$/.test(String(since)) && isAncestor(repoDir, since, head) ? [since] : [];
+  const pending = git(repoDir, ['cherry', main, head, ...limit]).split('\n').filter(line => line.startsWith('+ ')).map(line => line.slice(2));
+  if (!pending.length) return [];
+  const files = new Set();
+  for (const sha of pending) for (const file of git(repoDir, ['show', '--name-only', '--format=', sha]).split('\n').filter(Boolean)) files.add(file);
+  if (files.size && !git(repoDir, ['diff', '--name-only', main, head, '--', ...files])) return [];
+  return pending;
+}
+
+// A shipped session is finished when its PR merged with everything on the branch; a closed PR, or
+// commits made after the merge, reopen it so the work is never silently stranded.
+async function reconcileShippedSessions({ store, workspaceRoot, sourceDirFor, resolveHead, readPullRequest }) {
+  const result = { checked: 0, closed: 0, reopened: 0 };
+  if (typeof readPullRequest !== 'function' || typeof store.shippedSessions !== 'function') return result;
+  let main = null;
+  for (const session of await store.shippedSessions()) {
+    if (!session.pr_url) continue;
+    result.checked += 1;
+    let pr;
+    try { pr = await readPullRequest({ url: session.pr_url }); } catch { continue; }
+    const label = session.pr_number ? `#${session.pr_number}` : session.pr_url;
+    const reopen = async (content, prState) => {
+      if (!await store.updateSession(session.id, { status: 'open', pr_url: null, pr_number: null }, { onlyIfStatus: 'shipped' })) return;
+      result.reopened += 1;
+      await store.post(session.id, { role: 'system', kind: 'status', content, payload: { stage: 'pr_reconciled', pr_state: prState, pr_url: session.pr_url } });
+    };
+    if (pr?.state === 'closed') {
+      await reopen(`Pull request ${label} was closed without merging. The work is still on this branch; Ship as PR opens a new pull request.`, 'closed');
+      continue;
+    }
+    if (pr?.state !== 'merged') continue;
+    let stranded = [];
+    if (session.head_sha && pr.headSha !== session.head_sha) {
+      try {
+        main = main || resolveHead();
+        stranded = unmergedCommits({ repoDir: sourceDirFor(main), main, head: session.head_sha, since: pr.headSha });
+      } catch { continue; }
+    }
+    if (stranded.length) {
+      await reopen(`Pull request ${label} was merged, but ${stranded.length} later commit(s) on this branch are not on main. Ship as PR brings the branch up to date and opens a new pull request for them.`, 'merged');
+      continue;
+    }
+    if (await store.updateSession(session.id, { status: 'closed' }, { onlyIfStatus: 'shipped' })) {
+      result.closed += 1;
+      await store.post(session.id, { role: 'system', kind: 'status', content: `Pull request ${label} was merged into main. This session is complete.`, payload: { stage: 'pr_reconciled', pr_state: 'merged', pr_url: session.pr_url } });
+    }
+  }
+  return result;
 }
 
 const EPHEMERAL_VIBE_PATHS = ['apps/web/node_modules/'];
@@ -1801,7 +1897,26 @@ async function runConversation({ store, session, message, workspacePath, branch,
 
 async function shipSession({ store, session, workspacePath, branch, baseSha, deps, beforeSeq = Number.MAX_SAFE_INTEGER, limits = VIBE_LIMITS }) {
   const state = branchState(workspacePath, baseSha);
-  if (!state.commits.length) return { reply: 'There is nothing to ship yet: the branch has no changes from main.' };
+  // A finished pull request is never reused: pushing to it after a merge strands the work.
+  let previous = null;
+  if (session.pr_url) {
+    const label = session.pr_number ? `#${session.pr_number}` : session.pr_url;
+    let read = null;
+    if (typeof deps.readPullRequest === 'function') {
+      try { read = await deps.readPullRequest({ url: session.pr_url }); } catch { read = null; }
+    }
+    if (!read || !['open', 'merged', 'closed'].includes(read.state)) {
+      return { error: true, reply: `Publication refused: Bob could not confirm the state of pull request ${label} on GitHub, so nothing was pushed. Try Ship as PR again shortly; the branch is preserved.` };
+    }
+    previous = { ...read, label };
+  }
+  const finished = Boolean(previous && previous.state !== 'open');
+  if (finished) await store.updateSession(session.id, { pr_url: null, pr_number: null });
+  const finishedNote = finished ? `Pull request ${previous.label} was already ${previous.state === 'merged' ? 'merged' : 'closed without merging'}, so it was not reused. ` : '';
+  if (!state.commits.length) {
+    if (previous?.state === 'merged') return { status: 'closed', reply: `Pull request ${previous.label} was merged and everything on this branch is already on main. This session is complete.` };
+    return { reply: `${finishedNote}There is nothing to ship yet: the branch has no changes from main.` };
+  }
   builderCommitIdentity({ requireVerified: true });
   if (git(workspacePath, ['status', '--porcelain'])) {
     return { error: true, reply: 'Publication refused: the workspace has uncommitted changes. Continue the coding turn so the draft can be checked and committed first.' };
@@ -1885,12 +2000,14 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
     return { error: true, reply: 'Publication refused: the branch changed during verification. Check and commit the current draft, then run Ship as PR again.' };
   }
   await store.updateSession(session.id, { status: 'shipping' });
-  await deps.publish({ workspacePath, branch, head: state.head });
-  let prUrl = session.pr_url;
-  let prNumber = session.pr_number;
+  await deps.publish({ workspacePath, branch, head: state.head, replaceOwnHistory: true });
+  let prUrl = finished ? null : session.pr_url;
+  let prNumber = finished ? null : session.pr_number;
+  const reused = Boolean(prUrl);
   if (!prUrl) {
     const body = [
       `Opened from a Bob Builder vibe session (\`${session.id}\`) at the owner's request.`,
+      ...(finished ? ['', `Follows pull request ${previous.label}, which was ${previous.state === 'merged' ? 'merged' : 'closed without merging'}; this branch was rebased onto current main first.`] : []),
       '', '### Commits', ...state.commits.map(line => `- ${line}`),
       '', '### Files', ...state.files.map(file => `- \`${file}\``),
       '', `### Verification at \`${state.head}\``, ...verification.map(check => `- ${check.command}: passed${check.warnings ? ` (${check.warnings} warnings; review the receipt)` : ''}`),
@@ -1901,7 +2018,7 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
     prNumber = pr.number;
   }
   await store.updateSession(session.id, { status: 'shipped', head_sha: state.head, changed_files: state.files, pr_url: prUrl, pr_number: prNumber });
-  return { reply: `${session.pr_url ? 'Pushed the latest changes to' : 'Opened'} pull request ${prUrl} with ${state.commits.length} commit(s) across ${state.files.length} file(s). It needs review and a merge before it goes live.`, payload: { pr_url: prUrl, pr_number: prNumber } };
+  return { reply: `${finishedNote}${reused ? 'Pushed the latest changes to' : 'Opened'} pull request ${prUrl} with ${state.commits.length} commit(s) across ${state.files.length} file(s). It needs review and a merge before it goes live.`, payload: { pr_url: prUrl, pr_number: prNumber } };
 }
 
 function revertLastTurn({ workspacePath, baseSha }) {
@@ -1946,13 +2063,48 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
       await store.post(session.id, { role: 'system', kind: 'status', content: ws.recovered ? `The session workspace was missing, so the branch was recreated from main ${ws.baseSha.slice(0, 10)}; earlier unshipped changes are not in it.` : `Working on branch ${ws.branch} from main ${ws.baseSha.slice(0, 10)}.` });
       session = { ...session, base_sha: ws.baseSha, branch: ws.branch };
     }
+    let baseSha = ws.baseSha;
+    let syncRefusal = null;
+    const recovering = recoveryHead !== undefined || Number(message.payload?.restart_retries) > 0;
+    if (!ws.created && action !== 'revert' && !recovering) {
+      let mergedHead = null;
+      if (session.pr_url && typeof deps.readPullRequest === 'function') {
+        try {
+          const pr = await deps.readPullRequest({ url: session.pr_url });
+          if (pr?.state === 'merged') mergedHead = pr.headSha || null;
+        } catch { /* a plain rebase still follows main */ }
+      }
+      let sync;
+      try { sync = syncWithMain({ workspacePath: ws.workspacePath, baseSha, deps, mergedHead }); }
+      catch (error) {
+        if (action === 'ship') throw error;
+        sync = { changed: false, error: clip(redactGitError(error && error.message), 300) };
+      }
+      if (sync.changed) {
+        if (!await store.updateSession(session.id, { base_sha: sync.baseSha, head_sha: sync.head }, { unlessClosed: true })) {
+          await store.complete(message.id, 'failed');
+          return { skipped: true };
+        }
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `Brought the branch up to date with main ${sync.baseSha.slice(0, 10)} (it started from ${sync.previousBase.slice(0, 10)}).`,
+          payload: { stage: 'sync_main', base_sha: sync.baseSha, previous_base_sha: sync.previousBase, head_sha: sync.head },
+        });
+        baseSha = sync.baseSha;
+        session = { ...session, base_sha: baseSha };
+      } else if (sync.conflicts || sync.error) {
+        const detail = describeSyncFailure(sync);
+        if (action === 'ship') syncRefusal = { error: true, reply: `Publication refused: ${detail} Nothing was pushed and the branch is unchanged. Start a new session from current main, or rework the conflicting file(s) to match main first.` };
+        else await store.post(session.id, { role: 'system', kind: 'error', content: `${detail} Continuing on the earlier base main ${String(baseSha).slice(0, 10)}; nothing on the branch was changed.`, payload: { stage: 'sync_main', conflicts: sync.conflicts || [] } });
+      }
+    }
     if (action === 'ship') {
-      outcome = await shipSession({ store, session, workspacePath: ws.workspacePath, branch: ws.branch, baseSha: ws.baseSha, deps, beforeSeq: message.seq, limits });
+      outcome = syncRefusal || await shipSession({ store, session, workspacePath: ws.workspacePath, branch: ws.branch, baseSha, deps, beforeSeq: message.seq, limits });
     } else if (action === 'revert') {
-      outcome = revertLastTurn({ workspacePath: ws.workspacePath, baseSha: ws.baseSha });
+      outcome = revertLastTurn({ workspacePath: ws.workspacePath, baseSha });
     } else {
       await store.post(session.id, { role: 'bob', kind: 'thinking', content: 'Working on it…', payload: { message_id: message.id } });
-      const result = await runConversation({ store, session, message, workspacePath: ws.workspacePath, branch: ws.branch, baseSha: ws.baseSha, gateway: deps.gateway, deps, limits });
+      const result = await runConversation({ store, session, message, workspacePath: ws.workspacePath, branch: ws.branch, baseSha, gateway: deps.gateway, deps, limits });
       const refused = revertRefusedChanges(result.tools, ws.workspacePath);
       const commit = commitTurn({ workspacePath: ws.workspacePath, message: message.content, identity: builderCommitIdentity() });
       if (commit) {
@@ -1963,8 +2115,10 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
       if (refused.length) await store.post(session.id, { role: 'system', kind: 'error', content: `Refused and reverted protected changes: ${refused.map(entry => `${entry.file} (${entry.reason})`).join('; ')}` });
       outcome = { reply: result.reply, error: result.error, payload: { model: result.model || null, commit } };
     }
-    const state = branchState(ws.workspacePath, ws.baseSha);
-    const status = session.pr_url || outcome.payload?.pr_url ? 'shipped' : 'open';
+    const state = branchState(ws.workspacePath, baseSha);
+    const current = typeof store.session === 'function' ? await store.session(session.id) : null;
+    const prUrl = outcome.payload?.pr_url || (current ? current.pr_url : session.pr_url);
+    const status = outcome.status || (prUrl ? 'shipped' : 'open');
     if (!await store.updateSession(session.id, { status, head_sha: state.head, changed_files: state.files }, { unlessClosed: true })) {
       await store.complete(message.id, 'failed');
       return { skipped: true };
@@ -1976,22 +2130,31 @@ async function processVibeMessage({ store, message, deps, limits = VIBE_LIMITS }
   } catch (error) {
     const detail = clip(redactGitError(error && error.message), 600);
     await store.post(session.id, { role: 'bob', kind: 'error', content: `Something went wrong: ${detail}` }).catch(() => {});
-    await store.updateSession(session.id, { status: session.pr_url ? 'shipped' : 'open' }, { unlessClosed: true }).catch(() => {});
+    // Ship may have cleared a finished pull request before failing, so the stored row decides.
+    const current = typeof store.session === 'function' ? await store.session(session.id).catch(() => null) : null;
+    const prUrl = current ? current.pr_url : session.pr_url;
+    await store.updateSession(session.id, { status: prUrl ? 'shipped' : 'open' }, { unlessClosed: true }).catch(() => {});
     await store.complete(message.id, 'failed').catch(() => {});
     return { error: detail };
   }
 }
 
-function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) {
+function createVibeWorker({ supabase, deps, intervalMs = 3000, reconcileIntervalMs = 5 * 60_000, log = console }) {
   const store = createVibeStore(supabase);
   let running = false;
   let timer = null;
+  let lastReconcile = 0;
   const tick = async () => {
     if (running) return;
     running = true;
     try {
       for (let claimed = await store.claimNext(); claimed; claimed = await store.claimNext()) {
         await processVibeMessage({ store, message: claimed, deps: { ...deps, supabase } });
+      }
+      if (deps.readPullRequest && Date.now() - lastReconcile >= reconcileIntervalMs) {
+        lastReconcile = Date.now();
+        const outcome = await reconcileShippedSessions({ store, workspaceRoot: deps.workspaceRoot, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead, readPullRequest: deps.readPullRequest });
+        if (outcome.closed || outcome.reopened) log.info?.(`vibe worker: pull request reconcile ${JSON.stringify(outcome)}`);
       }
     } catch (error) {
       log.error?.(`vibe worker: ${redactGitError(error && error.message)}`);
@@ -2016,4 +2179,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, vibeExternalProviders, applyVibeRouting, vibeProviderCandidates, rankVibeCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, editTargets, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, vibeExternalProviders, applyVibeRouting, vibeProviderCandidates, rankVibeCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, syncWithMain, reconcileShippedSessions, processVibeMessage, createVibeWorker };
