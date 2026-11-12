@@ -4,8 +4,14 @@ import path from 'node:path';
 const orgA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const orgB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const userId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const otherUserId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const vibeSessionId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const vibeMessageId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+const recoveryRequestId = '99999999-9999-4999-8999-999999999999';
 let profileRole = 'master';
 let profileDeactivatedAt = null;
+let vibeSessionOwnerId = userId;
+const recoveryCalls = [];
 const jobs = [
   { id: '11111111-1111-4111-8111-111111111111', organization_id: orgA, title: 'Old incident % report',
     human_reference: 'BB-9007199254740992', status: 'failed', created_at: '2026-01-02T00:00:00Z',
@@ -32,6 +38,22 @@ globalThis.fetch = async (input, init) => {
   });
   if (url.pathname === '/rest/v1/audit_log') return new Response(null, { status: 201 });
   if (url.pathname === '/rest/v1/builder_projects') return respond([]);
+  if (url.pathname === '/rest/v1/builder_vibe_sessions') {
+    const requestedId = url.searchParams.get('id')?.replace(/^eq\./, '');
+    return respond(requestedId === vibeSessionId ? {
+      id: vibeSessionId, created_by: vibeSessionOwnerId, status: 'open',
+      head_sha: 'a'.repeat(40), pr_url: null,
+    } : null);
+  }
+  if (url.pathname === '/rest/v1/rpc/builder_vibe_recover_failed_turn') {
+    const args = await request.json();
+    recoveryCalls.push(args);
+    if (args.p_session_id !== vibeSessionId || args.p_message_id !== vibeMessageId
+      || args.p_expected_head !== 'a'.repeat(40) || args.p_request_id !== recoveryRequestId) {
+      throw new Error('Recovery RPC arguments were not bound to the requested owner turn');
+    }
+    return respond({ result: 'scheduled', message_status: 'queued' });
+  }
   if (url.pathname === '/rest/v1/rpc/builder_rename_job') {
     const args = await request.json();
     const job = jobs.find(row => row.id === args.p_job_id && row.organization_id === args.p_organization_id);
@@ -145,5 +167,18 @@ result.renameOfficer = await call({ action: 'rename', job_id: jobs[0].id,
   expected_title: 'Clearer work', title: 'Officer change' });
 profileRole = 'master';
 result.renameReadback = await call({ action: 'get', job_id: jobs[0].id });
+result.vibeRecovery = await call({ action: 'recover_vibe_turn', session_id: vibeSessionId, message_id: vibeMessageId,
+  expected_head: 'a'.repeat(40), request_id: recoveryRequestId });
+vibeSessionOwnerId = otherUserId;
+result.vibeRecoveryOtherOwner = await call({ action: 'recover_vibe_turn', session_id: vibeSessionId, message_id: vibeMessageId,
+  expected_head: 'a'.repeat(40), request_id: '88888888-8888-4888-8888-888888888888' });
+vibeSessionOwnerId = userId;
+result.vibeRecoveryMalformed = await call({ action: 'recover_vibe_turn', session_id: vibeSessionId, message_id: vibeMessageId,
+  expected_head: 'not-a-full-sha', request_id: recoveryRequestId });
+profileRole = 'officer';
+result.vibeRecoveryOfficer = await call({ action: 'recover_vibe_turn', session_id: vibeSessionId, message_id: vibeMessageId,
+  expected_head: 'a'.repeat(40), request_id: recoveryRequestId });
+profileRole = 'master';
+result.vibeRecoveryRpcCalls = recoveryCalls;
 console.log(`BUILDER_FIXTURE_RESULT ${JSON.stringify(result)}`);
 Deno.exit(0);

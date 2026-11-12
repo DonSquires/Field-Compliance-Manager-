@@ -70,4 +70,16 @@ test('Builder Edge returns stored references without leaking other organizations
   assert.equal(responses.renameInactive.status, 403);
   assert.equal(responses.renameOfficer.status, 403);
   assert.equal(responses.renameReadback.body.job.title, 'Clearer work');
+  assert.equal(responses.vibeRecovery.status, 200);
+  assert.deepEqual(responses.vibeRecovery.body.recovery, { result: 'scheduled', message_status: 'queued' });
+  assert.equal(responses.vibeRecoveryOtherOwner.status, 404);
+  assert.equal(responses.vibeRecoveryMalformed.status, 400);
+  assert.equal(responses.vibeRecoveryOfficer.status, 403);
+  assert.equal(responses.vibeRecoveryRpcCalls.length, 1, 'only the active owner can invoke the service-only RPC');
+  assert.deepEqual(responses.vibeRecoveryRpcCalls[0], {
+    p_session_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    p_message_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    p_expected_head: 'a'.repeat(40),
+    p_request_id: '99999999-9999-4999-8999-999999999999',
+  });
 });

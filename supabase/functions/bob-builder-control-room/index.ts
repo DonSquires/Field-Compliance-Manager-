@@ -195,13 +195,13 @@ serve(async req => {
   const allowedOrganizations = new Set([profile.organization_id, ...strings(profile.authorized_organization_ids, 200)].filter(Boolean));
   const canAccessOrganization = (organizationId: string | null) => role === 'grand_master' || Boolean(organizationId && allowedOrganizations.has(organizationId));
 
-  const audit = async (organizationId: string | null, result: string, jobId: string | null = null) => {
+  const audit = async (organizationId: string | null, result: string, jobId: string | null = null, entityType = 'builder_job') => {
     try {
       await admin.from('audit_log').insert({
         organization_id: organizationId,
         user_id: user.id,
         action: FUNCTION_NAME,
-        entity_type: 'builder_job',
+        entity_type: entityType,
         entity_id: jobId,
         change_summary: JSON.stringify({ action, result }),
       });
@@ -252,6 +252,43 @@ serve(async req => {
     await audit(profile.organization_id, result.ok ? action : `${action}_failed`, runId);
     if (!result.ok || !run) return json({ error: failureDetail(result.payload) ?? 'Human-test run is unavailable' }, result.status);
     return json({ run, existing: result.payload.existing === true }, result.status);
+  }
+
+  if (action === 'recover_vibe_turn') {
+    stage = 'recover_vibe_turn';
+    if (profile.deactivated_at !== null) return json({ error: 'An active Builder identity is required' }, 403);
+    const sessionId = typeof body.session_id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.session_id) ? body.session_id : null;
+    const messageId = typeof body.message_id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.message_id) ? body.message_id : null;
+    const expectedHead = typeof body.expected_head === 'string' && /^[0-9a-f]{40}$/.test(body.expected_head) ? body.expected_head : null;
+    const requestId = typeof body.request_id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.request_id) ? body.request_id : null;
+    if (!sessionId || !messageId || !expectedHead || !requestId) {
+      return json({ error: 'A Vibe session, failed owner turn, current branch head and request ID are required' }, 400);
+    }
+    const { data: session, error: sessionError } = await admin.from('builder_vibe_sessions')
+      .select('id,created_by,status,head_sha,pr_url').eq('id', sessionId).maybeSingle();
+    if (sessionError) return json({ error: 'Vibe session ownership could not be verified' }, 503);
+    if (!session || session.created_by !== user.id) return json({ error: 'Vibe session is unavailable' }, 404);
+    if (session.status !== 'open' || session.pr_url || session.head_sha !== expectedHead) {
+      return json({ error: 'Vibe session changed or is no longer open. Refresh before retrying.' }, 409);
+    }
+    const { data: recoveryResult, error: recoveryError } = await admin.rpc('builder_vibe_recover_failed_turn', {
+      p_session_id: sessionId,
+      p_message_id: messageId,
+      p_expected_head: expectedHead,
+      p_request_id: requestId,
+    });
+    await audit(profile.organization_id, recoveryError ? 'vibe_turn_recovery_failed' : 'vibe_turn_recovery_scheduled', sessionId, 'builder_vibe_session');
+    if (recoveryError) {
+      console.error(`[${FUNCTION_NAME}] Vibe turn recovery failed`, { code: recoveryError.code });
+      const conflict = recoveryError.code === 'P0001' || recoveryError.code === '23514';
+      return json({ error: conflict ? 'This Vibe turn is no longer eligible for recovery. Refresh the conversation.' : 'The failed Vibe turn could not be queued. Retry the request.' }, conflict ? 409 : 503);
+    }
+    const result = recoveryResult && typeof recoveryResult === 'object' && !Array.isArray(recoveryResult)
+      ? recoveryResult as Record<string, unknown> : {};
+    if (!['scheduled', 'already_scheduled'].includes(String(result.result))) {
+      return json({ error: 'The Vibe recovery queue did not confirm the request' }, 503);
+    }
+    return json({ recovery: { result: result.result, message_status: result.message_status === 'queued' ? 'queued' : null } });
   }
 
   // Bob's terminal on the owner's laptop (owner instruction 2026-09-26). Grand master only: the laptop
