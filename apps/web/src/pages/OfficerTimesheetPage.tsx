@@ -31,7 +31,7 @@ interface Timesheet {
   submitted_at: string | null;
 }
 
-interface TimesheetWorkEntry {
+interface TimesheetWorkEntryLocal {
   id: string;
   date: string;
   description: string;
