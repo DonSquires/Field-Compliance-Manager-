@@ -228,6 +228,32 @@ test('autopilot skips a job whose run is already in flight and retries a retryab
   assert.ok(!failed.calls.some(([name]) => name === 'record'), 'a retryable failure is not reported as blocked');
 });
 
+test('the same pre-step failure repeated every tick becomes a visible block instead of a silent loop (BB-170)', async () => {
+  const job = { id: 'job-repeat-loop', status: 'design_pending', autopilot_state: 'driving', title: 'Routine repair', target_sha: 'e'.repeat(40) };
+  const error = 'product specification artifact is not valid JSON';
+  const outcomesByTick = [];
+  let last;
+  for (let tick = 0; tick < 3; tick += 1) {
+    last = actionsRecorder({ run: { paused: true, reason: 'action_failed', result: { success: false, error } } });
+    outcomesByTick.push((await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: last }))[0].outcome);
+  }
+  assert.deepEqual(outcomesByTick, ['advanced', 'advanced', 'blocked']);
+  const recorded = last.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'blocked');
+  assert.match(recorded[3].text, /repeated 3 times/);
+  assert.match(recorded[3].text, /not valid JSON/);
+});
+
+test('a different pre-step failure resets the repeat counter', async () => {
+  const job = { id: 'job-repeat-varied', status: 'design_pending', autopilot_state: 'driving', title: 'Routine repair', target_sha: 'f'.repeat(40) };
+  const outcomes = [];
+  for (const error of ['first failure', 'first failure', 'second failure', 'second failure']) {
+    const actions = actionsRecorder({ run: { paused: true, reason: 'action_failed', result: { success: false, error } } });
+    outcomes.push((await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }))[0].outcome);
+  }
+  assert.deepEqual(outcomes, ['advanced', 'advanced', 'advanced', 'advanced']);
+});
+
 function releaseReadyFixture() {
   const org = '56710c19-d604-4767-9ad8-9c5863b4ceb7';
   const job = { id: 'job-4', organization_id: org, status: 'release_ready', autopilot_state: 'driving', title: "Accept 'go for it' as a yes", task_description: 'brief', target_sha: 'd'.repeat(40), workspace_pull_request_url: null };

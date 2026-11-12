@@ -615,6 +615,16 @@ async function resumeAfterRepair({ supabase, job, actions, log }) {
   return { job: job.id, outcome: 'resumed', resumed_as: reopened.id };
 }
 
+const REPEATED_FAILURE_LIMIT = 3;
+const REPEATED_FAILURES = new Map();
+
+function noteRepeatedFailure(jobId, error) {
+  const previous = REPEATED_FAILURES.get(jobId);
+  const count = previous && previous.error === error ? previous.count + 1 : 1;
+  REPEATED_FAILURES.set(jobId, { error, count });
+  return count;
+}
+
 async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
   const outcomes = [];
   for (const job of orderAutopilotJobs(jobs)) {
@@ -777,7 +787,15 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         continue;
       }
       const blockedReason = run?.reason === 'attempt_ceiling' ? run.detail : run?.reason === 'blocked' ? (run.detail || 'the Builder is blocked') : run?.reason === 'action_failed' ? (run.result?.error || run.result?.detail || 'a Builder step failed') : null;
-      if (blockedReason && run?.reason !== 'action_failed') {
+      // A failure thrown before a step starts never counts an attempt, so the ceiling cannot stop it
+      // (live job BB-170 failed identically every minute for five days). Repeats become a visible block.
+      const repeats = run?.reason === 'action_failed' ? noteRepeatedFailure(job.id, blockedReason) : (REPEATED_FAILURES.delete(job.id), 0);
+      const repeatedReason = repeats >= REPEATED_FAILURE_LIMIT
+        ? `the same Builder failure repeated ${repeats} times without the step being able to start: ${blockedReason}`
+        : null;
+      if (repeatedReason) REPEATED_FAILURES.delete(job.id);
+      if (blockedReason && (run?.reason !== 'action_failed' || repeatedReason)) {
+        const stopReason = repeatedReason || blockedReason;
         const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
         const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
         const baseline = baselineBlock(blockedReason);
@@ -811,9 +829,9 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           outcomes.push({ job: job.id, outcome: 'repairing', repair_job: repair.id });
           continue;
         }
-        if (typeof actions.fail === 'function') await actions.fail(job.id, blockedReason);
-        await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: blockedReason }));
-        outcomes.push({ job: job.id, outcome: 'blocked', reason: blockedReason });
+        if (typeof actions.fail === 'function') await actions.fail(job.id, stopReason);
+        await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: stopReason }));
+        outcomes.push({ job: job.id, outcome: 'blocked', reason: stopReason });
         continue;
       }
       // action_failed on a retryable step is retried on the next tick; the attempt ceiling turns it into a block.

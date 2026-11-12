@@ -334,6 +334,16 @@ test('Product Analyst parser rejects malformed or incomplete output', () => {
   })), /workflow_verification.before/);
 });
 
+test('a routine repair that forbids redesign is not treated as a broad UI redesign (BB-182)', () => {
+  const routine = 'Goal: repair the routine monitored defect.\nBefore: page /officer; module web_runtime.\n'
+    + 'Routine boundary: make the smallest corrective patch that removes the root cause. Do not redesign, add a feature/module/workflow, change architecture.';
+  assert.equal(isBroadUiRedesign(routine), false);
+  assert.equal(isBroadUiRedesign("Fix the crash on the officer page. Don't rebuild the interface."), false);
+  assert.equal(isBroadUiRedesign('Fix the page without a redesign of the UI.'), false);
+  assert.equal(isBroadUiRedesign('Never redesign the page; just fix the null check.'), false);
+  assert.equal(isBroadUiRedesign('Do not add a feature. Redesign the officer page UI.'), true);
+});
+
 test('Product Analyst rejects generic acceptance for a broad UI redesign', () => {
   const taskDescription = 'Redesign the Builder workspace UI and UX to be a professional enterprise interface';
   assert.equal(isBroadUiRedesign(taskDescription), true);

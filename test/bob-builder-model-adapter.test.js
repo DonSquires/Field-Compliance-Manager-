@@ -6,6 +6,7 @@ const {
   buildModelRunRequest,
   resolveArtifactType,
   contentMetadata,
+  parseArtifactJson,
   persistModelArtifact,
   callModelGateway,
   executeBuilderModelRun
@@ -526,4 +527,12 @@ test('Claude leads the security review chains and external tiers never enter a r
     assert.ok(!routeBuilderModel({ workloadKind }).chain.includes('omniroute'), `OmniRoute is opt-in only (${workloadKind})`);
   }
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'omniroute,gpu_workstation' } }).chain, ['omniroute', 'gpu_workstation'], 'operators opt OmniRoute in by configuration');
+});
+
+test('stored artifacts written inside a markdown code fence still parse as JSON (BB-170)', () => {
+  const fenced = '```json\n{\n  "product_brief": { "problem": "stale chunk" }\n}\n```';
+  assert.deepEqual(parseArtifactJson(fenced), { product_brief: { problem: 'stale chunk' } });
+  assert.deepEqual(parseArtifactJson('  {"a":1}  '), { a: 1 });
+  assert.deepEqual(parseArtifactJson('```\n[1,2]\n```\n'), [1, 2]);
+  assert.throws(() => parseArtifactJson('# Heading\nnot json'), SyntaxError);
 });

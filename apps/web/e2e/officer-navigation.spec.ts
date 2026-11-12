@@ -1,10 +1,23 @@
 import { expect, test } from '@playwright/test';
 import { installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsOfficer } from './fixtures';
 
-test('officer geofence resolves before the deferred address lookup', async ({ page, context }, testInfo) => {
+test('officer geofence resolves before the deferred address lookup', async ({ page }, testInfo) => {
   await installOfficerScheduleFixtures(page);
-  await context.grantPermissions(['geolocation']);
-  await context.setGeolocation({ latitude: -41.274, longitude: 173.283, accuracy: 8 });
+  // Headless Chromium's emulated geolocation can stall past the app timeout under CI load; answer deterministically.
+  await page.addInitScript(() => {
+    const position = () => ({
+      coords: { latitude: -41.274, longitude: 173.283, accuracy: 8, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+      timestamp: Date.now(),
+    });
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (success: PositionCallback) => { setTimeout(() => success(position() as GeolocationPosition), 0); },
+        watchPosition: (success: PositionCallback) => { setTimeout(() => success(position() as GeolocationPosition), 0); return 1; },
+        clearWatch: () => undefined,
+      },
+    });
+  });
   await page.route('**/rest/v1/rpc/resolve_operational_context_authorized', async (route) => {
     await route.fulfill({ json: [{ resolution_status: 'resolved', site_id: '42424242-4242-4242-8242-424242424242', matched_zone_id: null, on_site: true }] });
   });

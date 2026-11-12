@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), address: vi.fn(), rows: {} as Record<string, unknown[]> }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), address: vi.fn(), rows: {} as Record<string, unknown[]>, gate: null as Promise<void> | null }));
 vi.mock('./AuthContext', () => ({ useAuth: () => ({ profile: { id: 'officer', organizationId: 'org', role: 'officer' } }) }));
 vi.mock('../lib/locationAddress', () => ({ resolveAddressForCoordinates: mocks.address }));
 vi.mock('../lib/supabase', () => ({ supabase: {
@@ -9,7 +9,7 @@ vi.mock('../lib/supabase', () => ({ supabase: {
   from: (table: string) => {
     const query = {
       select: () => query, or: () => query, order: () => query, in: () => query, eq: () => query,
-      then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: mocks.rows[table] ?? [], error: null }).then(resolve),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(table === 'service_agreements' ? mocks.gate : null).then(() => ({ data: mocks.rows[table] ?? [], error: null })).then(resolve),
       maybeSingle: () => Promise.resolve({ data: mocks.rows[table]?.[0] ?? null, error: null }),
     };
     return query;
@@ -58,7 +58,21 @@ describe('service location resolution', () => {
       return nativeTimeout(handler, delay, ...args);
     }) as typeof window.setTimeout);
   });
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); mocks.gate = null; });
+
+  it('uses a fresh fix that arrived while service context was loading instead of asking the device again', async () => {
+    let releaseContext!: () => void;
+    mocks.gate = new Promise<void>((resolve) => { releaseContext = resolve; });
+    render(<ServiceRelationshipProvider><LocationProbe /></ServiceRelationshipProvider>);
+    fireEvent.click(screen.getByText('GPS'));
+    await waitFor(() => expect(navigator.geolocation.getCurrentPosition).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('Location status').textContent).toBe('loading');
+    act(() => positionSuccess({ ...geolocationPosition, timestamp: Date.now() } as GeolocationPosition));
+    expect(mocks.rpc).not.toHaveBeenCalledWith('resolve_operational_context_authorized', expect.anything());
+    await act(async () => releaseContext());
+    await waitFor(() => expect(screen.getByLabelText('Location status').textContent).toBe('resolved'));
+    expect(navigator.geolocation.getCurrentPosition).toHaveBeenCalledTimes(1);
+  });
 
   async function start(waitForResolution = true) {
     render(<ServiceRelationshipProvider><LocationProbe /></ServiceRelationshipProvider>);

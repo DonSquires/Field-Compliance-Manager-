@@ -20,7 +20,7 @@ const message = (payload = {}) => ({
   payload: { research_mode: 'public_cloud', research_consent: { allowed: true, policy_version: 'builder_research_v1', actor_user_id: OWNER, raw_images_allowed: true }, research_urls: [SOURCE.url], ...payload },
 });
 
-function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults, doneReason = 'stop' } = {}) {
+function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults, doneReason = 'stop', fetchStatus = {}, chatStatus } = {}) {
   const calls = [];
   const rows = [];
   const fetchImpl = async (url, options) => {
@@ -31,8 +31,12 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
     const endpoint = url.split('/').at(-1);
     if (endpoint === 'tags') { assert.equal(options.method, 'GET'); return Response.json({ models: models.map(name => ({ name })) }); }
     if (endpoint === 'show') return Response.json({ capabilities: vision ? ['completion', 'tools', 'vision'] : ['completion', 'tools'] });
-    if (endpoint === 'web_fetch') return Response.json({ title: 'Compose documentation', content: CONTENT });
+    if (endpoint === 'web_fetch') {
+      if (fetchStatus[body.url]) return new Response(JSON.stringify({ error: 'page not found' }), { status: fetchStatus[body.url] });
+      return Response.json({ title: 'Compose documentation', content: CONTENT });
+    }
     if (endpoint === 'web_search') return Response.json({ results: searchResults || [{ url: SOURCE.url }] });
+    if (chatStatus) return new Response(JSON.stringify({ error: 'you (account) have reached your monthly usage limit, upgrade for higher limits: https://ollama.com/upgrade' }), { status: chatStatus });
     if (body.model === failedModel) return new Response('', { status: 503 });
     const response = result(body);
     return Response.json({ message: response?.tool_calls ? response : { content: typeof response === 'string' ? response : JSON.stringify(response) }, done_reason: doneReason });
@@ -277,6 +281,26 @@ test('unsafe source URLs are rejected; unsafe search results are excluded with a
   const result = await f.run(message({ research_urls: [], web_search: true }));
   assert.equal(result.research.excluded_search_results, 1);
   assert.equal(f.calls.filter(call => call.url.endsWith('/web_fetch')).length, 1);
+});
+
+test('a search result that cannot be fetched is skipped with a receipt instead of aborting research', async () => {
+  const dead = 'https://gone.example.org/missing';
+  const f = fixture({ searchResults: [{ url: dead }, { url: SOURCE.url }], fetchStatus: { [dead]: 404 } });
+  const result = await f.run(message({ research_urls: [], web_search: true }));
+  assert.equal(result.model, 'kimi-k2.7-code');
+  assert.deepEqual(result.research.unfetched_sources, [{ url: dead, error: 'Ollama web_fetch HTTP 404: page not found' }]);
+});
+
+test('an explicitly requested source that cannot be fetched names the endpoint, status and URL', async () => {
+  const dead = 'https://gone.example.org/missing';
+  const f = fixture({ fetchStatus: { [dead]: 404 } });
+  await assert.rejects(f.run(message({ research_urls: [dead] })), /web_fetch HTTP 404: page not found.*gone\.example\.org/);
+});
+
+test('an account usage limit stops immediately with an actionable message instead of trying every model', async () => {
+  const f = fixture({ models: ['kimi-k2.7-code', 'deepseek-v4.1-flash:1017'], chatStatus: 429 });
+  await assert.rejects(f.run(), /Ollama Cloud usage limit reached \(HTTP 429\).*add usage credits or upgrade/);
+  assert.equal(f.calls.filter(call => call.url.endsWith('/chat')).length, 1);
 });
 
 test('research dispatch never loads a checkout, repository tools or earlier chat', async () => {

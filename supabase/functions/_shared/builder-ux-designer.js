@@ -1,7 +1,8 @@
 const {
   buildModelRunRequest,
   executeBuilderModelRun,
-  contentMetadata
+  contentMetadata,
+  parseArtifactJson
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
@@ -275,7 +276,7 @@ async function loadApprovedSpecification(supabase, artifactId, jobId) {
     throw new Error('product specification artifact integrity check failed');
   }
   try {
-    return { artifact, specification: JSON.parse(content) };
+    return { artifact, specification: parseArtifactJson(content) };
   } catch {
     throw new Error('product specification artifact is not valid JSON');
   }

@@ -94,6 +94,18 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('git push origin main'), false);
 });
 
+test('a rejected heartbeat is reported with the database reason instead of crashing the author (BB-186)', async () => {
+  const supabase = {
+    from() {
+      return { update() { return { eq: async () => ({ error: { message: 'violates check constraint "builder_model_runs_provider_check"', code: '23514' } }) }; } };
+    }
+  };
+  const result = await heartbeatAgenticReceipt(supabase, 'run-1', { provider: 'anthropic', model: 'claude-sonnet-5-5', turn: 4, changedFileCount: 0 });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /builder_model_runs_provider_check/);
+  assert.match(result.error, /anthropic/);
+});
+
 test('agentic author records a durable session and per-turn heartbeat before final provenance', async () => {
   const writes = [];
   const query = {
