@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, orderAutopilotJobs, repairJobFor, routineRepairHold, isRepairJob } = require('../builder-autopilot');
+const { autopilotTick, baselineBlock, beginBb163CorrectionRpc, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, listAutopilotJobs, orderAutopilotJobs, repairJobFor, routineRepairHold, isRepairJob } = require('../builder-autopilot');
 
 const verificationSpecification = {
   workflow_verification: { before: ['preconditions'], during: ['requests and visible states'], after: ['receipt and downstream state'] },
@@ -43,6 +43,34 @@ function fakeSupabase({ job, steps = [], artifacts = [], workerRuns = [], object
   };
 }
 
+function autopilotListingSupabase(resultSets) {
+  const queries = [];
+  return {
+    queries,
+    from(name) {
+      assert.equal(name, 'builder_jobs');
+      const query = { filters: [] };
+      for (const method of ['eq', 'in', 'or', 'not', 'is', 'order', 'limit']) {
+        query[method] = (...args) => {
+          query.filters.push([method, ...args]);
+          return query;
+        };
+      }
+      query.select = (columns) => {
+        query.columns = columns;
+        queries.push(query);
+        return query;
+      };
+      query.then = (resolve) => resolve({ data: resultSets[queries.length - 1] ?? [], error: null });
+      return query;
+    },
+  };
+}
+
+function hasListingFilter(query, method, ...values) {
+  return query.filters.some((filter) => filter[0] === method && JSON.stringify(filter.slice(1)) === JSON.stringify(values));
+}
+
 function actionsRecorder(overrides = {}) {
   const calls = [];
   return {
@@ -66,6 +94,172 @@ test('incomplete acceptance parks without terminally failing the job or creating
   const receipt = actions.calls.find(([name]) => name === 'record');
   assert.equal(receipt[2], 'blocked');
   assert.match(receipt[3].text, /DR-1/);
+});
+
+test('only an unparked routine-monitor BB-163 acceptance gap is loaded from the blocked queue', async () => {
+  const job = {
+    id: 'bb163',
+    human_reference: 'BB-163',
+    autopilot_source: 'routine_monitor',
+    repair_risk: 'routine',
+    status: 'security_review',
+    autopilot_state: 'blocked',
+    autopilot_report: { state: 'blocked', text: 'Whole-job acceptance incomplete: missing a passing changed regression test.' },
+  };
+  const supabase = autopilotListingSupabase([[], [], [job]]);
+
+  assert.deepEqual(await listAutopilotJobs(supabase), [job]);
+  const correctionQuery = supabase.queries[2];
+  assert.ok(hasListingFilter(correctionQuery, 'eq', 'human_reference', 'BB-163'));
+  assert.ok(hasListingFilter(correctionQuery, 'eq', 'autopilot_source', 'routine_monitor'));
+  assert.ok(hasListingFilter(correctionQuery, 'eq', 'repair_risk', 'routine'));
+  assert.ok(hasListingFilter(correctionQuery, 'eq', 'status', 'security_review'));
+  assert.ok(hasListingFilter(correctionQuery, 'eq', 'autopilot_state', 'blocked'));
+  assert.ok(correctionQuery.filters.some(([method, expression]) => method === 'or' && /Whole-job acceptance incomplete/.test(expression)));
+  assert.ok(correctionQuery.filters.some(([method, expression]) => method === 'or' && /bb163_auto_correction_parked/.test(expression)));
+  assert.ok(hasListingFilter(correctionQuery, 'limit', 2));
+});
+
+test('ambiguous active BB-163 correction jobs fail closed', async () => {
+  const candidate = { id: 'bb163-a', human_reference: 'BB-163', autopilot_source: 'routine_monitor', repair_risk: 'routine' };
+  const supabase = autopilotListingSupabase([[], [], [candidate, { ...candidate, id: 'bb163-b' }]]);
+  await assert.rejects(listAutopilotJobs(supabase), /ambiguous active BB-163 correction jobs/);
+});
+
+test('BB-163 correction action calls the service RPC and rejects errors or invalid outcomes', async () => {
+  const job = { id: 'bb163' };
+  const calls = [];
+  const supabase = {
+    rpc: async (...args) => {
+      calls.push(args);
+      return { data: { outcome: 'correcting', round: 2 }, error: null };
+    },
+  };
+  const blockers = 'Whole-job acceptance incomplete: the worker command is missing.';
+
+  assert.deepEqual(await beginBb163CorrectionRpc(supabase, job, blockers), { outcome: 'correcting', round: 2 });
+  assert.deepEqual(calls, [[
+    'builder_autopilot_begin_bb163_correction',
+    { _job_id: 'bb163', _blockers: blockers },
+  ]]);
+  await assert.rejects(beginBb163CorrectionRpc({ rpc: async () => ({ data: null, error: { message: 'denied' } }) }, job, blockers), /denied/);
+  await assert.rejects(beginBb163CorrectionRpc({ rpc: async () => ({ data: { outcome: 'correcting', round: 4 }, error: null }) }, job, blockers), /invalid outcome/);
+});
+
+test('BB-163 acceptance failures enter at most three same-job correction rounds', async () => {
+  const blocker = 'Whole-job acceptance incomplete: DR-1 needs a changed regression test with a passing worker command.';
+  const results = [];
+
+  for (let completedRounds = 0; completedRounds <= 3; completedRounds += 1) {
+    const job = {
+      id: 'bb163',
+      human_reference: 'BB-163',
+      autopilot_source: 'routine_monitor',
+      repair_risk: 'routine',
+      status: 'security_review',
+      autopilot_state: 'driving',
+      autopilot_report: {
+        bb163_auto_correction_rounds: completedRounds,
+        bb163_auto_correction_history: Array.from({ length: completedRounds }, (_, index) => ({ round: index + 1 })),
+        bb163_auto_correction_parked: false,
+      },
+    };
+    const actions = actionsRecorder({
+      run: { paused: true, reason: 'acceptance_incomplete', detail: blocker },
+    });
+    const correctionCalls = [];
+    actions.beginBb163Correction = async (target, observedBlocker) => {
+      correctionCalls.push([target.id, observedBlocker]);
+      return completedRounds < 3
+        ? { outcome: 'correcting', round: completedRounds + 1 }
+        : { outcome: 'parked', round: 3 };
+    };
+
+    const outcome = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+    assert.deepEqual(correctionCalls, [['bb163', blocker]]);
+    const record = actions.calls.find(([name]) => name === 'record');
+    assert.equal(record[1], 'bb163');
+    assert.equal(record[2], 'blocked');
+    assert.equal(record[3].bb163_auto_correction_rounds, completedRounds);
+    assert.deepEqual(record[3].bb163_auto_correction_history, job.autopilot_report.bb163_auto_correction_history);
+    assert.equal(outcome[0].outcome, completedRounds < 3 ? 'correcting' : 'parked');
+    assert.equal(outcome[0].round, completedRounds < 3 ? completedRounds + 1 : 3);
+    results.push(outcome[0].outcome);
+  }
+
+  assert.deepEqual(results, ['correcting', 'correcting', 'correcting', 'parked']);
+});
+
+test('a blocked BB-163 acceptance gap resumes its correction before another worker run after restart', async () => {
+  const blocker = 'Whole-job acceptance incomplete: the changed regression test is still missing.';
+  const job = {
+    id: 'bb163',
+    human_reference: 'BB-163',
+    autopilot_source: 'routine_monitor',
+    repair_risk: 'routine',
+    status: 'security_review',
+    autopilot_state: 'blocked',
+    autopilot_report: {
+      state: 'blocked',
+      text: `Stopped: prior attempt. Why: ${blocker}`,
+      bb163_auto_correction_rounds: 1,
+      bb163_auto_correction_history: [{ round: 1 }],
+      bb163_auto_correction_parked: false,
+    },
+  };
+  const actions = actionsRecorder();
+  actions.run = async () => assert.fail('a persisted acceptance blocker must be resumed before running the worker');
+  actions.beginBb163Correction = async (target, observedBlocker) => {
+    assert.equal(target.id, 'bb163');
+    assert.equal(observedBlocker, blocker);
+    return { outcome: 'correcting', round: 2 };
+  };
+
+  assert.deepEqual(
+    await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }),
+    [{ job: 'bb163', outcome: 'correcting', round: 2 }],
+  );
+  assert.ok(!actions.calls.some(([name]) => name === 'record'));
+});
+
+test('non-BB-163 acceptance failures retain existing behavior without invoking the correction action', async () => {
+  const job = {
+    id: 'bb164',
+    human_reference: 'BB-164',
+    autopilot_source: 'routine_monitor',
+    repair_risk: 'routine',
+    status: 'security_review',
+    autopilot_state: 'driving',
+  };
+  const actions = actionsRecorder({
+    run: { paused: true, reason: 'acceptance_incomplete', detail: 'Whole-job acceptance incomplete: evidence missing.' },
+  });
+  actions.beginBb163Correction = async () => assert.fail('only BB-163 may use bounded corrections');
+
+  assert.deepEqual(
+    await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }),
+    [{ job: 'bb164', outcome: 'acceptance_incomplete' }],
+  );
+});
+
+test('accepted BB-163 work remains on the existing approval path before the correction cap', async () => {
+  const job = {
+    id: 'bb163',
+    human_reference: 'BB-163',
+    autopilot_source: 'routine_monitor',
+    repair_risk: 'routine',
+    status: 'approval_pending',
+    autopilot_state: 'driving',
+    autopilot_report: { bb163_auto_correction_rounds: 2, bb163_auto_correction_history: [{ round: 1 }, { round: 2 }] },
+  };
+  const actions = actionsRecorder({ pending: [] });
+  actions.beginBb163Correction = async () => assert.fail('accepted work must not start another correction');
+
+  assert.deepEqual(
+    await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }),
+    [{ job: 'bb163', outcome: 'gate_cleared', count: 0 }],
+  );
+  assert.ok(actions.calls.some(([name]) => name === 'listPending'));
 });
 
 test('autopilot prioritizes release reconciliation ahead of long model work', () => {

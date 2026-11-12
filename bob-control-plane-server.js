@@ -20,7 +20,7 @@ const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
-const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
+const { autopilotTick, beginBb163CorrectionRpc, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { finaliseOrphanedModelRuns } = require('./builder-model-run-reaper');
 const { planRoutineIntake, routinePacketAutomationStatus, routineRepairBrief, routineRepairStillDriven, routineSignature } = require('./builder-routine-intake');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
@@ -1537,6 +1537,7 @@ async function autopilotOnce() {
           const started = await runBuilderJobBounded(jobId, { maxActions: 8 });
           return started.skipped ? started : await started.execution;
         },
+        beginBb163Correction: (job, blockers) => beginBb163CorrectionRpc(builderSupabase, job, blockers),
         publish: async ({ job, validatedPatchId, bodyFor, automerge }) => {
           await bindBuilderWorkspace(job.id);
           const { data: fresh } = await builderSupabase.from('builder_jobs').select('workspace_head_sha,workspace_branch,target_sha').eq('id', job.id).single();

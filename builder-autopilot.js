@@ -319,6 +319,10 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     if (evidence?.review?.verdict) lines.push(`An independent AI reviewer (a different model from the author) said "${evidence.review.verdict}"${evidence.review.summary ? `: ${evidence.review.summary}` : ''}.`);
     lines.push('What to do: open Platform & Settings → Builder → this job → Approvals and approve or decline with a note. Bob continues only after your decision; nothing is published or merged before then.');
   }
+  const correctionState = {};
+  for (const key of ['bb163_auto_correction_rounds', 'bb163_auto_correction_history', 'bb163_auto_correction_parked']) {
+    if (job?.autopilot_report?.[key] !== undefined) correctionState[key] = job.autopilot_report[key];
+  }
   return {
     state,
     headline: lines[0] ?? '',
@@ -332,6 +336,7 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     repair_job_id: repair?.id ?? null,
     resumed_as_job_id: resumedAs ?? null,
     generated_at: new Date().toISOString(),
+    ...correctionState,
   };
 }
 
@@ -625,6 +630,43 @@ function noteRepeatedFailure(jobId, error) {
   return count;
 }
 
+function bb163AcceptanceBlocker(value) {
+  const text = String(value ?? '');
+  const start = text.indexOf('Whole-job acceptance incomplete:');
+  return start < 0 ? null : text.slice(start, start + 4000).trim();
+}
+
+function isEligibleBb163Correction(job) {
+  return job?.human_reference === 'BB-163'
+    && job.autopilot_source === 'routine_monitor'
+    && job.repair_risk === 'routine'
+    && job.autopilot_report?.bb163_auto_correction_parked !== true;
+}
+
+function validBb163CorrectionOutcome(correction) {
+  return correction && ['correcting', 'parked'].includes(correction.outcome)
+    && Number.isInteger(correction.round) && correction.round >= 1 && correction.round <= 3
+    && (correction.outcome !== 'parked' || correction.round === 3);
+}
+
+async function beginBb163CorrectionRpc(supabase, job, blockers) {
+  const { data, error } = await supabase.rpc('builder_autopilot_begin_bb163_correction', {
+    _job_id: job.id,
+    _blockers: blockers,
+  });
+  if (error) throw new Error(`BB-163 correction could not be started: ${error.message}`);
+  if (!validBb163CorrectionOutcome(data)) throw new Error('BB-163 correction RPC returned an invalid outcome');
+  return data;
+}
+
+async function beginBb163Correction({ job, blockers, actions, log }) {
+  if (typeof actions.beginBb163Correction !== 'function') throw new Error('BB-163 correction action is unavailable');
+  const correction = await actions.beginBb163Correction(job, blockers);
+  if (!validBb163CorrectionOutcome(correction)) throw new Error('BB-163 correction transition returned an invalid outcome');
+  log({ job: job.id, bb163_correction: correction.outcome, round: correction.round });
+  return { job: job.id, outcome: correction.outcome, round: correction.round };
+}
+
 async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
   const outcomes = [];
   for (const job of orderAutopilotJobs(jobs)) {
@@ -633,6 +675,14 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         if (job.autopilot_state !== 'done') await actions.record(job.id, 'done', job.autopilot_report);
         outcomes.push({ job: job.id, outcome: 'superseded', resumed_as: job.autopilot_report.resumed_as_job_id });
         continue;
+      }
+      if (job.autopilot_state === 'blocked' && job.status === 'security_review'
+          && isEligibleBb163Correction(job) && job.autopilot_report?.state === 'blocked') {
+        const blockers = bb163AcceptanceBlocker(job.autopilot_report.reason || job.autopilot_report.text);
+        if (blockers) {
+          outcomes.push(await beginBb163Correction({ job, blockers, actions, log }));
+          continue;
+        }
       }
       // Waiting on a repair of main (owner ruling 2026-09-27: Bob does the coding; nobody is asked to fix main).
       if (job.autopilot_state === 'blocked' && job.autopilot_report?.repair_job_id && !job.autopilot_report?.resumed_as_job_id && !job.autopilot_report?.repair_outcome) {
@@ -782,7 +832,13 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
       const run = await actions.run(job.id);
       if (run?.skipped) { outcomes.push({ job: job.id, outcome: 'running' }); continue; }
       if (run?.reason === 'acceptance_incomplete') {
-        await actions.record(job.id, 'blocked', composeReport({ job, state: 'blocked', reason: run.detail || 'Whole-job acceptance is incomplete' }));
+        const report = composeReport({ job, state: 'blocked', reason: run.detail || 'Whole-job acceptance is incomplete' });
+        await actions.record(job.id, 'blocked', report);
+        const blockers = bb163AcceptanceBlocker(run.detail);
+        if (isEligibleBb163Correction(job) && blockers) {
+          outcomes.push(await beginBb163Correction({ job, blockers, actions, log }));
+          continue;
+        }
         outcomes.push({ job: job.id, outcome: 'acceptance_incomplete' });
         continue;
       }
@@ -857,9 +913,10 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 }
 
 async function listAutopilotJobs(supabase, limit = 5) {
+  const columns = 'id, human_reference, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at';
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select(columns)
     .or('autopilot_requested_by.not.is.null,autopilot_source.eq.main_monitor')
     .in('autopilot_state', ['driving', 'awaiting_human', 'published'])
     .order('autopilot_updated_at', { ascending: true })
@@ -868,7 +925,7 @@ async function listAutopilotJobs(supabase, limit = 5) {
   // Jobs parked behind a repair of main are re-checked each tick until the repair lands or fails.
   const { data: waiting, error: waitingError } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select(columns)
     .or('autopilot_requested_by.not.is.null,autopilot_source.eq.main_monitor')
     .eq('autopilot_state', 'blocked')
     .not('autopilot_report->>repair_job_id', 'is', null)
@@ -877,7 +934,22 @@ async function listAutopilotJobs(supabase, limit = 5) {
     .order('autopilot_updated_at', { ascending: true })
     .limit(limit);
   if (waitingError) throw new Error('autopilot jobs waiting on a repair could not be listed');
-  return [...(data || []), ...(waiting || [])];
+  const { data: correctionJobs, error: correctionError } = await supabase
+    .from('builder_jobs')
+    .select(columns)
+    .eq('human_reference', 'BB-163')
+    .eq('autopilot_source', 'routine_monitor')
+    .eq('repair_risk', 'routine')
+    .eq('status', 'security_review')
+    .eq('autopilot_state', 'blocked')
+    .eq('autopilot_report->>state', 'blocked')
+    .or('autopilot_report->>reason.ilike.*Whole-job acceptance incomplete*,autopilot_report->>text.ilike.*Whole-job acceptance incomplete*')
+    .or('autopilot_report->>bb163_auto_correction_parked.is.null,autopilot_report->>bb163_auto_correction_parked.eq.false')
+    .order('autopilot_updated_at', { ascending: true })
+    .limit(2);
+  if (correctionError) throw new Error(`BB-163 correction job could not be listed: ${correctionError.message}`);
+  if ((correctionJobs || []).length > 1) throw new Error('ambiguous active BB-163 correction jobs');
+  return [...new Map([...(data || []), ...(waiting || []), ...(correctionJobs || [])].map((job) => [job.id, job])).values()];
 }
 
 async function listPendingApprovals(supabase, jobId) {
@@ -886,4 +958,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, reconcileOwnerPullRequest, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, orderAutopilotJobs, repairJobFor, TERMINAL, GATES };
+module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, beginBb163CorrectionRpc, reconcileOwnerPullRequest, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, orderAutopilotJobs, repairJobFor, TERMINAL, GATES };
