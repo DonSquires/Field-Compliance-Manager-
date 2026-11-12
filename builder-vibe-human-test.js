@@ -42,19 +42,27 @@ function humanTestSpecs(workspacePath, changedFiles) {
   return [...new Set(specs)].filter(spec => SPEC_PATTERN.test(spec) && fs.existsSync(path.join(webDir, spec)));
 }
 
-const isBrowserSpecPath = spec => typeof spec === 'string' && SPEC_PATTERN.test(spec);
+function normalizeBrowserSpecPath(spec) {
+  if (typeof spec !== 'string') return null;
+  const normalized = spec.startsWith('apps/web/') ? spec.slice('apps/web/'.length) : spec;
+  return SPEC_PATTERN.test(normalized) ? normalized : null;
+}
+
+const isBrowserSpecPath = spec => normalizeBrowserSpecPath(spec) !== null;
 
 function validateBrowserSpecs(workspacePath, specs) {
   if (!Array.isArray(specs) || !specs.length || specs.length > 6) throw new Error('Provide one to six exact Playwright spec paths under e2e/.');
   const webDir = path.join(workspacePath, 'apps/web');
-  for (const spec of specs) {
-    if (!isBrowserSpecPath(spec)) throw new Error(`Invalid browser spec path: ${String(spec)}`);
-    const file = path.join(webDir, spec);
-    if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) throw new Error(`Browser spec is missing or not a regular file: ${spec}`);
+  const normalizedSpecs = specs.map(spec => {
+    const normalized = normalizeBrowserSpecPath(spec);
+    if (!normalized) throw new Error(`Invalid browser spec path: ${String(spec)}`);
+    const file = path.join(webDir, normalized);
+    if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) throw new Error(`Browser spec is missing or not a regular file: ${normalized}`);
     const relative = path.relative(fs.realpathSync(webDir), fs.realpathSync(file));
-    if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error(`Browser spec is outside the workspace: ${spec}`);
-  }
-  return [...new Set(specs)];
+    if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error(`Browser spec is outside the workspace: ${normalized}`);
+    return normalized;
+  });
+  return [...new Set(normalizedSpecs)];
 }
 
 function decodeAttachment(attachment) {
@@ -130,7 +138,7 @@ async function runOnce({ workspacePath, changedFiles, reason, image, execute, ti
   if (!image) throw new Error('Human test worker image is not configured (BOB_WORKER_IMAGE)');
   const targeted = requestedSpecs !== undefined || Boolean(authorSpecs);
   const specs = authorSpecs
-    ? [...new Set(authorSpecs)].filter(spec => isBrowserSpecPath(spec) && fs.existsSync(path.join(workspacePath, 'apps/web', spec)))
+    ? [...new Set(authorSpecs.map(normalizeBrowserSpecPath).filter(Boolean))].filter(spec => fs.existsSync(path.join(workspacePath, 'apps/web', spec)))
     : targeted ? validateBrowserSpecs(workspacePath, requestedSpecs) : humanTestSpecs(workspacePath, changedFiles);
   if (!targeted && !specs.includes(HUMAN_SPEC)) throw new Error(`${HUMAN_SPEC} is missing from the workspace`);
   if (!specs.length) throw new Error('No Playwright spec to run in this workspace');
@@ -192,4 +200,4 @@ function runBrowserSpecs({ workspacePath, specs, reason = '', image = process.en
   return run;
 }
 
-module.exports = { HUMAN_SPEC, SPEC_PATTERN, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
+module.exports = { HUMAN_SPEC, SPEC_PATTERN, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, normalizeBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
