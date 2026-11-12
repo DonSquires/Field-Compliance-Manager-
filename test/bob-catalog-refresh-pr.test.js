@@ -59,8 +59,8 @@ test('a changed live catalog is committed with the verified identity, pushed, op
   assert.equal(result.number, 7);
   assert.deepEqual(result.files.sort(), ['src/types/database.ts', 'supabase/schema.sql']);
   const branch = `bob/catalog-${fx.base.slice(0, 8)}`;
-  const identity = 'Don Squires <256263525+DonSquires@users.noreply.github.com>';
-  assert.deepEqual(fx.git(fx.root, `--git-dir=${fx.remote}`, 'log', '-1', '--format=%an <%ae>%n%cn <%ce>', branch).split('\n'), [identity, identity]);
+  const identity = ['DonSquires <squires.don@gmail.com>', 'GitHub <noreply@github.com>'];
+  assert.deepEqual(fx.git(fx.root, `--git-dir=${fx.remote}`, 'log', '-1', '--format=%an <%ae>%n%cn <%ce>', branch).split('\n'), identity);
   assert.match(fx.git(fx.root, `--git-dir=${fx.remote}`, 'show', `${branch}:supabase/schema.sql`), /create table b/);
   const merge = api.calls.find(call => call.url.endsWith('/merge'));
   assert.equal(merge.body.sha, fx.git(fx.root, `--git-dir=${fx.remote}`, 'rev-parse', branch));
@@ -75,7 +75,7 @@ test('catalog refresh refuses a mismatched configured Git identity before contac
     repo: 'unused',
     base: 'a'.repeat(40),
     schema: 'unused',
-    env: { ...env('unused'), GIT_AUTHOR_EMAIL: 'squires.don@gmail.com' },
+    env: { ...env('unused'), GIT_AUTHOR_EMAIL: '256263525+DonSquires@users.noreply.github.com' },
     fetchImpl: api.fetchImpl,
     log: () => {},
   }), /configured Git identity is not the verified GitHub identity/);

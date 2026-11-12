@@ -127,8 +127,8 @@ test('release lane refuses a main branch head with an unverified author', (t) =>
     });
     return execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   };
-  const verifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'verified');
-  const unverifiedHead = commit('Don Squires', 'squires.don@gmail.com', 'unverified');
+  const verifiedHead = commit('DonSquires', 'squires.don@gmail.com', 'verified');
+  const unverifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'unverified');
   const bashRepo = process.platform === 'win32'
     ? repo.replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, '/')
     : repo;

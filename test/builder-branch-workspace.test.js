@@ -62,12 +62,16 @@ test('Builder can require an explicitly configured verified GitHub commit identi
     delete process.env.BOB_BUILDER_GIT_NAME;
     delete process.env.BOB_BUILDER_GIT_EMAIL;
     assert.throws(() => builderCommitIdentity({ requireVerified: true }), /BOB_BUILDER_GIT_EMAIL/);
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = 'unverified@example.com';
-    assert.throws(() => builderCommitIdentity({ requireVerified: true }), new RegExp(VERIFIED_GITHUB_EMAIL.replace(/[.+]/g, '\\$&')));
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     assert.deepEqual(builderCommitIdentity({ requireVerified: true }), {
-      name: 'Don Squires',
+      name: 'DonSquires',
       email: VERIFIED_GITHUB_EMAIL,
     });
   } finally {
@@ -298,7 +302,7 @@ test('GitHub publication rejects an unverified workspace head even when its reco
   const previousName = process.env.BOB_BUILDER_GIT_NAME;
   const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
   try {
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '22345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
     assert.throws(
@@ -326,7 +330,7 @@ test('Bob preserves a concurrent agent commit while advancing with a verified re
     git(repo.root, ['-c', 'user.name=Concurrent Agent', '-c', 'user.email=don@squires.local', 'commit', '-qm', 'concurrent app work']);
     const concurrentSha = git(repo.root, ['rev-parse', 'HEAD']);
 
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const committed = commitVerifiedPatch({
       workspacePath: workspace.workspacePath,
@@ -338,7 +342,7 @@ test('Bob preserves a concurrent agent commit while advancing with a verified re
     assert.equal(git(repo.root, ['show', '-s', '--format=%ae', committed.commitSha]), VERIFIED_GITHUB_EMAIL);
     assert.equal(git(repo.root, ['rev-parse', `${committed.commitSha}^`]), repo.sha);
 
-    git(repo.root, ['-c', 'user.name=Don Squires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'merge', '--no-ff', '-qm', 'merge Bob after concurrent work', committed.commitSha]);
+    git(repo.root, ['-c', 'user.name=DonSquires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'merge', '--no-ff', '-qm', 'merge Bob after concurrent work', committed.commitSha]);
     const releaseSha = git(repo.root, ['rev-parse', 'HEAD']);
     assert.equal(git(repo.root, ['merge-base', '--is-ancestor', concurrentSha, releaseSha]), '');
     assert.equal(git(repo.root, ['merge-base', '--is-ancestor', committed.commitSha, releaseSha]), '');
@@ -459,7 +463,7 @@ test('publication may replace only remote branch tips this workspace produced it
   const previousName = process.env.BOB_BUILDER_GIT_NAME;
   const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
   try {
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const remote = path.join(repo.root, '.remote.git');
     git(repo.root, ['init', '-q', '--bare', remote]);
