@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { sanitizeSvg } from './BobMermaidDiagram';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { sanitizeSvg, BobMermaidDiagram } from './BobMermaidDiagram';
 
 describe('sanitizeSvg', () => {
   it('preserves text-only Mermaid labels while removing executable foreign content', () => {
@@ -21,5 +22,17 @@ describe('sanitizeSvg', () => {
     expect(svg?.querySelector('script, img')).toBeNull();
     expect(svg?.querySelector('div')?.hasAttribute('onclick')).toBe(false);
     expect(svg?.querySelector('div')?.hasAttribute('style')).toBe(false);
+  });
+});
+
+vi.mock('mermaid', () => ({}));
+
+describe('BobMermaidDiagram', () => {
+  it('renders a recoverable error state when the mermaid module has no default export', async () => {
+    render(<BobMermaidDiagram chart="graph TD; A-->B;" title="Test diagram" />);
+    await waitFor(() => {
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toMatch(/Diagram preview failed/);
+    });
   });
 });

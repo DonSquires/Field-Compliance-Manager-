@@ -38,7 +38,11 @@ export function BobMermaidDiagram({ chart, title = 'Bob diagram' }: { chart: str
       setRendering(true);
       setError(null);
       try {
-        const mermaid = (await import('mermaid')).default;
+        const mermaidModule = await import('mermaid');
+        const mermaid = mermaidModule?.default;
+        if (!mermaid) {
+          throw new Error('Mermaid module unavailable');
+        }
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'strict',
