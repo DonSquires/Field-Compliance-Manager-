@@ -144,8 +144,8 @@ function installBrowserSpec(repo) {
 
 function verifiedFixtureIdentity(t) {
   const previous = { name: process.env.BOB_BUILDER_GIT_NAME, email: process.env.BOB_BUILDER_GIT_EMAIL };
-  process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
-  process.env.BOB_BUILDER_GIT_EMAIL = 'squires.don@gmail.com';
+  process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+  process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
   t.after(() => {
     if (previous.name === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
     else process.env.BOB_BUILDER_GIT_NAME = previous.name;
@@ -2182,8 +2182,8 @@ test('Vibe rejects public vision endpoints and attachment IDs from other session
 });
 
 test('revert undoes the last turn and ship pushes the branch and opens one pull request', async () => {
-  process.env.BOB_BUILDER_GIT_EMAIL = 'squires.don@gmail.com';
-  process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
+  process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+  process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
   try {
     const published = [];
     const opened = [];
@@ -2212,7 +2212,7 @@ test('revert undoes the last turn and ship pushes the branch and opens one pull 
     assert.match(opened[0].body, /human_test: passed/);
     assert.equal(store.state.session.status, 'shipped');
     assert.equal(store.state.session.pr_url, 'https://github.com/o/r/pull/7');
-    assert.equal(git(ws, ['log', '-1', '--format=%an <%ae>']), 'DonSquires <squires.don@gmail.com>');
+    assert.equal(git(ws, ['log', '-1', '--format=%an <%ae>']), 'Don Squires <256263525+DonSquires@users.noreply.github.com>');
     assert.notEqual(git(ws, ['rev-parse', 'HEAD']), repo.sha);
   } finally {
     delete process.env.BOB_BUILDER_GIT_EMAIL;
