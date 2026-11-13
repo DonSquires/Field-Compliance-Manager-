@@ -56,7 +56,7 @@ test('proxy discovery and completion authenticate with the gateway project crede
     fetchImpl: async (url, init) => {
       urls.push(url);
       assert.equal(init.headers.Authorization, 'Bearer synthetic-project-secret');
-      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'gemini-approved' }] }) };
+      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'models/gemini-approved' }] }) };
       return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
     },
   });
@@ -65,6 +65,23 @@ test('proxy discovery and completion authenticate with the gateway project crede
     'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/models',
     'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/chat/completions',
   ]);
+});
+
+test('Gemini discovery accepts Google model IDs prefixed with models/', async () => {
+  const config = createModelGatewayConfig({
+    GEMINI_API_KEY: 'synthetic-prefixed-model-key', BOB_GEMINI_MODELS: 'gemini-approved',
+  });
+  let completionModel;
+  const result = await invokeBuilderModel({
+    config, input,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'models/gemini-approved' }] }) };
+      completionModel = JSON.parse(init.body).model;
+      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(completionModel, 'gemini-approved');
 });
 
 test('proxy refuses requests when its project credential is missing even if a legacy service key exists', async () => {
