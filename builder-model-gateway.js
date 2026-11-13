@@ -151,7 +151,12 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
     try {
       const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: authHeaders(providerConfig), signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3) });
       const data = response.ok ? await response.json().catch(() => null) : null;
-      installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
+      installed = Array.isArray(data?.data)
+        ? data.data.map(model => {
+          const id = String(model.id || '');
+          return name === 'gemini' ? id.replace(/^models\//, '') : id;
+        }).filter(Boolean)
+        : [];
       if (!response.ok) reason = `model_discovery_http_${response.status}`;
     } catch { signal?.throwIfAborted(); installed = []; reason = 'model_discovery_unavailable'; }
     signal?.throwIfAborted();
