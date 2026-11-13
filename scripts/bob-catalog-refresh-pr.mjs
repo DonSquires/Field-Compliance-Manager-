@@ -14,10 +14,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const CATALOG_FILES = Object.freeze(['supabase/schema.sql', 'src/types/database.ts']);
-const VERIFIED_AUTHOR_NAME = 'DonSquires';
-const VERIFIED_AUTHOR_EMAIL = 'squires.don@gmail.com';
-const VERIFIED_COMMITTER_NAME = 'GitHub';
-const VERIFIED_COMMITTER_EMAIL = 'noreply@github.com';
+const VERIFIED_AUTHOR_NAME = 'Don Squires';
+const VERIFIED_AUTHOR_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+const VERIFIED_COMMITTER_NAME = VERIFIED_AUTHOR_NAME;
+const VERIFIED_COMMITTER_EMAIL = VERIFIED_AUTHOR_EMAIL;
 
 export function onlyCatalogFiles(files) {
   return files.length > 0 && files.every(file => CATALOG_FILES.includes(file));

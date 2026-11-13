@@ -10,8 +10,8 @@ const VIBE_BRANCH_PREFIX = 'bob/vibe-';
 const isPublishableBranch = name => /^bob\/(?:job|vibe)-[a-z0-9]+$/.test(String(name));
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
-const VERIFIED_GITHUB_NAME = 'DonSquires';
-const VERIFIED_GITHUB_EMAIL = 'squires.don@gmail.com';
+const VERIFIED_GITHUB_NAME = 'Don Squires';
+const VERIFIED_GITHUB_EMAIL = '256263525+DonSquires@users.noreply.github.com';
 
 function builderCommitIdentity({ requireVerified = false } = {}) {
   const name = String(process.env.BOB_BUILDER_GIT_NAME || BUILDER_NAME).trim();
@@ -19,7 +19,7 @@ function builderCommitIdentity({ requireVerified = false } = {}) {
   if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new Error('Builder commit identity is invalid');
   }
-  if (requireVerified && (name !== VERIFIED_GITHUB_NAME || email.toLowerCase() !== VERIFIED_GITHUB_EMAIL.toLowerCase())) {
+  if (requireVerified && (name !== VERIFIED_GITHUB_NAME || email !== VERIFIED_GITHUB_EMAIL)) {
     throw new Error(`configured identity is not the verified GitHub identity; BOB_BUILDER_GIT_NAME and BOB_BUILDER_GIT_EMAIL must be ${VERIFIED_GITHUB_NAME} <${VERIFIED_GITHUB_EMAIL}> before GitHub publication`);
   }
   return { name, email };
@@ -28,7 +28,7 @@ function builderCommitIdentity({ requireVerified = false } = {}) {
 function assertVerifiedCommitIdentity(workspacePath, commitSha) {
   const expected = builderCommitIdentity({ requireVerified: true });
   const [name, email] = git(workspacePath, ['show', '-s', '--format=%an%x00%ae', commitSha]).split('\0');
-  if (name !== expected.name || email.toLowerCase() !== expected.email.toLowerCase()) {
+  if (name !== expected.name || email !== expected.email) {
     throw new Error('Builder workspace head does not use the configured verified GitHub identity');
   }
 }
