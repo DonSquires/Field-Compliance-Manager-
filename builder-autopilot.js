@@ -350,6 +350,9 @@ function automergeEligible({ job, evidence, env = process.env }) {
     && expectedMainHealthFiles.length > 0
     && expectedMainHealthFiles.every((file) => /^apps\/web\/(?:src\/[A-Za-z0-9_./-]+\.(?:test|spec)\.tsx?|e2e\/[A-Za-z0-9_./-]+\.spec\.ts)$/.test(file) && !file.includes('..'));
   if (!job?.autopilot_requested_by && !mainHealthRepair) return { ok: false, reason: 'not requested by a person in chat or a bounded main-health repair' };
+  if (job?.source_friction_packet_id && job?.autopilot_source == null) {
+    return { ok: false, reason: 'opened automatically from a page change request; merge stays human' };
+  }
   if (!evidence?.verifyRun) return { ok: false, reason: 'no independent worker verification' };
   if (evidence.verificationContract?.passed !== true) {
     return { ok: false, reason: `verification contract incomplete: ${(evidence.verificationContract?.failures || ['missing evidence']).slice(0, 2).join('; ')}` };

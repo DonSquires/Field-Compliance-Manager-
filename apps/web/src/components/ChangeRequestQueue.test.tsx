@@ -25,6 +25,8 @@ it('hands off for evaluation only and surfaces denied review writes', async () =
   const open = vi.fn();
   render(<ChangeRequestQueue onOpenBob={open} />);
   await screen.findByText('Show unfilled shifts first');
+  expect(screen.getByText(/go to Bob Builder chat automatically/)).toBeTruthy();
+  expect(screen.getByText(/Queued for Bob Builder chat/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Evaluate with Bob' }));
   expect(open.mock.calls[0][0]).toContain('Do not open a job');
   fireEvent.click(screen.getByRole('button', { name: 'Mark reviewing' }));

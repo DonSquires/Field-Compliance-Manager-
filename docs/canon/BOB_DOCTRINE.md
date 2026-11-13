@@ -482,6 +482,19 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   classifier decides routine, not eligible, or Grandmaster review. Filing
   never changes the verdict, never re-runs the walk, and never widens the
   routine lane (`docs/HUMAN_TESTING.md`).
+- **Page change request ruling (owner, 2026-11-13).** Every page change
+  request that is not protected and did not hit a stop line is routed
+  automatically into the Builder project owner's Bob Builder chat for
+  assessment against canon, Atlas and schema, and for planning. If Bob proposes
+  a job, it is opened and driven on autopilot as the owner's recorded key,
+  exactly as a natural-language Builder instruction would be. Request text is
+  redacted (email, phone and long numbers) before any model sees it and is
+  framed as untrusted feedback, never as instructions. Protected and stop-line
+  requests stay held for a person. A request with no proposal, or whose job
+  cannot be opened, is parked for human review. These jobs never auto-merge.
+  Merge, deployment and every other HIGH effect keep their separate human key
+  (`supabase/migrations/20261113150000_change_request_builder_intake.sql`,
+  `builder-change-request-intake.js`).
 - **Natural-language Builder autonomy ruling (owner, 2026-10-13).** An explicit
   software-build instruction from the admiral is itself the recorded key to
   open and drive the isolated Builder job; Bob must not ask the admiral to

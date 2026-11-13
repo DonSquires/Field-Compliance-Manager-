@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { bobEvaluationPrompt, buildChangeRequestEnvelope, canRequestChange, captureViewContext, listChangeRequests, type ChangeRequestRecord } from './bobChangeRequest';
+import { bobEvaluationPrompt, buildChangeRequestEnvelope, canRequestChange, captureViewContext, changeRequestStatusLabel, listChangeRequests, type ChangeRequestRecord } from './bobChangeRequest';
 
 vi.mock('./supabase', () => ({ supabase: {} }));
 
@@ -37,5 +37,15 @@ describe('page change briefs', () => {
     expect(prompt).toContain('RLS and role access');
     expect(prompt).toContain('Do not open a job');
     expect(prompt).toContain('request-1');
+  });
+  it('shows where an automatically routed request is in the Builder lane', () => {
+    const base = { disposition: 'open', builder_job_id: null, repair_risk: 'significant', automation_status: 'awaiting_grandmaster', stop_line_hit: null } as const;
+    expect(changeRequestStatusLabel(base)).toBe('Queued for Bob Builder chat');
+    expect(changeRequestStatusLabel({ ...base, automation_status: 'claimed' })).toBe('Bob is assessing in Builder chat');
+    expect(changeRequestStatusLabel({ ...base, automation_status: 'failed' })).toBe('Bob did not open a job — waiting for review');
+    expect(changeRequestStatusLabel({ ...base, stop_line_hit: 'payroll' })).toBe('Waiting for review (stop line)');
+    expect(changeRequestStatusLabel({ ...base, repair_risk: 'protected' })).toBe('Waiting for platform review (protected area)');
+    expect(changeRequestStatusLabel({ ...base, builder_job_id: 'job-1', automation_status: 'builder_started' })).toBe('Builder job opened');
+    expect(changeRequestStatusLabel({ ...base, disposition: 'reviewing' })).toBe('Under review');
   });
 });
