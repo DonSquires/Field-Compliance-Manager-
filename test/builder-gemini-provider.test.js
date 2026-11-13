@@ -32,15 +32,60 @@ test('Gemini completes a Builder request with the existing JSON transport', asyn
   assert.equal('reasoning_effort' in sent, false);
 });
 
-test('Supabase Gemini transport is explicit and does not require copying the Google secret', () => {
+test('Supabase Gemini transport is explicit and uses its dedicated project credential', () => {
   const config = createModelGatewayConfig({
     BOB_GEMINI_USE_SUPABASE_PROXY: '1',
-    SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-key',
+    SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-legacy-key',
+    BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
   });
   assert.equal(config.gemini.baseUrl, 'https://fixture.supabase.co/functions/v1/bob-gemini-gateway');
-  assert.equal(config.gemini.apiKey, 'synthetic-service-key');
+  assert.equal(config.gemini.apiKey, 'synthetic-project-secret');
   const disabled = createModelGatewayConfig({ SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-key' });
   assert.equal(disabled.gemini.apiKey, '');
+});
+
+test('proxy discovery and completion authenticate with the gateway project credential', async () => {
+  const config = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', BOB_GEMINI_MODELS: 'gemini-approved',
+    SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-legacy-key',
+    BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
+  });
+  const urls = [];
+  const result = await invokeBuilderModel({
+    config, input,
+    fetchImpl: async (url, init) => {
+      urls.push(url);
+      assert.equal(init.headers.Authorization, 'Bearer synthetic-project-secret');
+      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'gemini-approved' }] }) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(urls, [
+    'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/models',
+    'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/chat/completions',
+  ]);
+});
+
+test('proxy refuses requests when its project credential is missing even if a legacy service key exists', async () => {
+  const config = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', BOB_GEMINI_MODELS: 'gemini-approved',
+    SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-legacy-key',
+  });
+  let requests = 0;
+  const result = await invokeBuilderModel({ config, input, fetchImpl: async () => { requests++; throw new Error('unexpected network request'); } });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'provider_unconfigured');
+  assert.equal(requests, 0);
+});
+
+test('direct Gemini keeps using its Google credential when a proxy credential is configured', () => {
+  const config = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', GEMINI_API_KEY: 'synthetic-google-key',
+    BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
+  });
+  assert.equal(config.gemini.baseUrl, 'https://generativelanguage.googleapis.com/v1beta/openai');
+  assert.equal(config.gemini.apiKey, 'synthetic-google-key');
 });
 
 test('Gemini does not claim health or send prompts when credential discovery fails', async () => {

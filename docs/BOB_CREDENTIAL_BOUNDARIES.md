@@ -249,8 +249,14 @@ under these egress controls:
 The Builder gateway supports Gemini through Google's OpenAI-compatible API.
 Set `GEMINI_API_KEY` on the server for direct transport, or explicitly set
 `BOB_GEMINI_USE_SUPABASE_PROXY=1` to call the service-only
-`bob-gemini-gateway` Edge Function using the existing server-side
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The latter keeps
+`bob-gemini-gateway` Edge Function using the server-side `SUPABASE_URL` and
+`BOB_GEMINI_PROXY_SERVICE_KEY`. That key must be the same project secret as
+the Edge Function's injected `SUPABASE_SERVICE_ROLE_KEY`; the control plane's
+legacy `SUPABASE_SERVICE_ROLE_KEY` may be a different, valid credential and
+is not used as a fallback. The proxy fails closed when its key is missing.
+The project secret has database service-role privileges, so keep it only in
+the protected control-plane environment and synchronize it if the Edge key
+rotates. The proxy keeps
 `GEMINI_API_KEY` (or the owner-approved existing `GOOGLE_API_TOKEN`) inside
 Supabase. It never retrieves secret plaintext through the management API or
 copies it into a worker, browser, prompt or receipt. The function validates
@@ -382,6 +388,7 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 | `GEMINI_API_KEY` / `GOOGLE_API_TOKEN` (owner direction 2026-11-13) | Supabase `bob-gemini-gateway`; `GEMINI_API_KEY` may alternatively configure the control-plane gateway directly | Gemini inference for approved unrestricted Builder work; Vibe only when explicitly configured; existing Google-token permissions must be verified, not assumed | Restricted/local-only work, arbitrary Google endpoints, Vision/Maps permission treated as Gemini access, browser, workers, prompts, logs, repository files |
 | `SUPABASE_ACCESS_TOKEN` (Supabase Management token; the Codespaces secret of the same name is the valid one, `FIELD_COMPLIANCE_CODESPACE` was rejected with 401 on 2026-10-21) | Codespaces terminal; the VPS release lane (`/var/lib/bob/release-lane.env`) and control plane (`/var/lib/bob/control-plane.env`, with `SUPABASE_PROJECT_REF`) | Applying merged migrations with a ledger row, deploying changed edge functions, regenerating `schema.sql` and `src/types/database.ts`, explicitly approved bounded seed SQL | Edge Function runtime, browser, Bob prompt, ordinary live data API header |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Functions/server-side diagnostics and explicitly approved Codespaces read checks | Bypassed-RLS server-side reads, governed service operations, Atlas checks | Browser/frontend, external web research, issue text, screenshots |
+| `BOB_GEMINI_PROXY_SERVICE_KEY` | Protected VPS control-plane environment; sent only to `bob-gemini-gateway` | Authenticate the opt-in Gemini proxy with the exact Edge-injected project secret | Other providers, browser, workers, prompts, logs, repository files |
 | `SUPABASE_ANON_KEY` | Supabase client/Edge Function caller client | Establish caller-authenticated Supabase context | Privileged database access |
 | Caller `Authorization: Bearer <user JWT>` | Request forwarding from an authenticated Edge Function | Preserve the user's identity, role, tenant, and RLS context | Replacing service-role authorization for approved server operations |
 | `GITLAB_TOKEN` / `GITLAB_READ_TOKEN` | Bob repository-search/read-issues functions | Read the allowlisted GitLab repository and issues | Supabase, Vercel, arbitrary repositories, write operations |
