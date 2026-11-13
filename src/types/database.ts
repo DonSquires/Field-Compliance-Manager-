@@ -38184,6 +38184,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      bob_search_platform_knowledge: {
+        Args: { p_limit?: number; p_terms: string[] }
+        Returns: {
+          content: string
+          id: string
+          key: string
+          source: string
+          title: string
+          updated_at: string
+        }[]
+      }
       bob_search_reference_documents: {
         Args: {
           p_allow_restricted?: boolean
