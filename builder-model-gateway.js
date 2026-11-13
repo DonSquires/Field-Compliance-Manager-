@@ -315,7 +315,7 @@ function createModelGatewayConfig(env = process.env) {
     },
     gemini: {
       kind: 'openai',
-      apiKey: geminiProxy ? env.SUPABASE_SERVICE_ROLE_KEY || '' : env.GEMINI_API_KEY || '',
+      apiKey: geminiProxy ? env.BOB_GEMINI_PROXY_SERVICE_KEY || '' : env.GEMINI_API_KEY || '',
       baseUrl: geminiProxy
         ? (env.SUPABASE_URL ? `${env.SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/bob-gemini-gateway` : '')
         : (env.GEMINI_OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, ''),
