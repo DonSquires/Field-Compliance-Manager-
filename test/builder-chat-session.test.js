@@ -1020,3 +1020,83 @@ test('filename discovery finds tracked lifecycle paths without pretending to rea
   const schema = chat.builderChatToolSchema(tools);
   assert.deepEqual(schema.oneOf.find(row => row.properties.tool.const === 'find_files').properties.args.required, ['name']);
 });
+
+const changeRequestMessage = (content, packetId = 'packet-1') => ({
+  id: `m-${Math.random()}`, seq: 10, thread_id: THREAD_ID, role: 'owner', content,
+  payload: { context: { surface: 'change_request_intake', packet_id: packetId }, change_request: { packet_id: packetId, auto_implement: true } },
+});
+
+function changeRequestDeps() {
+  const calls = { implement: [], park: [] };
+  return {
+    calls,
+    changeRequests: {
+      implement: async input => { calls.implement.push(input); return { jobId: 'job-cr-1' }; },
+      park: async input => { calls.park.push(input); },
+    },
+  };
+}
+
+test('a routed change request that ends in a proposal opens and binds a Builder job automatically', async () => {
+  const hooks = changeRequestDeps();
+  const { store, deps } = setup([...RESEARCH, { tool: 'propose_job', args: PROPOSAL }, { tool: 'reply', args: { message: 'Proposed.' } }], { changeRequests: hooks.changeRequests });
+  const message = changeRequestMessage('Untrusted user feedback. Investigate the change request and propose a Builder job.');
+  await chat.processBuilderChatMessage({ store, message, deps });
+  assert.equal(hooks.calls.implement.length, 1);
+  assert.equal(hooks.calls.implement[0].message.id, message.id);
+  assert.equal(hooks.calls.implement[0].head, 'a'.repeat(40));
+  assert.deepEqual(hooks.calls.implement[0].proposal, chat.validateProposal(PROPOSAL).proposal);
+  assert.equal(hooks.calls.park.length, 0);
+  assert.ok(store.rows.some(row => row.role === 'system' && row.kind === 'status' && row.payload.job_id === 'job-cr-1' && /opened automatically/i.test(row.content)));
+});
+
+test('a routed change request stays in proposal mode even when its text reads like a status question', async () => {
+  const hooks = changeRequestDeps();
+  const { store, deps, toolCalls } = setup([...RESEARCH, { tool: 'propose_job', args: PROPOSAL }, { tool: 'reply', args: { message: 'Proposed.' } }], { changeRequests: hooks.changeRequests });
+  await chat.processBuilderChatMessage({ store, message: changeRequestMessage('What is the status of my timesheets?'), deps });
+  assert.equal(toolCalls[0][0], 'list_jobs');
+  assert.equal(hooks.calls.implement.length, 1);
+});
+
+test('a routed change request without a proposal is parked for the owner instead of opening a job', async () => {
+  const hooks = changeRequestDeps();
+  const refusal = { tool: 'reply', args: { message: 'I could not finish the investigation.' } };
+  const { store, deps } = setup([refusal, refusal, refusal], { changeRequests: hooks.changeRequests });
+  await chat.processBuilderChatMessage({ store, message: changeRequestMessage('Investigate the change request and propose a Builder job.', 'packet-9'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 3 } });
+  assert.equal(hooks.calls.implement.length, 0);
+  assert.equal(hooks.calls.park.length, 1);
+  assert.equal(hooks.calls.park[0].packetId, 'packet-9');
+});
+
+test('a failed automatic job creation is reported in the thread and parks the request', async () => {
+  const hooks = changeRequestDeps();
+  hooks.changeRequests.implement = async () => { throw new Error('Change request is not claimed'); };
+  const { store, deps } = setup([...RESEARCH, { tool: 'propose_job', args: PROPOSAL }, { tool: 'reply', args: { message: 'Proposed.' } }], { changeRequests: hooks.changeRequests });
+  await chat.processBuilderChatMessage({ store, message: changeRequestMessage('Investigate the change request and propose a Builder job.'), deps });
+  assert.ok(store.rows.some(row => row.kind === 'error' && /could not open the Builder job automatically/i.test(row.content) && /not claimed/.test(row.content)));
+  assert.ok(store.rows.some(row => row.kind === 'proposal'), 'the proposal stays available for manual creation');
+});
+
+test('an ordinary owner proposal never creates a job without the owner confirming it', async () => {
+  const hooks = changeRequestDeps();
+  const { store, deps } = setup([...RESEARCH, { tool: 'propose_job', args: PROPOSAL }, { tool: 'reply', args: { message: 'Proposed.' } }], { changeRequests: hooks.changeRequests });
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Queue the CCTV review token migration'), deps });
+  assert.equal(hooks.calls.implement.length, 0);
+  assert.equal(hooks.calls.park.length, 0);
+});
+
+test('a routed change request whose turn fails or whose thread was closed is parked, never left claimed', async () => {
+  const failing = changeRequestDeps();
+  const { store, deps } = setup([], { changeRequests: failing.changeRequests });
+  store.history = async () => { throw new Error('history unavailable'); };
+  await chat.processBuilderChatMessage({ store, message: changeRequestMessage('Investigate the change request and propose a Builder job.', 'packet-err'), deps });
+  assert.deepEqual(failing.calls.park.map(call => call.packetId), ['packet-err']);
+  assert.match(failing.calls.park[0].reason, /history unavailable/);
+
+  const closed = changeRequestDeps();
+  const setupClosed = setup([], { changeRequests: closed.changeRequests });
+  setupClosed.store.state.thread.status = 'closed';
+  await chat.processBuilderChatMessage({ store: setupClosed.store, message: changeRequestMessage('Investigate.', 'packet-closed'), deps: setupClosed.deps });
+  assert.deepEqual(closed.calls.park.map(call => call.packetId), ['packet-closed']);
+  assert.equal(closed.calls.implement.length, 0);
+});

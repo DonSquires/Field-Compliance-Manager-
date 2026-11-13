@@ -472,10 +472,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       truncated: row.payload?.result_truncated ?? true,
     })), limitation: 'Historical receipts, not fresh reads. Revalidate runtime state or changed source before claiming the result is current.' };
   };
-  const intent = statusIntent(message.content);
+  // A routed change request is always an assessment that may end in a proposal, whatever its wording.
+  const changeRequest = Boolean(message.payload?.change_request?.packet_id);
+  const intent = changeRequest ? null : statusIntent(message.content);
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
-  let proposeMode = !statusMode && proposeIntent(message.content) && typeof allTools.propose_job === 'function';
+  let proposeMode = !statusMode && (changeRequest || proposeIntent(message.content)) && typeof allTools.propose_job === 'function';
   const research = { source_paths: [], ledger_checked: false, atlas_queries: [] };
   const sourceReads = new Map();
   const normalizeQuote = text => text.replace(/^\d+: ?/gm, '').replace(/\s+/g, ' ').trim();
@@ -741,10 +743,40 @@ async function retry(fn, attempts = 3, delayMs = 500) {
   }
 }
 
+// Owner ruling 2026-11-13: a routed page change request turns Bob's proposal into an autopilot job;
+// without a proposal, or if the job cannot be opened, the request is parked for the owner.
+async function settleChangeRequest({ store, thread, message, outcome, head, hooks }) {
+  const packetId = message.payload.change_request.packet_id;
+  if (!outcome.proposal) {
+    await hooks.park({ packetId, reason: outcome.reply || 'Bob did not propose a job for this change request.' }).catch(() => {});
+    await store.post(thread.id, { role: 'system', kind: 'status', content: 'No job was proposed for this change request; it is waiting for your review.', payload: { message_id: message.id, packet_id: packetId } });
+    return;
+  }
+  try {
+    const { jobId } = await hooks.implement({ message, proposal: outcome.proposal, head });
+    await store.post(thread.id, { role: 'system', kind: 'status', content: 'Builder job opened automatically from this change request. Bob will drive it to a reviewed pull request; merge and deployment stay with you.', payload: { message_id: message.id, packet_id: packetId, job_id: jobId } });
+  } catch (error) {
+    const detail = clip(redactGitError(error && error.message), 300);
+    await hooks.park({ packetId, reason: detail }).catch(() => {});
+    await store.post(thread.id, { role: 'bob', kind: 'error', content: `I could not open the Builder job automatically: ${detail}. The proposal above can still be created by hand.`, payload: { message_id: message.id, packet_id: packetId } });
+  }
+}
+
+// A routed request whose turn cannot finish is parked so it never sits claimed; parking a bound request is a no-op in SQL.
+async function parkUnsettledChangeRequest(message, deps, reason) {
+  const packetId = message.payload?.change_request?.packet_id;
+  if (!packetId || !deps.changeRequests) return;
+  await deps.changeRequests.park({ packetId, reason }).catch(() => {});
+}
+
 async function processBuilderChatMessage({ store, message, deps, limits = BUILDER_CHAT_LIMITS }) {
   try {
     const thread = await store.thread(message.thread_id);
-    if (!thread || thread.status === 'closed') { await retry(() => store.complete(message.id, 'failed'), 3, deps.retryDelayMs ?? 500); return { skipped: true }; }
+    if (!thread || thread.status === 'closed') {
+      await parkUnsettledChangeRequest(message, deps, 'Builder chat thread was closed before Bob could assess this request.');
+      await retry(() => store.complete(message.id, 'failed'), 3, deps.retryDelayMs ?? 500);
+      return { skipped: true };
+    }
     await store.updateThread(thread.id, { status: 'working' });
     await store.post(thread.id, { role: 'bob', kind: 'thinking', content: 'Looking into it…', payload: { message_id: message.id } });
     const cloudResearch = message.payload?.research_mode === 'public_cloud';
@@ -766,11 +798,16 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
       });
     }
     await store.post(thread.id, { role: 'bob', kind: outcome.error ? 'error' : 'message', content: outcome.reply, payload: { message_id: message.id, model: outcome.model || null, research: outcome.research } });
+    const changeRequest = message.payload?.change_request;
+    if (changeRequest?.auto_implement === true && changeRequest.packet_id && deps.changeRequests) {
+      await settleChangeRequest({ store, thread, message, outcome, head: checkout.head, hooks: deps.changeRequests });
+    }
     await store.complete(message.id, outcome.error ? 'failed' : 'done');
     await store.updateThread(thread.id, { status: 'open' });
     return outcome;
   } catch (error) {
     const detail = clip(redactGitError(error && error.message), 600);
+    await parkUnsettledChangeRequest(message, deps, clip(detail, 300));
     await store.post(message.thread_id, { role: 'bob', kind: 'error', content: `Something went wrong: ${detail}`, payload: { message_id: message.id } }).catch(() => {});
     await store.updateThread(message.thread_id, { status: 'open' }).catch(() => {});
     // An unreleased claim would block later turns and VPS deploys until restart, so retry the release.

@@ -485,6 +485,7 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
   const on = { BOB_AUTOPILOT_AUTOMERGE: 'true' };
   assert.equal(automergeEligible({ job, evidence: clean, env: on }).ok, true);
   assert.equal(automergeEligible({ job: { ...job, autopilot_requested_by: null }, evidence: clean, env: on }).ok, false, 'not asked for in chat');
+  assert.match(automergeEligible({ job: { ...job, autopilot_source: null, source_friction_packet_id: 'packet-1' }, evidence: clean, env: on }).reason, /page change request/, 'an automatically opened change request always waits for a human merge');
   const mainHealthJob = {
     ...job,
     autopilot_requested_by: null,

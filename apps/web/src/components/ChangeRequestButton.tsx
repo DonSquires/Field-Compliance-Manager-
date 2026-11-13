@@ -134,7 +134,7 @@ export function ChangeRequestDialog({ context, userId, onClose, onOpenBob }: Cha
           <div>
             <span>Bob Builder brief</span>
             <h2 id={titleId}>Request a change to this page</h2>
-            <p>Describe what gets in your way. A reviewer can ask Bob to check it against the app's rules, data and permissions. This submits a brief, not a code change or permission to build.</p>
+            <p>Describe what gets in your way. Bob Builder checks it against the app's rules, data and permissions and plans the change; protected areas wait for a person. Nothing is merged or deployed without human approval.</p>
           </div>
           <button type="button" className="change-request-close" onClick={closeDialog} disabled={phase === 'sending'} aria-label="Close change request"><X size={18} /></button>
         </header>
@@ -148,11 +148,11 @@ export function ChangeRequestDialog({ context, userId, onClose, onOpenBob }: Cha
                 ? 'Your request mentions personal or security-sensitive detail, so it is held for a platform reviewer before Bob looks at it.'
                 : verdict.repair_risk === 'protected'
                   ? 'It touches a protected area (access, money, evidence or legal), so the platform owner reviews it before Bob proposes anything.'
-                  : 'It is in the review queue. An administrator will ask Bob to evaluate it and approve or decline any proposal.'}
+                  : 'Bob Builder will assess it and plan the change in Builder chat, then open a job for review. Nothing is merged or deployed without a person.'}
             </p>
             <dl>
               <div><dt>Reference</dt><dd><code>{verdict.packet_id.slice(0, 8)}</code></dd></div>
-              <div><dt>Status</dt><dd>Waiting for review</dd></div>
+              <div><dt>Status</dt><dd>{changeRequestStatusLabel({ disposition: 'open', builder_job_id: null, repair_risk: verdict.repair_risk, automation_status: verdict.automation_status, stop_line_hit: verdict.stop_line_hit })}</dd></div>
             </dl>
             <div className="change-request-actions"><button type="button" className="is-primary" onClick={closeDialog}>Done</button></div>
           </section>

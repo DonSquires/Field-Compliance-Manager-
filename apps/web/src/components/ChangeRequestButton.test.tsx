@@ -39,6 +39,8 @@ describe('governed change request dialog', () => {
     await screen.findByText('Connection interrupted');
     fireEvent.click(screen.getByRole('button', { name: 'Send to review queue' }));
     await screen.findByText('Request recorded');
+    expect(screen.getByText(/Bob Builder will assess it and plan the change/)).toBeTruthy();
+    expect(screen.getByText('Queued for Bob Builder chat')).toBeTruthy();
     expect(requests.submitChangeRequest).toHaveBeenCalledTimes(2);
     const calls = vi.mocked(requests.submitChangeRequest).mock.calls;
     expect(calls[0][2]).toBe(calls[1][2]);

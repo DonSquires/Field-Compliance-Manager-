@@ -180,12 +180,16 @@ export async function setChangeRequestDisposition(id: string, disposition: Chang
   if (!data) throw new Error('You do not have permission to review this request.');
 }
 
-export function changeRequestStatusLabel(record: Pick<ChangeRequestRecord, 'disposition' | 'builder_job_id' | 'repair_risk'>) {
+export function changeRequestStatusLabel(record: Pick<ChangeRequestRecord, 'disposition' | 'builder_job_id' | 'repair_risk' | 'automation_status' | 'stop_line_hit'>) {
   if (record.builder_job_id) return 'Builder job opened';
   if (record.disposition === 'resolved') return 'Resolved';
   if (record.disposition === 'dismissed') return 'Declined';
   if (record.disposition === 'reviewing') return 'Under review';
-  return record.repair_risk === 'protected' ? 'Waiting for platform review (protected area)' : 'Waiting for review';
+  if (record.repair_risk === 'protected') return 'Waiting for platform review (protected area)';
+  if (record.stop_line_hit) return 'Waiting for review (stop line)';
+  if (record.automation_status === 'claimed') return 'Bob is assessing in Builder chat';
+  if (record.automation_status === 'failed') return 'Bob did not open a job — waiting for review';
+  return record.automation_status === 'awaiting_grandmaster' ? 'Queued for Bob Builder chat' : 'Waiting for review';
 }
 
 /** The brief Bob receives when a reviewer asks him to evaluate a request. Bob proposes; a person confirms. */

@@ -29,6 +29,7 @@ const { createKnowledgeTool } = require('./builder-knowledge');
 const { embedText, embeddingConfig } = require('./services/fcm-api/src/bob/knowledgeEmbedding');
 const { createModelRouter, setDefaultModelRouter } = require('./services/fcm-api/src/bob/modelRouter');
 const { createBuilderChatWorker } = require('./builder-chat-session');
+const { routeChangeRequests, implementChangeRequest, parkChangeRequest } = require('./builder-change-request-intake');
 const { createPlatformTools } = require('./bob-platform-diagnostics');
 const { runBrowserSpecs, runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
@@ -844,6 +845,8 @@ async function runBuilderJobBounded(jobId, body = {}, { singleStep = false } = {
 // reviewed pull request. Human-only paths (merge, deploy, protected files) are untouched.
 const autopilotEnabled = process.env.BOB_BUILDER_AUTOPILOT !== 'false';
 const routineRepairEnabled = process.env.BOB_ROUTINE_SELF_HEAL !== 'false';
+// Owner ruling 2026-11-13: unprotected page change requests go to Bob Builder chat automatically.
+const changeRequestAutobuildEnabled = process.env.BOB_CHANGE_REQUEST_AUTOBUILD !== 'false';
 const autopilotIntervalMs = Math.max(15_000, Number(process.env.BOB_BUILDER_AUTOPILOT_INTERVAL_MS) || 60_000);
 let autopilotBusy = false;
 let mainHealthInFlight = null;
@@ -1213,6 +1216,16 @@ async function previousRoutineAttempts(packetIds) {
   return (Array.isArray(data) ? data : []).map((job) => ({ jobId: job.id, error: job.last_error || `ended as ${job.status}` }));
 }
 
+async function startChangeRequestIntake() {
+  if (!changeRequestAutobuildEnabled || !builderChatWorker) return [];
+  try {
+    return await routeChangeRequests({ supabase: builderSupabase, project: await routineBuilderProject(), record: (event, id, data) => record('autopilot', event, id, data) });
+  } catch (error) {
+    record('autopilot', 'builder.change_request.intake_unavailable', null, { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
+    return [];
+  }
+}
+
 async function startRoutineRepairs() {
   if (!routineRepairEnabled) return [];
   try {
@@ -1508,6 +1521,7 @@ async function autopilotOnce() {
     await startInterruptedModelRecovery();
     startMainHealthCheck();
     await startRoutineRepairs();
+    await startChangeRequestIntake();
     await reconcileInvalidSelfHealDeployments();
     await reconcileStaleBuilderJobs();
     try {
@@ -1615,7 +1629,7 @@ async function autopilotOnce() {
             .eq('id', jobId)
             .maybeSingle();
           if (routineJobError) throw new Error(`routine repair provenance could not be read: ${routineJobError.message}`);
-          if (routineJob?.autopilot_source === 'routine_monitor' && routineJob.source_friction_packet_id) {
+          if ((routineJob?.autopilot_source === 'routine_monitor' || routineJob?.autopilot_source == null) && routineJob?.source_friction_packet_id) {
             const automationStatus = routinePacketAutomationStatus(state, report);
             const { error: packetStatusError } = await builderSupabase.from('bob_friction_packets').update({
               automation_status: automationStatus,
@@ -2159,6 +2173,10 @@ const builderChatWorker = Boolean(builderSupabase) && process.env.BOB_BUILDER_CH
     retrieveKnowledge: retrieveBuilderKnowledge,
     sourceDirFor: sha => builderGitSource(sha),
     resolveHead: () => builderRepositoryHead('main').sha,
+    changeRequests: {
+      implement: async ({ message, proposal, head }) => implementChangeRequest({ supabase: builderSupabase, project: await routineBuilderProject(), message, proposal, head }),
+      park: ({ packetId, reason }) => parkChangeRequest({ supabase: builderSupabase, packetId, reason }),
+    },
   },
 }) : null;
 const redeemVibeTicket = async (sessionId, ticket) => {

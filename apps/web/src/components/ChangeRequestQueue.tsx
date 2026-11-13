@@ -32,7 +32,7 @@ export function ChangeRequestQueue({ onOpenBob }: { onOpenBob?: (prompt: string)
   return <section className="change-request-queue" aria-label="Page change review queue">
     <details>
       <summary>Page change requests · {loading ? 'Loading' : `${requests.length} awaiting review`}</summary>
-      <p>Human-submitted briefs, not authorised implementation jobs. Evaluate against canon, schema, Atlas and access policy before a separate Builder confirmation.</p>
+      <p>Unprotected requests go to Bob Builder chat automatically for assessment, planning and an autopilot job. Protected and stop-line requests wait here for a person. Merge and deployment always stay human.</p>
       <button type="button" disabled={loading || !!busy} onClick={() => void load()}>Refresh requests</button>
       {error && <p role="alert">{error}</p>}
       {!loading && !error && !requests.length && <p>No page change requests awaiting review.</p>}
