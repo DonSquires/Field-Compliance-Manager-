@@ -15,8 +15,11 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
    `fcm-api`, worker image, `cctv-vision` (`services/vision` or `services/fcm-inference`: the
    VPS `fcm-inference` and `fcm-vision-watcher` containers); `apps/web` is left to Vercel,
 4. **dry-run** (default): writes the plan to `plan.json` and the log, once per new head;
-   **live**: applies migrations (refusing destructive SQL), deploys edge functions, rebuilds and
-   restarts services with a health check, rolling a failed service back to the previous release,
+   **live**: applies migrations (refusing destructive SQL), streaming their JSON request bodies
+   rather than passing large SQL as a process argument. A migration transport, database or ledger
+   failure stops subsequent migrations and all function/service deployment; it is logged and the
+   live pointer stays unchanged. After successful migrations, the lane deploys edge functions,
+   rebuilds and restarts services with a health check, rolling a failed service back to the previous release,
 5. after applying migrations, snapshots the live catalog. If it no longer matches the committed
    `supabase/schema.sql`, `scripts/bob-catalog-refresh-pr.mjs` commits the regenerated
    `schema.sql` and `src/types/database.ts` (verified identity) on `bob/catalog-<sha8>`, opens a
@@ -26,8 +29,9 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
    default email. The owner's merge of the migration is the approval (owner ruling 2026-10-21);
    the next tick re-checks and moves the pointer,
 6. records a ledger (`ledger.json`) and a note in Bob's own memory (`bob_self_memory`, kind
-   `deployment`) so Bob can tell the owner what went live. The live pointer only moves when
-   every target succeeded, so a partial release is retried next tick, not forgotten.
+   `deployment`) so Bob can tell the owner what went live. An early migration failure is logged
+   immediately and does not reach this ledger step. The live pointer only moves when every target
+   succeeded, so a partial release is retried next tick, not forgotten.
 
 ## Install (once, on the VPS host)
 

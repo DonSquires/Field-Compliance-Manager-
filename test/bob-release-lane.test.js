@@ -127,8 +127,8 @@ test('release lane refuses a main branch head with an unverified author', (t) =>
     });
     return execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   };
-  const verifiedHead = commit('DonSquires', 'squires.don@gmail.com', 'verified');
-  const unverifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'unverified');
+  const verifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'verified');
+  const unverifiedHead = commit('DonSquires', 'squires.don@gmail.com', 'unverified');
   const bashRepo = process.platform === 'win32'
     ? repo.replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, '/')
     : repo;
@@ -142,6 +142,70 @@ test('release lane refuses a main branch head with an unverified author', (t) =>
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /main branch-head author is not the verified GitHub identity/);
   assert.ok(source.indexOf('if ! verify_main_author') < source.indexOf('# 2. What is live?'));
+});
+
+test('release migration transport streams large SQL and propagates generator or HTTP failures', (t) => {
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('post_migration()');
+  const end = source.indexOf('\nOK=true', start);
+  assert.ok(start >= 0 && end > start, 'the streaming migration helper is present');
+  const helper = source.slice(start, end);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-large-sql-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fixture = path.join(directory, 'fixture.sql');
+  const sql = `-- synthetic fixture with quotes ' " and slashes \\\\\n${'SELECT 1;\n'.repeat(200000)}`;
+  fs.writeFileSync(fixture, sql);
+  const run = (file, curlStatus = 0) => spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    env: { ...process.env, FIXTURE_SQL: file, EXPECTED_BYTES: String(Buffer.byteLength(sql)), CURL_STATUS: String(curlStatus) },
+    input: `set -euo pipefail
+SUPABASE_PROJECT_REF=fixture
+SUPABASE_ACCESS_TOKEN=synthetic
+STATE_DIR=/tmp
+${helper}
+curl() {
+  [[ " $* " == *" --data-binary @- "* ]] || return 11
+  node -e 'let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", c => s+=c); process.stdin.on("end", () => { const data=JSON.parse(s); if(Buffer.byteLength(data.query)!==Number(process.env.EXPECTED_BYTES)) process.exit(12); });' || return $?
+  return "$CURL_STATUS"
+}
+post_migration "$FIXTURE_SQL" synthetic
+`,
+  });
+  const success = run(fixture);
+  assert.equal(success.status, 0, success.stderr);
+  const failedCurl = run(fixture, 22);
+  assert.equal(failedCurl.status, 22);
+  assert.notEqual(run(path.join(directory, 'missing.sql')).status, 0);
+});
+
+test('a failed migration prevents later migrations and service deployment', (t) => {
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('\nOK=true');
+  const end = source.indexOf('\nif [[ -n "$FUNCTIONS" ]]', start);
+  assert.ok(start >= 0 && end > start);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-stop-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  for (const name of ['100_first.sql', '101_second.sql']) fs.writeFileSync(path.join(directory, name), 'SELECT 1;\n');
+  const result = spawnSync('bash', ['-s'], {
+    cwd: directory, encoding: 'utf8',
+    input: `set -euo pipefail
+NEW_MIGRATIONS="100_first.sql 101_second.sql"
+SUPABASE_PROJECT_REF=fixture
+SUPABASE_ACCESS_TOKEN=synthetic
+STATE_DIR=.
+RESULTS=()
+curl() { printf '[]'; }
+post_migration() { printf 'attempt:%s\\n' "$2" >&2; return 22; }
+fail_note() { printf '%s\\n' "$*" >&2; }
+log() { printf '%s\\n' "$*" >&2; }
+${source.slice(start, end)}
+printf 'service deployment must not run\\n'
+`,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /attempt:100/);
+  assert.doesNotMatch(result.stderr, /attempt:101/);
+  assert.doesNotMatch(result.stdout, /service deployment must not run/);
 });
 
 test('release lane skips applied migrations and exclusively owns its live pointer', () => {

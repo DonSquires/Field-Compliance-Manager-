@@ -75,8 +75,8 @@ fetch_err="$("${FETCH_ENV[@]}" git -C "$REPO_DIR" "${FETCH_CONFIG[@]}" fetch -q 
   }
 HEAD_SHA="$(git -C "$REPO_DIR" rev-parse refs/remotes/release-lane/main)"
 
-VERIFIED_GITHUB_NAME="DonSquires"
-VERIFIED_GITHUB_EMAIL="squires.don@gmail.com"
+VERIFIED_GITHUB_NAME="Don Squires"
+VERIFIED_GITHUB_EMAIL="256263525+DonSquires@users.noreply.github.com"
 verify_main_author() {
   local actual
   actual="$(git -C "$REPO_DIR" show -s --format='%an <%ae>' "$HEAD_SHA")" || {
@@ -291,6 +291,13 @@ supabase_cli() {
   npx --yes --package="supabase@$version" --package="@supabase/cli-$platform@$version" supabase "$@"
 }
 
+post_migration() {
+  local file="$1" version="$2"
+  node -e 'process.stdout.write(JSON.stringify({ query: require("fs").readFileSync(process.argv[1], "utf8") }))' "$file" |
+    curl -sS -o "$STATE_DIR/migration-$version.out" -w '%{http_code}' -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+      -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H 'Content-Type: application/json' --data-binary @-
+}
+
 OK=true
 if [[ -n "$NEW_MIGRATIONS" ]]; then
   : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for migrations}"; : "${SUPABASE_PROJECT_REF:?}"
@@ -302,22 +309,28 @@ if [[ -n "$NEW_MIGRATIONS" ]]; then
       --data-binary "{\"query\":\"select version from supabase_migrations.schema_migrations where version = '${version}'\"}" | tr -d ' \n')"
     if [[ "$recorded" == *"\"version\":\"${version}\""* ]]; then RESULTS+=("migration $version already applied, skipped"); continue; fi
     if grep -qiE '^\s*(drop\s+(table|schema|database|column)|truncate\s+table|alter\s+table[^;]*\bdrop\b|delete\s+from\s+\S+\s*;)' "$file"; then
-      fail_note "migration $file contains destructive SQL; not applied automatically"; OK=false; continue
+      fail_note "migration $file contains destructive SQL; not applied automatically"; OK=false; break
     fi
-    body="$(node -e 'process.stdout.write(JSON.stringify({ query: require("fs").readFileSync(process.argv[1], "utf8") }))' "$file")"
-    code="$(curl -s -o "$STATE_DIR/migration-$version.out" -w '%{http_code}' -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
-      -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H 'Content-Type: application/json' --data-binary "$body")"
+    if ! code="$(post_migration "$file" "$version")"; then
+      fail_note "migration $version transport failed; not ledgered"; OK=false; break
+    fi
     if [[ "$code" =~ ^2 ]]; then
       if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" supabase_cli migration repair --status applied "$version" --project-ref "$SUPABASE_PROJECT_REF" --yes >"$STATE_DIR/migration-$version-repair.out" 2>"$STATE_DIR/migration-$version-repair.err"; then
         RESULTS+=("migration $version applied and ledgered")
       else
         fail_note "migration $version applied but ledger repair failed: $(tail -c 300 "$STATE_DIR/migration-$version-repair.err")"
         OK=false
+        break
       fi
     else
-      fail_note "migration $version failed (HTTP $code): $(head -c 300 "$STATE_DIR/migration-$version.out")"; OK=false
+      fail_note "migration $version failed (HTTP $code): $(head -c 300 "$STATE_DIR/migration-$version.out")"; OK=false; break
     fi
   done
+fi
+
+if ! $OK; then
+  log "release ${SHA8} stopped before function or service deployment because a migration failed"
+  exit 1
 fi
 
 if [[ -n "$FUNCTIONS" ]]; then
