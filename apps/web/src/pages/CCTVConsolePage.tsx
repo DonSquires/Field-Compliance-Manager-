@@ -102,6 +102,7 @@ import {
   type SceneSynopsis,
   type TimeView,
   type ViewItem,
+  rawVideoRetentionNotice,
 } from '../lib/cctvConsole';
 import { CCTVTimeline } from '../components/CCTVTimeline';
 import { CCTVPlayerTile, type CCTVPlayerTileHandle } from '../components/CCTVPlayerTile';
@@ -387,6 +388,7 @@ const CCTVConsolePage: React.FC = () => {
         courtReady: Boolean(row.is_court_ready),
         lockedAt: row.locked_at,
         retentionHold: Boolean(row.retention_hold),
+        retentionNotice: rawVideoRetentionNotice(metadata, typeof metadata.source_timezone === 'string' ? metadata.source_timezone : 'Pacific/Auckland'),
         integrity: parseClipIntegrity(metadata.integrity),
         sceneSynopsis: synopsisByEvidence.get(row.id) ?? null,
       }];
@@ -557,6 +559,7 @@ const CCTVConsolePage: React.FC = () => {
   }, []);
 
   const resolveUrl = useCallback(async (clip: ConsoleClip) => {
+    if (clip.retentionNotice) throw new Error(clip.retentionNotice);
     const path = clip.playbackPath ?? clip.sourcePath;
     const key = `${clip.bucket}:${path}`;
     const cached = urlCache.current.get(key);

@@ -32,7 +32,7 @@ import { engineLabel, inferenceCoverage } from '../lib/cctvQuality';
 import { buildCCTVPrintableReport, type CCTVReportReceiptProvenance } from '../lib/cctvReport';
 import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';
 import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
-import { entityTitle, inferenceReviewLabel, isReviewed, OBSERVATION_SELECT, toObservation, type ConsoleObservation } from '../lib/cctvConsole';
+import { entityTitle, inferenceReviewLabel, isReviewed, OBSERVATION_SELECT, rawVideoRetentionNotice, toObservation, type ConsoleObservation } from '../lib/cctvConsole';
 import type {
   ConsolidatedFaceEvent,
   ConsolidatedPersonEvent,
@@ -656,6 +656,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       const bucket = String(selected.evidence.metadata?.storage_bucket || 'bob-uploads');
       const playbackPath = selected.evidence.metadata?.playback_storage_path;
       const rawFileType = String(selected.evidence.metadata?.file_type || '');
+      const retentionNotice = rawVideoRetentionNotice(selected.evidence.metadata, String(selected.evidence.metadata?.source_timezone || 'Pacific/Auckland'));
+      if (retentionNotice) {
+        setVideoUrl(null);
+        setVideoError(retentionNotice);
+        setVideoLoading(false);
+        return;
+      }
       // Raw h264/h265 elementary streams (direct SD-card extraction) cannot play in a <video>
       // element until the vision worker remuxes them into MP4; show that state instead of a
       // broken player.

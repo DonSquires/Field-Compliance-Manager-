@@ -29,6 +29,8 @@ export type ConsoleClip = {
   courtReady: boolean;
   lockedAt: string | null;
   retentionHold: boolean;
+  /** Set once the raw-video retention policy has removed the recording; the player shows it instead of loading. */
+  retentionNotice?: string | null;
   /** Latest re-measurement of the stored bytes against the recorded hash (record_cctv_integrity_check). */
   integrity: ClipIntegrity | null;
   /** Self-hosted vision-LLM draft of the whole clip, unverified until a reviewer approves it. */
@@ -41,6 +43,15 @@ export type SceneSynopsis = { text: string; approvalStatus: string; generatedAt:
 
 export type ClipIntegrityState = 'verified' | 'mismatch' | 'unanchored';
 export type ClipIntegrity = { state: ClipIntegrityState; checkedAt: string | null; checkCount: number; mismatchCount: number };
+
+/** Set by custodian_record_raw_video_purge when the cctv_raw_video retention policy removed the recording. */
+export function rawVideoRetentionNotice(metadata: Record<string, unknown> | null | undefined, timeZone: string): string | null {
+  const purgedAt = metadata?.raw_video_purged_at;
+  if (typeof purgedAt !== 'string') return null;
+  const date = new Date(purgedAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone });
+  const days = typeof metadata?.raw_video_retention_days === 'number' ? `${metadata.raw_video_retention_days}-day ` : '';
+  return `The original recording was removed on ${date} under the ${days}CCTV retention policy. Frames, observations and review decisions are kept.`;
+}
 
 export function parseClipIntegrity(value: unknown): ClipIntegrity | null {
   if (!value || typeof value !== 'object') return null;

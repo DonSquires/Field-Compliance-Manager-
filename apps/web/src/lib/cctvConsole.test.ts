@@ -10,6 +10,7 @@ import {
   createRefreshCoalescer,
   custodyBadge,
   DEFAULT_CCTV_INSPECTION,
+  rawVideoRetentionNotice,
   describeConsoleFailure,
   durationLabel,
   entityTitle,
@@ -489,5 +490,17 @@ describe('refresh coalescing', () => {
     coalescer.request('imp');
     await vi.advanceTimersByTimeAsync(1000);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('rawVideoRetentionNotice', () => {
+  it('explains a recording removed under the retention policy and what remains', () => {
+    const notice = rawVideoRetentionNotice({ raw_video_purged_at: '2027-02-12T03:40:00Z', raw_video_retention_days: 90 }, 'Pacific/Auckland');
+    expect(notice).toBe('The original recording was removed on 12 Feb 2027 under the 90-day CCTV retention policy. Frames, observations and review decisions are kept.');
+  });
+
+  it('returns null while the recording is still held', () => {
+    expect(rawVideoRetentionNotice({ playback_storage_path: 'org/x/a.playback.mp4' }, 'Pacific/Auckland')).toBeNull();
+    expect(rawVideoRetentionNotice(null, 'Pacific/Auckland')).toBeNull();
   });
 });
