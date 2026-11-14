@@ -35,6 +35,31 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
    immediately and does not reach this ledger step. The live pointer only moves when every target
    succeeded, so a partial release is retried next tick, not forgotten.
 
+## Manual PR merges and release identity
+
+Before creating a release-bound commit, set and verify the author:
+
+```bash
+git config user.name "Don Squires"
+git config user.email "256263525+DonSquires@users.noreply.github.com"
+git show -s --format='%an <%ae>%n%cn <%ce>' HEAD
+```
+
+Once the required checks pass, use a rebase merge for commits bearing that
+author, then fetch and verify the actual `main` head:
+
+```bash
+gh pr merge <number> --rebase
+git fetch origin main
+git show -s --format='%an <%ae>' origin/main
+```
+
+GitHub squash merges can substitute the account's default author identity:
+this blocked the lane after #504 on 2026-11-14. If a wrong-author commit has
+already landed, do not rewrite `main` or bypass the identity guard. Merge a
+subsequent verified-author commit through a PR, verify the resulting head, and
+let the lane retry the complete tree.
+
 ## Install (once, on the VPS host)
 
 ```bash
