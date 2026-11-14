@@ -4,7 +4,8 @@
 # reports Ollama models outside the worker keep-list. Docker disk compaction stays a manual step.
 param(
   [string]$EnvFile = (Join-Path $PSScriptRoot '..\deploy\laptop-worker\laptop-worker.env'),
-  [string]$At = '03:00'
+  [string]$At = '03:00',
+  [string]$PurgeAt = '04:15'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,3 +23,14 @@ $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $At
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 Register-ScheduledTask -TaskName 'FCM laptop storage clean' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 Write-Host "Registered 'FCM laptop storage clean' (weekly, Sunday $At). Log: $log"
+
+# Daily Evidence Custodian run: removes raw CCTV recordings past the cctv_raw_video retention policy
+# (records each purge in custodian_actions first; sealed, court-ready and held evidence is never touched).
+Copy-Item (Join-Path $PSScriptRoot 'custodian-raw-video-purge.js') (Join-Path $installDir 'custodian-raw-video-purge.js') -Force
+$purgeLog = Join-Path $installDir 'raw-video-purge.log'
+$purgeCommand = '& "{0}" "{1}" --apply --env "{2}" *> "{3}"' -f $node, (Join-Path $installDir 'custodian-raw-video-purge.js'), $envPath, $purgeLog
+$purgeAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "{0}"' -f $purgeCommand.Replace('"', '\"'))
+$purgeTrigger = New-ScheduledTaskTrigger -Daily -At $PurgeAt
+$purgeSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+Register-ScheduledTask -TaskName 'FCM custodian raw video purge' -Action $purgeAction -Trigger $purgeTrigger -Settings $purgeSettings -Force | Out-Null
+Write-Host "Registered 'FCM custodian raw video purge' (daily, $PurgeAt). Log: $purgeLog"

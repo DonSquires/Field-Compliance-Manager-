@@ -27,6 +27,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-admin-finish-overri
 if (process.env.BOB_TEST_POSTGRES === '1') require('./verify-staff-credential.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-change-request-intake-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cron-run-history-retention-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-raw-video-retention-migration.test');
 
 test('PM RPC adds immutable purpose/summary approval without exposing browser write grants', () => {
   assert.match(pmMigration, /p_purpose NOT IN \('pm', 'qa', 'technical_review'\)/);
