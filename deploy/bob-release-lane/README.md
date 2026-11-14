@@ -42,6 +42,13 @@ Before creating a release-bound commit, set and verify the author:
 ```bash
 git config user.name "Don Squires"
 git config user.email "256263525+DonSquires@users.noreply.github.com"
+git config --get user.name
+git config --get user.email
+```
+
+After committing, verify its author and committer:
+
+```bash
 git show -s --format='%an <%ae>%n%cn <%ce>' HEAD
 ```
 
