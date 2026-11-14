@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { installStaleBuildRecovery, shouldReloadForStaleBuild } from './staleBuildRecovery';
+import { installStaleBuildRecovery, isStaleBuildReloadPending, shouldReloadForStaleBuild } from './staleBuildRecovery';
 
 const memoryStorage = () => {
   const values = new Map<string, string>();
@@ -18,7 +18,7 @@ describe('stale build recovery', () => {
     expect(shouldReloadForStaleBuild(null, 5)).toBe(true);
   });
 
-  it('reloads the page on a vite preload error', () => {
+  it('reloads without swallowing the chunk error and marks the reload as pending', () => {
     const listeners: Record<string, (event: Event) => void> = {};
     const reload = vi.fn();
     const target = {
@@ -27,9 +27,13 @@ describe('stale build recovery', () => {
       location: { reload },
     } as unknown as Window;
     installStaleBuildRecovery(target);
+    expect(isStaleBuildReloadPending()).toBe(false);
     const event = new Event('vite:preloadError', { cancelable: true });
     listeners['vite:preloadError'](event);
     expect(reload).toHaveBeenCalledTimes(1);
-    expect(event.defaultPrevented).toBe(true);
+    // Vite resolves a prevented import to undefined, which React.lazy turns into
+    // "Cannot read properties of undefined (reading 'default')" (BB-182/189/190).
+    expect(event.defaultPrevented).toBe(false);
+    expect(isStaleBuildReloadPending()).toBe(true);
   });
 });

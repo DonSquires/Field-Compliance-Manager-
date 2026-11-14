@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isStaleBuildReloadPending } from './staleBuildRecovery';
 
 type MonitoredError = {
   kind: 'exception' | 'render_failure' | 'unhandled_rejection';
@@ -18,6 +19,7 @@ function stableKey(input: string) {
 }
 
 export async function reportMonitoredError(error: MonitoredError) {
+  if (isStaleBuildReloadPending()) return;
   const page = window.location.pathname.slice(0, 500);
   const message = error.message.trim().slice(0, 500);
   if (!message) return;
