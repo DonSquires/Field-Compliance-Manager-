@@ -250,6 +250,7 @@ test('a proposed job is posted for owner confirmation and never created by the w
   assert.ok(proposal, 'a proposal row is posted');
   assert.deepEqual(proposal.payload.proposal, chat.validateProposal(PROPOSAL).proposal);
   assert.equal(proposal.payload.proposal.frontend_required, true);
+  assert.equal(proposal.payload.proposal.backend_required, true);
   assert.equal(proposal.payload.job_id, undefined);
   assert.deepEqual(proposal.payload.research, {
     source_paths: ['apps/web/src/pages/CctvReviewPage.css'], ledger_checked: true,
@@ -286,13 +287,13 @@ test('rejected unsolicited proposals cannot convert a guidance question into req
 test('an invalid proposal is returned to the model as an error, not posted', async () => {
   const { store, model, deps } = setup([
     ...RESEARCH,
-    { tool: 'propose_job', args: { ...PROPOSAL, frontend_required: false, backend_required: false } },
+    { tool: 'propose_job', args: { ...PROPOSAL, title: 'x' } },
     { tool: 'propose_job', args: PROPOSAL },
     { tool: 'reply', args: { message: 'Proposed.' } },
   ]);
   await chat.processBuilderChatMessage({ store, message: ownerMessage('Build it'), deps });
   assert.equal(store.rows.filter(row => row.kind === 'proposal').length, 1);
-  assert.match(model.calls[4].request.messages.at(-1).content, /frontend_required and\/or backend_required/);
+  assert.match(model.calls[4].request.messages.at(-1).content, /title must be 4-160 characters/);
 });
 
 test('a reply claiming it created a job is refused once, then replaced if repeated', async () => {
@@ -868,7 +869,8 @@ test('structured JSON mode preserves the same required proposal and reader argum
     assert.deepEqual(branch.properties.args, entry.function.parameters);
   }
   const proposal = schema.oneOf.find(branch => branch.properties.tool.const === 'propose_job').properties.args;
-  assert.deepEqual(proposal.required, ['title', 'task_description', 'frontend_required', 'backend_required', 'findings', 'plan', 'acceptance_checks']);
+  assert.deepEqual(proposal.required, ['title', 'task_description', 'findings', 'plan', 'acceptance_checks']);
+  assert.equal(chat.validateProposal({ ...PROPOSAL, frontend_required: false, backend_required: false }).proposal.backend_required, true);
   assert.equal(proposal.properties.title.maxLength, 160);
   assert.equal(proposal.properties.task_description.maxLength, 8000);
   assert.ok(!schema.oneOf.some(branch => branch.properties.tool.enum), 'no generic argument branch bypasses the contracts');

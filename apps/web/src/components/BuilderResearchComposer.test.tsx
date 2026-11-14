@@ -48,7 +48,7 @@ it('invalidates approval when question, sources or search selection changes', ()
   expect(checked()).toBe(false);
 });
 
-it('uses fixed-purpose PM with a human-reviewed summary, no automatic web search, and fresh approval on edits', async () => {
+it('uses purpose-based Fusion PM with a human-reviewed summary, no automatic web search, and fresh approval on edits', async () => {
   const { props, rerender } = setup('How should we investigate?');
   rerender(<BuilderResearchComposer {...props} pmMode />);
   const approved = () => (screen.getByLabelText(consent) as HTMLInputElement).checked;
@@ -56,7 +56,8 @@ it('uses fixed-purpose PM with a human-reviewed summary, no automatic web search
   fireEvent.change(screen.getByLabelText(/Human-reviewed non-sensitive evidence summary/), { target: { value: 'Synthetic report: a saved draft is missing after reload.' } });
   expect(approved()).toBe(false);
   fireEvent.click(screen.getByLabelText(consent));
-  fireEvent.change(screen.getByLabelText('Purpose and model'), { target: { value: 'qa' } });
+  expect(screen.getByText(/OpenAI, Anthropic, Gemini and Ollama Cloud/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'qa' } });
   expect(approved()).toBe(false);
   // The component was initially mounted in legacy research mode for this fixture.
   fireEvent.click(screen.getByLabelText('Search the public web'));
@@ -67,6 +68,16 @@ it('uses fixed-purpose PM with a human-reviewed summary, no automatic web search
     p_purpose: 'qa', p_evidence_summary: 'Synthetic report: a saved draft is missing after reload.',
     p_web_search: false, p_allow_cloud: true,
   }));
+});
+
+it('warns that Ollama Cloud credits are required when PM web search or URL retrieval is requested', () => {
+  const props = { threadId: 'test-thread', question: 'Review this public source', disabled: false, onSent: vi.fn(), onError: vi.fn(), onBusy: vi.fn() };
+  render(<BuilderResearchComposer {...props} pmMode />);
+  expect(screen.getByText(/No web retrieval is requested.*Fusion can answer.*even if Ollama Cloud is unavailable/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Source URLs/), { target: { value: 'https://docs.docker.com/compose/' } });
+  expect(screen.getByText(/If its credit limit is reached, this research turn cannot complete/)).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('Search the public web'));
+  expect(screen.getByText(/Ollama Cloud for retrieval and inference over fetched evidence.*If its credit limit is reached/)).toBeTruthy();
 });
 
 it('blocks unsafe URL submissions and unsupported or excessive files before upload', async () => {
@@ -99,8 +110,28 @@ it('keeps a stable request id across uncertain network failures and surfaces the
   fireEvent.click(screen.getByLabelText(consent));
   fireEvent.click(screen.getByRole('button', { name: 'Send approved cloud research' }));
   await waitFor(() => expect(rpc).toHaveBeenCalledTimes(3));
-  expect(rpc.mock.calls[2][1].p_client_request_id).toBe(rpc.mock.calls[0][1].p_client_request_id);
+  expect(rpc.mock.calls[2][1].p_client_request_id).not.toBe(rpc.mock.calls[0][1].p_client_request_id);
+  expect(rpc.mock.calls[2][1].p_content).toBe('Changed after an uncertain submission');
   expect(props.onSent).not.toHaveBeenCalled();
+});
+
+it('retains an uploaded file after an edited retry when the prior submission may have succeeded', async () => {
+  const { props, rerender } = setup();
+  const file = syntheticFile('public.txt', 'text/plain');
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');
+  upload.mockResolvedValue({ error: null });
+  invoke.mockResolvedValue({ data: { checksum: hash, text: 'Public synthetic document text.' }, error: null });
+  rpc.mockRejectedValueOnce(new Error('Network response lost'));
+
+  fireEvent.change(screen.getByLabelText('Research attachments'), { target: { files: [file] } });
+  fireEvent.click(screen.getByLabelText(consent));
+  fireEvent.click(screen.getByRole('button', { name: 'Send approved cloud research' }));
+  await waitFor(() => expect(props.onError).toHaveBeenCalledWith('Network response lost'));
+  rerender(<BuilderResearchComposer {...props} question="Changed after an uncertain submission" />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Remove public.txt' }));
+  expect(props.onError).toHaveBeenLastCalledWith(expect.stringMatching(/prior research send may have been accepted/));
+  expect(screen.getByText('public.txt · Prepared')).toBeTruthy();
 });
 
 function syntheticFile(name: string, type: string) {

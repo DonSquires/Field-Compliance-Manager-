@@ -8,6 +8,8 @@ const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025160000_builder_chat_public_research.sql'), 'utf8');
 const pmMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025170000_builder_chat_cloud_pm.sql'), 'utf8');
+const fusionPmMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261113120000_builder_chat_pm_fusion_consent.sql'), 'utf8');
+const duplicateReceiptMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261113110000_builder_chat_proposal_duplicate_receipt.sql'), 'utf8');
 const memoryMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025171000_builder_chat_self_memory.sql'), 'utf8');
 
 if (process.env.BOB_TEST_POSTGRES === '1') require('./builder-chat-revision-migration.test');
@@ -37,6 +39,22 @@ test('PM RPC adds immutable purpose/summary approval without exposing browser wr
   assert.match(pmMigration, /v_id := public.builder_chat_send_research\(/);
   assert.match(pmMigration, /FROM PUBLIC, anon/);
   assert.doesNotMatch(pmMigration, /GRANT (?:INSERT|UPDATE|DELETE|ALL) ON (?:TABLE|public\.builder_chat_messages)/);
+});
+
+test('new PM consent binds Fusion provider allowlist while old queued turns keep their legacy policy', () => {
+  assert.match(fusionPmMigration, /policy_version', 'builder_pm_fusion_v1'/);
+  assert.match(fusionPmMigration, /fusion_provider_allowlist/);
+  assert.match(fusionPmMigration, /jsonb_build_array\('ollama_cloud','openai','anthropic','gemini'\)/);
+  assert.match(fusionPmMigration, /IF v_existing_request THEN RETURN v_id/);
+  assert.match(fusionPmMigration, /FROM PUBLIC,anon/);
+  assert.match(fusionPmMigration, /TO authenticated/);
+  assert.doesNotMatch(fusionPmMigration, /UPDATE public\.builder_chat_messages[\s\S]*WHERE id = v_id[\s\S]*IF v_existing_request/);
+});
+
+test('proposal job receipts do not rewrite the original duplicate result on replay', () => {
+  const replay = duplicateReceiptMigration.slice(duplicateReceiptMigration.indexOf('IF v_thread IS NULL THEN'), duplicateReceiptMigration.indexOf("IF v_thread IS NULL THEN RAISE EXCEPTION 'Proposal not found"));
+  assert.match(replay, /SELECT thread_id INTO v_thread/);
+  assert.doesNotMatch(replay, /UPDATE public\.builder_chat_messages|duplicate_returned/);
 });
 
 test('research RPC binds per-message consent, ownership, file bounds and immutable replay without browser write grants', () => {
@@ -190,7 +208,9 @@ test('research migration executes with owner/consent/storage/idempotency authori
         IF result <> again OR NOT EXISTS (
           SELECT 1 FROM public.builder_chat_messages WHERE id = result AND status = 'queued'
           AND payload->>'pm_purpose' = 'pm' AND payload->>'evidence_summary' = 'Synthetic summary.'
+          AND payload->'research_consent'->>'policy_version' = 'builder_pm_fusion_v1'
           AND payload->'research_consent'->>'pm_purpose' = 'pm'
+          AND payload->'research_consent'->'fusion_provider_allowlist' = '["ollama_cloud","openai","anthropic","gemini"]'::jsonb
           AND payload->'research_consent'->>'evidence_summary_sha256' =
             encode(extensions.digest('Synthetic summary.', 'sha256'), 'hex')
         ) THEN RAISE EXCEPTION 'PM approval/replay was not persisted'; END IF;
@@ -204,13 +224,22 @@ test('research migration executes with owner/consent/storage/idempotency authori
         PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','pm-long','pm',repeat('a',6001),'[]','[]',false,true)$cmd$, 'at most 6000');
         PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','pm-no-consent','pm','','[]','[]',false,false)$cmd$, 'explicit');
         PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222223','Question','pm-wrong-owner','pm','','[]','[]',false,true)$cmd$, 'this owner');
+        result := public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222', 'Fusion PM question', 'fusion-pm-request', 'pm', 'Approved Fusion summary.', '[]', '[]', false, true);
+        again := public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222', 'Fusion PM question', 'fusion-pm-request', 'pm', 'Approved Fusion summary.', '[]', '[]', false, true);
+        IF result <> again OR NOT EXISTS (
+          SELECT 1 FROM public.builder_chat_messages WHERE id = result AND status = 'queued'
+            AND payload->'research_consent'->>'policy_version' = 'builder_pm_fusion_v1'
+            AND payload->'research_consent'->'fusion_provider_allowlist' = '["ollama_cloud","openai","anthropic","gemini"]'::jsonb
+            AND payload->'research_consent'->>'evidence_summary_sha256' = encode(extensions.digest('Approved Fusion summary.', 'sha256'), 'hex')
+        ) THEN RAISE EXCEPTION 'Fusion PM approval/replay was not persisted'; END IF;
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Fusion PM question','fusion-pm-request','qa','Approved Fusion summary.','[]','[]',false,true)$cmd$, 'different PM purpose or summary');
         PERFORM set_config('test.owner', 'off', false);
         PERFORM public.expect_error(format('SELECT public.builder_chat_send_research(%L,%L,%L,%L,%L,false,true)',
           '22222222-2222-4222-8222-222222222222', 'Question', 'not-grandmaster', '[]', '[]'), 'platform owner');
       END $$;
     `;
     const output = execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-      encoding: 'utf8', input: fixture + base + migration + pmMigration + memoryMigration + checks + memoryChecks, stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf8', input: fixture + base + migration + pmMigration + fusionPmMigration + memoryMigration + checks + memoryChecks, stdio: ['pipe', 'pipe', 'pipe'],
     });
     assert.match(output, /DO/);
   } finally { if (created) docker(['rm', '--force', name]); }

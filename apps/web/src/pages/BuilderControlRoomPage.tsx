@@ -236,29 +236,21 @@ const PROMPT_TEMPLATES = [
     label: '🚀 New Feature',
     title: 'Build feature: [Feature name]',
     prompt: 'Goal: Build a new feature for [Feature name].\n\nUser intent: [Describe what the user wants to accomplish in plain English].\n\nRequirements:\n- Create UI components following FCM enterprise design\n- Connect to Supabase schema / RPCs\n- Include empty, loading, error, and permission states\n\nVerification:\n- Add unit and guard tests ensuring 100% test pass rate',
-    frontend: true,
-    backend: false,
   },
   {
     label: '🐛 Fix Defect',
     title: 'Fix issue: [Issue summary]',
     prompt: 'Goal: Fix the issue observed in [Component or page name].\n\nSymptom: [Describe the unexpected behavior or error message].\nExpected: [Describe the expected behavior].\n\nRoot cause diagnosis: [Identify which files/functions are implicated].\n\nVerification: Run relevant tests and verify the fix does not regress related surfaces.',
-    frontend: true,
-    backend: true,
   },
   {
     label: '🎨 UI/UX Vibe',
     title: 'Enhance UX: [Page or workflow name]',
     prompt: 'Goal: Enhance the UI/UX for [Page or workflow name] using natural language design.\n\nImprovements:\n- Add intuitive filtering, search, and state transitions\n- Improve accessibility, contrast, and responsive layout\n- Follow FCM design tokens and enterprise SaaS UX training standards',
-    frontend: true,
-    backend: false,
   },
   {
     label: '🛡️ Self-Heal',
     title: 'Repair tests: [Test file or area]',
     prompt: 'Goal: Repair failing test or guard assertions in [test file].\n\nDiagnosis: Check if the test expectation is stale vs current implementation or if code regressed.\nAction: Update the assertion or fix code to match canonical schema/Atlas truth.\nVerification: Confirm all tests pass.',
-    frontend: true,
-    backend: false,
   },
 ];
 
@@ -295,8 +287,11 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, { expectedTitle: string; value: string }>>({});
   const [showCreate, setShowCreate] = useState(false);
+  const createDialogRef = useRef<HTMLFormElement | null>(null);
+  const createDialogOpenerRef = useRef<HTMLElement | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('task');
   const [bobOpen, setBobOpen] = useState(true);
@@ -328,10 +323,44 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   searchQueryRef.current = searchQuery;
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
-    frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
+    codeReviewMode: 'human' as ReviewMode,
     requestedAction: 'prepare_change' as RequestedAction, targetEnvironment: 'development' as TargetEnvironment,
     autopilot: true,
   });
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const dialog = createDialogRef.current;
+    if (!dialog) return;
+    const priorFocus = createDialogOpenerRef.current;
+    const getFocusable = () => [...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter(element => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    getFocusable()[0]?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowCreate(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = getFocusable();
+      if (!focusable.length) { event.preventDefault(); dialog.focus(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      priorFocus?.focus();
+      createDialogOpenerRef.current = null;
+    };
+  }, [showCreate]);
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
@@ -656,20 +685,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
       ...current,
       title: tpl.title,
       taskDescription: tpl.prompt,
-      frontendRequired: tpl.frontend,
-      backendRequired: tpl.backend,
     }));
   };
 
   const createJob = async (event: React.FormEvent) => {
     event.preventDefault();
+    setCreateError(null);
     if (!selectedProject || !form.title.trim() || !form.taskDescription.trim()) return;
     if (hasTemplatePlaceholders(form.title) || hasTemplatePlaceholders(form.taskDescription)) {
-      setError('Fill in template placeholders before creating the Builder job.');
-      return;
-    }
-    if (!form.frontendRequired && !form.backendRequired) {
-      setError('Select at least one implementation scope.');
+      setCreateError('Fill in template placeholders before creating the Builder job.');
       return;
     }
     setBusy('create');
@@ -679,8 +703,8 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         action: 'create', organization_id: selectedProject.organization_id, project_id: selectedProject.id,
         title: form.title.trim(), task_description: form.taskDescription.trim(),
         target_sha: form.targetSha.trim().toLowerCase() || 'main',
-        branch_name: form.branchName.trim() || 'main', frontend_required: form.frontendRequired,
-        backend_required: form.backendRequired, code_review_mode: form.codeReviewMode,
+        branch_name: form.branchName.trim() || 'main', frontend_required: true,
+        backend_required: true, code_review_mode: form.codeReviewMode,
         requested_action: form.requestedAction, target_environment: form.targetEnvironment,
         autopilot: form.autopilot,
       });
@@ -689,27 +713,32 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
       await loadList();
       if (data?.job?.id) setSelectedId(data.job.id);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Builder job could not be created.');
+      setCreateError(createError instanceof Error ? createError.message : 'Builder job could not be created.');
     } finally {
       setBusy(null);
     }
   };
 
-  const createJobFromProposal = async (proposal: BuilderChatProposal): Promise<string | null> => {
+  const createJobFromProposal = async (proposal: BuilderChatProposal): Promise<{ id: string; human_reference?: string | null; duplicate?: boolean } | null> => {
     if (!selectedProject) throw new Error('Choose a Builder project before creating a job.');
     setNotice(null);
     const data = await invoke({
       action: 'create', organization_id: selectedProject.organization_id, project_id: selectedProject.id,
       title: proposal.title, task_description: proposal.task_description,
-      target_sha: 'main', branch_name: 'main', frontend_required: proposal.frontend_required,
-      backend_required: proposal.backend_required, code_review_mode: form.codeReviewMode,
+      target_sha: 'main', branch_name: 'main', frontend_required: true,
+      backend_required: true, code_review_mode: form.codeReviewMode,
       requested_action: 'prepare_change', target_environment: 'development', autopilot: form.autopilot,
     });
     setNotice(creationNotice(data, 'Builder job created from the Bob Builder chat proposal:'));
     await loadList();
-    const jobId = typeof data?.job?.id === 'string' ? data.job.id : null;
+    const job = data?.job as { id?: unknown; human_reference?: unknown } | undefined;
+    const jobId = typeof job?.id === 'string' ? job.id : null;
     if (jobId) setSelectedId(jobId);
-    return jobId;
+    return jobId ? {
+      id: jobId,
+      human_reference: typeof job?.human_reference === 'string' ? job.human_reference : null,
+      duplicate: data?.duplicate === true,
+    } : null;
   };
 
   const proposalSettings = selectedProject
@@ -865,7 +894,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     setBusy('followup');
     setError(null);
     try {
-      const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: selectedJob.frontend_required, backend_required: selectedJob.backend_required, code_review_mode: selectedJob.code_review_mode, autopilot: true });
+      const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: true, backend_required: true, code_review_mode: selectedJob.code_review_mode, autopilot: true });
       setFollowupTask('');
       setNotice(creationNotice(data, 'Builder follow-up created from the verified workspace commit:'));
       await loadList();
@@ -997,7 +1026,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
           {onOpenVibe && <button type="button" onClick={onOpenVibe} title="Back to the Vibe Builder chat"><Sparkles size={16} /> Vibe Builder</button>}
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
           <button type="button" onClick={() => { setBobOpen(current => !current); setMobileWorkspaceView('agent'); }} title={bobOpen ? 'Hide the Bob Builder chat (separate from in-app Bob)' : 'Open the Bob Builder chat (separate from in-app Bob)'} aria-pressed={bobOpen}><MessageSquareText size={16} /> {bobOpen ? 'Hide Builder chat' : 'Builder chat'}</button>
-          <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
+          <button type="button" className="is-primary" onClick={event => { createDialogOpenerRef.current = event.currentTarget; setCreateError(null); setShowCreate(true); }}><Plus size={16} /> New job</button>
         </div>
       </header>
 
@@ -1243,7 +1272,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
               <div key={step.id} className={`builder-step state-${step.status}`}>
                 <span>{step.ordinal_position}</span>
                 <div><strong>{step.step_id.replaceAll('_', ' ')}</strong><small>{step.builder_mode.replaceAll('_', ' ')}</small></div>
-                <div><b>{step.status}</b>{step.attempt_count > 0 && <small>{step.attempt_count} attempt{step.attempt_count === 1 ? '' : 's'}</small>}</div>
+                <div><b>{step.status}</b>{step.attempt_count > 0 && <small>{step.attempt_count} attempt{step.attempt_count === 1 ? '' : 's'}</small>}{step.status === 'skipped' && step.result_summary && <small>Reason: {step.result_summary}</small>}</div>
               </div>
             ))}</div>
             <p className="builder-execution-inputs">Bob finds the source files himself and picks the independent reviewer model. You only decide at the approval gates.</p>
@@ -1292,6 +1321,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
               onClose={() => { setBobOpen(false); setMobileWorkspaceView(selectedJob ? 'workbench' : 'queue'); }}
               onCreateJob={createJobFromProposal}
               onOpenJob={jobId => { setSelectedId(jobId); setMobileWorkspaceView('workbench'); }}
+              getJobReference={jobId => jobs.find(job => job.id === jobId)?.human_reference ?? null}
               jobSettings={proposalSettings}
               context={{
                 surface: 'builder_control_room',
@@ -1308,8 +1338,9 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         )}
       </div>
 
-      {showCreate && <div className="builder-modal-backdrop" role="presentation"><form className="builder-modal" onSubmit={createJob}>
-        <div className="builder-panel-heading"><div><span>New build</span><h2>Create Builder job</h2></div><button type="button" onClick={() => setShowCreate(false)}><X size={16} /></button></div>
+      {showCreate && <div className="builder-modal-backdrop" role="presentation"><form ref={createDialogRef} className="builder-modal" role="dialog" aria-modal="true" aria-labelledby="builder-create-job-title" tabIndex={-1} onSubmit={createJob}>
+        <div className="builder-panel-heading"><div><span>New build</span><h2 id="builder-create-job-title">Create Builder job</h2></div><button type="button" aria-label="Close create job dialog" onClick={() => setShowCreate(false)}><X size={16} /></button></div>
+        {createError && <p className="builder-message is-error" role="alert"><AlertTriangle size={17} />{createError}</p>}
         <label>Project<select value={form.projectId} onChange={event => setForm({ ...form, projectId: event.target.value })} required>{projects.map(project => <option value={project.id} key={project.id}>{project.name} · {project.gitea_owner}/{project.gitea_repo}</option>)}</select></label>
         <div className="builder-templates-header"><span>Prompt Starters (Natural Language)</span></div>
         <div className="builder-templates">
@@ -1331,7 +1362,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         </div>
         <div className="builder-field-row"><label>Branch<input value={form.branchName} onChange={event => setForm({ ...form, branchName: event.target.value })} /></label><label>Target commit SHA<input value={form.targetSha} onChange={event => setForm({ ...form, targetSha: event.target.value })} placeholder="Auto (HEAD of main)" /></label></div>
         <div className="builder-field-row"><label>Requested action<select value={form.requestedAction} onChange={event => setForm({ ...form, requestedAction: event.target.value as RequestedAction })}><option value="prepare_change">Prepare change</option><option value="prepare_release">Prepare release</option></select></label><label>Target environment<select value={form.targetEnvironment} onChange={event => { const targetEnvironment = event.target.value as TargetEnvironment; setForm({ ...form, targetEnvironment, requestedAction: targetEnvironment === 'production' ? 'prepare_release' : form.requestedAction, codeReviewMode: targetEnvironment === 'production' ? 'human' : form.codeReviewMode }); }}><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div>
-        <fieldset><legend>Implementation scope</legend><label><input type="checkbox" checked={form.frontendRequired} onChange={event => setForm({ ...form, frontendRequired: event.target.checked })} /> Frontend</label><label><input type="checkbox" checked={form.backendRequired} onChange={event => setForm({ ...form, backendRequired: event.target.checked })} /> Backend</label></fieldset>
+        <fieldset><legend>Implementation team</legend><span>Frontend + Backend specialists</span></fieldset>
         <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
         <label className="builder-autopilot-option"><input type="checkbox" checked={form.autopilot} onChange={event => setForm({ ...form, autopilot: event.target.checked })} /> Bob drives this job to the next human gate and reports back (merge and deployment stay with you)</label>
         <div className="builder-modal-actions"><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="is-primary" disabled={busy === 'create' || projects.length === 0}>{busy === 'create' ? 'Creating…' : 'Create job'}</button></div>

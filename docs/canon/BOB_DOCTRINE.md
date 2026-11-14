@@ -81,6 +81,16 @@ verification identity remains because verification has not started. Fresh
 verification, security and human review still gate delivery. No underlying
 repair is proven by a recovery receipt.
 
+**Universal Builder lane participation, owner decision 2026-11-13.** Every
+newly created Builder job, including follow-up iterations, starts both frontend
+and backend implementation specialists regardless of legacy scope flags or
+request labels. Each specialist assesses its work area; when no change is
+relevant, it may return an evidence-backed, audited no-change result through
+the existing skip path for an unprotected source path. That result does not
+waive another required outcome, verification, security review, human approval,
+or any protected-path gate. Historical jobs retain their recorded scope and
+steps.
+
 **Builder memory continuity clarification, owner reminder 2026-10-25.**
 Bob already has his own `bob_self_memory` and must be able to write to it and
 use it to support lessons, continuity and jobs. Reuse that diary; do not invent
@@ -99,6 +109,9 @@ owner-gated read path; excerpts join a cloud packet only after review and fresh
 packet approval. No private diary is automatically dumped into cloud inference.
 
 **Builder Chat PM/QA and cloud-purpose ruling, owner decision 2026-10-25.**
+The fixed model assignment below is retained only for messages already queued
+under `builder_research_v1`; new PM turns follow the 2026-11-13 Fusion ruling
+below.
 Builder Chat is the technical PM, investigator and QA lead, not the coding
 agent. Vibe Builder handles interactive implementation and Bob Builder durable
 autonomous implementation; both are full-stack. The owner directs Chat model
@@ -125,10 +138,29 @@ collection is not permission to transfer it. Private preparation of a candidate
 summary is distinct from disclosure: no automatic summarizer or classifier can
 replace the human review required by this selected cloud evidence flow.
 
-This supersedes the private-first default for new PM Chat turns, not the
-builders' model policy or existing private queued turns. A prose cloud handoff
-brief remains advisory: it does not satisfy the source-inspected repair-plan
-gate, start a builder, create a job, approve a change or establish completion.
+The original Ollama Cloud approval remains the public web search/fetch route. A
+prose handoff brief remains advisory: it does not satisfy the source-inspected
+repair-plan gate, start a builder, create a job, approve a change or establish
+completion.
+
+**Builder Chat Fusion routing, owner decision 2026-11-13.** New PM/QA and
+technical-review turns use the same privacy-aware Fusion router as Builder and
+Vibe instead of assigning a fixed model by purpose. Purpose still controls the
+PM prompt and available tools; Fusion selects among configured, healthy
+providers for the `builder` / `builder_conversation` task. The packet boundary
+does not change: only the current question, this message's human-reviewed
+non-sensitive summary, and explicitly selected/approved evidence are eligible;
+prior chat, selected-job context, repository source, credentials and tenant
+records remain withheld. Private providers may be selected locally. The only
+external candidates admitted by this UI are Ollama Cloud, OpenAI, Anthropic and
+Gemini, and only when this message's explicit consent and server configuration
+both permit them; OmniRoute and other external providers remain excluded.
+Public web search/fetch remains the separate owner-approved Ollama Cloud route.
+Image turns may use only a Fusion-ranked Gemini or Ollama Cloud candidate whose
+vision capability was verified; no provider is assumed to support images.
+Record the selected provider/model, purpose, routing decision and actual egress
+on the turn receipt. Existing queued turns retain their recorded route and
+purpose.
 
 **Investigation handoff implementation, 2026-10-25:** following the owner's
 instruction to connect and UI-test PM-to-builder work, Chat may prepare a native

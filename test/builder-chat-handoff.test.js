@@ -2,8 +2,21 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { investigationProposal } = require('../builder-chat-handoff');
 const { pmChatWithMemory } = require('../builder-chat-memory');
+const receiptMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261113110000_builder_chat_proposal_duplicate_receipt.sql'), 'utf8');
+
+test('proposal job receipts persist duplicate state and keep the original RPC compatible', () => {
+  assert.match(receiptMigration, /CREATE OR REPLACE FUNCTION public\.builder_chat_record_job_receipt\(\s*p_message_id uuid,\s*p_job_id uuid,\s*p_duplicate boolean/);
+  assert.match(receiptMigration, /builder_chat_require_owner\(\)/);
+  assert.match(receiptMigration, /'duplicate_returned', p_duplicate/);
+  assert.match(receiptMigration, /Owner received an existing Builder job; no duplicate was created\./);
+  assert.match(receiptMigration, /Owner created the proposed Builder job\./);
+  assert.match(receiptMigration, /GRANT EXECUTE ON FUNCTION public\.builder_chat_record_job_receipt\(uuid,uuid,boolean\) TO authenticated/);
+  assert.doesNotMatch(receiptMigration, /DROP FUNCTION public\.builder_chat_record_job\(uuid,uuid\)/);
+});
 
 const REPORT = 'The screen only showed an error after part of my request succeeded.';
 const MESSAGE = { id: 'source-message', content: REPORT, payload: {} };
@@ -25,13 +38,17 @@ test('handoff binds the reported quote and source message without claiming sourc
   assert.match(proposal.task_description, /existing job ledger/);
   assert.match(proposal.task_description, /before\/during\/after/);
   assert.match(proposal.task_description, /not independently verified/);
+  assert.deepEqual([proposal.frontend_required, proposal.backend_required], [true, true]);
+  assert.deepEqual([
+    investigationProposal({ ...ARGS, frontend_required: false, backend_required: false }, MESSAGE).frontend_required,
+    investigationProposal({ ...ARGS, frontend_required: false, backend_required: false }, MESSAGE).backend_required,
+  ], [true, true]);
   assert.throws(() => investigationProposal({ ...ARGS, report_quote: 'Invented evidence was verified by live checks.' }, MESSAGE), /must match/);
   assert.equal(investigationProposal({ ...ARGS, report_quote: REPORT }, { ...MESSAGE, content: 'Please investigate.', payload: { evidence_summary: REPORT } }).handoff_kind, 'investigation');
 });
 
 test('invalid or overbroad handoffs fail explicitly', () => {
   for (const args of [
-    { ...ARGS, frontend_required: false, backend_required: false },
     { ...ARGS, title: '' }, { ...ARGS, backend_required: 'true' },
     { ...ARGS, investigation_steps: ['Inspect'] }, { ...ARGS, unknowns: '' },
     { ...ARGS, acceptance_checks: ['x'.repeat(501), 'Check the user outcome.'] },

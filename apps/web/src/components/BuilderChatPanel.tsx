@@ -29,9 +29,10 @@ export interface BuilderChatMessage {
 interface BuilderChatPanelProps {
   context: Record<string, unknown>;
   onClose?: () => void;
-  /** Creates the Builder job through the control room and returns its id. */
-  onCreateJob: (proposal: BuilderChatProposal) => Promise<string | null>;
+  /** Creates the Builder job through the control room and returns its receipt. */
+  onCreateJob: (proposal: BuilderChatProposal) => Promise<{ id: string; human_reference?: string | null; duplicate?: boolean } | null>;
   onOpenJob?: (jobId: string) => void;
+  getJobReference?: (jobId: string) => string | null;
   /** Plain-language summary of the settings a confirmed proposal will be created with. */
   jobSettings?: string;
 }
@@ -56,11 +57,26 @@ function requestId(): string {
 }
 
 function ResearchReceipt({ value }: { value: unknown }) {
-  if (!value || typeof value !== 'object' || !('provider' in value) || value.provider !== 'ollama_cloud' || !('sources' in value) || !Array.isArray(value.sources)) return null;
+  if (!value || typeof value !== 'object' || !('provider' in value) || typeof value.provider !== 'string' || !('sources' in value) || !Array.isArray(value.sources)) return null;
+  const routing = 'routing' in value && value.routing && typeof value.routing === 'object' ? value.routing : null;
+  const attempts = routing && 'attempts' in routing && Array.isArray(routing.attempts) ? routing.attempts : [];
+  const fusionRoute = 'fallback_scope' in value && value.fallback_scope === 'fusion_candidates_permitted_by_this_message_approval';
+  const externalEgress = ('external_egress' in value && value.external_egress === true)
+    || ['ollama_cloud', 'openai', 'anthropic', 'gemini'].includes(value.provider);
+  const webEvidencePresent = value.sources.some((source: unknown) => Boolean(source && typeof source === 'object' && 'url' in source && typeof source.url === 'string'));
   return <details className="bchat-research-receipt">
     <summary>Research sources and transfer receipt</summary>
-    {'purpose' in value && typeof value.purpose === 'string' && <p>Purpose: {value.purpose} · Model: {'model' in value && typeof value.model === 'string' ? value.model : 'not recorded'} · No automatic fallback</p>}
-    <p>Only the approved current question/files were eligible. Images use cloud vision; documents use bounded extracted text, never raw document files. Research is advisory, not approval to change the system.</p>
+    <p>{'purpose' in value && typeof value.purpose === 'string' ? `Purpose: ${value.purpose} · ` : ''}Actual transfer: {externalEgress ? 'external' : 'private/local'} · Provider: {value.provider} · Model: {'model' in value && typeof value.model === 'string' ? value.model : 'not recorded'}{fusionRoute ? ` · ${attempts.length} Fusion candidate attempt${attempts.length === 1 ? '' : 's'} recorded` : attempts.length ? ` · ${attempts.length} provider attempt${attempts.length === 1 ? '' : 's'} recorded` : ' · No automatic fallback'}</p>
+    {webEvidencePresent && <p>Public web evidence and its inference were routed through Ollama Cloud only.</p>}
+    {fusionRoute && attempts.length > 0 && <ol aria-label="Fusion provider attempts">{attempts.map((attempt: unknown, index: number) => {
+      if (!attempt || typeof attempt !== 'object') return null;
+      const provider = 'provider' in attempt && typeof attempt.provider === 'string' ? attempt.provider : 'Unknown provider';
+      const model = 'model' in attempt && typeof attempt.model === 'string' ? attempt.model : 'model not recorded';
+      const outcome = !('ok' in attempt) || typeof attempt.ok !== 'boolean' ? 'status not recorded' : attempt.ok ? 'completed' : 'failed';
+      const transfer = ['gpu_workstation', 'ollama'].includes(provider) ? 'private/local' : 'external';
+      return <li key={index}>{provider}/{model} · {outcome} · {transfer}</li>;
+    })}</ol>}
+    <p>Only the approved current question/files were eligible. Images use a verified vision-capable provider; documents use bounded extracted text, never raw document files. Research is advisory, not approval to change the system.</p>
     <ul>{value.sources.map((source: unknown, index: number) => {
       if (!source || typeof source !== 'object') return null;
       const title = 'title' in source && typeof source.title === 'string' ? source.title : `Source ${index + 1}`;
@@ -87,7 +103,7 @@ export function proposalFrom(message: BuilderChatMessage): BuilderChatProposal |
   const raw = message.payload.proposal as Partial<BuilderChatProposal> | undefined;
   if (!raw || typeof raw.title !== 'string' || typeof raw.task_description !== 'string') return null;
   return {
-    title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined,
+    title: raw.title, task_description: raw.task_description, frontend_required: true, backend_required: true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined,
     ...(raw.handoff_kind === 'investigation' ? { handoff_kind: raw.handoff_kind, source_message_id: typeof raw.source_message_id === 'string' ? raw.source_message_id : undefined } : {}),
   };
 }
@@ -164,11 +180,13 @@ function RevisionCard({ message, busy, sourceStatus, onRequest, onOpenJob }: {
   </article>;
 }
 
-function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingElsewhere }: { message: BuilderChatMessage; onCreate: () => void; onOpenJob?: (jobId: string) => void; busy: boolean; settings?: string; creatingElsewhere: boolean }) {
+function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingElsewhere, jobReference }: { message: BuilderChatMessage; onCreate: () => void; onOpenJob?: (jobId: string) => void; busy: boolean; settings?: string; creatingElsewhere: boolean; jobReference?: string | null }) {
   const proposal = proposalFrom(message);
   if (!proposal) return null;
   const jobId = typeof message.payload.job_id === 'string' ? message.payload.job_id : null;
-  const scope = [proposal.frontend_required && 'Frontend', proposal.backend_required && 'Backend'].filter(Boolean).join(' + ');
+  const reference = typeof message.payload.job_reference === 'string' ? message.payload.job_reference : jobReference;
+  const duplicateReturned = message.payload.duplicate_returned === true;
+  const scope = 'Frontend + Backend';
   return (
     <article className="bchat-proposal" aria-label={`Proposed Builder job: ${proposal.title}`}>
       <header><span>{proposal.handoff_kind === 'investigation' ? 'Investigation handoff · Bob Builder' : 'Proposed job'} · {scope}</span><h3>{proposal.title}</h3></header>
@@ -176,13 +194,13 @@ function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingEl
       <p className="bchat-proposal__task">{proposal.task_description}</p>
       {proposal.rationale && <p className="bchat-proposal__why">{proposal.rationale}</p>}
       {jobId
-        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>Job created</span><span>Receipt: {jobId}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
+        ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /><span>{duplicateReturned ? 'Existing job returned; no duplicate created' : 'Job created'}</span><span>{reference ? `Reference: ${reference}` : 'Reference unavailable'}</span>{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
         : <div className="bchat-proposal__actions"><span>{settings ? `Creates with: ${settings}. ` : ''}Nothing runs until you create it.</span><button type="button" onClick={onCreate} disabled={busy || creatingElsewhere} title={creatingElsewhere ? 'This job is being created from another tab or window' : undefined}>{busy || creatingElsewhere ? <Loader2 size={14} className="bchat-spin" /> : <Bot size={14} />} {creatingElsewhere ? 'Creating…' : 'Create job'}</button></div>}
     </article>
   );
 }
 
-export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, jobSettings }: BuilderChatPanelProps) {
+export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, getJobReference, jobSettings }: BuilderChatPanelProps) {
   const [access, setAccess] = useState<Access>('checking');
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BuilderChatMessage[]>([]);
@@ -299,15 +317,24 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
     const token = reservations.current.get(message.id) ?? requestId();
     reservations.current.set(message.id, token);
     let jobId: string | null = null;
+    let jobReference: string | null = null;
+    let duplicateReturned = false;
     try {
       const { data: reserved, error: reserveError } = await supabase.rpc('builder_chat_reserve_proposal', { p_message_id: message.id, p_token: token });
       if (reserveError) throw reserveError;
       if (reserved !== true) throw new Error('This proposal is already being created from another tab or window, or was already created.');
-      jobId = await onCreateJob(proposal);
+      const createdJob = await onCreateJob(proposal);
+      jobId = createdJob?.id ?? null;
+      jobReference = createdJob?.human_reference ?? null;
+      duplicateReturned = createdJob?.duplicate === true;
       if (!jobId) throw new Error('The Builder job was not created.');
-      const { error: recordError } = await supabase.rpc('builder_chat_record_job', { p_message_id: message.id, p_job_id: jobId });
+      const { error: recordError } = await supabase.rpc('builder_chat_record_job_receipt', {
+        p_message_id: message.id, p_job_id: jobId, p_duplicate: duplicateReturned,
+      });
       if (recordError) throw recordError;
       reservations.current.delete(message.id);
+      setMessages(current => current.map(row => row.id === message.id
+        ? { ...row, payload: { ...row.payload, job_id: jobId, job_reference: jobReference, duplicate_returned: duplicateReturned } } : row));
     } catch (createError) {
       // Release only when no job exists; once created, keep the reservation so a retry links the same job.
       if (!jobId) await supabase.rpc('builder_chat_release_proposal', { p_message_id: message.id, p_token: token });
@@ -369,10 +396,11 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
                   onRequest={() => void requestRevision(item.message)} onOpenJob={onOpenJob} />
               : item.message.kind === 'proposal'
                 ? <ProposalCard key={item.message.id} message={item.message} settings={jobSettings} busy={busy === `proposal:${item.message.id}`}
+                  jobReference={typeof item.message.payload.job_id === 'string' ? getJobReference?.(item.message.payload.job_id) : null}
                   creatingElsewhere={typeof item.message.payload.creating_token === 'string' && item.message.payload.creating_token !== reservations.current.get(item.message.id) && Date.now() - Date.parse(String(item.message.payload.creating_at ?? '')) < 5 * 60_000} onCreate={() => void createFromProposal(item.message)} onOpenJob={onOpenJob} />
                 : <div key={item.message.id} className={`bchat-msg bchat-msg--${item.message.role}${item.message.kind === 'error' ? ' is-error' : ''}${item.message.kind === 'status' ? ' is-status' : ''}`}>
                     <p>{item.message.content}</p>
-                    {item.message.payload.research_mode === 'public_cloud' && <small>Owner-approved public cloud research · previous chat excluded</small>}
+                    {item.message.payload.research_mode === 'public_cloud' && <small>Owner-approved Builder Chat packet · previous chat excluded</small>}
                     <ResearchReceipt value={item.message.payload.research} />
                     {item.message.role === 'owner' && item.message.status === 'failed' && <span className="bchat-msg__meta">Not answered</span>}
                   </div>)}

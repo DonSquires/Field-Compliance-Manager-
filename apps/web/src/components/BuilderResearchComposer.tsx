@@ -27,10 +27,12 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
   const [sending, setSending] = useState(false);
   const prepared = useRef(new Map<string, ResearchFile>());
   const uploaded = useRef(new Map<string, string>());
+  const unresolvedSubmissions = useRef(new Map<string, Set<string>>());
   const request = useRef<string | null>(null);
-  useEffect(() => { setApproved(false); }, [question, pmMode]);
+  useEffect(() => { setApproved(false); request.current = null; }, [question, pmMode]);
   const busy = disabled || sending;
-  const changed = () => { setApproved(false); };
+  const cloudRetrievalRequested = webSearch || urls.split('\n').some(value => value.trim());
+  const changed = () => { setApproved(false); request.current = null; };
   const stage = (selected: FileList | null) => {
     if (!selected) return;
     changed();
@@ -91,12 +93,23 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
         preparingId = null;
       }
       request.current ??= crypto.randomUUID();
+      const submittedRequestId = request.current;
+      for (const file of ready) {
+        const requestIds = unresolvedSubmissions.current.get(file.id) || new Set<string>();
+        requestIds.add(submittedRequestId);
+        unresolvedSubmissions.current.set(file.id, requestIds);
+      }
       const { error } = await supabase.rpc(pmMode ? 'builder_chat_send_pm' : 'builder_chat_send_research', {
         p_thread_id: threadId, p_content: question.trim(), p_client_request_id: request.current,
         p_files: ready, p_urls: sourceUrls.map(value => new URL(value).toString()), p_web_search: webSearch, p_allow_cloud: approved,
         ...(pmMode ? { p_purpose: purpose, p_evidence_summary: evidenceSummary } : {}),
       });
       if (error) throw error;
+      for (const file of ready) {
+        const requestIds = unresolvedSubmissions.current.get(file.id);
+        requestIds?.delete(submittedRequestId);
+        if (requestIds?.size === 0) unresolvedSubmissions.current.delete(file.id);
+      }
       setFiles([]); prepared.current.clear(); uploaded.current.clear(); request.current = null; setApproved(false); setUrls(''); setEvidenceSummary('');
       onSent();
     } catch (error) {
@@ -106,6 +119,10 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
   };
   const remove = async (id: string) => {
     const path = uploaded.current.get(id);
+    if (unresolvedSubmissions.current.has(id)) {
+      onError('A prior research send may have been accepted. Keep this attachment until its matching message is confirmed in the chat.');
+      return;
+    }
     if (path && request.current) {
       onError('A research submission was attempted. Retry to confirm its result before removing a prepared upload; it may already belong to the queued message.');
       return;
@@ -124,13 +141,13 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
     prepared.current.delete(id); uploaded.current.delete(id); changed();
   };
   return <fieldset className="bchat-research" disabled={busy}>
-    <legend>{pmMode ? 'Cloud PM / QA' : 'Public cloud research'}</legend>
-    <p>{pmMode ? 'One purpose-assigned Ollama Cloud model, no VPS/laptop inference or automatic fallback. Chat assesses reports and can prepare a Bob Builder investigation card for owner confirmation; Builder and Vibe implement.' : 'Ollama Cloud first, no metered providers.'} Only this approved packet; no previous chat, selected job or private repository context.</p>
+    <legend>{pmMode ? 'Fusion PM / QA' : 'Public cloud research'}</legend>
+    <p>{pmMode ? 'Fusion ranks available models for this purpose. OpenAI, Anthropic, Gemini and Ollama Cloud are eligible only for this approved packet. Image review requires a verified vision-capable candidate.' : 'Ollama Cloud first, no metered providers.'} Only this approved packet; no previous chat, selected job or private repository context.</p>
     {pmMode && <>
-      <label>Purpose and model<select value={purpose} onChange={event => { setPurpose(event.target.value); changed(); }}>
-        <option value="pm">PM, investigation planning and visual review · Kimi K2.7 Code</option>
-        <option value="qa">Independent QA challenge · DeepSeek V4 Pro</option>
-        <option value="technical_review">Technical handoff review · Kimi K2.7 Code</option>
+      <label>Purpose<select value={purpose} onChange={event => { setPurpose(event.target.value); changed(); }}>
+        <option value="pm">PM, investigation planning and visual review</option>
+        <option value="qa">Independent QA challenge</option>
+        <option value="technical_review">Technical handoff review</option>
       </select></label>
       <label>Human-reviewed non-sensitive evidence summary (optional)<textarea rows={3} maxLength={6000} value={evidenceSummary} onChange={event => { setEvidenceSummary(event.target.value); changed(); }} /></label>
       <BuilderMemoryRecall disabled={busy} onError={onError} onUse={excerpt => {
@@ -139,7 +156,10 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
         setEvidenceSummary(summary);
         changed();
       }} />
-      <small>Include only redacted facts you approve for cloud transfer, their provenance and unknowns. No sensitive source, tenant records, secrets or raw diagnostics. This is reported evidence, not independent verification. A written brief does not send work; confirm Create job on an investigation card to hand it to Bob Builder.</small>
+      <small>Include only redacted facts you approve for external model transfer, their provenance and unknowns. No sensitive source, tenant records, secrets or raw diagnostics. This is reported evidence, not independent verification. A written brief does not send work; confirm Create job on an investigation card to hand it to Bob Builder.</small>
+      <small>{cloudRetrievalRequested
+        ? 'Public web search and URLs use Ollama Cloud for retrieval and inference over fetched evidence. If its credit limit is reached, this research turn cannot complete; remove those sources to use another consented provider on the reviewed packet alone.'
+        : 'No web retrieval is requested. Fusion can answer from this reviewed packet using another configured provider even if Ollama Cloud is unavailable.'}</small>
       <small>Current stage: no automatic private evidence collection or conversation carry-over. The PM should identify the next authorized collection task, not ask you to diagnose code. The reviewed packet is the only context for this turn.</small>
     </>}
     <label><input type="checkbox" checked={webSearch} onChange={event => { setWebSearch(event.target.checked); changed(); }} /> Search the public web</label>
@@ -147,7 +167,7 @@ export function BuilderResearchComposer({ threadId, question, disabled, onSent, 
     <label className="bchat-research__file"><Paperclip size={14} /> Add images or documents<input aria-label="Research attachments" type="file" multiple accept={Object.values(TYPES).join(',')} onChange={event => { stage(event.target.files); event.target.value = ''; }} /></label>
     <small>JPEG/PNG/WebP: 10 MB. PDF/DOCX/XLSX/CSV/TXT: 20 MB. Five files max. Documents use up to 12,000 extracted characters, not raw files; XLSX uses one selected populated sheet. Images use verified cloud vision. Empty/scanned PDFs are reported unreadable.</small>
     <ul>{files.map(file => <li key={file.id}><span role="status">{file.file.name} · {file.status}</span><button type="button" aria-label={`Remove ${file.file.name}`} onClick={() => void remove(file.id)}><X size={14} /></button></li>)}</ul>
-    <label><input type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I reviewed this question, {pmMode ? 'purpose, evidence summary, ' : ''}URLs and files: no personal, confidential, restricted, credential or proprietary information. Allow this message and selected non-sensitive images/document text to Ollama Cloud.</label>
+    <label><input type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I reviewed this question, {pmMode ? 'purpose, evidence summary, ' : ''}URLs and files: no personal, confidential, restricted, credential or proprietary information. {pmMode ? 'Allow Fusion to send this packet to OpenAI, Anthropic, Gemini or Ollama Cloud when selected by the router.' : 'Allow this message and selected non-sensitive images/document text to Ollama Cloud.'}</label>
     <button type="button" disabled={busy || !approved || !question.trim()} onClick={() => void send()}>{sending ? 'Preparing research...' : pmMode ? 'Send approved PM message' : 'Send approved cloud research'}</button>
   </fieldset>;
 }

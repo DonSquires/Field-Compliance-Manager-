@@ -25,7 +25,7 @@ const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 // 'openai' transport kind; the provider name, not the kind, decides routing and egress policy.
 const PROVIDER_KINDS = Object.freeze({
   openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama', ollama_cloud: 'ollama_cloud',
-  anthropic: 'openai', gemini: 'openai', omniroute: 'openai'
+  anthropic: 'openai', gemini: 'gemini', omniroute: 'openai'
 });
 const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
@@ -102,6 +102,7 @@ function hostedProviderConfigured(providerConfig) {
 }
 
 function authHeaders(providerConfig) {
+  if (providerConfig.kind === 'gemini') return providerConfig.apiKey ? { 'x-goog-api-key': providerConfig.apiKey } : {};
   return providerConfig.apiKey ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {};
 }
 
@@ -111,6 +112,32 @@ function parseModelAllowlist(value, fallback) {
 
 function estimateTokens(chars) {
   return Math.ceil(Number(chars || 0) / CHARS_PER_TOKEN);
+}
+
+function buildGeminiBody({ input, config, model }) {
+  const messages = Array.isArray(input.messages) ? input.messages : [
+    { role: 'system', content: input.system_prompt }, { role: 'user', content: input.user_prompt },
+  ];
+  const system = messages.filter(message => message.role === 'system').map(message => String(message.content || '')).join('\n\n');
+  const contents = messages.filter(message => message.role !== 'system').map(message => {
+    const parts = [];
+    if (typeof message.content === 'string' && message.content) parts.push({ text: message.content });
+    if (Array.isArray(message.images)) {
+      for (let index = 0; index < message.images.length; index += 1) {
+        parts.push({ inlineData: { mimeType: message.image_mime_types?.[index] || 'image/jpeg', data: message.images[index] } });
+      }
+    }
+    return { role: message.role === 'assistant' ? 'model' : 'user', parts };
+  });
+  const generationConfig = {
+    responseMimeType: 'application/json',
+    maxOutputTokens: Math.min(Number(input.max_output_tokens) || config.maxOutputTokens, config.maxOutputTokens),
+    ...(typeof input.temperature === 'number' ? { temperature: input.temperature } : {}),
+  };
+  if (input.output_schema && !Array.isArray(input.output_schema.oneOf) && input.output_schema.properties) {
+    generationConfig.responseSchema = input.output_schema;
+  }
+  return { ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}), contents, generationConfig };
 }
 
 function durationMs(value) {
@@ -165,6 +192,27 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
     healthCache.set(cacheKey, { healthy, installed, reason, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
     return { name, configured: true, healthy, installed, reason, cached: false };
   }
+  if (providerConfig.kind === 'gemini') {
+    if (!providerConfig.apiKey || !providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
+    const cached = healthCache.get(cacheKey);
+    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
+    let healthy = false;
+    let installed = [];
+    try {
+      const response = await fetchImpl(`${providerConfig.baseUrl}/models?pageSize=100`, {
+        headers: authHeaders(providerConfig), signal: probeSignal(HEALTH_PROBE_TIMEOUT_MS * 3), redirect: 'error',
+      });
+      const data = response.ok ? await response.json().catch(() => null) : null;
+      healthy = response.ok && Array.isArray(data?.models);
+      installed = healthy ? data.models
+        .filter(item => Array.isArray(item.supportedGenerationMethods) && item.supportedGenerationMethods.includes('generateContent'))
+        .map(item => String(item.name || '').replace(/^models\//, '')).filter(Boolean) : [];
+      healthy = healthy && installed.length > 0;
+    } catch { signal?.throwIfAborted(); }
+    signal?.throwIfAborted();
+    healthCache.set(cacheKey, { healthy, installed, reason: healthy ? null : 'gemini_model_inventory_unavailable', until: now() + (healthy ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
+    return { name, configured: true, healthy, installed, cached: false, reason: healthy ? null : 'gemini_generate_content_model_unavailable' };
+  }
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
   const cached = healthCache.get(cacheKey);
@@ -213,6 +261,7 @@ async function modelHealth(config, options = {}) {
       healthy: probe.healthy,
       models: eligible,
       configured_models: [...(provider?.models ?? [])],
+      vision_models: [...(provider?.visionModels ?? [])],
       installed: probe.installed,
       ready_model: probe.healthy ? bestAvailableModel(eligible, probe.installed) : null,
       model_memory_budget_bytes: provider?.modelMemoryBudgetBytes ?? null,
@@ -257,10 +306,14 @@ function createModelGatewayConfig(env = process.env) {
   const maxOutputTokens = Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192));
   const vramMb = Number(env.BOB_GPU_VRAM_MB || 8192);
   const headroomMb = Number(env.BOB_GPU_HEADROOM_MB || 2048);
-  const geminiProxy = env.BOB_GEMINI_USE_SUPABASE_PROXY === '1' && !env.GEMINI_API_KEY;
+  const geminiProxy = env.BOB_GEMINI_USE_SUPABASE_PROXY === '1' && !(env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
   if (!Number.isFinite(vramMb) || !Number.isFinite(headroomMb) || headroomMb < 1024 || vramMb <= headroomMb) {
     throw new Error('GPU memory configuration must reserve at least 1024 MiB and leave a positive model budget');
   }
+  const geminiModels = parseModelAllowlist(env.BOB_GEMINI_MODELS, 'gemini-3.8-flash');
+  const geminiVisionModels = [...parseModelAllowlist(env.BOB_GEMINI_VISION_MODELS, '')]
+    .filter(model => geminiModels.has(model));
+  const supabaseUrl = String(env.SUPABASE_URL || '').replace(/\/+$/, '');
   return {
     openai: {
       kind: 'openai',
@@ -318,13 +371,16 @@ function createModelGatewayConfig(env = process.env) {
       temperature: false,
       models: parseModelAllowlist(env.BOB_ANTHROPIC_MODELS, 'claude-opus-5-5,claude-sonnet-5-5,claude-opus-4-8,claude-sonnet-4-6,claude-haiku-5-5')
     },
+    // Gemini has a distinct native REST transport; do not treat it as OpenAI-compatible.
     gemini: {
-      kind: 'openai',
-      apiKey: geminiProxy ? env.BOB_GEMINI_PROXY_SERVICE_KEY || '' : env.GEMINI_API_KEY || '',
+      kind: geminiProxy ? 'openai' : 'gemini',
+      apiKey: geminiProxy ? env.BOB_GEMINI_PROXY_SERVICE_KEY || '' : env.GEMINI_API_KEY || env.GOOGLE_API_KEY || '',
       baseUrl: geminiProxy
-        ? (env.SUPABASE_URL ? `${env.SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/bob-gemini-gateway` : '')
-        : (env.GEMINI_OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_GEMINI_MODELS, 'gemini-4-hydrogen,gemini-3.1-flash-lite')
+        ? (supabaseUrl ? `${supabaseUrl}/functions/v1/bob-gemini-gateway` : '')
+        : (env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, ''),
+      models: geminiModels,
+      visionModels: geminiVisionModels,
+      maxOutputTokens: Math.min(maxOutputTokens, 16384),
     },
     // OmniRoute: an owner-run OpenAI-compatible gateway that fans out to many providers, including
     // free third-party tiers (owner accepted that data boundary 2026-11-10). Unconfigured until
@@ -356,6 +412,11 @@ function validateModelRequest(input, config) {
   if (!input || typeof input !== 'object') return 'request body is required';
   if (input.builder_mode === 'officer_privacy' && !['gpu_workstation', 'ollama'].includes(input.provider)) return 'officer privacy requires private inference';
   if (!PROVIDER_KINDS[input.provider]) return 'unsupported model provider';
+  const imageMessages = Array.isArray(input.messages) ? input.messages.filter(message => Array.isArray(message?.images) && message.images.length > 0) : [];
+  if (input.provider === 'gemini' && imageMessages.length) {
+    if (config.gemini.kind !== 'gemini') return 'Gemini proxy mode does not support image inputs';
+    if (!input.model || !config.gemini.visionModels?.includes(input.model)) return 'Gemini image requests require an explicitly allowlisted vision model';
+  }
   if (input.builder_mode === 'officer_privacy') {
     let endpoint;
     try { endpoint = new URL(config[input.provider].baseUrl); } catch { return 'private inference endpoint is invalid'; }
@@ -424,6 +485,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
     const label = { openai: 'OpenAI', anthropic: 'Anthropic', omniroute: 'OmniRoute' }[input.provider] || input.provider;
     return { status: 503, body: { error: `${label} provider is not configured`, code: 'provider_unconfigured' } };
   }
+  if (providerConfig.kind === 'gemini' && (!providerConfig.apiKey || !providerConfig.baseUrl)) {
+    return { status: 503, body: { error: 'Gemini provider is not configured', code: 'provider_unconfigured' } };
+  }
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) {
     return { status: 503, body: { error: 'Ollama Cloud provider is not configured', code: 'provider_unconfigured' } };
   }
@@ -482,15 +546,21 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
   const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, planningTimeout || Infinity));
   try {
     const isOpenAI = providerConfig.kind === 'openai';
+    const isGemini = providerConfig.kind === 'gemini';
+    const endpoint = isGemini
+      ? `${providerConfig.baseUrl}/models/${encodeURIComponent(model)}:generateContent`
+      : isOpenAI ? `${providerConfig.baseUrl}/chat/completions` : `${providerConfig.baseUrl}/api/chat`;
+    const providerBody = isGemini ? buildGeminiBody({ input, config: providerConfig, model })
+      : buildProviderBody({ input, config, model, nativeTools });
     const response = await fetchImpl(
-      isOpenAI ? `${providerConfig.baseUrl}/chat/completions` : `${providerConfig.baseUrl}/api/chat`,
+      endpoint,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...authHeaders(providerConfig)
         },
-        body: JSON.stringify(buildProviderBody({ input, config, model, nativeTools })),
+        body: JSON.stringify(providerBody),
         ...(input.builder_mode === 'officer_privacy' ? { redirect: 'error' } : {}),
         signal: controller.signal
       }
@@ -510,7 +580,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
       return { status: 502, body: { error: `${input.provider} provider request failed${detail}`, code: 'provider_error' } };
     }
 
-    let content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
+    let content = isOpenAI ? data.choices?.[0]?.message?.content
+      : isGemini ? data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('')
+        : data.message?.content;
     if (nativeTools && !data.message?.tool_calls?.length) {
       // A model that ignores native tools once keeps doing so; do not re-spend a turn proving it every message.
       const reason = 'model declared native support but returned no function call; using structured JSON compatibility for six hours';
@@ -544,9 +616,14 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch,
         model,
         content,
         ...(input.tools ? { tool_protocol: nativeTools ? 'native' : 'json', tool_protocol_reason: toolProtocolReason } : {}),
-        finish_reason: isOpenAI ? (data.choices?.[0]?.finish_reason ?? null) : (data.done_reason ?? null),
-        usage: isOpenAI
-          ? (data.usage || {})
+        finish_reason: isOpenAI ? (data.choices?.[0]?.finish_reason ?? null)
+          : isGemini ? (data.candidates?.[0]?.finishReason ?? null) : (data.done_reason ?? null),
+        usage: isOpenAI ? (data.usage || {})
+          : isGemini ? {
+            input_tokens: data.usageMetadata?.promptTokenCount || 0,
+            output_tokens: data.usageMetadata?.candidatesTokenCount || 0,
+            total_tokens: data.usageMetadata?.totalTokenCount || 0,
+          }
           : {
             input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0,
             inference: {
@@ -589,6 +666,7 @@ module.exports = {
   promptFitsProvider,
   resolveProviderModel,
   buildProviderBody,
+  buildGeminiBody,
   createModelGatewayConfig,
   defaultReviewerModel,
   isReasoningModel,

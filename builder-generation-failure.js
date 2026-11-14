@@ -53,6 +53,17 @@ function crossLaneNoChange(generation, mode) {
     || detail.includes(`outside the allowed ${ownLane} lane`);
 }
 
+function safeSiblingEvidenceFile(generation, sibling) {
+  const inspected = new Set(Array.isArray(generation?.inspected_files) ? generation.inspected_files : []);
+  const accepted = file => typeof file === 'string' && inspected.has(file) && laneAllows(sibling, file);
+  if (typeof generation?.no_change_file === 'string') {
+    return accepted(generation.no_change_file) ? generation.no_change_file : null;
+  }
+  const reason = String(generation?.error || generation?.summary || '');
+    const candidates = (reason.match(/[^\s`"'<>()[\]{},;]+/g) || []).map(token => token.replace(/[.:!?]+$/, ''));
+  return candidates.find(file => /\.(?:[cm]?[jt]sx?|sql|css|html)$/.test(file) && accepted(file)) ?? null;
+}
+
 /**
  * A no-change answer can be actionable in two ways:
  * 1) the sibling implementation already delivered the patch, or
@@ -64,9 +75,11 @@ async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, 
   const reroute = crossLaneNoChange(generation, step?.builder_mode);
   if (!generation?.no_change || (!siblingCompleted && !reroute) || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
   const sibling = step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend';
+  const evidenceFile = safeSiblingEvidenceFile(generation, sibling);
+  if (!evidenceFile) return false;
   const reason = reroute
-    ? `Nothing to change in this lane; author evidence says this fix belongs to the ${sibling} lane. Author: ${String(generation.error || '').slice(0, 600)}`
-    : `Nothing to change in this lane; the ${sibling} lane delivered the change. Author: ${String(generation.error || '').slice(0, 600)}`;
+    ? `Nothing to change in this lane; author evidence says this fix belongs to the ${sibling} lane at ${evidenceFile}. Author: ${String(generation.error || '').slice(0, 600)}`
+    : `Nothing to change in this lane; the ${sibling} lane delivered the change at ${evidenceFile}. Author: ${String(generation.error || '').slice(0, 600)}`;
   try {
     const { error } = await supabase.rpc('builder_skip_implementation_step', { _job_id: job.id, _step_id: step.id, _builder_mode: step.builder_mode, _reason: reason });
     if (error) { logger?.warn?.(`[builder] lane skip not recorded: ${error.message}`); return false; }

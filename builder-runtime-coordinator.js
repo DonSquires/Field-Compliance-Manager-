@@ -14,7 +14,7 @@ const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
-const { laneFor, normalizeRepoPath } = require('./builder-path-policy');
+const { laneAllows, laneFor, normalizeRepoPath } = require('./builder-path-policy');
 const { checkImplementationAcceptance } = require('./builder-implementation-acceptance');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
@@ -28,6 +28,15 @@ const MAX_STEP_ATTEMPTS = Math.max(1, Number(process.env.BOB_BUILDER_MAX_STEP_AT
 // Bob works the implementation steps as a coding agent (explore → edit → test →
 // iterate) unless explicitly switched back to the one-shot engineers.
 const AGENTIC_ENABLED = process.env.BOB_BUILDER_AGENTIC !== 'false';
+
+function mainMonitorSourceFiles(requirements) {
+  if (!Array.isArray(requirements) || !requirements.length
+    || requirements.some(requirement => !Array.isArray(requirement.source_scope) || !requirement.source_scope.length
+      || requirement.source_scope.some(file => typeof file !== 'string' || !normalizeRepoPath(file) || !laneAllows(laneFor(file), file)))) {
+    throw new Error('Main-health specification has no valid unprotected implementation scope');
+  }
+  return [...new Set(requirements.flatMap(requirement => requirement.source_scope))];
+}
 
 function byStep(snapshot, stepId) {
   return snapshot.steps.find(step => step.step_id === stepId);
@@ -385,22 +394,21 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     const { bytes } = await downloadVerifiedArtifact(supabase, artifact.id, snapshot.job.id, 'product_specification');
     const specification = JSON.parse(bytes.toString('utf8'));
     const requirements = specification.delivery_requirements;
-    if (!Array.isArray(requirements) || !requirements.length
-      || requirements.some(requirement => !Array.isArray(requirement.source_scope) || !requirement.source_scope.length
-        || requirement.source_scope.some(file => typeof file !== 'string' || !normalizeRepoPath(file)))) {
-      throw new Error('Main-health specification has no valid implementation scope');
-    }
+    const files = mainMonitorSourceFiles(requirements);
     const lane = action.type === 'run_frontend' ? 'frontend' : 'backend';
-    const files = [...new Set(requirements.flatMap(requirement => requirement.source_scope))];
     if (!files.some(file => laneFor(file) === lane)) {
-      const siblingMode = lane === 'frontend' ? 'backend_engineer' : 'frontend_engineer';
+      const siblingLane = lane === 'frontend' ? 'backend' : 'frontend';
+      const siblingMode = `${siblingLane}_engineer`;
       const sibling = snapshot.steps.find(step => step.builder_mode === siblingMode);
       if (!sibling || !['pending', 'completed'].includes(sibling.status)) {
         throw new Error('Cannot skip an unused repair lane without a sibling implementation');
       }
+      if (!files.length || files.some(file => !laneAllows(siblingLane, file))) {
+        throw new Error('Cannot skip an unused repair lane without a validated unprotected sibling source path');
+      }
       const { error } = await supabase.rpc('builder_skip_implementation_step', {
         _job_id: snapshot.job.id, _step_id: action.step.id, _builder_mode: action.step.builder_mode,
-        _reason: `Validated specification ${artifact.id} assigns this repair to the ${lane === 'frontend' ? 'backend' : 'frontend'} lane only: ${files.join(', ')}`,
+        _reason: `Validated specification ${artifact.id} assigns this repair to the ${siblingLane} lane only; its unprotected source scope is ${files.join(', ')}`,
       });
       if (error) throw new Error(`Unused repair lane could not be recorded: ${error.message}`);
       return { success: true, skipped: true, phase: 'specification_scope', specification_artifact_id: artifact.id };
@@ -514,6 +522,7 @@ async function runBuilderUntilPause({
 
 module.exports = {
   MAX_STEP_ATTEMPTS,
+  mainMonitorSourceFiles,
   failedImplementationEvidence,
   attemptCeilingReached,
   AGENTIC_ENABLED,

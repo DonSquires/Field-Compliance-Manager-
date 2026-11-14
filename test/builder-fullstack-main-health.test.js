@@ -77,7 +77,7 @@ test('missing, invalid, or unusable sibling scope cannot silently skip a repair'
     const fixture = repairFixture(scopes);
     await assert.rejects(executeBuilderAction({
       ...fixture, action: { type: 'run_frontend', step: fixture.snapshot.steps[1] }, context: {},
-    }), /valid implementation scope/);
+    }), /valid (?:unprotected )?implementation scope/);
     assert.equal(fixture.calls.length, 0);
   }
   const fixture = repairFixture([['test/fix.test.js']]);

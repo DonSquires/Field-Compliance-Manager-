@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import BuilderControlRoomPage, { failedFrontendPatchRetryCandidate } from './BuilderControlRoomPage';
 
@@ -30,6 +30,24 @@ it('shows the persistent Builder reference in the queue and workbench and search
   fireEvent.change(screen.getByRole('textbox', { name: 'Filter jobs' }), { target: { value: 'bb-4' } });
   expect(screen.getByRole('button', { name: /BB-4.*Older work/ })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Recent work/ })).toBeNull();
+});
+
+it('shows the audited reason when an implementation lane was skipped', async () => {
+  const job = { id: 'job', human_reference: 'BB-103', project_id: 'project', title: 'Cross-lane repair',
+    status: 'implementation_pending', target_sha: 'a'.repeat(40), created_at: '2026-11-02T00:00:00Z', updated_at: '2026-11-02T00:00:00Z' };
+  const step = { id: 'front', job_id: job.id, step_id: 'frontend_implementation', ordinal_position: 3,
+    builder_mode: 'frontend_engineer', status: 'skipped', attempt_count: 1,
+    result_summary: 'Nothing to change in this lane; the backend lane delivered the change at builder-chat-session.js.', error: null, retryable: false };
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [job], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    if (body.action === 'get') return { data: { job, steps: [step], artifacts: [], workerRuns: [], approvals: [] }, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+
+  render(<BuilderControlRoomPage />);
+  await screen.findByRole('heading', { name: 'Cross-lane repair' });
+  expect(screen.getByText(`Reason: ${step.result_summary}`)).toBeTruthy();
 });
 
 it('saves an edited job name without changing its reference', async () => {
@@ -75,6 +93,29 @@ it('keeps an edited job name as a draft when the server rejects the change', asy
   expect((await screen.findByRole('alert')).textContent).toMatch(/changed.*refresh/i);
   expect((screen.getByRole('textbox', { name: 'Job name' }) as HTMLInputElement).value).toBe('My unsaved name');
   expect(screen.getByRole('heading', { name: 'Original work' })).toBeTruthy();
+});
+
+it('traps focus in the create-job dialog and restores it when dismissed with Escape', async () => {
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+  render(<BuilderControlRoomPage />);
+
+  const opener = await screen.findByRole('button', { name: 'New job' });
+  fireEvent.click(opener);
+  const dialog = await screen.findByRole('dialog', { name: 'Create Builder job' });
+  const close = screen.getByRole('button', { name: 'Close create job dialog' });
+  expect(document.activeElement).toBe(close);
+
+  fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(document.activeElement).toBe(opener);
+  expect(dialog).toBeTruthy();
 });
 
 it('does not replace another selected job when a delayed rename finishes', async () => {
@@ -155,6 +196,24 @@ it.each([
   expect(screen.getByRole('button', { name: /BB-103.*Renamed work/ })).toBeTruthy();
 });
 
+it('keeps create-job failures visible and announced inside the open dialog', async () => {
+  const project = { id: 'project', organization_id: 'org', name: 'FCM', gitea_owner: 'owner', gitea_repo: 'repo' };
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [], projects: [project] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    if (body.action === 'create') return { error: null, data: { error: 'Builder service is unavailable.' } };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+  render(<BuilderControlRoomPage />);
+  fireEvent.click(await screen.findByRole('button', { name: /New job/ }));
+  const dialog = await screen.findByRole('dialog', { name: 'Create Builder job' });
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Title' }), { target: { value: 'A focused repair' } });
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Task description' }), { target: { value: 'Repair the observed workflow.' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create job' }));
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('Builder service is unavailable.');
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+
 it.each([false, true])('shows the real reference in the create receipt (duplicate: %s)', async duplicate => {
   const job = { id: 'job', human_reference: 'BB-104', project_id: 'project', title: 'Meaningful work',
     status: 'failed', target_sha: 'a'.repeat(40), created_at: '2026-11-02T00:00:00Z', updated_at: '2026-11-02T00:00:00Z' };
@@ -169,10 +228,17 @@ it.each([false, true])('shows the real reference in the create receipt (duplicat
   render(<BuilderControlRoomPage />);
   await screen.findByRole('heading', { name: 'Meaningful work' });
   fireEvent.click(screen.getByRole('button', { name: 'New job' }));
+  expect(screen.getByRole('dialog', { name: 'Create Builder job' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Close create job dialog' })).toBeTruthy();
+  expect(screen.getByText('Frontend + Backend specialists')).toBeTruthy();
+  expect(screen.queryByRole('checkbox', { name: 'Frontend' })).toBeNull();
+  expect(screen.queryByRole('checkbox', { name: 'Backend' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Meaningful work' } });
   fireEvent.change(screen.getByLabelText('Task description'), { target: { value: 'Describe the work' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create job' }));
   expect(await screen.findByText(duplicate ? /Existing.*BB-104.*no duplicate/i : /created.*BB-104/i)).toBeTruthy();
+  expect(invoke.mock.calls.find(([, options]) => options.body.action === 'create')?.[1].body)
+    .toMatchObject({ frontend_required: true, backend_required: true });
 });
 
 it('shows the new follow-up reference in its receipt', async () => {

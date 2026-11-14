@@ -13,23 +13,25 @@ const input = {
   output_schema: { type: 'object', properties: { ok: { type: 'boolean' } } },
 };
 
-test('Gemini completes a Builder request with the existing JSON transport', async () => {
+test('Gemini completes a Builder request with native generateContent transport', async () => {
   const config = createModelGatewayConfig({ GEMINI_API_KEY: 'synthetic-google-key', BOB_GEMINI_MODELS: 'gemini-approved' });
   let sent;
   const result = await invokeBuilderModel({
     config, input,
     fetchImpl: async (url, init) => {
-      assert.equal(init.headers.Authorization, 'Bearer synthetic-google-key');
-      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'gemini-approved' }] }) };
-      assert.equal(url, 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
+      assert.equal(init.headers['x-goog-api-key'], 'synthetic-google-key');
+      if (url.endsWith('/models?pageSize=100')) return { ok: true, json: async () => ({ models: [
+        { name: 'models/gemini-approved', supportedGenerationMethods: ['generateContent'] },
+      ] }) };
+      assert.equal(url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-approved:generateContent');
       sent = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }] }) };
     },
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.model, 'gemini-approved');
-  assert.deepEqual(sent.response_format, { type: 'json_object' });
-  assert.equal('reasoning_effort' in sent, false);
+  assert.equal(sent.generationConfig.responseMimeType, 'application/json');
+  assert.equal('reasoning_effort' in sent.generationConfig, false);
 });
 
 test('Supabase Gemini transport is explicit and uses its dedicated project credential', () => {
@@ -75,13 +77,15 @@ test('Gemini discovery accepts Google model IDs prefixed with models/', async ()
   const result = await invokeBuilderModel({
     config, input,
     fetchImpl: async (url, init) => {
-      if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'models/gemini-approved' }] }) };
-      completionModel = JSON.parse(init.body).model;
-      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
+      if (url.endsWith('/models?pageSize=100')) return { ok: true, json: async () => ({ models: [
+        { name: 'models/gemini-approved', supportedGenerationMethods: ['generateContent'] },
+      ] }) };
+      completionModel = url;
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }] }) };
     },
   });
   assert.equal(result.status, 200);
-  assert.equal(completionModel, 'gemini-approved');
+  assert.equal(completionModel, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-approved:generateContent');
 });
 
 test('proxy refuses requests when its project credential is missing even if a legacy service key exists', async () => {
@@ -101,7 +105,8 @@ test('direct Gemini keeps using its Google credential when a proxy credential is
     BOB_GEMINI_USE_SUPABASE_PROXY: '1', GEMINI_API_KEY: 'synthetic-google-key',
     BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
   });
-  assert.equal(config.gemini.baseUrl, 'https://generativelanguage.googleapis.com/v1beta/openai');
+  assert.equal(config.gemini.kind, 'gemini');
+  assert.equal(config.gemini.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
   assert.equal(config.gemini.apiKey, 'synthetic-google-key');
 });
 
