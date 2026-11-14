@@ -1,7 +1,8 @@
 # Registers the weekly "FCM laptop storage clean" task (Sunday 03:00).
 # Re-run after pulling to refresh the installed copy of laptop-storage-clean.js.
 # The weekly run prunes stale temp, Docker build cache/unused images and the npm cache; it only
-# reports Ollama models outside the worker keep-list. Docker disk compaction stays a manual step.
+# reports Ollama models outside the worker keep-list and git worktrees that need attention (a main
+# checkout off main or behind origin/main, merged clean worktrees). Docker disk compaction stays manual.
 param(
   [string]$EnvFile = (Join-Path $PSScriptRoot '..\deploy\laptop-worker\laptop-worker.env'),
   [string]$At = '03:00',
@@ -15,8 +16,9 @@ Copy-Item (Join-Path $PSScriptRoot 'laptop-storage-clean.js') (Join-Path $instal
 
 $node = (Get-Command node -ErrorAction Stop).Source
 $envPath = (Resolve-Path $EnvFile).Path
+$repoPath = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $log = Join-Path $installDir 'last-run.log'
-$command = '& "{0}" "{1}" --apply --env "{2}" *> "{3}"' -f $node, (Join-Path $installDir 'laptop-storage-clean.js'), $envPath, $log
+$command = '& "{0}" "{1}" --apply --env "{2}" --repo "{3}" *> "{4}"' -f $node, (Join-Path $installDir 'laptop-storage-clean.js'), $envPath, $repoPath, $log
 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "{0}"' -f $command.Replace('"', '\"'))
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $At

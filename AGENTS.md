@@ -57,6 +57,16 @@ products, do not optimise this repo for backward compatibility with them, and
 do not let their architecture overrule this repo's canon, Atlas, live schema,
 or `docs/REBUILD_PLAN.md`.
 
+**Local checkouts.** The main checkout stays on the `main` branch, tracking
+`origin/main`, so anyone opening it sees current code. Never run
+`git checkout origin/main` there, because it detaches HEAD and the folder
+silently falls behind. Do task work in a separate worktree
+(`git worktree add -b <branch> <dir> origin/main`), and remove it
+(`git worktree remove <dir>`) once its pull request merges or closes. Never
+remove a worktree that has uncommitted changes. The weekly laptop storage clean
+task (`scripts/laptop-storage-clean.js --repo <dir>`) reports a stale main
+checkout and merged clean worktrees. It never removes them.
+
 ## Two separate things named "Atlas" — do not confuse them
 
 **What Atlas is for (owner ruling, 2026-09-14).** The app is not a flat set of
