@@ -2959,6 +2959,59 @@ for (const [shape, timedOutResponse] of VIBE_TIMEOUT_SHAPES) {
   });
 }
 
+test('a blocked_reason over a missing test file is refused once so the model creates the test itself', async t => {
+  const testCommand = 'npm run test --prefix apps/web -- src/hello.test.ts';
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"hello"' } },
+    { tool: 'run', args: { command: testCommand } },
+    { tool: 'reply', args: { blocked_reason: 'The test file does not exist. Please create src/hello.test.ts.' } },
+    { tool: 'write_file', args: { path: 'apps/web/src/hello.test.ts', content: 'export const covered = true;\n' } },
+    { tool: 'run', args: { command: testCommand } },
+    { tool: 'reply', args: { message: 'Changed the greeting and added its test.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/package.json'), JSON.stringify({ scripts: { lint: 'node -e "process.exit(0)"', test: 'node find-test.cjs' } }));
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/find-test.cjs'), [
+    'const file = process.argv[2];',
+    'if (!require("fs").existsSync(file)) { console.error(`No test files found, exiting with code 1\\nfilter: ${file}`); process.exit(1); }',
+    'console.log("1 test passed");',
+  ].join('\n'));
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add test finder fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Make the greeting friendlier and cover it with a test.'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.match(JSON.stringify(model.calls[3].request.messages), /No test files found[\s\S]*write_file/);
+  assert.ok(store.state.session.changed_files.includes('apps/web/src/hello.test.ts'));
+});
+
+test('an account usage limit skips every model on that provider, not just the one that answered 429', async () => {
+  const seen = [];
+  const { store, deps } = setup([], {
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['quota-one', 'quota-two'], installed: ['quota-one', 'quota-two'], ready_model: 'quota-one' },
+      ollama: { configured: true, healthy: true, models: ['other-provider'], ready_model: 'other-provider' },
+    }),
+    callModel: async ({ modelRequest }) => {
+      seen.push(`${modelRequest.provider}/${modelRequest.model_name}`);
+      if (modelRequest.provider === 'gpu_workstation') {
+        return { ok: false, status: 429, error: 'you (squiresdon) have reached your monthly usage limit' };
+      }
+      const call = seen.filter(entry => entry.startsWith('ollama/')).length === 1
+        ? { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"hello"' } }
+        : { tool: 'reply', args: { message: 'Changed the greeting.' } };
+      return { ok: true, data: { content: JSON.stringify(call) } };
+    },
+  });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(seen.slice(0, 2), ['gpu_workstation/quota-one', 'ollama/other-provider'], 'a sibling model sharing the exhausted account is not tried');
+  const notice = store.state.rows.find(row => row.payload?.reason === 'provider_quota_exhausted');
+  assert.ok(notice, 'the owner sees that the whole provider account is out of quota');
+  assert.equal(notice.payload.previous_provider, 'gpu_workstation');
+  assert.equal(`${notice.payload.provider}/${notice.payload.model}`, 'ollama/other-provider');
+});
+
 test('Vibe external tiers are opt-in: owner-approved providers append after private compute', () => {
   assert.deepEqual(vibe.vibeExternalProviders({}), []);
   assert.deepEqual(vibe.vibeExternalProviders({ BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'true' }), ['ollama_cloud']);
