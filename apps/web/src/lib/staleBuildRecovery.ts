@@ -4,6 +4,13 @@
 const RELOAD_STAMP_KEY = 'fcm:stale-build-reload-at';
 const RELOAD_COOLDOWN_MS = 60_000;
 
+let reloadPending = false;
+
+/** True once this page has started reloading onto a new build; errors after that are deploy noise, not defects. */
+export function isStaleBuildReloadPending(): boolean {
+  return reloadPending;
+}
+
 export function shouldReloadForStaleBuild(storage: Pick<Storage, 'getItem' | 'setItem'> | null, now: number): boolean {
   try {
     const stamp = storage?.getItem(RELOAD_STAMP_KEY);
@@ -17,11 +24,13 @@ export function shouldReloadForStaleBuild(storage: Pick<Storage, 'getItem' | 'se
 }
 
 export function installStaleBuildRecovery(target: Window = window): void {
-  target.addEventListener('vite:preloadError', (event) => {
+  target.addEventListener('vite:preloadError', () => {
     let storage: Storage | null = null;
     try { storage = target.sessionStorage; } catch { storage = null; }
     if (!shouldReloadForStaleBuild(storage, Date.now())) return;
-    event.preventDefault();
+    // Never preventDefault: Vite then resolves the import to undefined and React.lazy
+    // throws "reading 'default'", hiding the chunk failure from the page's recovery.
+    reloadPending = true;
     target.location.reload();
   });
 }
