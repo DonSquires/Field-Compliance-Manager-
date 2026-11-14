@@ -38898,6 +38898,101 @@ export type Database = {
         }
       }
       builder_cancel_terminal_approvals: { Args: never; Returns: number }
+      builder_change_request_bind_job: {
+        Args: { _job_id: string; _message_id: string; _packet_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_revision: Json | null
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          human_reference: string | null
+          human_reference_number: number
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_change_request_enqueue: {
+        Args: { _content: string; _packet_id: string; _project_id: string }
+        Returns: string
+      }
+      builder_change_request_owner: {
+        Args: { _project_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          gitea_clone_url: string | null
+          gitea_owner: string
+          gitea_repo: string
+          gitea_repo_id: number | null
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_projects"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_change_request_park: {
+        Args: { _packet_id: string; _reason: string }
+        Returns: undefined
+      }
+      builder_change_request_park_stale: {
+        Args: { _older_than_minutes: number }
+        Returns: number
+      }
       builder_chat_claim_next: {
         Args: never
         Returns: {
@@ -38924,6 +39019,10 @@ export type Database = {
       }
       builder_chat_record_job: {
         Args: { p_job_id: string; p_message_id: string }
+        Returns: undefined
+      }
+      builder_chat_record_job_receipt: {
+        Args: { p_duplicate: boolean; p_job_id: string; p_message_id: string }
         Returns: undefined
       }
       builder_chat_recover_implementation: {
@@ -43692,6 +43791,21 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      custodian_raw_video_purge_candidates: {
+        Args: { p_limit?: number }
+        Returns: {
+          evidence_id: string
+          imported_at: string
+          organization_id: string
+          retention_days: number
+          storage_bucket: string
+          storage_paths: string[]
+        }[]
+      }
+      custodian_record_raw_video_purge: {
+        Args: { p_evidence_id: string }
+        Returns: Json
       }
       custodian_retention_candidates: {
         Args: { p_limit?: number; p_organization_id?: string }
