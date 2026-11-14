@@ -23,6 +23,22 @@ const clip = (value, max) => {
   const text = stripAnsi(value).trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
 };
+const clipTail = (value, max) => {
+  const text = stripAnsi(value).trim();
+  return text.length > max ? `…${text.slice(-max)}` : text;
+};
+const streamText = items => (items || []).map(item => item?.text ?? (item?.buffer ? Buffer.from(item.buffer, 'base64').toString('utf8') : '')).join('');
+
+// Playwright's error-context attachment is the page snapshot at the moment of failure.
+function readErrorContext(attachments, artifactDir) {
+  const item = (attachments || []).find(attachment => attachment.name === 'error-context');
+  if (!item) return '';
+  try {
+    if (item.body) return Buffer.from(item.body, 'base64').toString('utf8');
+    if (item.path && artifactDir && item.path.startsWith('/artifacts/')) return fs.readFileSync(path.join(artifactDir, item.path.slice('/artifacts/'.length)), 'utf8');
+  } catch { /* evidence that cannot be read is simply absent */ }
+  return '';
+}
 
 /** Web source changes that a person would see in the browser. */
 function uiChangedFiles(files) {
@@ -91,6 +107,11 @@ function summarizeHumanReport(report, artifactDir = null) {
         if (entry.status === 'failed') {
           entry.error = clip(error, 600);
           entry.screenshot_mismatch = SCREENSHOT_FAILURE.test(stripAnsi(error));
+          if (Number.isFinite(result.duration)) entry.duration_ms = result.duration;
+          const output = clipTail(`${streamText(result.stdout)}${streamText(result.stderr)}`, 1500);
+          if (output) entry.output = output;
+          const errorContext = clip(readErrorContext(result.attachments, artifactDir), 1500);
+          if (errorContext) entry.error_context = errorContext;
           const evidence = (result.attachments || []).filter(item => item.path && /\.png$/i.test(item.path)).map(item => item.path);
           if (evidence.length) entry.evidence = evidence.slice(0, 3).map(file => artifactDir && file.startsWith('/artifacts/') ? path.join(artifactDir, file.slice('/artifacts/'.length)) : file);
         }
