@@ -31,21 +31,6 @@ interface Timesheet {
   submitted_at: string | null;
 }
 
-interface TimesheetWorkEntryLocal {
-  id: string;
-  date: string;
-  description: string;
-  calculated_minutes: number;
-  actual_hours: number;
-  source_type: string;
-  source_id: string;
-  metadata: Record<string, any>;
-  started_at: string;
-  ended_at: string;
-  label: string;
-  // ... other properties
-}
-
 type WorkPreview =
   | { key: string; status: 'loading' }
   | { key: string; status: 'ready'; entries: TimesheetWorkEntry[] }
@@ -166,9 +151,29 @@ const OfficerTimesheetPage: React.FC = () => {
     return () => { active = false; };
   }, [profile?.id, profile?.organizationId, periodValid, previewKey, previewRetry, form.periodStart, form.periodEnd]);
 
-  const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
-const paidHours = workEntries.reduce((total, entry) => total + entry.actual_hours, 0);
+    const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
+  const paidHours = workEntries.reduce((total, entry) => total + (entry.calculated_minutes / 60), 0);
   const shiftCount = workEntries.filter((entry) => entry.source_type === 'shift').length;
+
+  const handleApproveTimesheet = (_id: string) => {
+    setNotice('Timesheet approvals are handled in the admin review flow.');
+  };
+
+  const handleCancelTimesheet = (_id: string) => {
+    setNotice('Timesheet approvals are handled in the admin review flow.');
+  };
+
+  const handleEditTimesheet = (id: string) => {
+    const selected = timesheets.find((timesheet) => timesheet.id === id);
+    if (!selected) return;
+    setForm((current) => ({
+      ...current,
+      periodStart: selected.period_start,
+      periodEnd: selected.period_end,
+      adjustmentHours: String(selected.actual_hours ?? selected.work_derived_hours ?? 0),
+    }));
+    setNotice('Loaded this timesheet into the submission form for editing.');
+  };
   const jobCount = workEntries.length - shiftCount;
   const rejectedForPeriod = timesheets.find((timesheet) => timesheet.status === 'rejected' && timesheet.period_start === form.periodStart && timesheet.period_end === form.periodEnd);
   const alreadyCovering = timesheets.find((timesheet) => timesheet.status !== 'rejected' && timesheet.period_start <= form.periodEnd && timesheet.period_end >= form.periodStart);
