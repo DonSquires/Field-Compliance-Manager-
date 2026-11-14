@@ -151,7 +151,8 @@ const OfficerTimesheetPage: React.FC = () => {
     return () => { active = false; };
   }, [profile?.id, profile?.organizationId, periodValid, previewKey, previewRetry, form.periodStart, form.periodEnd]);
 
-    const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
+  const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
+  const workedHours = workedMinutes / 60;
   const paidHours = workEntries.reduce((total, entry) => total + (entry.calculated_minutes / 60), 0);
   const shiftCount = workEntries.filter((entry) => entry.source_type === 'shift').length;
 
@@ -367,7 +368,7 @@ const OfficerTimesheetPage: React.FC = () => {
        </div>
        <div className="totals">
          <div>
-           <strong>Total hours worked:</strong> {hours(workedMinutes)}
+            <strong>Total hours worked:</strong> {hours(workedHours)}
          </div>
          <div>
            <strong>Total paid hours:</strong> {hours(paidHours)}
