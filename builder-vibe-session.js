@@ -151,6 +151,9 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
 const VIBE_PRIVATE_PROVIDERS = Object.freeze(['gpu_workstation', 'ollama']);
 const VIBE_EXTERNAL_LABELS = Object.freeze({ ollama_cloud: 'Ollama Cloud', openai: 'OpenAI', anthropic: 'Anthropic Claude', gemini: 'Google Gemini', omniroute: 'OmniRoute' });
 const isVibeExternal = provider => EXTERNAL_PROVIDERS.has(provider);
+// Billing/plan exhaustion is account-wide; a per-minute rate limit is not, and keeps the per-model retry path.
+const isProviderQuotaExhausted = response => response?.status === 402
+  || /usage limit|quota|insufficient_quota|credit balance|out of credits|billing/i.test(String(response?.error || ''));
 const externalLabel = provider => VIBE_EXTERNAL_LABELS[provider] || provider;
 const providerTier = provider => (isVibeExternal(provider) ? `owner-approved ${externalLabel(provider)}` : 'local');
 
@@ -1105,15 +1108,19 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
   }
   let failedEditReplyCorrected = false;
+  let missingTestCorrected = false;
   let cloudStartIndex = null;
   const cloudEgressReceipts = new Set();
   // A request to alter code; verification-only or question messages may legitimately change nothing.
   const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
+  // An account usage limit applies to every model on that provider, so its sibling models are never tried after it.
+  const exhaustedProviders = new Set();
+  const nextUsable = (from = active) => candidates.findIndex((entry, index) => index > from && !exhaustedProviders.has(entry.provider));
   const nextCandidate = () => {
-    const cloudIndex = candidates.findIndex((entry, index) => index > active && isVibeExternal(entry.provider));
-    const next = cloudIndex > active ? cloudIndex : active + 1;
-    return candidates[next]?.model && candidates[next].model !== candidates[active].model ? next : -1;
+    const cloudIndex = candidates.findIndex((entry, index) => index > active && isVibeExternal(entry.provider) && !exhaustedProviders.has(entry.provider));
+    const next = cloudIndex > active ? cloudIndex : nextUsable();
+    return next >= 0 && candidates[next]?.model && candidates[next].model !== candidates[active].model ? next : -1;
   };
   const repeatedCalls = new Map();
   const toolCache = new Map();
@@ -1556,13 +1563,13 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const fittedTask = compactOpening(originalTask, availableTask - reserve, isVibeExternal(candidate.provider))
       ?? compactOpening(originalTask, availableTask, isVibeExternal(candidate.provider));
     if (fittedTask === null) {
-      if (active + 1 < candidates.length) {
+      if (nextUsable() >= 0) {
         await store.post(session.id, {
           role: 'system', kind: 'status',
           content: `${candidate.provider}/${candidate.model || 'configured model'} cannot fit the current request and required evidence; trying the next available model without dropping the request.`,
           payload: { message_id: message.id, reason: 'context_too_small', provider: candidate.provider, model: candidate.model },
         });
-        active++; turn--;
+        active = nextUsable(); turn--;
         continue;
       }
       return { reply: 'The available model context is too small for your current request and required evidence. This oversized request was not truncated or sent; the existing branch is preserved. Use a larger private model or shorten the request.', error: true, tools };
@@ -1577,7 +1584,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     providerMessages[1] = { ...providerMessages[1], content: fittedTask };
     const fittedMessages = compactMessages(providerMessages, { maxChars: promptBudget });
     if (fittedMessages.reduce((size, entry) => size + String(entry.content || '').length, 0) > promptBudget) {
-      if (active + 1 < candidates.length) { active++; turn--; continue; }
+      if (nextUsable() >= 0) { active = nextUsable(); turn--; continue; }
       return { reply: 'The model context cannot fit the current request and tool history. The existing branch is preserved; use a larger private model or start a shorter continuation.', error: true, tools };
     }
     const request = { ...base, idempotency_key: `${base.idempotency_key}${resuming ? `::restart-${message.payload.restart_retries}` : ''}::vibe-${turn}`, request: { ...base.request, user_prompt: fittedTask, messages: fittedMessages, ...(isVibeExternal(candidate.provider) ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
@@ -1638,16 +1645,23 @@ async function runConversation({ store, session, message, workspacePath, branch,
       // A timeout already cost the owner a full turn budget of silence; never spend a second one on the
       // same provider when another candidate exists, and say why the model changed.
       const timedOut = response.timeout === true || response.status === 408 || response.code === 'provider_timeout';
-      if (active + 1 < candidates.length && (timedOut || unavailable >= 2 || [413, 429].includes(response.status))) {
+      const quotaExhausted = isProviderQuotaExhausted(response);
+      if (quotaExhausted) exhaustedProviders.add(candidates[active].provider);
+      const following = nextUsable();
+      if (following >= 0 && (timedOut || quotaExhausted || unavailable >= 2 || [413, 429].includes(response.status))) {
         const previous = candidates[active];
-        active++; unavailable = 0; turn--;
+        active = following; unavailable = 0; turn--;
+        const why = quotaExhausted
+          ? `has reached its account usage limit (${clip(response.error, 160)}), so its other models are skipped too`
+          : timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`;
         await store.post(session.id, {
           role: 'system', kind: 'status',
-          content: `${previous.provider}/${previous.model} ${timedOut ? `did not answer within ${Math.round(limits.turnTimeoutMs / 60_000)} min` : `is unavailable (${clip(response.error, 160)})`}; switching to ${candidates[active].provider}/${candidates[active].model}.`,
-          payload: { message_id: message.id, reason: timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: isVibeExternal(candidates[active].provider) },
+          content: `${quotaExhausted ? previous.provider : `${previous.provider}/${previous.model}`} ${why}; switching to ${candidates[active].provider}/${candidates[active].model}.`,
+          payload: { message_id: message.id, reason: quotaExhausted ? 'provider_quota_exhausted' : timedOut ? 'timeout' : 'unavailable', status: response.status ?? null, previous_provider: previous.provider, previous_model: previous.model, provider: candidates[active].provider, model: candidates[active].model, external_egress: isVibeExternal(candidates[active].provider) },
         });
         continue;
       }
+      if (quotaExhausted) return { reply: `Every available model provider has reached its account usage limit (${clip(response.error, 200)}). Nothing further was attempted; your branch keeps whatever was done so far. Top up the provider or configure another one, then send another message.`, error: true, tools };
       if (unavailable >= 3) return { reply: `The model stopped responding (${clip(response.error, 200)}). Your branch keeps whatever was done so far; send another message to continue.`, error: true, tools };
       turn--;
       await new Promise(resolve => setTimeout(resolve, 1500 * unavailable));
@@ -1753,6 +1767,28 @@ async function runConversation({ store, session, message, workspacePath, branch,
             role: 'system', kind: 'status',
             content: `${previous.model} tried to finish with failed edits outstanding; continuing with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model}.`,
             payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'failed_edits_outstanding', previous_provider: previous.provider, previous_model: previous.model, external_egress: isVibeExternal(candidates[active].provider) },
+          });
+        }
+        continue;
+      }
+      // A missing test file is work the model can do itself, not a blocker to hand the owner (VB-15).
+      const missingTest = args.blocked_reason && !missingTestCorrected
+        ? [...failedVerifications.values()].find(entry => /No test files? found/i.test(String(entry.preview || '')))
+        : null;
+      if (missingTest) {
+        missingTestCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) });
+        pushModelFeedback({
+          error: `Reply refused: "${missingTest.command}" found no test file. That is not a blocker for the owner: create the test with write_file (find_files an existing sibling test to copy its imports and environment), or run an existing test that covers the change, then rerun the check. Use args.blocked_reason only for something you cannot do yourself.`,
+        });
+        const next = nextCandidate();
+        if (next > 0) {
+          const previous = candidates[active];
+          active = next;
+          await store.post(session.id, {
+            role: 'system', kind: 'status',
+            content: `${previous.model} tried to stop over a missing test file; continuing with ${providerTier(candidates[active].provider)} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'missing_test_file', previous_provider: previous.provider, previous_model: previous.model, external_egress: isVibeExternal(candidates[active].provider) },
           });
         }
         continue;
