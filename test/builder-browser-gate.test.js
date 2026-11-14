@@ -65,6 +65,25 @@ test('the Builder browser specs are the verifier\'s targeted set without Dr Bob\
   }
 });
 
+test('browser_test shows the author why a pre-existing failure fails, not only its name (BB-191)', async () => {
+  const ws = makeWorkspace();
+  const detailed = { ...PREEXISTING, error: 'Test timeout of 30000ms exceeded.', screenshot_mismatch: false, duration_ms: 30012,
+    output: 'MODULE_START smoke_complaints', error_context: '- main: Loading smoke complaints…' };
+  const runSpecs = async () => ({ ok: false, status: 'failed', complete: true, passed: 3, failed: 1, flaky: 0, failures: [detailed], report_errors: [], evidence_directory: '/tmp/evidence' });
+  const gate = createBrowserGate({ workspacePath: ws.workspacePath, runSpecs, fingerprint: () => fs.readFileSync(path.join(ws.workspacePath, PAGE), 'utf8'),
+    changedFiles: () => changedFiles(ws.workspacePath) });
+  try {
+    fs.writeFileSync(path.join(ws.workspacePath, PAGE), 'export function UserManagementPage() { return <main />; }\n');
+    const view = await gate.test({ reason: 'diagnose the main-health failure' });
+    assert.equal(view.status, 'passed_with_preexisting');
+    assert.deepEqual(view.preexisting_failures, [{ test: 'user-identity.spec.ts > identity preset screenshot', error: 'Test timeout of 30000ms exceeded.',
+      duration_ms: 30012, output: 'MODULE_START smoke_complaints', error_context: '- main: Loading smoke complaints…' }]);
+    assert.equal(view.evidence_directory, '/tmp/evidence');
+  } finally {
+    fs.rmSync(ws.root, { recursive: true, force: true });
+  }
+});
+
 test('the browser gate refuses a failure the patch introduced, names the pre-existing one, and passes once it is fixed (job 34382d60)', async () => {
   const ws = makeWorkspace();
   const worker = fakeWorker();

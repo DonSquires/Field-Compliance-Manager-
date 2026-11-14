@@ -51,6 +51,9 @@ function classifyBrowserRun(result) {
   const failures = (result.failures || []).map(failure => ({
     key: `${failure.file}::${failure.title}`, file: failure.file, title: failure.title,
     error: clip(failure.error, 600), screenshot_mismatch: Boolean(failure.screenshot_mismatch),
+    ...(Number.isFinite(failure.duration_ms) ? { duration_ms: failure.duration_ms } : {}),
+    ...(failure.output ? { output: String(failure.output).slice(-1500) } : {}),
+    ...(failure.error_context ? { error_context: clip(failure.error_context, 1500) } : {}),
   }));
   if (failures.some(failure => INFRASTRUCTURE_PATTERNS.some(pattern => pattern.test(failure.error)))) {
     return { unavailable: 'a browser test failed on runner resources (memory, timeout or docker), not on an assertion' };
@@ -184,12 +187,16 @@ function createBrowserGate({ workspacePath, runSpecs, fingerprint, changedFiles,
     async test({ reason } = {}) {
       const verdict = await check(changedFiles(), clip(reason || 'Author check of the targeted Playwright specs', 500));
       const name = failure => (failure.file ? `${failure.file} > ${failure.title}` : failure.title);
+      // The author needs the why (error, timing, console, page snapshot) to repair a failure, not only its name.
+      const detail = failure => Object.fromEntries(Object.entries({ test: name(failure), error: failure.error, screenshot_mismatch: failure.screenshot_mismatch || undefined,
+        duration_ms: failure.duration_ms, output: failure.output, error_context: failure.error_context }).filter(([, value]) => value !== undefined));
       const result = {
         status: verdict.status, specs: verdict.specs || [], reason: verdict.reason,
         passed: verdict.passed,
-        failures: (verdict.failures || []).map(failure => ({ test: name(failure), error: failure.error, screenshot_mismatch: failure.screenshot_mismatch || undefined })),
-        preexisting_failures: (verdict.preexisting || []).map(name),
+        failures: (verdict.failures || []).map(detail),
+        preexisting_failures: (verdict.preexisting || []).map(detail),
         unresolved_failures: (verdict.unresolved || []).map(name),
+        evidence_directory: verdict.evidence_directory || undefined,
       };
       if (verdict.status === 'failed') result.next = 'These fail with your patch and not at the pinned commit: fix the cause (never weaken the assertion) and run browser_test again.';
       if (verdict.status === 'unavailable') result.note = 'No browser verdict; the independent verifier still runs these specs.';

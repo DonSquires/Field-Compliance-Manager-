@@ -45,6 +45,31 @@ test('an empty or errored report is never complete', () => {
   assert.equal(summarizeHumanReport({ ...report(), errors: [{ message: 'webServer timed out' }] }).complete, false);
 });
 
+test('a failing test keeps its duration, console output and page snapshot for diagnosis (BB-191)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-human-report-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'test-results/route'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'test-results/route/error-context.md'), '# Page snapshot\n- main: Loading smoke complaints…\n');
+    const failing = {
+      suites: [{ title: 'officer-module-entitlements.spec.ts', specs: [{ title: 'every advertised standalone specialty route renders officer page content', file: 'officer-module-entitlements.spec.ts',
+        tests: [{ projectName: 'desktop-chromium', status: 'unexpected', results: [{
+          duration: 30012,
+          errors: [{ message: 'Test timeout of 30000ms exceeded.' }],
+          stdout: [{ text: 'MODULE_LOAD parking 2100ms\n' }, { text: 'MODULE_START smoke_complaints\n' }],
+          stderr: [{ text: 'warn: slow image\n' }],
+          attachments: [{ name: 'error-context', contentType: 'text/markdown', path: '/artifacts/test-results/route/error-context.md' }],
+        }] }] }] }],
+      errors: [],
+    };
+    const [failure] = summarizeHumanReport(failing, dir).failures;
+    assert.equal(failure.duration_ms, 30012);
+    assert.match(failure.output, /MODULE_LOAD parking 2100ms[\s\S]*MODULE_START smoke_complaints[\s\S]*warn: slow image/);
+    assert.match(failure.error_context, /Loading smoke complaints/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('only browser-visible web files count as UI changes', () => {
   assert.deepEqual(uiChangedFiles(['apps/web/src/a.tsx', 'apps/web/index.html', 'apps/web/public/x.svg', 'apps/web/e2e/a.spec.ts', 'supabase/schema.sql', 'apps/web/package.json']),
     ['apps/web/src/a.tsx', 'apps/web/index.html', 'apps/web/public/x.svg']);
