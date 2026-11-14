@@ -20,7 +20,8 @@ const message = (payload = {}) => ({
   payload: { research_mode: 'public_cloud', research_consent: { allowed: true, policy_version: 'builder_research_v1', actor_user_id: OWNER, raw_images_allowed: true }, research_urls: [SOURCE.url], ...payload },
 });
 
-function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults, doneReason = 'stop', fetchStatus = {}, chatStatus } = {}) {
+function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults, doneReason = 'stop', fetchStatus = {}, chatStatus,
+  env = ENV, gateway, modelRouter, fetchHealth, callGateway } = {}) {
   const calls = [];
   const rows = [];
   const fetchImpl = async (url, options) => {
@@ -44,8 +45,11 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
   return {
     calls, rows, fetchImpl,
     run: msg => runBuilderResearch({
-      thread: THREAD, message: msg || message(), env: ENV, fetchImpl, post: async row => rows.push(row),
-      supabase: { storage: { from: () => ({ download: async () => ({ data: new Blob([bytes || 'text']), error: null }) }) } },
+      thread: THREAD, message: msg || message(), env, fetchImpl, gateway, modelRouter, fetchHealth, callGateway,
+      post: async row => rows.push(row),
+      supabase: { storage: { from: () => ({ download: async storagePath => ({
+        data: new Blob([typeof bytes === 'function' ? bytes(storagePath) : bytes || 'text']), error: null,
+      }) }) } },
     }),
   };
 }
@@ -60,6 +64,39 @@ function pmMessage(purpose = 'pm', summary = '') {
       recorded_at: '2026-10-25T00:00:00.000Z',
     },
   });
+}
+
+function fusionPmMessage(purpose = 'pm', summary = '') {
+  const value = pmMessage(purpose, summary);
+  return { ...value, payload: { ...value.payload, research_consent: {
+    ...value.payload.research_consent, policy_version: 'builder_pm_fusion_v1',
+    raw_images_allowed: true, fusion_provider_allowlist: ['ollama_cloud', 'openai', 'anthropic', 'gemini'],
+  } } };
+}
+
+function fusionHealth({ cloud = true, vision = false } = {}) {
+  return {
+    gpu_workstation: { configured: false, healthy: false },
+    ollama: { configured: false, healthy: false },
+    ollama_cloud: { configured: cloud, healthy: cloud, ready_model: 'kimi-k2.7-code', models: ['kimi-k2.7-code'] },
+    openai: { configured: true, healthy: true, ready_model: 'gpt-4o-mini', models: ['gpt-4o-mini'] },
+    anthropic: { configured: true, healthy: true, ready_model: 'claude-haiku-5-5', models: ['claude-haiku-5-5'] },
+    gemini: { configured: true, healthy: true, ready_model: 'gemini-3.8-flash', models: ['gemini-3.8-flash'], vision_models: vision ? ['gemini-3.8-flash'] : [] },
+  };
+}
+
+function orderedFusionRouter(order, observations = []) {
+  return {
+    rank: async ({ candidates, surface, workloadKind }) => {
+      assert.equal(surface, 'builder');
+      assert.equal(workloadKind, 'builder_conversation');
+      return {
+        ordered: order.map(provider => candidates.find(candidate => candidate.provider === provider)).filter(Boolean),
+        task_class: 'conversation', policy: { surface: 'builder', task_class: 'conversation' }, excluded: [],
+      };
+    },
+    observe: row => observations.push(row),
+  };
 }
 
 test('PM purposes invoke exactly their assigned cloud model once and withhold unrelated private context', async () => {
@@ -86,6 +123,154 @@ test('PM purposes invoke exactly their assigned cloud model once and withhold un
     assert.ok(!('format' in request));
     assert.match(result.reply, /Start by checking/);
   }
+});
+
+test('new PM Fusion consent ranks only approved providers and falls through an exhausted Ollama Cloud account', async () => {
+  const calls = [];
+  const observations = [];
+  const router = orderedFusionRouter(['ollama_cloud', 'openai', 'anthropic', 'gemini'], observations);
+  const f = fixture({
+    gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+    fetchHealth: async () => fusionHealth(), modelRouter: router,
+    callGateway: async ({ modelRequest }) => {
+      const request = modelRequest.request;
+      calls.push({ provider: modelRequest.provider, model: modelRequest.model_name, messages: request.messages });
+      if (modelRequest.provider === 'ollama_cloud') return { ok: false, status: 429, error: 'provider quota exhausted' };
+      return { ok: true, status: 200, data: { content: JSON.stringify({
+        summary: 'The reviewed packet is advisory.',
+        claims: [{ statement: 'The packet reports a concern.', evidence: [{ source_id: 'reviewed-summary', quote: 'Reviewed, non-sensitive report summary.' }] }],
+      }), finish_reason: 'stop' } };
+    },
+  });
+  const result = await f.run(fusionPmMessage('pm', 'Reviewed, non-sensitive report summary.'));
+
+  assert.equal(result.research.policy_version, 'builder_pm_fusion_v1');
+  assert.equal(result.research.provider, 'openai');
+  assert.equal(result.research.model, 'gpt-4o-mini');
+  assert.equal(result.research.external_egress, true);
+  assert.deepEqual(calls.map(call => call.provider), ['ollama_cloud', 'openai']);
+  const approvedPrompt = JSON.stringify(calls[0].messages);
+  assert.match(approvedPrompt, /Reviewed, non-sensitive report summary/);
+  assert.doesNotMatch(approvedPrompt, /PRIVATE-SELECTED-JOB|PRIVATE-HISTORY/);
+  assert.ok(observations.some(row => row.provider === 'ollama_cloud' && !row.ok));
+  assert.ok(observations.some(row => row.provider === 'openai' && row.ok));
+  const attempts = result.research.routing.attempts;
+  assert.deepEqual(attempts.map(row => row.provider), ['ollama_cloud', 'openai']);
+});
+
+test('public web evidence stays on Ollama Cloud even when Fusion ranks another consented provider first', async () => {
+  const calls = [];
+  const f = fixture({
+    gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+    fetchHealth: async () => fusionHealth(),
+    modelRouter: orderedFusionRouter(['openai', 'ollama_cloud']),
+    callGateway: async ({ modelRequest }) => {
+      calls.push({ provider: modelRequest.provider, messages: modelRequest.request.messages });
+      return { ok: true, status: 200, data: { content: JSON.stringify(answer()), finish_reason: 'stop' } };
+    },
+  });
+
+  const msg = fusionPmMessage('pm');
+  msg.payload.research_urls = [SOURCE.url];
+  await f.run(msg);
+
+  assert.deepEqual(calls.map(call => call.provider), ['ollama_cloud']);
+  assert.match(JSON.stringify(calls[0].messages), /Compose uses a YAML file/);
+});
+
+test('Fusion can select Anthropic and Gemini for text PM turns without widening the consent set', async () => {
+  for (const provider of ['anthropic', 'gemini']) {
+    const calls = [];
+    const f = fixture({
+      env: { ...ENV, OLLAMA_API_KEY: '', OLLAMA_API_TOKEN: '', BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'false' },
+      gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+      fetchHealth: async () => fusionHealth({ cloud: false }),
+      modelRouter: orderedFusionRouter([provider]),
+      callGateway: async ({ modelRequest }) => {
+        calls.push(modelRequest.provider);
+        return { ok: true, status: 200, data: { content: JSON.stringify({ summary: 'The current question can be answered from the approved packet.', claims: [] }), finish_reason: 'stop' } };
+      },
+    });
+    const result = await f.run(fusionPmMessage('technical_review'));
+    assert.equal(result.research.provider, provider);
+    assert.deepEqual(calls, [provider]);
+    assert.equal(result.research.external_egress, true);
+    assert.deepEqual(result.research.routing.attempts.map(attempt => attempt.provider), [provider]);
+  }
+});
+
+test('Fusion can keep a PM packet on a configured private provider when policy ranks it first', async () => {
+  const calls = [];
+  const health = fusionHealth();
+  health.gpu_workstation = { configured: true, healthy: true, ready_model: 'qwen2.5-coder:7b', models: ['qwen2.5-coder:7b'] };
+  const f = fixture({
+    gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+    fetchHealth: async () => health,
+    modelRouter: orderedFusionRouter(['gpu_workstation']),
+    callGateway: async ({ modelRequest }) => {
+      calls.push(modelRequest.provider);
+      return { ok: true, status: 200, data: { content: JSON.stringify({ summary: 'A private Fusion answer.', claims: [] }), finish_reason: 'stop' } };
+    },
+  });
+
+  const result = await f.run(fusionPmMessage('pm'));
+  assert.equal(result.research.provider, 'gpu_workstation');
+  assert.equal(result.research.external_egress, false);
+  assert.deepEqual(calls, ['gpu_workstation']);
+});
+
+test('a Fusion provider output-limit finish reason is refused rather than accepted as an answer', async () => {
+  const f = fixture({
+    gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+    fetchHealth: async () => fusionHealth({ cloud: false }),
+    modelRouter: orderedFusionRouter(['gemini']),
+    callGateway: async () => ({ ok: true, status: 200, data: { content: '{"summary":"truncated', finish_reason: 'MAX_TOKENS' } }),
+  });
+  await assert.rejects(f.run(fusionPmMessage('pm')), /output limit reached; answer is incomplete/);
+  assert.equal(f.rows.some(row => row.kind === 'message'), false);
+});
+
+test('new PM Fusion rejects provider-list tampering and routes image bytes only to a verified Gemini vision model', async () => {
+  const tampered = fusionPmMessage();
+  tampered.payload.research_consent.fusion_provider_allowlist.push('omniroute');
+  const denied = fixture({ gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' } });
+  await assert.rejects(denied.run(tampered), /differs from the approved allowlist/);
+  assert.equal(denied.calls.length, 0);
+
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const jpeg = Buffer.from([255, 216, 255, 1, 2, 3]);
+  const sha256 = image => crypto.createHash('sha256').update(image).digest('hex');
+  const msg = fusionPmMessage('pm', '');
+  msg.payload.research_files = [
+    { id: 'attachment-png', file_name: 'approved.png', file_type: 'image/png', file_size_bytes: png.length,
+      sha256: sha256(png), storage_path: `desktop/${OWNER}/builder-chat/${THREAD.id}/attachment-png-approved.png`, extracted_text: '' },
+    { id: 'attachment-jpeg', file_name: 'approved.jpg', file_type: 'image/jpeg', file_size_bytes: jpeg.length,
+      sha256: sha256(jpeg), storage_path: `desktop/${OWNER}/builder-chat/${THREAD.id}/attachment-jpeg-approved.jpg`, extracted_text: '' },
+  ];
+  const calls = [];
+  const f = fixture({
+    bytes: storagePath => storagePath.includes('attachment-png-') ? png : jpeg,
+    env: { ...ENV, OLLAMA_API_KEY: '', OLLAMA_API_TOKEN: '', BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'false' },
+    gateway: { gatewayUrl: 'http://gateway.invalid', apiToken: 'server-only' },
+    fetchHealth: async () => fusionHealth({ cloud: false, vision: true }),
+    modelRouter: orderedFusionRouter(['gemini', 'openai', 'anthropic']),
+    callGateway: async ({ modelRequest }) => {
+      calls.push({ provider: modelRequest.provider, message: modelRequest.request.messages[1] });
+      return { ok: true, status: 200, data: { content: JSON.stringify({
+        summary: 'The approved image shows a roster screen.', claims: [],
+        image_observations: [
+          { source_id: 'attachment-1', description: 'A roster screen is visible.' },
+          { source_id: 'attachment-2', description: 'A second roster view is visible.' },
+        ],
+      }), finish_reason: 'stop' } };
+    },
+  });
+  const result = await f.run(msg);
+  assert.equal(result.research.provider, 'gemini');
+  assert.equal(result.research.raw_images_sent, 2);
+  assert.deepEqual(calls.map(call => call.provider), ['gemini']);
+  assert.deepEqual(calls[0].message.image_mime_types, ['image/png', 'image/jpeg']);
+  assert.deepEqual(calls[0].message.images, [png.toString('base64'), jpeg.toString('base64')]);
 });
 
 test('a reviewed report keeps its qualification when cited alongside primary documentation or corroborating domains', () => {

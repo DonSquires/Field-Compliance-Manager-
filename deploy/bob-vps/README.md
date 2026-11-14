@@ -127,6 +127,18 @@ security-review engine; it is skipped until `ANTHROPIC_API_KEY` is set in
 `/var/lib/bob/control-plane.env`). OmniRoute joins a chain only when
 `OMNIROUTE_BASE_URL` is set and a `BOB_BUILDER_ROUTE_*` value names `omniroute`
 (or the auto router ranks it).
+Builder Chat PM/QA Fusion can also use configured OpenAI, Anthropic, Gemini and
+Ollama Cloud models, but only for the current owner-approved non-sensitive
+packet. Gemini is configured server-side in `/var/lib/bob/control-plane.env`
+with `GEMINI_API_KEY`, optional `GEMINI_API_BASE_URL`, and `BOB_GEMINI_MODELS`.
+Alternatively, explicitly set `BOB_GEMINI_USE_SUPABASE_PROXY=1`, `SUPABASE_URL`,
+and the dedicated `BOB_GEMINI_PROXY_SERVICE_KEY` matching the Edge Function's
+injected service credential; proxy mode does not fall back to a direct Google
+key or the control plane's generic service-role variable.
+Keep `BOB_GEMINI_VISION_MODELS` empty unless the named models' vision capability
+has been verified. The API key never belongs in the browser or a Vite variable.
+Public web search/fetch still uses Ollama Cloud; Fusion inference can fall back
+to the other consented providers when Ollama Cloud has no credits.
 OmniRoute runs from `/opt/omniroute` (deployed 2026-11-11): the upstream
 `docker-compose.selfhost.yml` and `.env.selfhost.example` pinned to tag `v3.8.53`
 (image `diegosouzapw/omniroute:3.8.53`, never `latest`), plus

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { planBuilderAction, advanceBuilderJob, runBuilderUntilPause } = require('../builder-runtime-coordinator');
+const { mainMonitorSourceFiles, planBuilderAction, advanceBuilderJob, runBuilderUntilPause } = require('../builder-runtime-coordinator');
 
 function snapshot(status, overrides = {}) {
   const steps = [
@@ -13,6 +13,20 @@ function snapshot(status, overrides = {}) {
   ].map(([step_id, builder_mode], index) => ({ id: `step-${index + 1}`, step_id, builder_mode, status: 'pending' }));
   return { job: { id: 'job-1', status, code_review_mode: 'none', ...overrides.job }, steps: overrides.steps || steps, artifacts: [], workerRuns: [] };
 }
+
+test('main-monitor lane skips can rely only on a validated unprotected specification scope', () => {
+  assert.deepEqual(mainMonitorSourceFiles([
+    { source_scope: ['apps/web/src/pages/Map.tsx'] },
+    { source_scope: ['builder-runtime-coordinator.js', 'apps/web/src/pages/Map.tsx'] },
+  ]), ['apps/web/src/pages/Map.tsx', 'builder-runtime-coordinator.js']);
+  for (const scope of [
+    [{ source_scope: ['supabase/schema.sql'] }],
+    [{ source_scope: ['apps/web/src/context/AuthContext.tsx'] }],
+    [{ source_scope: ['../outside.js'] }],
+    [{ source_scope: [] }],
+    [],
+  ]) assert.throws(() => mainMonitorSourceFiles(scope), /unprotected implementation scope/);
+});
 
 test('runtime planner pauses at human and terminal states', () => {
   assert.equal(planBuilderAction(snapshot('specification_ready')).type, 'waiting_for_human');
@@ -659,7 +673,7 @@ test('an author with nothing to change in its lane skips the step when the other
   const originalEngineer = require.cache[engineerPath].exports;
   const coordinatorPath = require.resolve('../builder-runtime-coordinator');
   delete require.cache[coordinatorPath];
-  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the cancel action already exists in the edge function; the change is web-only', routing: { provider: 'openai' } }) };
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async () => ({ ok: false, no_change: true, no_change_file: 'apps/web/src/pages/CancelAction.tsx', inspected_files: ['apps/web/src/pages/CancelAction.tsx'], error: 'the cancel action already exists in the edge function; the change is web-only', routing: { provider: 'openai' } }) };
   const rpcs = [];
   const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };
   try {
@@ -669,7 +683,7 @@ test('an author with nothing to change in its lane skips the step when the other
     assert.equal(skipped.skipped, true);
     assert.deepEqual(rpcs.map((r) => r.name), ['builder_skip_implementation_step']);
     assert.equal(rpcs[0].args._builder_mode, 'backend_engineer');
-    assert.match(rpcs[0].args._reason, /^Nothing to change in this lane; the frontend lane delivered the change\. Author: the cancel action already exists/);
+    assert.match(rpcs[0].args._reason, /^Nothing to change in this lane; the frontend lane delivered the change at apps\/web\/src\/pages\/CancelAction\.tsx\. Author: the cancel action already exists/);
     rpcs.length = 0;
     const parked = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z', builder_mode: 'backend_engineer' }, siblingCompleted: false, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
     assert.equal(parked.success, false);
@@ -687,7 +701,7 @@ test('a cross-lane no-change skips this lane even before the sibling finishes', 
   delete require.cache[coordinatorPath];
   require.cache[engineerPath].exports = {
     ...originalEngineer,
-    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in apps/web/src/Preview.tsx: outside the backend lane', routing: { provider: 'openai' } }),
+    runAgenticEngineer: async () => ({ ok: false, no_change: true, no_change_file: 'apps/web/src/Preview.tsx', inspected_files: ['apps/web/src/Preview.tsx'], error: 'the crash lives in apps/web/src/Preview.tsx: outside the backend lane', routing: { provider: 'openai' } }),
   };
   const rpcs = [];
   const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };

@@ -8,8 +8,8 @@ test('explicit sibling routing and the observed protected-lane response reach th
   const input = { job: { id: 'job' }, step: { id: 'step', builder_mode: 'frontend_engineer' },
     supabase: { rpc: async (name, args) => { calls.push({ name, args }); return { error: null }; } } };
   for (const generation of [
-    { no_change: true, no_change_lane: 'backend', no_change_file: 'builder-chat-session.js', error: 'The fix belongs in builder-chat-session.js' },
-    { no_change: true, error: 'Two author attempts produced no patch; second attempt: Protected lane boundary: the required fix lives in `builder-chat-session.js` (backend lane), while this turn is restricted to `apps/web/` frontend files only.' },
+    { no_change: true, no_change_lane: 'backend', no_change_file: 'builder-chat-session.js', inspected_files: ['builder-chat-session.js'], error: 'The fix belongs in builder-chat-session.js' },
+    { no_change: true, inspected_files: ['builder-chat-session.js'], error: 'Two author attempts produced no patch; second attempt: Protected lane boundary: the required fix lives in `builder-chat-session.js` (backend lane), while this turn is restricted to `apps/web/` frontend files only.' },
   ]) {
     assert.equal(await skipLaneWithNothingToDo(input, generation), true);
   }
@@ -34,13 +34,30 @@ test('explicit sibling routing and the observed protected-lane response reach th
   assert.equal(crossLaneNoChange({ no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx' }, 'backend_engineer'), true);
 });
 
+test('a completed sibling lane can only justify a skip with a named unprotected source file', async () => {
+  const calls = [];
+  const input = { job: { id: 'job' }, step: { id: 'backend', builder_mode: 'backend_engineer' }, siblingCompleted: true,
+    supabase: { rpc: async (name, args) => { calls.push({ name, args }); return { error: null }; } } };
+  assert.equal(await skipLaneWithNothingToDo(input, { no_change: true, error: 'The frontend implementation contains the complete change.' }), false);
+  assert.equal(await skipLaneWithNothingToDo(input, { no_change: true, no_change_file: 'supabase/schema.sql', error: 'The source is protected.' }), false);
+  assert.equal(await skipLaneWithNothingToDo(input, { no_change: true, no_change_file: 'apps/web/src/pages/BuilderControlRoomPage.tsx', inspected_files: [], error: 'The frontend implementation contains the complete change.' }), false);
+  assert.equal(calls.length, 0);
+
+  assert.equal(await skipLaneWithNothingToDo(input, {
+    no_change: true, no_change_file: 'apps/web/src/pages/BuilderControlRoomPage.tsx',
+    inspected_files: ['apps/web/src/pages/BuilderControlRoomPage.tsx'], error: 'The frontend implementation contains the complete change.',
+  }), true);
+  assert.equal(calls[0].name, 'builder_skip_implementation_step');
+  assert.match(calls[0].args._reason, /delivered the change at apps\/web\/src\/pages\/BuilderControlRoomPage\.tsx/);
+});
+
 test('a required lane reopened by a confirmed correction cannot be skipped again and parks for human direction', async () => {
   const { recordGenerationFailure } = require('../builder-generation-failure');
   const calls = [];
   const job = { id: 'job', code_review_revision: { approval_id: 'review', reopened_required_lanes: ['frontend_implementation'] } };
   const input = { job, step: { id: 'front', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer' },
     siblingCompleted: true, supabase: { rpc: async (name, args) => { calls.push({ name, args }); return { error: null }; } } };
-  const generation = { no_change: true, no_change_lane: 'backend', no_change_file: 'builder-chat-session.js', error: 'The fix belongs in builder-chat-session.js' };
+  const generation = { no_change: true, no_change_lane: 'backend', no_change_file: 'builder-chat-session.js', inspected_files: ['builder-chat-session.js'], error: 'The fix belongs in builder-chat-session.js' };
   assert.equal(await skipLaneWithNothingToDo(input, generation), false);
   assert.equal(await skipLaneWithNothingToDo({ ...input, step: { id: 'front', builder_mode: 'frontend_engineer' } }, generation), false);
   await recordGenerationFailure(input, generation, 'generation');
@@ -49,7 +66,7 @@ test('a required lane reopened by a confirmed correction cannot be skipped again
   assert.match(calls[0].args._reason, /^generation: Required lane reopened by the confirmed correction cannot be skipped; human direction is required\. Author: The fix belongs/);
 
   const backend = { ...input, step: { id: 'back', step_id: 'backend_implementation', builder_mode: 'backend_engineer' } };
-  assert.equal(await skipLaneWithNothingToDo(backend, { no_change: true, no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx', error: 'web only' }), true);
+  assert.equal(await skipLaneWithNothingToDo(backend, { no_change: true, no_change_lane: 'frontend', no_change_file: 'apps/web/src/example.tsx', inspected_files: ['apps/web/src/example.tsx'], error: 'web only' }), true);
   assert.equal(calls.at(-1).name, 'builder_skip_implementation_step');
 });
 

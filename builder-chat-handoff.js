@@ -7,7 +7,7 @@ const HANDOFF_TOOL = Object.freeze({
     description: 'Prepare a real Bob Builder investigation handoff card when the owner requests builder work on a reported issue. It is NOT a source-verified repair plan. The owner must confirm Create job in the UI before any job exists. Builder must inspect source, schema, Atlas and existing jobs, establish cause and pass normal specification/review/release gates before implementing a fix. Do not use for ordinary questions or requests not to create/propose work. Vibe dispatch is not available from this tool; do not pretend it is.',
     parameters: {
       type: 'object', additionalProperties: false,
-      required: ['title', 'report_quote', 'assessment', 'investigation_steps', 'acceptance_checks', 'unknowns', 'frontend_required', 'backend_required'],
+      required: ['title', 'report_quote', 'assessment', 'investigation_steps', 'acceptance_checks', 'unknowns'],
       properties: {
         title: { type: 'string', minLength: 4, maxLength: 140 },
         report_quote: { type: 'string', minLength: 1, maxLength: 1500 },
@@ -15,8 +15,8 @@ const HANDOFF_TOOL = Object.freeze({
         investigation_steps: { type: 'array', minItems: 2, maxItems: 8, items: { type: 'string', minLength: 15, maxLength: 500 } },
         acceptance_checks: { type: 'array', minItems: 2, maxItems: 8, items: { type: 'string', minLength: 15, maxLength: 500 } },
         unknowns: { type: 'string', minLength: 10, maxLength: 800 },
-        frontend_required: { type: 'boolean' },
-        backend_required: { type: 'boolean' },
+        frontend_required: { type: 'boolean', description: 'Legacy, ignored; both implementation specialists are always included.' },
+        backend_required: { type: 'boolean', description: 'Legacy, ignored; both implementation specialists are always included.' },
       },
     },
   },
@@ -28,6 +28,7 @@ function investigationProposal(args, message, sources = []) {
       || Object.keys(args).some(key => !Object.hasOwn(fields, key))) throw new Error('Invalid Builder investigation arguments');
   for (const [name, spec] of Object.entries(fields)) {
     const value = args[name];
+    if (value === undefined && !HANDOFF_TOOL.function.parameters.required.includes(name)) continue;
     if (spec.type === 'string' && (typeof value !== 'string' || value.trim().length < spec.minLength || value.length > spec.maxLength)
         || spec.type === 'boolean' && typeof value !== 'boolean'
         || spec.type === 'array' && (!Array.isArray(value) || value.length < spec.minItems || value.length > spec.maxItems
@@ -35,7 +36,6 @@ function investigationProposal(args, message, sources = []) {
       throw new Error(`Invalid Builder investigation ${name}`);
     }
   }
-  if (!args.frontend_required && !args.backend_required) throw new Error('Builder investigation requires at least one scope');
   const normalize = text => text.replace(/\s+/g, ' ').trim();
   const reports = [
     { source_id: 'current-question', content: message.content },
@@ -64,8 +64,8 @@ function investigationProposal(args, message, sources = []) {
   if (task.length > 8000) throw new Error('Builder investigation handoff exceeds 8000 characters');
   return {
     title: `Investigate: ${args.title.trim()}`, task_description: task,
-    frontend_required: args.frontend_required, backend_required: args.backend_required,
-    rationale: 'Bob Builder handles the durable investigation and any evidence-supported fix through existing gates. Owner confirmation creates the job; no job has started yet.',
+    frontend_required: true, backend_required: true,
+    rationale: 'Bob Builder handles the durable investigation and any evidence-supported fix with both implementation specialists through existing gates. Owner confirmation creates the job; no job has started yet.',
     handoff_kind: 'investigation', source_message_id: message.id,
   };
 }

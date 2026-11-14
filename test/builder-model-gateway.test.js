@@ -52,6 +52,142 @@ test('Anthropic requests omit temperature, which current Claude models reject', 
   assert.equal(openai.temperature, 0.2, 'other OpenAI-compatible providers keep their temperature');
 });
 
+test('Gemini uses the native generateContent API, an explicit model allowlist and verified vision metadata', async () => {
+  const { buildGeminiBody, modelHealth } = require('../builder-model-gateway');
+  const noVision = createModelGatewayConfig({ GEMINI_API_KEY: 'gemini-fixture-key', BOB_GEMINI_MODELS: 'gemini-3.8-flash' });
+  assert.deepEqual([...noVision.gemini.visionModels], [], 'vision is not assumed from the provider or model name');
+  const cfg = createModelGatewayConfig({
+    GEMINI_API_KEY: 'gemini-fixture-key',
+    BOB_GEMINI_MODELS: 'gemini-3.8-flash,gemini-3.8-pro',
+    BOB_GEMINI_VISION_MODELS: 'gemini-3.8-flash',
+  });
+  const images = ['AAECAw=='];
+  const requestBody = buildGeminiBody({
+    input: request({
+      provider: 'gemini', model: 'gemini-3.8-flash',
+      messages: [
+        { role: 'system', content: 'Return JSON.' },
+        { role: 'user', content: 'Describe this approved image.', images, image_mime_types: ['image/png'] },
+      ],
+      output_schema: { type: 'object', properties: { summary: { type: 'string' } } },
+    }), config: cfg.gemini, model: 'gemini-3.8-flash',
+  });
+  assert.deepEqual(requestBody.systemInstruction, { parts: [{ text: 'Return JSON.' }] });
+  assert.deepEqual(requestBody.contents[0].parts, [
+    { text: 'Describe this approved image.' }, { inlineData: { mimeType: 'image/png', data: images[0] } },
+  ]);
+  assert.equal(requestBody.generationConfig.responseMimeType, 'application/json');
+  assert.deepEqual([...cfg.gemini.visionModels], ['gemini-3.8-flash']);
+  assert.ok(cfg.gemini.models.has('gemini-3.8-pro'));
+
+  const calls = [];
+  const result = await invokeBuilderModel({
+    config: cfg,
+    input: request({ provider: 'gemini', model: 'gemini-3.8-flash', system_prompt: 'Return JSON.', user_prompt: 'Summarize the approved packet.' }),
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith('/models?pageSize=100')) return { ok: true, json: async () => ({ models: [
+        { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] },
+        { name: 'models/gemini-embedding', supportedGenerationMethods: ['embedContent'] },
+      ] }) };
+      return { ok: true, json: async () => ({
+        candidates: [{ content: { parts: [{ text: '{"summary":"Reviewed packet only."}' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 8, totalTokenCount: 20 },
+      }) };
+    },
+  });
+  assert.deepEqual(calls.map(call => call.url), [
+    'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+  ]);
+  assert.equal(calls[0].init.headers['x-goog-api-key'], 'gemini-fixture-key');
+  assert.equal(calls[1].init.headers['x-goog-api-key'], 'gemini-fixture-key');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.content, '{"summary":"Reviewed packet only."}');
+  assert.equal(result.body.finish_reason, 'STOP');
+  assert.deepEqual(result.body.usage, { input_tokens: 12, output_tokens: 8, total_tokens: 20 });
+
+  const status = await modelHealth(cfg, { fetchImpl: async () => ({ ok: true, json: async () => ({ models: [
+    { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-embedding', supportedGenerationMethods: ['embedContent'] },
+  ] }) }) });
+  assert.deepEqual(status.gemini.vision_models, ['gemini-3.8-flash']);
+});
+
+test('Gemini can explicitly use the service-keyed Supabase proxy without sending the Google key', async () => {
+  const proxyConfig = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', BOB_GEMINI_MODELS: 'gemini-approved',
+    SUPABASE_URL: 'https://fixture.supabase.co',
+    BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
+  });
+  const requests = [];
+  const result = await invokeBuilderModel({
+    config: proxyConfig,
+    input: request({ provider: 'gemini', model: 'gemini-approved' }),
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gemini-approved' }] });
+      return Response.json({ choices: [{ message: { content: '{"ok":true}' } }] });
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(requests.map(call => call.url), [
+    'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/models',
+    'https://fixture.supabase.co/functions/v1/bob-gemini-gateway/chat/completions',
+  ]);
+  assert.ok(requests.every(call => call.init.headers.Authorization === 'Bearer synthetic-project-secret'));
+  assert.ok(requests.every(call => !JSON.stringify(call.init.headers).includes('synthetic-google-key')));
+});
+
+test('Gemini proxy mode fails closed without its dedicated key', async () => {
+  const proxyConfig = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', BOB_GEMINI_MODELS: 'gemini-approved',
+    SUPABASE_URL: 'https://fixture.supabase.co',
+  });
+  let requests = 0;
+  const result = await invokeBuilderModel({
+    config: proxyConfig,
+    input: request({ provider: 'gemini', model: 'gemini-approved' }),
+    fetchImpl: async () => { requests++; throw new Error('unexpected network request'); },
+  });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'provider_unconfigured');
+  assert.equal(requests, 0);
+});
+
+test('a configured direct Gemini key takes precedence over the optional proxy', () => {
+  const direct = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', SUPABASE_URL: 'https://fixture.supabase.co',
+    GEMINI_API_KEY: 'synthetic-google-key', BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret',
+  });
+  assert.equal(direct.gemini.kind, 'gemini');
+  assert.equal(direct.gemini.apiKey, 'synthetic-google-key');
+  assert.equal(direct.gemini.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
+});
+
+test('Gemini image input requires native transport and an explicitly allowlisted vision model', async () => {
+  let requests = 0;
+  const imageRequest = request({
+    provider: 'gemini', model: 'gemini-approved',
+    messages: [{ role: 'user', content: 'Describe the image.', images: ['AAECAw=='], image_mime_types: ['image/png'] }],
+  });
+  const noVision = createModelGatewayConfig({ GEMINI_API_KEY: 'synthetic-google-key', BOB_GEMINI_MODELS: 'gemini-approved' });
+  const deniedVision = await invokeBuilderModel({ config: noVision, input: imageRequest, fetchImpl: async () => { requests++; } });
+  assert.equal(deniedVision.status, 400);
+  assert.match(deniedVision.body.error, /explicitly allowlisted vision model/);
+  assert.equal(requests, 0);
+
+  const proxy = createModelGatewayConfig({
+    BOB_GEMINI_USE_SUPABASE_PROXY: '1', SUPABASE_URL: 'https://fixture.supabase.co',
+    BOB_GEMINI_PROXY_SERVICE_KEY: 'synthetic-project-secret', BOB_GEMINI_MODELS: 'gemini-approved',
+    BOB_GEMINI_VISION_MODELS: 'gemini-approved',
+  });
+  const deniedProxy = await invokeBuilderModel({ config: proxy, input: imageRequest, fetchImpl: async () => { requests++; } });
+  assert.equal(deniedProxy.status, 400);
+  assert.match(deniedProxy.body.error, /proxy mode does not support image inputs/);
+  assert.equal(requests, 0);
+});
+
 test('Ollama Cloud defaults to the installed coding model before general fallback models', () => {
   const cloud = createModelGatewayConfig({ OLLAMA_API_TOKEN: 'test-cloud-token' }).ollama_cloud;
   const models = Array.from(cloud.models);

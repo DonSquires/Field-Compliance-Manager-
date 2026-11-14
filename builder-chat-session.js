@@ -20,7 +20,7 @@ const { runBuilderResearch } = require('./builder-chat-research');
 const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
 const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'builder-chat-v10';
+const PROMPT_VERSION = 'builder-chat-v11';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -63,12 +63,12 @@ function builderChatSystemPrompt() {
     ATLAS_RESEARCH_GUIDANCE,
     '- Ground every claim in a tool result from this conversation: name files, tables and jobs you actually read. Never invent tables, columns, files, job IDs or statuses. An empty search is not proof something is missing.',
     '- You cannot edit files, create or cancel jobs, approve gates, merge or deploy. Never say you did. Say "I propose" and use propose_job.',
-    '- A good proposal names the user/role and job-to-be-done, the files or surfaces involved, the schema/Atlas path, acceptance checks, and what must not change. Set frontend_required/backend_required honestly.',
+    '- A good proposal names the user/role and job-to-be-done, the files or surfaces involved, the schema/Atlas path, acceptance checks, and what must not change. Every new job includes both frontend and backend implementation specialists; never classify a proposal into a single-lane scope.',
     '- Research before proposing: use list_jobs to check for matching active work, read_file to inspect actual owning source, and atlas to check the relevant terrain. Cite the source paths you read in your own repair plan. Search matches and directory listings are discovery, not a source investigation. Never copy the owner brief into a job or substitute a fallback draft for unfinished research.',
     '- search finds literal text INSIDE files, not concepts or filenames. Once a search locates a relevant path, read_file it; after empty searches change method with list_dir or a shorter exact source token. Trace writers and callers, not just the first match. Use bounded start_line/end_line ranges.',
     '- Discover relevant filenames with find_files using a short fragment from the current task. It lists tracked paths, not their contents or relevance. Read the owning source and follow actual writers/callers before deciding a cause.',
     '- Tool contracts give argument shapes; use real discovered paths and entity names, not example filenames. For terrain_edges use an exact discovered name. Empty Atlas results are a gap, not proof of absence; reads/writes differ from weak references and flow_reach differs from fk_reach.',
-    '- propose_job requires title (4-160 characters), task_description (your own 40+ character summary), frontend_required/backend_required (booleans), findings, plan and acceptance_checks. Each finding has path, source_quote (an exact snippet from read_file) and observation (what that code proves). Supply at least two concrete plan steps and two acceptance checks. Include unknowns separately. A request to investigate later is not a repair plan. A tool error means correct those arguments, not restart the investigation.',
+    '- propose_job requires title (4-160 characters), task_description (your own 40+ character summary), findings, plan and acceptance_checks. Each finding has path, source_quote (an exact snippet from read_file) and observation (what that code proves). Supply at least two concrete plan steps and two acceptance checks. Include unknowns separately. A request to investigate later is not a repair plan. A tool error means correct those arguments, not restart the investigation.',
     '- Separate known facts, hypotheses and unknowns. You have repository/Atlas/ledger read tools and any explicitly provided read-only platform diagnostics, not a VPS shell. Source inventory describes the deployed control-plane source, not the host filesystem. Docker Compose labels describe container creation, not whether referenced paths still exist. Report missing evidence rather than inventing host observations. An incomplete investigation ends with an explicit blocker and no Create job card.',
     '- Answer the question asked. A status question is answered from owner_queue/list_jobs/job_status; do not read source code for it.',
     '- Never guess file paths. If a path is missing, use did_you_mean from the error, search or list_dir. After a couple of failed calls, reply with what you know.',
@@ -193,11 +193,10 @@ function jobSummary(job) {
 function validateProposal(args) {
   const title = String(args.title || '').trim();
   const task = String(args.task_description || '').trim();
-  const frontend = args.frontend_required === true;
-  const backend = args.backend_required === true;
   if (title.length < 4 || title.length > 160) return { error: 'title must be 4-160 characters' };
   if (task.length < 40 || task.length > 8000) return { error: 'task_description must be 40-8000 characters and specific enough to build from' };
-  if (!frontend && !backend) return { error: 'set frontend_required and/or backend_required to true' };
+  if (args.frontend_required !== undefined && typeof args.frontend_required !== 'boolean'
+      || args.backend_required !== undefined && typeof args.backend_required !== 'boolean') return { error: 'legacy scope values, when supplied, must be booleans' };
   const findings = args.findings;
   if (!Array.isArray(findings) || findings.length < 1 || findings.length > 8 || findings.some(item =>
     !item || typeof item.path !== 'string' || !item.path.trim() || typeof item.source_quote !== 'string' || item.source_quote.trim().length < 12 || item.source_quote.length > 500 || typeof item.observation !== 'string' || item.observation.trim().length < 20 || item.observation.length > 1000
@@ -213,7 +212,7 @@ function validateProposal(args) {
     ...(args.unknowns?.length ? ['Unknowns / live evidence still required:', ...args.unknowns.map(line => `- ${line.trim()}`)] : []),
   ].join('\n');
   if (description.length > 8000) return { error: 'the complete proposal including findings, plan and acceptance checks must be at most 8000 characters; shorten it without dropping evidence' };
-  return { proposal: { title, task_description: description, frontend_required: frontend, backend_required: backend, rationale: clip(String(args.rationale || '').trim(), 1500) } };
+  return { proposal: { title, task_description: description, frontend_required: true, backend_required: true, rationale: clip(String(args.rationale || '').trim(), 1500) } };
 }
 
 function createBuilderChatTools({ supabase, workspacePath, limits, platformTools, retrieveKnowledge }) {
@@ -422,12 +421,13 @@ function builderChatNativeTools(tools) {
       description: 'Propose a Builder job for the owner to confirm. Only the owner creates it. Use after investigating.',
       parameters: { type: 'object', properties: {
         title: { type: 'string', minLength: 4, maxLength: 160 }, task_description: { type: 'string', minLength: 40, maxLength: 8000 },
-        frontend_required: { type: 'boolean' }, backend_required: { type: 'boolean' }, rationale: text,
+        frontend_required: { type: 'boolean', description: 'Legacy, ignored; both implementation specialists are always included.' },
+        backend_required: { type: 'boolean', description: 'Legacy, ignored; both implementation specialists are always included.' }, rationale: text,
         findings: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: {
           path: { type: 'string', minLength: 1 }, source_quote: { type: 'string', minLength: 12, maxLength: 500 }, observation: { type: 'string', minLength: 20, maxLength: 1000 },
         }, required: ['path', 'source_quote', 'observation'], additionalProperties: false } },
         plan: steps, acceptance_checks: steps, unknowns: { ...steps, minItems: 0 },
-      }, required: ['title', 'task_description', 'frontend_required', 'backend_required', 'findings', 'plan', 'acceptance_checks'], additionalProperties: false },
+      }, required: ['title', 'task_description', 'findings', 'plan', 'acceptance_checks'], additionalProperties: false },
     },
   };
   return vibeNativeTools(tools)
@@ -642,7 +642,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
         if (!proposeNudged && !final) {
           proposeNudged = true;
           messages.push({ role: 'assistant', content: JSON.stringify({ tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
-            error: 'Reply refused: the owner asked you to PROPOSE a job. Proposing needs no permission and changes nothing. Call propose_job now with a title, a specific task_description from what you found, and frontend_required/backend_required.',
+            error: 'Reply refused: the owner asked you to PROPOSE a job. Proposing needs no permission and changes nothing. Call propose_job now with a title, a specific task_description from what you found, findings, a plan and acceptance checks.',
           }) });
           continue;
         }
@@ -783,7 +783,7 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
     const checkout = cloudResearch ? { workspacePath: null, head: null } : deps.workspacePath ? { workspacePath: deps.workspacePath, head: deps.head || null }
       : ensureChatCheckout({ workspaceRoot: deps.workspaceRoot, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead });
     const outcome = cloudResearch
-      ? await runBuilderResearch({ supabase: deps.supabase, thread, message, post: row => store.post(thread.id, row), ...deps.research })
+      ? await runBuilderResearch({ supabase: deps.supabase, thread, message, post: row => store.post(thread.id, row), gateway: deps.gateway, modelRouter: deps.modelRouter, ...deps.research })
       : await runBuilderChat({ store, thread, message, workspacePath: checkout.workspacePath, head: checkout.head, gateway: deps.gateway, deps, limits });
     if (outcome.proposal) {
       await store.post(thread.id, {

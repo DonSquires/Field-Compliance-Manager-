@@ -330,7 +330,7 @@ function systemPrompt({ lane, limits, firewall = false, browser = false }) {
     SUPABASE_SKILL_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
-    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
+    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. If the sibling lane already delivered the change and your lane has no remaining work, set no_change_file to the exact unprotected sibling-lane source file that proves this; no path means no lane skip. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
@@ -675,6 +675,7 @@ function applyEnvelopeUpdate(content, lines, file) {
 
 function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true, browserTest = null, remainingMs = () => Infinity }) {
   const generatedBaselines = new Map();
+  const readFiles = new Set();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
   const runs = [];
   // Content hash of every changed file, so a passing check is only trusted for the exact tree it ran on.
@@ -880,6 +881,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return missingPath(workspacePath, 'file', normalized);
       const buffer = fs.readFileSync(absolute);
       if (looksBinary(buffer)) return { error: `binary file: ${normalized}` };
+      readFiles.add(normalized);
       const lines = buffer.toString('utf8').split('\n');
       const start = Math.max(1, Number(start_line) || 1);
       const end = Math.min(lines.length, Number(end_line) || lines.length);
@@ -1229,6 +1231,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       return { ...result, note: 'Aggregate count only. A column with zero rows_with_value has no live writer yet: report it as a gap, do not wire UI to it as live data.' };
     },
     __changedFiles: changedFiles,
+    __readFiles: () => [...readFiles],
     __compileGate: compileGate,
     __browserGate: browserGate ? (files) => browserGate.gate(files) : null,
     __policyCheck: policyCheck,
@@ -1888,7 +1891,8 @@ async function runAgenticEngineer({
         const routing = { no_change: true, error: String(noChangeReason),
           no_change_lane: args.no_change_lane, no_change_file: args.no_change_file };
         const currentDiff = execFileSync('git', ['diff', 'HEAD', '--no-color', '--binary'], { cwd: workspacePath, encoding: 'utf8' });
-        if (currentDiff === seedDiff && JSON.stringify(tools.__changedFiles().sort()) === JSON.stringify([...seeded.files].sort())
+        if (currentDiff === seedDiff && tools.__readFiles().includes(args.no_change_file)
+          && JSON.stringify(tools.__changedFiles().sort()) === JSON.stringify([...seeded.files].sort())
             && crossLaneNoChange(routing, `${lane}_engineer`)) {
           const files = validatePatchText(seedDiff, { lane: lane === 'frontend' ? 'frontend' : 'verified' });
           outcome = { ok: true, model: response.data?.model, proposal: {
@@ -2058,6 +2062,7 @@ async function runAgenticEngineer({
     no_change: Boolean(outcome.no_change),
     no_change_lane: outcome.no_change_lane ?? null,
     no_change_file: outcome.no_change_file ?? null,
+    inspected_files: tools.__readFiles(),
     // The next attempt starts from this map instead of from nothing (see classifyNoChange).
     budget_exhausted: Boolean(outcome.budget_exhausted),
     resume_hints: outcome.budget_exhausted ? { ...readingMap(transcript), conclusion: String(outcome.summary || outcome.error || '').slice(0, 1500), turns_used: turns, lessons: lessons.slice(0, 3) } : null,

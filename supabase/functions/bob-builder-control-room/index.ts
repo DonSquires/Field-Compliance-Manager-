@@ -393,6 +393,8 @@ serve(async req => {
       .eq('organization_id', requestedOrgId)
       .eq('project_id', projectId)
       .eq('title', title)
+      .eq('frontend_required', true)
+      .eq('backend_required', true)
       .not('status', 'in', '("release_ready","deployed","failed","cancelled")');
     if (body.autopilot === true) {
       duplicateQuery = duplicateQuery
@@ -423,8 +425,8 @@ serve(async req => {
       _target_sha: targetSha,
       _branch_name: typeof body.branch_name === 'string' ? body.branch_name.slice(0, 200) : 'main',
       _description: typeof body.description === 'string' ? body.description.slice(0, 2000) : null,
-      _frontend_required: body.frontend_required !== false,
-      _backend_required: body.backend_required === true,
+      _frontend_required: true,
+      _backend_required: true,
       _code_review_mode: codeReviewMode,
       _task_run_id: null,
       _requested_action: requestedAction,
@@ -594,8 +596,8 @@ serve(async req => {
       _parent_job_id: jobId,
       _title: title,
       _task_description: taskDescription,
-      _frontend_required: body.frontend_required !== false,
-      _backend_required: body.backend_required === true,
+      _frontend_required: true,
+      _backend_required: true,
       _code_review_mode: typeof body.code_review_mode === 'string' ? body.code_review_mode : 'none',
     });
     await audit(job.organization_id, error ? 'followup_failed' : 'followup_created', jobId);

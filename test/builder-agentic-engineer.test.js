@@ -563,12 +563,13 @@ test('owner-confirmed recovery invalidates a failed checkpoint and preserves str
     repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
   };
   try {
-    const first = fakeModel([{ tool: 'finish', args: { no_change_reason: 'No changes: the backend owns lib/sum.js.',
+    const first = fakeModel([{ tool: 'read_file', args: { path: 'lib/sum.js' } }, { tool: 'finish', args: { no_change_reason: 'No changes: the backend owns lib/sum.js.',
       no_change_lane: 'backend', no_change_file: 'lib/sum.js' } }]);
     const result = await runAgenticEngineer({ ...input, callModel: first.callModel });
     assert.equal(result.no_change, true);
     assert.equal(result.no_change_lane, 'backend');
     assert.equal(result.no_change_file, 'lib/sum.js');
+    assert.deepEqual(result.inspected_files, ['lib/sum.js']);
     const recovery = { ...input.job.code_review_revision, recovery_id: 'confirmed-recovery', recovery_feedback: 'Let the backend implement its fix.' };
     await assert.rejects(runAgenticEngineer({ ...input, job: { ...input.job, code_review_revision: recovery },
       callModel: async ({ modelRequest }) => {
@@ -586,7 +587,7 @@ test('recovered seeded lane retains its unchanged patch for fresh verification i
   const repo = makeRepo();
   const seed = 'diff --git a/apps/web/src/app.tsx b/apps/web/src/app.tsx\n--- a/apps/web/src/app.tsx\n+++ b/apps/web/src/app.tsx\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n';
   try {
-    const model = fakeModel([{ tool: 'finish', args: {
+    const model = fakeModel([{ tool: 'read_file', args: { path: 'lib/sum.js' } }, { tool: 'finish', args: {
       no_change_reason: 'No additional frontend changes: the remaining repair belongs in lib/sum.js.',
       no_change_lane: 'backend', no_change_file: 'lib/sum.js',
     } }]);
@@ -598,7 +599,8 @@ test('recovered seeded lane retains its unchanged patch for fresh verification i
       seedPatch: { text: seed, artifact_id: 'reviewed-seed' }, callModel: model.callModel,
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(model.seen.length, 1);
+    assert.equal(model.seen.length, 2);
+    assert.deepEqual(result.inspected_files, ['lib/sum.js']);
     assert.match(result.proposal.patch, /\+export const a = 2/);
     assert.equal(result.proposal.retained_seed_artifact_id, 'reviewed-seed');
     assert.deepEqual(result.proposal.changed_files, ['apps/web/src/app.tsx']);

@@ -98,25 +98,43 @@ The private projection does not itself revoke older raw RPC or table paths.
 Those paths must be traced and protected before treating the projection as a
 complete privacy boundary or releasing the selected-shift changes.
 
-### Builder Chat cloud PM/QA (owner decision, 2026-10-25)
+### Builder Chat PM/QA (owner decisions, 2026-10-25 and 2026-11-13)
 
-New PM turns use purpose-assigned Ollama Cloud models directly, without private
-inference attempts. The owner selected human-approved non-sensitive summaries,
-not raw private evidence. The server must bind purpose and summary to the same
-message's approval and retry identity. Neither earlier conversation nor selected
-job/page context is implicitly transferred. The current slice accepts a summary
-pasted by the reviewer after redaction. Future governed private collection may
-prepare a candidate for review, but cannot automatically approve its external
-transfer or introduce a private inference ladder for Chat. Sensitive source,
-credentials and tenant/HR/legal data
-remain excluded. Exact text matching proves only what a reviewed summary said,
-not that its underlying assertions were independently observed.
+The 2026-10-25 fixed Ollama Cloud model assignment remains only for already
+queued messages carrying `builder_research_v1`. New PM/QA turns use the shared
+privacy-aware Fusion router as directed 2026-11-13. Purpose still controls the
+PM behavior and available tools; it does not hardcode a model. The same owner
+approval, provider/model capability checks and egress receipt apply to every
+candidate.
 
-Capability metadata must match the selected purpose's inputs. Unavailable,
-invalid or non-vision models fail explicitly; no automatic model ladder or
-private fallback. Independent QA is a deliberate purpose, not an automatic
-second model on every PM answer. Existing explicit public-research mode remains
-isolated. Model receipts disclose purpose, model and the actual transfer shape.
+New Fusion PM turns rank configured private providers and only the explicitly
+consented, server-configured external allowlist: Ollama Cloud, OpenAI, Anthropic
+and Gemini. OmniRoute and other providers are excluded from this UI. Ollama Cloud may be skipped when its account is unavailable or credit
+limited; Fusion can continue to another permitted provider for inference. Public
+web search and URL retrieval still use Ollama Cloud and can fail independently
+when that service is unavailable. Raw image inference is allowed only on a
+candidate with verified vision capability; Gemini vision models require an
+explicit server-side `BOB_GEMINI_VISION_MODELS` allowlist. No capability is
+assumed from a model name.
+
+The Builder gateway uses Gemini's native `generateContent` API by default with
+server-side `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). The opt-in
+`BOB_GEMINI_USE_SUPABASE_PROXY=1` mode uses `BOB_GEMINI_PROXY_SERVICE_KEY`, the
+exact project service credential injected into `bob-gemini-gateway`; it does
+not fall back to `SUPABASE_SERVICE_ROLE_KEY` or a direct Google key. Keep both
+credentials server-only and configure only the selected transport.
+
+Human-reviewed non-sensitive summaries, not raw private evidence, may be
+transferred. Purpose, summary hash, provider allowlist and approval are bound to
+the same message and retry identity. Neither earlier conversation nor selected
+job/page context is implicitly transferred. Private repository source,
+credentials, tenant/HR/legal data and raw diagnostics remain excluded. Exact
+text matching proves only what a reviewed summary said, not that its underlying
+assertions were independently observed. Independent QA remains a deliberate
+purpose, not an automatic second model on every PM answer. Existing queued
+messages retain their recorded consent version and route; they are not rerouted.
+Model receipts disclose purpose, selected provider/model, routing attempts and
+the actual transfer shape.
 
 Bob's own diary is not tenant operational memory. The cloud PM may choose
 `write_self_memory` to append a bounded non-sensitive reflection or Builder

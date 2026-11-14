@@ -3,7 +3,7 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 const THREAD = '22222222-2222-4222-8222-222222222222';
 
-test('owner reviews a synthetic evidence summary/document and approves a fixed-model cloud PM packet', async ({ page, isMobile }) => {
+test('owner reviews a synthetic evidence summary/document and approves a Fusion PM packet', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
   await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: THREAD }] }));
@@ -34,7 +34,7 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
   await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
   if (isMobile) await page.getByRole('button', { name: 'Bob Builder', exact: true }).click();
   const chat = page.getByRole('region', { name: 'Bob Builder chat', exact: true });
-  await expect(chat.getByLabel('Purpose and model')).toHaveValue('pm');
+  await expect(chat.locator('.bchat-research select').first()).toHaveValue('pm');
   const input = chat.getByLabel('Message Bob Builder');
   await input.fill('Explain this synthetic public document.');
   await chat.getByLabel('Research attachments').setInputFiles({ name: 'public-fixture.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
@@ -96,9 +96,9 @@ test('PM investigation card requires owner confirmation and retains a persisted 
       expect(route.request().postDataJSON().p_message_id).toBe(proposalId);
       return route.fulfill({ json: true });
     });
-    await page.route('**/rest/v1/rpc/builder_chat_record_job', route => {
+    await page.route('**/rest/v1/rpc/builder_chat_record_job_receipt', route => {
       effects.push('record');
-      expect(route.request().postDataJSON()).toEqual({ p_message_id: proposalId, p_job_id: jobId });
+      expect(route.request().postDataJSON()).toEqual({ p_message_id: proposalId, p_job_id: jobId, p_duplicate: false });
       accepted = true;
       return route.fulfill({ json: null });
     });
@@ -132,7 +132,8 @@ test('PM investigation card requires owner confirmation and retains a persisted 
     await expect.poll(() => effects).toEqual(['reserve', 'create', 'record']);
     await page.reload();
     const restored = await open();
-    await expect(restored.getByText(`Receipt: ${jobId}`, { exact: true })).toBeVisible();
+    await expect(restored.getByText('Job created', { exact: true })).toBeVisible();
+    await expect(restored.getByText('Reference unavailable', { exact: true })).toBeVisible();
     await expect(restored.getByRole('button', { name: 'Create job', exact: true })).toHaveCount(0);
     expect(await restored.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(effects).toEqual(['reserve', 'create', 'record']);
