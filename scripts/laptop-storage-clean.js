@@ -2,7 +2,8 @@
 'use strict';
 
 // Laptop worker disk hygiene. Dry run by default; pass --apply to delete.
-// Usage: node scripts/laptop-storage-clean.js [--apply] [--remove-unused-models] [--env <file>] [--temp-days N]
+// Usage: node scripts/laptop-storage-clean.js [--apply] [--remove-unused-models] [--env <file>] [--temp-days N] [--repo <dir>]
+// Git worktrees are only reported (stale main checkout, merged clean worktrees), never removed.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -52,6 +53,55 @@ function dockerPruneCommands({ imageAgeHours }) {
     ['docker', 'image', 'prune', '--all', '--force', '--filter', `until=${imageAgeHours}h`],
     ['docker', 'volume', 'prune', '--force'],
   ];
+}
+
+function parseWorktreeList(text) {
+  const rows = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) rows.push({ path: line.slice(9), branch: null, detached: false });
+    else if (line.startsWith('branch ') && rows.length) rows[rows.length - 1].branch = line.slice(7).replace(/^refs\/heads\//, '');
+    else if (line === 'detached' && rows.length) rows[rows.length - 1].detached = true;
+  }
+  return rows;
+}
+
+// Report only: worktrees hold uncommitted work, so this never removes anything.
+function worktreeFindings(rows, { behindLimit = 30 } = {}) {
+  const findings = [];
+  for (const row of rows) {
+    if (row.isMain) {
+      if (row.branch !== 'main') findings.push({ path: row.path, issue: 'main checkout is not on main' });
+      if (row.behind > 0) findings.push({ path: row.path, issue: `main checkout is ${row.behind} commits behind origin/main` });
+    } else if (!row.dirty && row.merged && row.behind > 0) {
+      findings.push({ path: row.path, issue: 'merged and clean: safe to remove (git worktree remove)' });
+    } else if (row.dirty && row.behind > behindLimit) {
+      findings.push({ path: row.path, issue: `${row.behind} commits behind with ${row.dirty} uncommitted changes: review before removing` });
+    }
+  }
+  return findings;
+}
+
+function git(cwd, args) {
+  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  return { ok: result.status === 0, out: String(result.stdout || '').trim() };
+}
+
+function reportWorktrees(repo) {
+  if (!repo || !git(repo, ['rev-parse', '--git-dir']).ok) return console.log('worktrees: no repository given (--repo <dir>), skipped');
+  git(repo, ['fetch', 'origin', '--prune', '--quiet']);
+  const mainPath = path.resolve(git(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir']).out, '..');
+  const rows = parseWorktreeList(git(repo, ['worktree', 'list', '--porcelain']).out)
+    .filter(row => fs.existsSync(row.path))
+    .map(row => ({
+      ...row,
+      isMain: path.resolve(row.path) === mainPath,
+      behind: Number(git(row.path, ['rev-list', '--count', 'HEAD..origin/main']).out) || 0,
+      dirty: git(row.path, ['status', '--porcelain']).out.split(/\r?\n/).filter(Boolean).length,
+      merged: git(row.path, ['merge-base', '--is-ancestor', 'HEAD', 'origin/main']).ok,
+    }));
+  const findings = worktreeFindings(rows);
+  console.log(`worktrees: ${rows.length} checked, ${findings.length} need attention`);
+  for (const finding of findings) console.log(`worktree: ${finding.path} -> ${finding.issue}`);
 }
 
 function readEnvFile(file) {
@@ -135,8 +185,11 @@ function main(argv) {
       else console.log(`ollama: ${model} is not in the worker keep-list (pass --remove-unused-models to remove)`);
     }
   }
+
+  const repoIndex = argv.indexOf('--repo');
+  reportWorktrees(repoIndex >= 0 ? argv[repoIndex + 1] : path.join(__dirname, '..'));
 }
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { keepModelsFromEnv, planOllamaRemovals, staleTempEntries, dockerPruneCommands };
+module.exports = { keepModelsFromEnv, planOllamaRemovals, staleTempEntries, dockerPruneCommands, parseWorktreeList, worktreeFindings };

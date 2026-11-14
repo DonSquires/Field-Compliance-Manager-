@@ -7,7 +7,41 @@ const {
   planOllamaRemovals,
   staleTempEntries,
   dockerPruneCommands,
+  parseWorktreeList,
+  worktreeFindings,
 } = require('../scripts/laptop-storage-clean');
+
+test('worktree porcelain output is parsed into path, branch and detached state', () => {
+  const text = [
+    'worktree C:/repo', 'HEAD aaa', 'branch refs/heads/main', '',
+    'worktree C:/wt-a', 'HEAD bbb', 'detached', '',
+  ].join('\n');
+  assert.deepEqual(parseWorktreeList(text), [
+    { path: 'C:/repo', branch: 'main', detached: false },
+    { path: 'C:/wt-a', branch: null, detached: true },
+  ]);
+});
+
+test('a main checkout off main or behind origin/main is reported', () => {
+  const findings = worktreeFindings([
+    { path: 'C:/repo', isMain: true, branch: null, detached: true, behind: 55, dirty: 3, merged: true },
+  ]);
+  assert.deepEqual(findings.map(f => f.issue), ['main checkout is not on main', 'main checkout is 55 commits behind origin/main']);
+});
+
+test('merged clean worktrees are flagged removable; uncommitted work is only flagged for review', () => {
+  const findings = worktreeFindings([
+    { path: 'C:/repo', isMain: true, branch: 'main', behind: 0, dirty: 0, merged: true },
+    { path: 'C:/wt-done', branch: 'fix/a', behind: 200, dirty: 0, merged: true },
+    { path: 'C:/wt-wip', branch: 'feat/b', behind: 40, dirty: 5, merged: true },
+    { path: 'C:/wt-new', branch: 'fix/c', behind: 2, dirty: 1, merged: false },
+    { path: 'C:/wt-fresh', branch: 'fix/d', behind: 0, dirty: 0, merged: true },
+  ], { behindLimit: 30 });
+  assert.deepEqual(findings, [
+    { path: 'C:/wt-done', issue: 'merged and clean: safe to remove (git worktree remove)' },
+    { path: 'C:/wt-wip', issue: '40 commits behind with 5 uncommitted changes: review before removing' },
+  ]);
+});
 
 test('keep-list comes from the worker env, with the shipped defaults when unset', () => {
   const keep = keepModelsFromEnv({});
