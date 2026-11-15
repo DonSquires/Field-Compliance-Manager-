@@ -327,6 +327,8 @@ Officer rejected-timesheet hotfix, 2026-11-15 (R01/R02, local acceptance only):
   absent-value fallback. This is not the automatic-timesheet feature, a live
   payroll write, deployment evidence or permission to bypass receipt/list
   recovery.
+- Protected publication and deployment verification are tracked in PR #515;
+  passing local tests alone do not close this recovery item.
 
 Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
 
