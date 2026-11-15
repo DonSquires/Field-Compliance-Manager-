@@ -90,7 +90,7 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("grand_master: { eyebrow: 'Roster oversight'");
     expect(page).toContain("admin: { eyebrow: 'Team planning'");
     expect(page).toContain("admin_officer: { eyebrow: 'Daily scheduling'");
-    expect(page).toContain('<h1>Roster</h1><p>{rosterView.description}</p>');
+    expect(page).toContain('<h1>Roster</h1><span>{rosterView.eyebrow}</span>');
   });
 
   it('supports staff and work-unit planning with direct timesheet handoff', () => {
@@ -100,7 +100,7 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type=\"button\" onClick={() => openEdit(selectedSlot)}>Edit draft</button>");
     expect(page).toContain('setEditingSlot(null)');
     expect(page).toContain("scheduleMode === 'staff' && staff.length === 0");
-    expect(page).toContain("scheduleMode === 'staff' && <div className=\"roster-readiness\"");
+    expect(page).toContain('<select aria-label="Staff readiness"');
     expect(page).toContain("scheduleMode === 'staff' ? 'Staff' : 'Work unit'");
     expect(page).toContain("navigate('/admin/timesheets')");
     expect(page).toContain('/admin/timesheets?tab=attendance&shift=${exception.shift_id}');

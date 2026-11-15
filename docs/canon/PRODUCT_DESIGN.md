@@ -40,6 +40,24 @@ silently approve the changed hours. Overnight corrections retain the whole
 shift as source evidence while each linked payroll period receives only its
 NZ-local share, including its share of unpaid breaks.
 
+### Owner ruling 2026-11-15: calendar-first roster workspace
+
+The roster calendar is the primary working surface. Remove the unused global
+service-agreement/place selection strip on this route only; preserve its
+context elsewhere and retain the authorised operating-branch selector.
+Consolidate date, view, horizon and search controls around the grid. Keep
+Create shift and period-wide Publish drafts visible, with the existing publish
+preview; search and display filters do not narrow that write scope.
+
+Put occasional tools and view settings behind labelled keyboard-accessible
+controls. Show active filters with a clear reset, show holiday names in their
+date headings, and make the duplicate officer-details directory optional.
+Preserve role context, readiness facts, handoff focus, explicit unavailable
+states, operational exceptions and inline timesheet review. Recover space by
+removing duplicate chrome, not by shrinking touch targets or hiding authority.
+This presentation ruling does not authorise planned-shift amendments, alter
+recorded attendance or change database permissions.
+
 ### Owner ruling 2026-11-07: Staff Profile is the workforce record of action
 
 After a hire is confirmed, Staff Profile is the primary place to complete and

@@ -1041,7 +1041,7 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
             </div>
           </header>
 
-          <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
+          {activePage !== 'roster' && <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />}
           {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
       {showWorkspaceNavigation && workforceSectionNav}
           <div className="bob-page-layout">
@@ -1091,7 +1091,7 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
           </button>
         </div>
       </header>
-      <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
+      {activePage !== 'roster' && <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />}
       {activeWorkspace && showWorkspaceNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
       {showWorkspaceNavigation && workforceSectionNav}
 
