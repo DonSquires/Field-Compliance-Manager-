@@ -128,6 +128,14 @@ as compliance observations).
   branch-authorised replacement staff member. Preserve the original assignment
   and decision in audit; never transfer recorded attendance or finalised payroll.
 
+#### Owner clarification 2026-11-15: human approval colours
+
+The shift-hours row colour now represents human review: amber awaiting approval,
+green approved, red rejected, and neutral for finalised payroll. This supersedes
+the automatic-matching row colours above, not the tolerance calculations.
+Show the calculation result separately and retain an explicit approval label.
+Saving a payable correction invalidates approval; it does not approve hours.
+
 ### Owner direction 2026-11-12: operations starts and finishes the shift by phone
 
 - **Record admin start** on the roster starts the officer's real shift in their
