@@ -42105,6 +42105,7 @@ export type Database = {
       correct_timesheet_hours: {
         Args: {
           p_actual_hours: number
+          p_expected_revision: number
           p_expected_status: string
           p_overtime_hours: number
           p_reason: string

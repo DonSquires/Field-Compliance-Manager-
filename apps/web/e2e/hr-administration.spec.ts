@@ -522,11 +522,12 @@ test('administrator finalizes an officer coverage claim into roster ownership', 
 
 test('administrator corrects submitted timesheet hours before review', async ({ page }) => {
   await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, work_derived_hours: 39, adjustment_hours: 0, work_summary: { source_count: 4 }, status: 'submitted', branch_review_notes: null, branch_reviewed_by: null, submitted_at: '2026-08-23T21:30:00Z' }]) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, work_derived_hours: 39, adjustment_hours: 0, work_summary: { source_count: 4 }, status: 'submitted', revision: 4, branch_review_notes: null, branch_reviewed_by: null, submitted_at: '2026-08-23T21:30:00Z' }]) });
   });
   await page.route('**/rest/v1/rpc/correct_timesheet_hours', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
     expect(payload.p_expected_status).toBe('submitted');
+    expect(payload.p_expected_revision).toBe(4);
     expect(payload.p_actual_hours).toBe(40);
     expect(payload.p_overtime_hours).toBe(0);
     expect(payload.p_reason).toBe('Corrected after comparing the signed attendance record.');

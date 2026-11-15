@@ -1246,6 +1246,7 @@ const RosterHRPage: React.FC = () => {
     const { error: correctionError } = await supabase.rpc('correct_timesheet_hours', {
       p_timesheet_id: timesheetCorrection.item.id,
       p_expected_status: timesheetCorrection.item.status,
+      p_expected_revision: timesheetCorrection.item.revision ?? 1,
       p_actual_hours: Number(timesheetCorrection.actualHours),
       p_overtime_hours: Number(timesheetCorrection.overtimeHours),
       p_reason: timesheetCorrection.reason.trim(),
