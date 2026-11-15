@@ -9,14 +9,14 @@ const root = path.join(__dirname, '..');
 const hooks = path.join(root, '.claude', 'hooks');
 const load = (file) => import(pathToFileURL(path.join(hooks, file)).href);
 
-const owner = { 'user.name': 'Don Squires', 'user.email': '256263525+DonSquires@users.noreply.github.com' };
+const owner = { 'user.name': 'DonSquires', 'user.email': 'squires.don@gmail.com' };
 
 async function harness({
   config = owner,
   branch = 'feature/x',
-  headAuthor = 'Don Squires <256263525+DonSquires@users.noreply.github.com>',
-  commitAuthor = () => 'Don Squires <256263525+DonSquires@users.noreply.github.com>',
-  rebaseAuthors = () => ['Don Squires <256263525+DonSquires@users.noreply.github.com>'],
+  headAuthor = 'DonSquires <squires.don@gmail.com>',
+  commitAuthor = () => 'DonSquires <squires.don@gmail.com>',
+  rebaseAuthors = () => ['DonSquires <squires.don@gmail.com>'],
 } = {}) {
   const { evaluate } = await load('guard.mjs');
   const { loadPolicy } = await load('lib.mjs');
@@ -60,8 +60,10 @@ test('shell writes into protected paths are denied, reads and safe redirects are
 
 test('commits must use the verified release identity', async () => {
   const wrong = await harness({ config: { 'user.name': 'Someone', 'user.email': 'don@squires.local' } });
-  assert.match(wrong('Bash', { command: 'git commit -m "x"' }).deny, /git config user.email "256263525\+DonSquires@users\.noreply\.github\.com"/);
-  assert.equal(wrong('Bash', { command: 'git -c user.name="Don Squires" -c user.email=256263525+DonSquires@users.noreply.github.com commit -m x' }), null);
+  assert.match(wrong('Bash', { command: 'git commit -m "x"' }).deny, /git config user.email "squires\.don@gmail\.com"/);
+  assert.equal(wrong('Bash', { command: 'git -c user.name=DonSquires -c user.email=squires.don@gmail.com commit -m x' }), null);
+  const obsolete = await harness({ config: { 'user.name': 'Don Squires', 'user.email': '256263525+DonSquires@users.noreply.github.com' } });
+  assert.ok(obsolete('Bash', { command: 'git commit -m "x"' }).deny);
   const right = await harness();
   assert.equal(right('Bash', { command: 'git add -A && git commit -m "feat: x"' }), null);
   assert.ok(right('Bash', { command: 'git commit --author="Bot <bot@example.com>" -m x' }).deny);

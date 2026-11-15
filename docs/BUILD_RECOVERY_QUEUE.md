@@ -27,15 +27,18 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
 
 ## P0: stop incorrect consequential behavior
 
-- [ ] **R01: deployed rejected-timesheet hours inflation.** PR #513 loads the
+- [x] **R01: deployed rejected-timesheet hours inflation.** PR #513 loads the
   saved total as a new additive adjustment. Reproduce in a focused test, preserve
   the saved adjustment, verify the submitted RPC argument and release the fix.
   PR #515 implements the repair; 27 focused tests independently pass and its
-  reviewed head is signed/verified. CI and production acceptance remain open.
-- [ ] **R02: misleading timesheet Approve/Cancel controls.** Current handlers
+  reviewed head is signed/verified. Merged as `0bf8d171`; all three verification
+  jobs passed and production deployment `7800351726` succeeded. Independent
+  offline desktop/mobile officer workflows: 30 passed. No historical payroll
+  records were changed; authenticated live financial writes were not tested.
+- [x] **R02: misleading timesheet Approve/Cancel controls.** Current handlers
   only show notices. Remove false officer actions rather than granting payroll
   powers; preserve real administrator review and explain the actual state.
-  Included in reviewed PR #515, without a new officer approval permission.
+  Released in PR #515, without a new officer approval permission.
 
 ## P1: recover current work and restore task completion
 
@@ -61,9 +64,12 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   #513 and VB-17 first, then implement settings, generation, staff replies and
   administrator review task by task. No payroll automation without saved rules.
 - [ ] **R08: Vibe blocked-verification self-triage.** Preserve
-  `wt-vibe-self-triage`. Its focused synthetic retry regression passes in
-  network-disabled Linux (one test); full compatibility, review and release
-  remain outstanding. This does not yet prove real browser recovery.
+  `wt-vibe-self-triage`. Recovered the bounded patch after finding six existing
+  compatibility regressions in the abandoned implementation. Corrected module:
+  169 passed, zero failed, two existing container-root permission skips.
+  PR #517 passed all checks and merged as `3a760e61`. Its execution is resident
+  in the control plane, not proved deployed by a Vercel receipt. Governed
+  deployment is blocked by R42. Real browser recovery remains unproven.
 - [ ] **R09: governed failed-turn recovery, PR #496.** Review the existing
   backend contract and UI retry receipt, lost-response behavior and eligibility;
   integrate with R08 without duplicating recovery writers.
@@ -79,7 +85,7 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   Browser/human checks and resulting corrections remain open.
 - [ ] **R12: integration/release hygiene.** This isolated branch was advanced
   to reviewed PR #515 head `cf223456`; the main checkout now tracks released
-  main `5e008d83`, preserving its unrelated untracked files.
+  main `0bf8d171`, preserving its unrelated untracked files.
   Keep signed verified release identity and record deploy/migration receipts.
 
 ## P2: finish or explicitly retire other recent proposals
@@ -160,7 +166,10 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   commercial blockers and distinguish unavailable, stale and successfully empty.
   Independent review also found stale organization responses could overwrite
   the current context and loading lacked announced busy semantics. The same
-  bounded repair is being revised with deferred-response regression tests.
+  bounded repair resolved both findings with deferred-response regression
+  tests. PR #518: 33 focused tests and combined web build pass. Its first
+  browser job reached the suite-wide 180-second limit without an assertion
+  failure; one failed-job retry is running. Do not merge while checks are red.
 - [ ] **R38 (P1): direct pay versus loaded service cost.** The actual-labour
   posting derives from pay, while wording does not explain the missing loaded
   cost boundary. Confirm the intended meaning with the owner before changing
@@ -176,6 +185,22 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   client's place, employee setup and finished-work billing on desktop/narrow
   layouts. Preserve specialist routes; change only labels/defaults/links shown
   to mislead rather than imposing another global page reshuffle.
+
+## Newly confirmed deployment blocker
+
+- [ ] **R42 (P0): obsolete release identity guards.** The installed release
+  lane, Builder publisher, catalog refresher and hook policy still expect the
+  obsolete noreply author, contradicting the owner's exact verified identity.
+  Before: verified release commits exist on main. During: the installed
+  service fails closed (`Result=exit-code`, status 1). After: the governed
+  deployed pointer remains at `56745340`, despite later merged fixes.
+  Correct the exact expected identity without relaxing mismatched-author
+  rejection or signing. Verify all four consumers and bootstrap only the
+  reviewed merged lane script; preserve active work and existing idle checks.
+  Atlas has no matching capability nodes or direct edges for these three
+  script/module names at source `0bf8d171`; flow/FK reach is therefore unknown,
+  not zero. Schema has no matching names. Source proves the shared publication
+  and deployment path. Do not hand-edit Atlas to imply a working deployment.
 
 ## Recovery evidence
 

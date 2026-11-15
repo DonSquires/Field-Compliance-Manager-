@@ -40,8 +40,8 @@
     }
   ],
   "releaseIdentity": {
-    "name": "Don Squires",
-    "email": "256263525+DonSquires@users.noreply.github.com",
+    "name": "DonSquires",
+    "email": "squires.don@gmail.com",
     "reason": "Vercel only deploys commits authored by the verified owner identity (see AGENTS.md, release identity)."
   },
   "protectedBranches": [

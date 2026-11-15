@@ -10,8 +10,8 @@ const VIBE_BRANCH_PREFIX = 'bob/vibe-';
 const isPublishableBranch = name => /^bob\/(?:job|vibe)-[a-z0-9]+$/.test(String(name));
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
-const VERIFIED_GITHUB_NAME = 'Don Squires';
-const VERIFIED_GITHUB_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+const VERIFIED_GITHUB_NAME = 'DonSquires';
+const VERIFIED_GITHUB_EMAIL = 'squires.don@gmail.com';
 
 function builderCommitIdentity({ requireVerified = false } = {}) {
   const name = String(process.env.BOB_BUILDER_GIT_NAME || BUILDER_NAME).trim();

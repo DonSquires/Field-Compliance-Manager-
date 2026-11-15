@@ -59,7 +59,7 @@ test('a changed live catalog is committed with the verified identity, pushed, op
   assert.equal(result.number, 7);
   assert.deepEqual(result.files.sort(), ['src/types/database.ts', 'supabase/schema.sql']);
   const branch = `bob/catalog-${fx.base.slice(0, 8)}`;
-  const identity = Array(2).fill('Don Squires <256263525+DonSquires@users.noreply.github.com>');
+  const identity = Array(2).fill('DonSquires <squires.don@gmail.com>');
   assert.deepEqual(fx.git(fx.root, `--git-dir=${fx.remote}`, 'log', '-1', '--format=%an <%ae>%n%cn <%ce>', branch).split('\n'), identity);
   assert.match(fx.git(fx.root, `--git-dir=${fx.remote}`, 'show', `${branch}:supabase/schema.sql`), /create table b/);
   const merge = api.calls.find(call => call.url.endsWith('/merge'));
@@ -72,7 +72,7 @@ test('catalog refresh refuses a mismatched configured Git identity before contac
   const { refreshCatalog } = await load();
   const api = fakeApi();
   for (const mismatch of [
-    { GIT_AUTHOR_EMAIL: 'squires.don@gmail.com' },
+    { GIT_AUTHOR_EMAIL: '256263525+DonSquires@users.noreply.github.com' },
     { GIT_COMMITTER_NAME: 'GitHub' },
   ]) {
     await assert.rejects(refreshCatalog({
