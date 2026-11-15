@@ -3,6 +3,25 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('client profile switches between details and locations without losing a draft', async ({ page }) => {
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  const profile = page.getByRole('region', { name: 'Selected client' });
+  await profile.getByLabel('Client name', { exact: true }).fill('Civic Events draft');
+  await profile.getByRole('button', { name: 'Locations', exact: true }).click();
+  await expect(profile.getByRole('region', { name: 'Client locations' })).toBeVisible();
+  await expect(profile.getByRole('form', { name: 'Client details' })).toBeHidden();
+  await profile.getByRole('button', { name: 'Details', exact: true }).click();
+  await expect(profile.getByLabel('Client name', { exact: true })).toHaveValue('Civic Events draft');
+  await profile.getByRole('button', { name: 'Activity', exact: true }).click();
+  const accountWorkspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await expect(accountWorkspace.locator('.crm-workspace-toolbar').nth(1)).toContainText('Relationship timeline');
+  await accountWorkspace.getByRole('button', { name: /Finance/ }).click();
+  await expect(accountWorkspace.locator('.crm-workspace-toolbar').nth(1)).toContainText('Finance');
+  await accountWorkspace.getByRole('button', { name: 'Close client portfolio' }).click();
+  await expect(profile.getByLabel('Client name', { exact: true })).toHaveValue('Civic Events draft');
+});
+
 test('operating branch selector is visible and switches the session context', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   const selector = page.getByLabel('Working in');

@@ -23,27 +23,32 @@ interface Props {
   onDirtyChange?: (dirty: boolean) => void;
   onNavigate: NavigateWithContext;
   onOpenDetails?: () => void;
+  visibleSection?: 'details' | 'locations';
 }
+
+let returnLocationList: { actorId: string; providerId: string; accountId: string; search: string; offset: number } | null = null;
 
 export function ServiceClientWorkspace(props: Props) {
   const { profile, operatingOrganizationId } = useAuth();
   const location = useLocation();
   const account = props.accountId ?? new URLSearchParams(location.search).get('account') ?? '';
   const provider = props.providerOrganizationId ?? readWorkflowContext(location.search).providerId ?? operatingOrganizationId ?? profile?.organizationId;
-  if (!provider || !isAdminTierRole(profile?.role)) return <p role="alert">Provider administrator access is required to set up a client.</p>;
-  return <ClientEditor key={`${provider}:${account}`} {...props} accountId={account} providerId={provider} />;
+  if (!provider || !profile || !isAdminTierRole(profile.role)) return <p role="alert">Provider administrator access is required to set up a client.</p>;
+  return <ClientEditor key={`${profile.id}:${provider}:${account}`} {...props} accountId={account} providerId={provider} actorId={profile.id} />;
 }
 
-function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNavigate, onOpenDetails }: Props & { providerId: string }) {
+function ClientEditor({ accountId, providerId, actorId, embedded, onDirtyChange, onNavigate, onOpenDetails, visibleSection }: Props & { providerId: string; actorId: string }) {
   const navigate = useNavigate();
   const route = useLocation();
+  const savedList = returnLocationList?.actorId === actorId && returnLocationList.providerId === providerId
+    && returnLocationList.accountId === accountId ? returnLocationList : null;
   const [client, setClient] = useState<Client | null>(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '' });
   const [engaged, setEngaged] = useState(false);
   const [engagementSaved, setEngagementSaved] = useState(false);
   const [places, setPlaces] = useState<FieldPlaceWorkspace | null>(null);
-  const [search, setSearch] = useState('');
-  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState(savedList?.search ?? '');
+  const [offset, setOffset] = useState(savedList?.offset ?? 0);
   const [adding, setAdding] = useState(false);
   const [placeName, setPlaceName] = useState('');
   const [isZone, setIsZone] = useState(false);
@@ -59,6 +64,11 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
   const request = useRef(crypto.randomUUID());
   const placeRequest = useRef(crypto.randomUUID());
   const hasDraft = dirty || (adding && Boolean(placeName.trim()));
+
+  useEffect(() => {
+    if (returnLocationList?.actorId === actorId && returnLocationList.providerId === providerId
+      && returnLocationList.accountId === accountId) returnLocationList = null;
+  }, [accountId, actorId, providerId]);
 
   useEffect(() => {
     if (client || form.name.trim().length < 3) { setMatches([]); return; }
@@ -131,8 +141,11 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
   };
   const leave = useCallback((destination: string, locationId?: string) => {
     if (hasDraft && !window.confirm('Leave without saving the client or new-location changes?')) return;
+    if (destination === 'locations' && locationId && client) {
+      returnLocationList = { actorId, providerId, accountId: client.id, search, offset };
+    }
     onNavigate(destination, { accountId: client?.id, locationId, providerId });
-  }, [hasDraft, client?.id, providerId, onNavigate]);
+  }, [hasDraft, client, actorId, providerId, search, offset, onNavigate]);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -180,7 +193,7 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
       {matches.map(match => <button key={match.id} type="button" onClick={() => {
         if (!dirty || window.confirm('Discard this new-client draft and open the existing client?')) onNavigate('client-setup', { accountId: match.id, providerId });
       }}>{match.name}</button>)}</section>}
-    <form onSubmit={event => void save(event)} aria-label="Client details">
+    <div hidden={visibleSection === 'locations'}><form onSubmit={event => void save(event)} aria-label="Client details">
       <fieldset disabled={busy || Boolean(accountId && !client)}>
         <div className="place-fields">
           <label>Client name<input required maxLength={200} value={form.name} onChange={event => change('name', event.target.value)} /></label>
@@ -195,8 +208,8 @@ function ClientEditor({ accountId, providerId, embedded, onDirtyChange, onNaviga
         <div className="place-actions"><button className="btn btn-primary" type="submit" disabled={!form.name.trim() || (!client && !engaged)}>{busy ? 'Saving...' : 'Save client'}</button>
           {client && <button type="button" onClick={() => onOpenDetails ? onOpenDetails() : leave('relationships')}>Contacts, agreement and invitation</button>}</div>
       </fieldset>
-    </form>
-    <section className="place-section" aria-label="Client locations">
+    </form></div>
+    <section className="place-section" aria-label="Client locations" hidden={visibleSection === 'details'}>
       <header><h2>Locations</h2><button type="button" disabled={!client || !engagementSaved || busy} onClick={() => setAdding(true)}>Add location</button></header>
       {!client ? <p>Save the client to add locations.</p> : !engagementSaved ? <p>Confirm the operational engagement above to add and use locations.</p> : <>
         <label>Search locations<input type="search" value={search} onChange={event => { setSearch(event.target.value); setOffset(0); }} /></label>

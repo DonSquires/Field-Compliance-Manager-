@@ -113,6 +113,18 @@ test('one-page client setup adds a location and opens its editable home profile'
   expect(errors).toEqual([]);
 });
 
+test('returning from a location preserves the client location search', async ({ page }) => {
+  await workspace(page);
+  await signInAsAdmin(page, `/admin/client-setup?account=${CLIENT}`);
+  const locations = page.getByRole('region', { name: 'Client locations' });
+  await locations.getByLabel('Search locations').fill('Main');
+  await locations.getByRole('button', { name: 'Main yard', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Main yard', exact: true, level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: 'Client and locations' }).click();
+  await expect(locations.getByLabel('Search locations')).toHaveValue('Main');
+  await expect(locations.getByRole('button', { name: 'Main yard', exact: true })).toBeVisible();
+});
+
 test('officer without specialty ticks verifies a corrected 10m point and admin sees the receipt', async ({ page }) => {
   const { writes } = await workspace(page);
   const errors = monitorBrowserErrors(page);
