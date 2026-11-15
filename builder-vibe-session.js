@@ -1797,12 +1797,20 @@ async function runConversation({ store, session, message, workspacePath, branch,
       await ensureHumanTest();
       const failure = lastVerification?.failed ? failureSignature() : null;
       const repairProgressed = verificationCorrections === 0 || failure !== correctedFailure || effectiveEdits > editsAtCorrection;
-      if (lastVerification?.failed && !args.blocked_reason && verificationCorrections < repairRounds && repairProgressed) {
+      const blocker = String(args.blocked_reason || '');
+      const humanBoundary = /\b(?:human[- ]only|(?:owner|human|product) decision|approval|consent|authori[sz]ation|credentials?|password|access token|MFA|2FA|(?:access|permission) denied|lacks? permission)\b/i.test(blocker)
+        || /\b(?:owner|human)\b[^.!?\n]{0,80}\b(?:choose|decide|confirm|grant)\b/i.test(blocker)
+        || /\b(?:need|needs|require|requires|await|awaiting|waiting for)\b[^.!?\n]{0,60}\b(?:access|permissions?|grant)\b/i.test(blocker);
+      // Only a fresh failure gets one chance to triage a premature blocker, not status replies or reused walks.
+      const selfTriage = args.blocked_reason && executedTools > 0 && !lastVerification?.historical
+        && !(lastVerification?.command === 'human_test' && humanTestRan?.reused)
+        && !humanBoundary && verificationCorrections === 0;
+      if (lastVerification?.failed && (!args.blocked_reason || selfTriage) && verificationCorrections < repairRounds && repairProgressed) {
         verificationCorrections += 1;
         correctedFailure = failure;
         editsAtCorrection = effectiveEdits;
         const correction = {
-          error: `Handoff refused: the latest verification failed (repair round ${verificationCorrections} of ${repairRounds}). Read the exact failure, fix its cause in source, and rerun the check, or reply with args.blocked_reason explaining why this remains unverified. A reply with no new edit and the same failure is handed to the owner as unverified.`,
+          error: `Handoff refused: the latest verification failed (repair round ${verificationCorrections} of ${repairRounds}). Self-triage the exact output with one bounded diagnostic step: inspect the failure and current diff, then fix source only if evidence ties the failure to changed code and rerun the relevant check. For browser timeouts use a narrow spec or pinned-base comparison; do not repeat an unchanged full walk or weaken assertions. Stop for human-only access, approval or product decisions; do not broaden permissions or use live data. If a safe attempt cannot resolve the failure, reply with args.blocked_reason preserving the exact unresolved evidence and unknown causality. A reply with no new edit and the same failure is handed to the owner as unverified.`,
           verification: lastVerification,
         };
         const cloudVerification = cloudSafeVerification(lastVerification);
