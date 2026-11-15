@@ -192,7 +192,67 @@ test('approved and rejected source hours offer correction but finalised evidence
   await expect(records.nth(0).getByRole('button', { name: /Edit shift hours/ })).toBeVisible();
   await expect(records.nth(1).getByRole('button', { name: /Edit shift hours/ })).toBeVisible();
   await expect(records.nth(2).getByRole('button', { name: /Edit shift hours/ })).toHaveCount(0);
+  await expect(records.nth(2).getByRole('button', { name: /Approve shift hours|Reject shift hours/ })).toHaveCount(0);
   await expect(records.nth(2)).toContainText('An amendment is required');
+});
+
+test('a corrected row offers approval and changes colour with the persisted human review decision', async ({ page }) => {
+  const rows = [shift({ review_status: 'rejected' })];
+  const corrections: Record<string, unknown>[] = [];
+  await openShiftReview(page, rows);
+  await page.route('**/rest/v1/rpc/correct_reviewed_timesheet_shift_hours', async route => {
+    const request = route.request().postDataJSON();
+    corrections.push(request);
+    if (corrections.length === 1) {
+      await route.fulfill({ status: 503, json: failure });
+      return;
+    }
+    rows[0] = shift({ review_status: 'needs_review', hours_status: 'review', source_revision: 'b'.repeat(32) });
+    await route.fulfill({ json: { shift_id: rows[0].id, staff_id: rows[0].staff_id, hours_status: 'review' } });
+  });
+  await page.route('**/rest/v1/rpc/review_shift_timesheet_hours', async route => {
+    const request = route.request().postDataJSON();
+    expect(request.p_rows).toEqual([{ shift_id: rows[0].id, source_revision: 'b'.repeat(32), review_revision: rows[0].review_revision }]);
+    rows[0] = { ...rows[0], review_status: request.p_decision, review_revision: rows[0].review_revision + 1 };
+    await route.fulfill({ json: { request_id: request.p_client_request_id, decision: request.p_decision,
+      shift_count: 1, shift_ids: [rows[0].id] } });
+  });
+  const record = page.getByRole('row').filter({ hasText: 'Fixture workplace' });
+  const rowColour = () => record.locator('td').first().evaluate(cell => getComputedStyle(cell).backgroundColor);
+  const rejectedColour = await rowColour();
+  await record.getByRole('button', { name: /Edit shift hours/ }).click();
+  const edit = page.getByRole('dialog', { name: 'Payable shift hours' });
+  await edit.getByRole('button', { name: 'Use roster dates and times' }).click();
+  await edit.getByLabel('Reason for correction').fill('Use verified roster dates and times');
+  await edit.getByRole('button', { name: 'Save for review' }).click();
+  await expect(edit.getByRole('alert')).toContainText('Synthetic payroll response lost');
+  await expect(edit.getByLabel('Reason for correction')).toHaveValue('Use verified roster dates and times');
+  await edit.getByRole('button', { name: 'Save for review' }).click();
+  await expect(edit).toHaveCount(0);
+  expect(corrections[0].p_client_request_id).toBe(corrections[1].p_client_request_id);
+  await expect(record).toContainText('Approval: Awaiting approval');
+  const pendingColour = await rowColour();
+  expect(pendingColour).not.toBe(rejectedColour);
+  await record.getByRole('button', { name: 'Approve shift hours for Fixture staff', exact: true }).click();
+  const approve = page.getByRole('dialog', { name: 'Approve shift hours' });
+  await expect(approve.getByRole('button', { name: 'Confirm hours approval' })).toBeDisabled();
+  await approve.getByLabel('Reason for hours review').fill('Roster and break checked');
+  await approve.getByRole('button', { name: 'Confirm hours approval' }).click();
+  await expect(approve).toHaveCount(0);
+  await expect(record).toContainText('Approval: Approved');
+  const approvedColour = await rowColour();
+  expect(approvedColour).not.toBe(pendingColour);
+  expect(approvedColour).not.toBe(rejectedColour);
+  await page.reload();
+  await expect(record).toContainText('Approval: Approved');
+  expect(await rowColour()).toBe(approvedColour);
+  await record.getByRole('button', { name: 'Reject shift hours for Fixture staff', exact: true }).click();
+  const reject = page.getByRole('dialog', { name: 'Reject shift hours' });
+  await reject.getByLabel('Reason for hours review').fill('Source needs another review');
+  await reject.getByRole('button', { name: 'Confirm hours rejection' }).click();
+  await expect(record).toContainText('Approval: Rejected');
+  expect(await rowColour()).toBe(rejectedColour);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('client hours use an agreement client and exclude employee numbers, wages and private notes', async ({ page }) => {

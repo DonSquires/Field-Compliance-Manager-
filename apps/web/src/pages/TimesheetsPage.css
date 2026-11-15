@@ -3,9 +3,15 @@
 .timesheets-page > .page-header h1 { margin:0; font-size:20px; font-weight:700; }
 .timesheets-page > .page-header .subtitle { margin:2px 0 0; font-size:12px; color:#8fa3b8; }
 .timesheets-page .back-btn { flex-shrink:0; }
-.timesheets-table .shift-hours-confirmed > td { background:var(--color-success-bg); }
-.timesheets-table .shift-hours-review > td { background:var(--color-warning-bg); }
-.timesheets-table .shift-hours-missed > td { background:var(--color-status-critical-bg); }
+.timesheets-table .shift-approval-approved > td { background:var(--color-success-bg); }
+.timesheets-table .shift-approval-needs_review > td { background:var(--color-warning-bg); }
+.timesheets-table .shift-approval-rejected > td { background:var(--color-status-critical-bg); }
+.timesheets-table .shift-approval-finalised > td { background:var(--color-bg-surface); }
+.shift-approval-approved .shift-approval-label { color:var(--color-success); }
+.shift-approval-needs_review .shift-approval-label { color:var(--color-warning); }
+.shift-approval-rejected .shift-approval-label { color:var(--color-danger); }
+.shift-hours-actions { display:flex; flex-wrap:wrap; gap:8px; min-width:140px; }
+.shift-hours-actions button { min-width:44px; min-height:44px; }
 .timesheets-page .modal-content { width:min(600px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:auto; }
 .shift-hours-dialog { padding:20px; color:var(--color-text-primary); }
 .shift-hours-dialog::backdrop { background:rgba(2,7,14,.78); }
