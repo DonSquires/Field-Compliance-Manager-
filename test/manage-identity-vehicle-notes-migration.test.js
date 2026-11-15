@@ -16,6 +16,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-enterprise-inference-
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-inference-claim-gate-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./cctv-recognition-quality-gates.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./timesheet-submission-concurrency-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./timesheet-approved-correction-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./website-page-view-analytics-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./website-posts-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-breadcrumb-admin-officer-migration.test');
