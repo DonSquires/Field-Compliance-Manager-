@@ -152,8 +152,15 @@ const OfficerTimesheetPage: React.FC = () => {
   }, [profile?.id, profile?.organizationId, periodValid, previewKey, previewRetry, form.periodStart, form.periodEnd]);
 
   const workedMinutes = workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0);
-  const workedHours = workedMinutes / 60;
-  const paidHours = workEntries.reduce((total, entry) => total + (entry.calculated_minutes / 60), 0);
+  const sumTimesheetHours = (getHours: (timesheet: Timesheet) => number | null): number | null => {
+    if (loading || listUnavailable || refreshingList) return null;
+    return timesheets.reduce<number | null>((total, timesheet) => {
+      const value = getHours(timesheet);
+      return total === null || value === null || !Number.isFinite(value) ? null : total + value;
+    }, 0);
+  };
+  const workedHours = sumTimesheetHours(timesheetWorkedHours);
+  const paidHours = sumTimesheetHours(timesheetPaidHours);
   const shiftCount = workEntries.filter((entry) => entry.source_type === 'shift').length;
 
   const handleApproveTimesheet = (_id: string) => {
