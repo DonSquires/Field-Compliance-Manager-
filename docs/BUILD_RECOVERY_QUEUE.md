@@ -11,8 +11,9 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
 ## Working rules
 
 - Preserve uncommitted work. A crashed chat is not permission to discard its files.
-- Leave VB-17 running. Recheck VB-18 after VB-17 finishes; do not assume one fixes
-  the other or start duplicate work.
+- Do not interrupt active Builder/Vibe work. VB-17 has now closed; review its
+  proposal and check VB-18 separately rather than assuming one fixes the other
+  or starting duplicate work.
 - Evaluate UX from the user's job: where to start, what to enter, how records
   relate, where to find them again and what confirms completion. Existing page
   boundaries and historical UI canon are hypotheses, not acceptance evidence.
@@ -42,9 +43,16 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
 
 ## P1: recover current work and restore task completion
 
-- [ ] **R03: VB-17 / VB-18.** VB-17 is active on timesheet UI; leave it alone,
-  inspect its final diff/receipt, then check VB-18 separately. Accept only real
-  persisted outcomes and error/recovery states. Neither is assumed resolved.
+- [ ] **R03: VB-17 / VB-18.** VB-17 closed and produced PR #519, currently
+  reviewed at `15962555`. A confirmed branch-review blocker remains: both
+  `get_branch_timesheet_queue` overloads omit the revision required by the
+  correction RPC, while the caller invents revision one when it is absent.
+  The browser fixture supplies a revision the actual queue does not return.
+  Live catalog inspection confirms the missing projection. The finding is
+  recorded on [the proposal](https://github.com/DonSquires/Field-Compliance-Manager-/pull/519#issuecomment-6891754579);
+  do not merge until the real queue-to-correction path has a regression test
+  and works with revisions above one. The exact VB-18 lookup still returns
+  no row; the owner's report remains unresolved, not disproved.
 - [ ] **R04: location checkpoint reader.** Preserve and review
   `wt-checkpoint-map-fix`, including its migration, schema-function files and
   regression test. Establish whether the reader ambiguity reproduces, then
@@ -69,7 +77,10 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   169 passed, zero failed, two existing container-root permission skips.
   PR #517 passed all checks and merged as `3a760e61`. Its execution is resident
   in the control plane, not proved deployed by a Vercel receipt. Governed
-  deployment is blocked by R42. Real browser recovery remains unproven.
+  runtime deployment is now verified at `623981e9`: successful ledger receipt,
+  restarted control plane, exact merged module hash and healthy HTTP endpoint
+  at 08:44 UTC. Real blocked-browser-turn recovery remains unproven; retain
+  this item for workflow acceptance rather than equating delivery with recovery.
 - [ ] **R09: governed failed-turn recovery, PR #496.** Review the existing
   backend contract and UI retry receipt, lost-response behavior and eligibility;
   integrate with R08 without duplicating recovery writers.
@@ -85,7 +96,7 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   Browser/human checks and resulting corrections remain open.
 - [ ] **R12: integration/release hygiene.** This isolated branch was advanced
   to reviewed PR #515 head `cf223456`; the main checkout now tracks released
-  main `0bf8d171`, preserving its unrelated untracked files.
+  main `623981e9`, preserving its unrelated untracked files.
   Keep signed verified release identity and record deploy/migration receipts.
 
 ## P2: finish or explicitly retire other recent proposals
@@ -159,17 +170,20 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   overview, not an invoice queue. Follow the generated draft into an existing
   authorized invoice view; verify the exact returned document and no implicit
   send. Reconcile CRM #514 before changing that destination.
-- [ ] **R37 (P1): false-clear completed-work billing state.** An initial query
+- [x] **R37 (P1): false-clear completed-work billing state.** An initial query
   error can coexist with "Everything finished has been billed"; a refresh
   failure can leave stale rows. Also, ready-only queries cannot prove everything
-  is billed. Bounded repair and regression tests are in progress. Preserve
+  is billed. The bounded repair and regression tests preserve
   commercial blockers and distinguish unavailable, stale and successfully empty.
   Independent review also found stale organization responses could overwrite
   the current context and loading lacked announced busy semantics. The same
   bounded repair resolved both findings with deferred-response regression
-  tests. PR #518: 33 focused tests and combined web build pass. Its first
+  tests. PR #518: 33 focused tests and combined web build passed. Its first
   browser job reached the suite-wide 180-second limit without an assertion
-  failure; one failed-job retry is running. Do not merge while checks are red.
+  failure; the single failed-job retry passed. All required checks passed and
+  the proposal merged as `e2273b64`. Production deployment `7800856224`
+  succeeded at 08:31:45 UTC. No live invoice-generation or financial writes
+  were used for acceptance.
 - [ ] **R38 (P1): direct pay versus loaded service cost.** The actual-labour
   posting derives from pay, while wording does not explain the missing loaded
   cost boundary. Confirm the intended meaning with the owner before changing
@@ -186,10 +200,10 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   layouts. Preserve specialist routes; change only labels/defaults/links shown
   to mislead rather than imposing another global page reshuffle.
 
-## Newly confirmed deployment blocker
+## Deployment repair and acceptance
 
-- [ ] **R42 (P0): obsolete release identity guards.** The installed release
-  lane, Builder publisher, catalog refresher and hook policy still expect the
+- [x] **R42 (P0): obsolete release identity guards.** The installed release
+  lane, Builder publisher, catalog refresher and hook policy expected the
   obsolete noreply author, contradicting the owner's exact verified identity.
   Before: verified release commits exist on main. During: the installed
   service fails closed (`Result=exit-code`, status 1). After: the governed
@@ -201,6 +215,18 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   script/module names at source `0bf8d171`; flow/FK reach is therefore unknown,
   not zero. Schema has no matching names. Source proves the shared publication
   and deployment path. Do not hand-edit Atlas to imply a working deployment.
+  PR #520 corrected all four exact-identity consumers without relaxing
+  rejection, signing or protected-main requirements. All required checks
+  passed; protected rebase merge `623981e9` completed at 08:37:26 UTC.
+  The owner's separate approval covered exactly the two non-secret runtime
+  author fields, which are now verified in the running container. The
+  checksum-verified reviewed lane script was installed without a forced
+  control-plane restart. Its first activity check failed safely; the existing
+  timer retried and completed at `2026-11-15T08:44:28.861Z`.
+  The governed deployed pointer and successful ledger both name `623981e9`;
+  the restarted control plane's Vibe and publication module hashes match that
+  merged source and HTTP health is `ok`. No migration was part of this release.
+  Vercel deployment `7800922509` separately succeeded at 08:38:18 UTC.
 
 ## Recovery evidence
 
@@ -225,6 +251,7 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   same counts. Scoped preflights now contain some raw `exercised=true` map
   values, unlike the older entirely-unpopulated warning. These values still
   do not prove an invocation or successful task completion.
-- VB-17 was still active at the latest read. No VB-18 row was returned by the
-  exact-reference lookup; keep the owner's report as an unresolved lead.
+- VB-17 is now closed; its proposal and confirmed missing queue revision are
+  tracked under R03. No VB-18 row was returned by the exact-reference lookup;
+  keep the owner's report as an unresolved lead.
 - Pending items above remain unchecked until their specific evidence is recorded.
