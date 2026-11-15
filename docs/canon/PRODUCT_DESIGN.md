@@ -10,6 +10,27 @@
 > This document is the single source of truth for all design decisions.  
 > If code conflicts with this document, the code is wrong.
 
+### Owner ruling 2026-11-15: reassess inherited UI through human tasks
+
+The owner has reopened the inherited UI/UX design. Its accumulated page
+boundaries, navigation and entry paths are not proof of a coherent experience.
+Review them independently by whether people can understand related records,
+complete data entry, find records again and finish their work without getting
+lost between workspaces.
+
+Use the approved Client Data & Setup, Workforce and Finance direction as the
+administrative organizing model. Correct verified errors and misleading
+controls as they are found. For wider consolidation, record the observed human
+problem, alternatives, chosen design and end-to-end acceptance evidence rather
+than bolting another disconnected page onto the existing layout.
+
+This reopens presentation and interaction decisions, not tenant isolation,
+authorization, privacy, audit, financial authority, historical evidence or
+safety controls. Atlas and the schema still establish real data paths; neither
+an Atlas flag nor conformity with an old screen is evidence of usable behavior.
+Track interrupted work and resulting corrections in
+[`BUILD_RECOVERY_QUEUE.md`](../BUILD_RECOVERY_QUEUE.md).
+
 ### Owner ruling 2026-11-07: Staff Profile is the workforce record of action
 
 After a hire is confirmed, Staff Profile is the primary place to complete and
