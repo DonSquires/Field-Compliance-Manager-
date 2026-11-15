@@ -24,6 +24,7 @@ interface Timesheet {
   scheduled_hours: number | null;
   work_derived_hours: number | null;
   actual_hours: number | null;
+  adjustment_hours: number | null;
   overtime_hours: number;
   status: string;
   review_notes: string | null;
@@ -57,7 +58,7 @@ export const hoursAndMinutes = (minutes: number) => `${Math.floor(minutes / 60)}
 const dateWords = (value: string) => new Date(value).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
 const timeWords = (value: string) => new Date(value).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' });
 const hours = (value: number | null | undefined) => value == null ? '–' : `${Number(value).toFixed(2)} h`;
-const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, work_derived_hours, actual_hours, overtime_hours, status, review_notes, approved_at, submitted_at';
+const TIMESHEET_COLUMNS = 'id, period_start, period_end, scheduled_hours, work_derived_hours, actual_hours, adjustment_hours, overtime_hours, status, review_notes, approved_at, submitted_at';
 
 const OfficerTimesheetPage: React.FC = () => {
   const location = useLocation();
@@ -163,14 +164,6 @@ const OfficerTimesheetPage: React.FC = () => {
   const paidHours = sumTimesheetHours(timesheetPaidHours);
   const shiftCount = workEntries.filter((entry) => entry.source_type === 'shift').length;
 
-  const handleApproveTimesheet = (_id: string) => {
-    setNotice('Timesheet approvals are handled in the admin review flow.');
-  };
-
-  const handleCancelTimesheet = (_id: string) => {
-    setNotice('Timesheet approvals are handled in the admin review flow.');
-  };
-
   const handleEditTimesheet = (id: string) => {
     const selected = timesheets.find((timesheet) => timesheet.id === id);
     if (!selected) return;
@@ -178,7 +171,7 @@ const OfficerTimesheetPage: React.FC = () => {
       ...current,
       periodStart: selected.period_start,
       periodEnd: selected.period_end,
-      adjustmentHours: String(selected.actual_hours ?? selected.work_derived_hours ?? 0),
+      adjustmentHours: String(selected.adjustment_hours ?? 0),
     }));
     setNotice('Loaded this timesheet into the submission form for editing.');
   };
@@ -362,8 +355,6 @@ const OfficerTimesheetPage: React.FC = () => {
               {t.submitted_at && <small className="timesheet-review-note">{submittedWords(t.submitted_at)}</small>}
               {t.review_notes && <small className="timesheet-review-note"><strong>Review note:</strong> {t.review_notes}{t.approved_at ? ` · ${new Date(t.approved_at).toLocaleString('en-NZ')}` : ''}</small>}
               <div className="action-buttons">
-                {t.status === 'pending' && <button className="btn btn-sm btn-secondary" onClick={() => handleApproveTimesheet(t.id)}>Approve</button>}
-                {t.status === 'approved' && <button className="btn btn-sm btn-danger" onClick={() => handleCancelTimesheet(t.id)}>Cancel</button>}
                 {t.status === 'rejected' && <button className="btn btn-sm btn-primary" onClick={() => handleEditTimesheet(t.id)}>Edit</button>}
               </div>
             </td>

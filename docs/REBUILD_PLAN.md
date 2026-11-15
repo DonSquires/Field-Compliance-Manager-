@@ -314,6 +314,20 @@ Website hub, news publishing and Expo preparation, 2026-11-02 (local acceptance)
   separately approved/published notice; PRIV-01 and that approval boundary are
   unchanged. Payroll PR #338 remains deliberately paused for this priority.
 
+Officer rejected-timesheet hotfix, 2026-11-15 (R01/R02, local acceptance only):
+
+- Rejected Edit reads the saved `adjustment_hours`, defaulting to zero only
+  when absent. It never uses paid or work-derived totals as a new additive
+  adjustment; the existing correction RPC still recalculates finished work.
+- Officer history no longer offers notice-only Approve/Cancel actions.
+  Rejected Edit, status, review feedback and the authorized manual submission
+  path remain; payroll authority and administrator review are unchanged.
+- Focused component regressions click Edit and submit through the real helper
+  to the mocked RPC boundary, checking saved zero/nonzero adjustments and
+  absent-value fallback. This is not the automatic-timesheet feature, a live
+  payroll write, deployment evidence or permission to bypass receipt/list
+  recovery.
+
 Timesheet preview and uncertain-receipt recovery, 2026-11-02 (local acceptance):
 
 - **Before:** a late response for an earlier period could replace the selected
