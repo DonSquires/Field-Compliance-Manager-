@@ -51,19 +51,30 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   The browser fixture supplies a revision the actual queue does not return.
   Live catalog inspection confirms the missing projection. The finding is
   recorded on [the proposal](https://github.com/DonSquires/Field-Compliance-Manager-/pull/519#issuecomment-6891754579);
-  the now-live queue contract still omits revision. A forward projection
-  repair is locally verified: the disposable PostgreSQL regression first
+  the pre-repair live queue contract omitted revision. The forward projection
+  repair in PR #523 is verified: the disposable PostgreSQL regression first
   failed with both revisions absent, then passed using the actual queue's
   revision seven to correct hours, returning revision eight and rejecting
   stale reuse after reapproval. Date/staff filters, unauthorized access,
   correction audit history and exact queue execute ACLs remain covered.
-  Protected publication and governed migration acceptance remain pending.
+  All runtime/migration, web and offline browser CI checks passed. Protected
+  rebase merge `e4926b92` completed at 09:18:16 UTC; governed migration
+  acceptance remains pending.
   The exact VB-18 lookup still returns no row; the owner's report remains
   unresolved, not disproved.
-- [ ] **R04: location checkpoint reader.** Preserve and review
-  `wt-checkpoint-map-fix`, including its migration, schema-function files and
-  regression test. Establish whether the reader ambiguity reproduces, then
-  finish or record why the existing patch is superseded.
+- [ ] **R04: location checkpoint reads and edits.** Preserved
+  `wt-checkpoint-map-fix` untouched. Both actual reader and manager RPCs fail
+  for an authorized synthetic actor because their output `id` conflicts with
+  an unqualified profile lookup. The error blocks the operational place
+  editor's loading path. A new forward migration qualifies the actor and
+  manager lookups; normalized definitions match the originals except for
+  table aliases/qualified columns. Permanent disposable PostGIS regression
+  failed on the actual ambiguity before the repair, then passed direct and
+  legacy Site/Zone reads, custody filtering, denied officer/inactive/foreign
+  access, create/replay, rename/status, geometry verification reset, history,
+  audit and unchanged execute ACLs. Five focused tests pass. Authority helpers
+  are synthetic fixtures, not proof of full production policy or visual map
+  acceptance. CI, protected publication and governed live acceptance remain.
 - [ ] **R05: officer gate/checkpoint capture.** Preserve and review
   `wt-officer-gate-capture`; verify geometry meaning, actor/tenant authority,
   provenance, retries and the actual officer entry path before release.
