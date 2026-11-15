@@ -43,16 +43,23 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
 
 ## P1: recover current work and restore task completion
 
-- [ ] **R03: VB-17 / VB-18.** VB-17 closed and produced PR #519, currently
-  reviewed at `15962555`. A confirmed branch-review blocker remains: both
+- [ ] **R03: VB-17 / VB-18.** VB-17 closed and produced PR #519, reviewed at
+  `15962555`. Its existing integration lane merged it as `1aa9f1e9` at
+  08:48:03 UTC while the reported branch-review blocker remained: both
   `get_branch_timesheet_queue` overloads omit the revision required by the
   correction RPC, while the caller invents revision one when it is absent.
   The browser fixture supplies a revision the actual queue does not return.
   Live catalog inspection confirms the missing projection. The finding is
   recorded on [the proposal](https://github.com/DonSquires/Field-Compliance-Manager-/pull/519#issuecomment-6891754579);
-  do not merge until the real queue-to-correction path has a regression test
-  and works with revisions above one. The exact VB-18 lookup still returns
-  no row; the owner's report remains unresolved, not disproved.
+  the now-live queue contract still omits revision. A forward projection
+  repair is locally verified: the disposable PostgreSQL regression first
+  failed with both revisions absent, then passed using the actual queue's
+  revision seven to correct hours, returning revision eight and rejecting
+  stale reuse after reapproval. Date/staff filters, unauthorized access,
+  correction audit history and exact queue execute ACLs remain covered.
+  Protected publication and governed migration acceptance remain pending.
+  The exact VB-18 lookup still returns no row; the owner's report remains
+  unresolved, not disproved.
 - [ ] **R04: location checkpoint reader.** Preserve and review
   `wt-checkpoint-map-fix`, including its migration, schema-function files and
   regression test. Establish whether the reader ambiguity reproduces, then
