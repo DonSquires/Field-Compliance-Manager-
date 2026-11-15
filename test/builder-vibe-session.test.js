@@ -1733,6 +1733,104 @@ test('no_change_reason is honoured even before any tool runs', async () => {
   assert.match(result.reply, /The previous message already restored the greeting\./);
 });
 
+test('a blocked response with failed verification gets one bounded self-triage retry', async t => {
+  const command = 'node --test test/vibe-self-triage.test.js';
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'run', args: { command } },
+    { tool: 'reply', args: { blocked_reason: 'The browser startup timeout needs an owner to interpret.' } },
+    { tool: 'run', args: { command } },
+    { tool: 'reply', args: { message: 'The targeted check passed on retry; the first timeout was transient.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(repo.dir, 'test'), { recursive: true });
+  fs.writeFileSync(path.join(repo.dir, 'test/vibe-self-triage.test.js'), [
+    "const test = require('node:test');",
+    "const assert = require('node:assert/strict');",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "test('a transient browser startup timeout can be retried', () => {",
+    "  const marker = path.join(__dirname, '../apps/web/node_modules/.cache/vibe-self-triage-attempt');",
+    '  const retried = fs.existsSync(marker);',
+    '  fs.mkdirSync(path.dirname(marker), { recursive: true });',
+    "  fs.writeFileSync(marker, 'attempted');",
+    "  if (!retried) assert.fail('Navigation timeout at /admin/bob');",
+    '});',
+  ].join('\n'));
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add retry fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the failed browser run'), deps });
+
+  assert.equal(result.error, undefined, result.reply);
+  assert.match(result.reply, /passed on retry/);
+  const receipts = store.state.rows.filter(row => row.payload?.tool === 'run');
+  assert.deepEqual(receipts.map(row => row.payload.ok), [false, true]);
+  assert.match(JSON.stringify(model.calls[2].request.messages), /self-triage/i);
+});
+
+test('self-triage can inspect and repair a failed draft before a verified handoff', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'reply', args: { blocked_reason: 'The compiler failure needs investigation.' } },
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"repaired"' } },
+    { tool: 'reply', args: { message: 'The greeting is repaired and verified.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('repair the greeting'), deps });
+  assert.equal(result.error, undefined, result.reply);
+  assert.match(result.reply, /repaired and verified/);
+  const checks = store.state.rows.filter(row => row.payload?.reason === 'web_typescript_handoff');
+  assert.deepEqual(checks.map(row => row.payload.ok), [false, true]);
+  assert.notEqual(checks[0].payload.source_fingerprint, checks[1].payload.source_fingerprint);
+  const ws = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  assert.match(fs.readFileSync(path.join(ws, 'apps/web/src/hello.ts'), 'utf8'), /"repaired"/);
+  assert.notEqual(store.state.session.head_sha, repo.sha);
+});
+
+test('self-triage stops on the same failed check and preserves the unresolved blocker', async t => {
+  const reason = 'The target is still missing after inspecting the failure.';
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'run', args: { command: 'node --check missing.js' } },
+    { tool: 'reply', args: { blocked_reason: 'The missing target needs investigation.' } },
+    { tool: 'read_file', args: { path: 'package.json' } },
+    { tool: 'reply', args: { blocked_reason: reason } },
+    { tool: 'write_file', args: { path: 'test/should-not-run.js', content: 'module.exports = true;\n' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify syntax'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified: node --check missing.js failed/);
+  assert.ok(result.reply.includes(reason));
+  assert.equal(model.calls.length, 4);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'run').length, 1);
+  assert.equal(store.state.rows.some(row => row.payload?.tool === 'write_file'), false);
+});
+
+for (const reason of [
+  'Owner approval is required before changing the access policy.',
+  'A human decision is needed about the expected product behavior.',
+  'Dedicated test credentials are unavailable; do not use a real user session.',
+  'Access denied: the test identity lacks permission.',
+  'The owner must choose the expected product behavior before I continue.',
+  'I need access to the private test environment.',
+  'The protected file requires an owner grant before it can be edited.',
+]) test(`self-triage respects a human-only boundary: ${reason}`, async t => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'run', args: { command: 'node --check missing.js' } },
+    { tool: 'reply', args: { blocked_reason: reason } },
+    { tool: 'write_file', args: { path: 'test/should-not-run.js', content: 'module.exports = true;\n' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify syntax'), deps });
+  assert.equal(result.error, true);
+  assert.ok(result.reply.includes(reason));
+  assert.equal(model.calls.length, 2);
+  assert.equal(store.state.rows.some(row => row.payload?.tool === 'write_file'), false);
+});
+
 test('failed verification cannot become a successful handoff just because the model says done', async () => {
   const { store, deps, model } = setup([
     { thought: 'check', tool: 'run', args: { command: 'node --check missing.js' } },
@@ -2226,6 +2324,8 @@ test('publication freshly checks a failing draft and permits shipping only after
   const { store, deps, repo, workspaceRoot } = setup([
     { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
     { tool: 'reply', args: { blocked_reason: 'Needs repair.' } },
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'reply', args: { blocked_reason: 'Needs repair after inspecting the failing draft.' } },
     { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"fixed"' } },
     { tool: 'reply', args: { message: 'Repaired.' } },
   ], {
@@ -2792,6 +2892,8 @@ test('complete failed browser evidence is reused across turns unless a fresh wal
     editHello,
     { tool: 'human_test', args: { reason: 'initial check' } },
     { tool: 'reply', args: { blocked_reason: 'The walk still fails.' } },
+    { tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { tool: 'reply', args: { blocked_reason: 'The walk still fails after inspecting the source; causality is unknown.' } },
     { tool: 'human_test', args: { reason: 'inspect the same branch' } },
     { tool: 'reply', args: { blocked_reason: 'The walk still fails.' } },
     { tool: 'human_test', args: { reason: 'owner requested a fresh walk', rerun: true } },
