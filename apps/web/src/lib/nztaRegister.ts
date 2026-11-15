@@ -60,7 +60,7 @@ export const MIN_EXPLANATION = 10;
 export function toCsv(rows: Array<Record<string, unknown>>, columns: Array<[string, string]>): string {
   const cell = (value: unknown) => {
     let text = value === null || value === undefined ? '' : String(value);
-    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    if (/^\s*[=+\-@]|^[\t\r\n]/.test(text)) text = `'${text}`;
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   return [columns.map(([, header]) => cell(header)).join(','),

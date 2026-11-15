@@ -1,0 +1,30 @@
+.shift-hours-export {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+}
+.shift-hours-export h2, .shift-hours-export p { margin: 0; }
+.shift-hours-export p, .shift-hours-export small { color: var(--color-text-secondary); }
+.shift-hours-export [role="alert"] { color: var(--color-danger-text, var(--color-text-primary)); }
+.shift-hours-export__controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); }
+.shift-hours-export__controls label { display: grid; gap: var(--space-1); min-width: 0; }
+.shift-hours-export__controls input, .shift-hours-export__controls select { min-height: 44px; max-width: 100%; color: var(--color-text-primary); background: var(--color-bg-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-2); }
+.shift-hours-export button { min-height: 44px; justify-self: start; white-space: normal; }
+.shift-hours-export__table { max-width: 100%; overflow-x: auto; }
+.shift-hours-export table { width: 100%; border-collapse: collapse; }
+.shift-hours-export th, .shift-hours-export td { padding: var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+.shift-hours-export caption { text-align: left; padding-bottom: var(--space-2); }
+.shift-hours-export details, .shift-hours-export li { overflow-wrap: anywhere; }
+.shift-hours-export summary { cursor: pointer; min-height: 44px; }
+.shift-hours-export small { display: block; }
+.shift-hours-export :focus-visible { outline: 2px solid var(--color-text-primary); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .shift-hours-export__controls { align-items: stretch; flex-direction: column; }
+  .shift-hours-export__controls > *, .shift-hours-export button { width: 100%; }
+}

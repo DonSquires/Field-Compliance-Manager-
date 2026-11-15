@@ -2,6 +2,7 @@ const test = require('node:test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./admin-timesheet-recovery-migration.test.js');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./timesheet-pay-links-migration.test.js');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./service-task-codes-migration.test.js');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./shift-hours-review-export-migration.test.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

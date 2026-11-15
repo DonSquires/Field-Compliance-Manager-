@@ -10,6 +10,31 @@
 
 **Spec:** [Three-Area Operating Model and Background Automation](../specs/2026-11-15-three-area-operating-model-design.md)
 
+## Owner-approved urgent delivery, 2026-11-15
+
+The owner prioritised a single shift-hours review and CSV handoff to the
+accountant/payroll person, plus a separate client-hours preview/export usable
+for NZ Health invoicing. This expands the original exclusion of export UX;
+it does not approve automatic payment, invoice sending or a native Xero
+integration. Remove the separate Submitted periods screen from the primary
+Timesheets workflow, not its historical payroll records.
+
+The urgent slice adds source-bound human hours approval/rejection and
+audited correction of confirmed, approved and rejected shift entries.
+Source-hours approval is not final employer payroll-period approval.
+Existing period approval cannot approve a whole source shift: a period can
+contain only the clipped portion of an overnight shift. Each handoff requires
+an explicit, current source-bound approval.
+Corrections invalidate source review and, where necessary, reopen an
+approved unexported payroll header through the existing governed RPC.
+Paid/exported evidence remains protected. Preview/download does not call
+`create_payroll_export_batch`, which currently marks its headers paid.
+Both handoffs include location, start/finish, unpaid break, hours and totals;
+client files exclude wage rates and internal correction notes. Missing
+agreement attribution or billing basis is visible, never inferred.
+The configured-cadence generator and staff replies below remain distinct,
+unfinished work; this urgent delivery must not claim to implement them.
+
 ## Global Constraints
 
 - Keep a single service provider for the current phase and multiple client organisations. Revisit multi-provider SaaS only after this product is working and the owner reopens that scope.

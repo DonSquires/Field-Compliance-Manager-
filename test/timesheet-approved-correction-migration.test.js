@@ -9,7 +9,6 @@ const { randomUUID } = require('node:crypto');
 const migrationPath = path.resolve(__dirname, '../supabase/migrations/20261115090000_allow_approved_timesheet_correction.sql');
 const migrationSource = fs.readFileSync(migrationPath, 'utf8');
 const migration = migrationSource.replace(/\s+/g, ' ');
-const timesheetsPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/TimesheetsPage.tsx'), 'utf8');
 const rosterPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterHRPage.tsx'), 'utf8');
 const databaseTypes = fs.readFileSync(path.resolve(__dirname, '../src/types/database.ts'), 'utf8');
 const queueRepair = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261115090108_branch_timesheet_queue_revision_projection.sql'), 'utf8');
@@ -25,7 +24,6 @@ test('approved hours corrections require payroll authority and the displayed rev
   assert.match(migration, /CREATE FUNCTION public\.correct_timesheet_hours\([\s\S]*p_expected_revision integer/i);
   assert.match(migration, /IF v_sheet\.status = 'approved' THEN IF NOT public\.is_timesheet_payroll_admin\(v_sheet\.organization_id\)/i);
   assert.match(migration, /v_sheet\.revision IS DISTINCT FROM p_expected_revision/i);
-  assert.match(timesheetsPage, /p_expected_revision: revision/);
   assert.match(rosterPage, /p_expected_revision: timesheetCorrection\.item\.revision/);
   assert.match(databaseTypes, /correct_timesheet_hours:\s*\{\s*Args:\s*\{[^}]*p_expected_revision: number/s);
 });
