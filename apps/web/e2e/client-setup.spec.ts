@@ -99,6 +99,7 @@ test('CRM unifies its directory, primary contact and simple location rows', asyn
   await contact.getByRole('button', { name: 'Save contact' }).click();
   await expect(contact.getByRole('status')).toHaveText('Primary contact saved.');
   expect(writes.find((write) => write.fn === 'manage_crm_contact')?.body).toMatchObject({ p_action: 'update', p_account_organization_id: CLIENT, p_contact_id: 'primary-contact', p_expected_updated_at: '2026-10-18T00:00:00Z', p_notes: 'Preserve existing governed notes', p_is_emergency: true });
+  await page.getByRole('region', { name: 'Selected client' }).getByRole('button', { name: 'Locations', exact: true }).click();
   const sites = page.getByRole('region', { name: 'Client locations' });
   await expect(sites.getByRole('button', { name: 'Main store', exact: true })).toBeVisible();
   await expect(sites.getByRole('button', { name: 'Depot', exact: true })).toBeVisible();
