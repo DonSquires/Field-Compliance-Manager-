@@ -31207,6 +31207,81 @@ export type Database = {
           },
         ]
       }
+      shift_timesheet_reviews: {
+        Row: {
+          decision: string
+          employer_organization_id: string
+          organization_id: string
+          reason: string
+          reviewed_at: string
+          reviewed_by: string
+          revision: number
+          shift_id: string
+          source_revision: string
+          staff_id: string
+        }
+        Insert: {
+          decision: string
+          employer_organization_id: string
+          organization_id: string
+          reason: string
+          reviewed_at?: string
+          reviewed_by: string
+          revision?: number
+          shift_id: string
+          source_revision: string
+          staff_id: string
+        }
+        Update: {
+          decision?: string
+          employer_organization_id?: string
+          organization_id?: string
+          reason?: string
+          reviewed_at?: string
+          reviewed_by?: string
+          revision?: number
+          shift_id?: string
+          source_revision?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_timesheet_reviews_employer_organization_id_fkey"
+            columns: ["employer_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_reviews_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_reviews_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: true
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_timesheet_reviews_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shifts: {
         Row: {
           actual_end: string | null
@@ -42101,6 +42176,21 @@ export type Database = {
           outcome: string
           record_id: string
         }[]
+      }
+      correct_reviewed_timesheet_shift_hours: {
+        Args: {
+          p_client_request_id: string
+          p_expected_correction_updated_at: string
+          p_expected_source_revision: string
+          p_expected_updated_at: string
+          p_payable_end: string
+          p_payable_start: string
+          p_reason: string
+          p_shift_id: string
+          p_staff_id: string
+          p_unpaid_minutes: number
+        }
+        Returns: Json
       }
       correct_timesheet_hours: {
         Args: {
@@ -53101,6 +53191,16 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      review_shift_timesheet_hours: {
+        Args: {
+          p_client_request_id: string
+          p_decision: string
+          p_organization_id: string
+          p_reason: string
+          p_rows: Json
+        }
+        Returns: Json
       }
       review_smoke_photo_classification: {
         Args: {
