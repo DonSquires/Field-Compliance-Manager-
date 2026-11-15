@@ -12,6 +12,13 @@ const migration = migrationSource.replace(/\s+/g, ' ');
 const timesheetsPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/TimesheetsPage.tsx'), 'utf8');
 const rosterPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterHRPage.tsx'), 'utf8');
 const databaseTypes = fs.readFileSync(path.resolve(__dirname, '../src/types/database.ts'), 'utf8');
+const queueRepair = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261115090108_branch_timesheet_queue_revision_projection.sql'), 'utf8');
+const queueDefinition = (file) => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations', file), 'utf8');
+  const definition = source.match(/CREATE (?:OR REPLACE )?FUNCTION public\.get_branch_timesheet_queue\([\s\S]*?\$function\$;/);
+  assert.ok(definition, file);
+  return definition[0];
+};
 
 test('approved hours corrections require payroll authority and the displayed revision', () => {
   assert.match(migration, /DROP FUNCTION public\.correct_timesheet_hours\(uuid, text, numeric, numeric, text\)/i);
@@ -99,14 +106,47 @@ test('approved corrections enforce payroll authority, revision checks and receip
           '${staff}',now(),'Branch checked','${org}');
     `);
     sql(migrationSource);
+    sql(`
+      ALTER TABLE public.timesheets ADD COLUMN period_start date DEFAULT '2026-11-02',
+        ADD COLUMN period_end date DEFAULT '2026-11-08', ADD COLUMN scheduled_hours numeric,
+        ADD COLUMN work_summary jsonb, ADD COLUMN submitted_at timestamptz;
+      CREATE TABLE public.staff_profiles(id uuid PRIMARY KEY, user_id uuid);
+      CREATE TABLE public.staff_branch_authorisations(user_id uuid, branch_org_id uuid, status text);
+      INSERT INTO public.staff_profiles VALUES ('${staff}','${staff}');
+      INSERT INTO public.staff_branch_authorisations VALUES ('${staff}','${org}','active');
+      CREATE FUNCTION public.user_can_operate_organization(uuid) RETURNS boolean LANGUAGE sql STABLE
+        AS $$ SELECT public.is_admin_for_org($1) $$;
+      CREATE FUNCTION public.user_can_exercise_branch_authority(uuid,uuid,text) RETURNS boolean LANGUAGE sql STABLE
+        AS $$ SELECT public.is_admin_for_org($1) AND $2='${staff}'::uuid AND $3='timesheet_local_review' $$;
+      ${queueDefinition('20261108130100_branch_timesheet_queue_date_range.sql')}
+      ${queueDefinition('20261108220000_shift_timesheet_review.sql')}
+      REVOKE ALL ON FUNCTION public.get_branch_timesheet_queue(uuid,timestamptz,timestamptz) FROM PUBLIC,anon;
+      REVOKE ALL ON FUNCTION public.get_branch_timesheet_queue(uuid,timestamptz,timestamptz,uuid) FROM PUBLIC,anon;
+      GRANT EXECUTE ON FUNCTION public.get_branch_timesheet_queue(uuid,timestamptz,timestamptz) TO authenticated,service_role;
+      GRANT EXECUTE ON FUNCTION public.get_branch_timesheet_queue(uuid,timestamptz,timestamptz,uuid) TO authenticated,service_role;
+    `);
+    const queueAcls = () => sql("SELECT jsonb_object_agg(oid::regprocedure::text,proacl::text) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname='get_branch_timesheet_queue'").trim();
+    const priorAcls = queueAcls();
+    sql(`BEGIN; ${queueRepair} COMMIT;`);
+    assert.equal(queueAcls(), priorAcls, 'both queue overloads preserve exact execute permissions');
+    const queueRow = (args) => JSON.parse(sql(`BEGIN; ${as(employerAdmin)}
+      SELECT row_to_json(q) FROM public.get_branch_timesheet_queue(${args}) q WHERE q.id='${hoursSheet}'; COMMIT;`).trim());
+    const unfiltered = queueRow(`'${org}',NULL,NULL`);
+    const scoped = queueRow(`'${org}','2026-11-01','2026-11-30','${staff}'`);
+    assert.deepEqual({ unfiltered: unfiltered.revision, scoped: scoped.revision }, { unfiltered: 7, scoped: 7 },
+      'actual queue rows must carry the revision used by correction, not an invented fixture field');
+    assert.equal(sql(`BEGIN; ${as(employerAdmin)} SELECT count(*) FROM public.get_branch_timesheet_queue('${org}','2026-12-01',NULL,'${staff}'); COMMIT;`).trim(), '0');
+    assert.equal(sql(`BEGIN; ${as(employerAdmin)} SELECT count(*) FROM public.get_branch_timesheet_queue('${org}',NULL,NULL,'${delegatedAdmin}'); COMMIT;`).trim(), '0');
+    fails(`BEGIN; ${as(staff)} SELECT * FROM public.get_branch_timesheet_queue('${org}',NULL,NULL); COMMIT;`, /Active authorized operating branch required/);
 
     fails(`BEGIN; ${as(delegatedAdmin)} SELECT public.correct_timesheet_hours('${hoursSheet}','approved',7,9,1,'Fix hours'); COMMIT;`, /Active employer payroll administrator required/);
     fails(`BEGIN; ${as(employerAdmin)} SELECT public.correct_timesheet_hours('${hoursSheet}','approved',6,9,1,'Fix hours'); COMMIT;`, /Timesheet changed/);
-    assert.equal(sql(`BEGIN; ${as(employerAdmin)} SELECT status||'|'||revision||'|'||(approved_by IS NULL)::text||'|'||(branch_reviewed_by IS NULL)::text FROM public.correct_timesheet_hours('${hoursSheet}','approved',7,9,1,'Fix hours'); COMMIT;`).trim(), 'submitted|8|true|true');
+    assert.equal(sql(`BEGIN; ${as(employerAdmin)} SELECT status||'|'||revision||'|'||(approved_by IS NULL)::text||'|'||(branch_reviewed_by IS NULL)::text FROM public.correct_timesheet_hours('${hoursSheet}', '${scoped.status}',${scoped.revision},9,1,'Fix hours'); COMMIT;`).trim(), 'submitted|8|true|true');
+    assert.equal(queueRow(`'${org}',NULL,NULL,'${staff}'`).revision, 8);
     assert.equal(sql(`SELECT (metadata->>'previous_status')||'|'||(metadata->>'previous_revision')||'|'||(metadata->>'previous_approved_by')||'|'||(metadata->>'previous_approved_at' IS NOT NULL)::text||'|'||(metadata->>'previous_branch_reviewed_by')||'|'||(metadata->>'previous_branch_reviewed_at' IS NOT NULL)::text||'|'||(metadata->>'previous_branch_review_notes')||'|'||(metadata->>'previous_branch_reviewed_organization_id') FROM public.audit_log WHERE target_id='${hoursSheet}'`).trim(), `approved|7|${employerAdmin}|true|${staff}|true|Branch checked|${org}`);
 
     sql(`UPDATE public.timesheets SET status='approved',approved_by='${employerAdmin}',approved_at=now() WHERE id='${hoursSheet}'`);
-    fails(`BEGIN; ${as(employerAdmin)} SELECT public.correct_timesheet_hours('${hoursSheet}','approved',7,10,1,'Stale form'); COMMIT;`, /Timesheet changed/);
+    fails(`BEGIN; ${as(employerAdmin)} SELECT public.correct_timesheet_hours('${hoursSheet}','approved',${scoped.revision},10,1,'Stale form'); COMMIT;`, /Timesheet changed/);
     assert.equal(sql(`SELECT actual_hours||'|'||status||'|'||revision FROM public.timesheets WHERE id='${hoursSheet}'`).trim(), '9|approved|9');
 
     assert.equal(sql(`BEGIN; ${as(employerAdmin)} SELECT status||'|'||revision||'|'||(approved_by IS NULL)::text FROM public.correct_timesheet_pay('00000000-0000-4000-8000-000000000007','${paySheet}',3,'OT',30,'Pay correction'); COMMIT;`).trim(), 'submitted|4|true');
