@@ -85,7 +85,10 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   Production web deployment `7801559448` succeeded at 09:39:55 UTC. The first
   CLI migration-ledger repair hit temporary-role authentication error `28P01`;
   the existing timer's automatic retry succeeded without an ad hoc database
-  write. Final catalog/pointer receipt and a human reload remain open.
+  write. Automatic catalog PR #526 merged as descendant `8ad4ec2b`; the
+  matching successful governed receipt at 09:54:56.908 UTC, deployment pointer
+  and healthy runtime are verified. A human close/reopen of Manage place
+  remains required; no production checkpoint writes were used for acceptance.
   The owner's screenshot now
   corroborates the exact error in Manage place while it remains loading;
   [redacted evidence is on the repair](https://github.com/DonSquires/Field-Compliance-Manager-/pull/525#issuecomment-6892327877).
