@@ -139,6 +139,9 @@ camping overnight, parking daytime). Zones (area + rules) and checkpoints (point
   to P2 visual verification. No proposal flow.
 - **Q4 Versioning** — every boundary of every entity type is versioned in
   `geofence_boundary_history`, including who verified and when.
+  History readers use `created_at DESC, version DESC`: accepting a shape and
+  confirming it in one transaction share a timestamp, so the version must
+  distinguish the final confirmation from the preceding unverified save.
 - **Q5 Governance is structural** — organisation + jurisdiction boundaries are
   SENSITIVE and always governed (propose → review → approve → execute, with map
   preview); zones and sites are direct-save through the map editor. No per-org
