@@ -8,6 +8,7 @@ import { FinanceLabourCostWorkspace } from '../components/FinanceLabourCostWorks
 import { FinanceBudgetWorkspace } from '../components/FinanceBudgetWorkspace';
 import { FinanceControlPanel } from '../components/FinanceControlPanel';
 import { CompletedWorkToInvoicePanel } from '../components/CompletedWorkToInvoicePanel';
+import { ClientShiftHoursExport } from '../components/ShiftHoursExportPanel';
 import { FinanceOwnerGuide } from '../components/FinanceOwnerGuide';
 import '../components/FinanceControlPanel.css';
 import './FinanceHome.css';
@@ -95,7 +96,7 @@ export default function FinanceMoneyPage({ onBack, onNavigate, onOpenBob, initia
         {error && <div className="alert alert-error" role="alert">{error}<button type="button" className="btn btn-secondary" onClick={refresh}>Retry</button></div>}
         {!loading && !period && <p className="finance-workbench-note">No accounting period selected. Create a draft period to start P&amp;L and job costs.</p>}
         {workflow === 'overview' && <FinanceOperationsDashboard key={`${periodId}-${revision}`} activePeriodId={periodId} compact />}
-        {workflow === 'invoices' && <><p className="finance-workbench-note">Completed-work billing follows the operating organisation. This queue is not filtered by the accounting period.</p><CompletedWorkToInvoicePanel organizationId={operatingOrganizationId ?? organizationId ?? null} onOpenInvoices={onNavigate ? () => onNavigate('finance-money') : undefined} /></>}
+        {workflow === 'invoices' && <><p className="finance-workbench-note">Completed-work billing follows the operating organisation. This queue is not filtered by the accounting period.</p><ClientShiftHoursExport organizationId={operatingOrganizationId ?? organizationId ?? null} /><CompletedWorkToInvoicePanel organizationId={operatingOrganizationId ?? organizationId ?? null} onOpenInvoices={onNavigate ? () => onNavigate('finance-money') : undefined} /></>}
         {workflow === 'reconciliation' && <><p className="finance-workbench-note">Bank matching is an independent queue, not filtered by the accounting period.</p><FinanceReconciliationWorkspace /></>}
         {workflow === 'labour' && <FinanceLabourCostWorkspace activePeriodId={periodId} onChanged={refresh} />}
         {workflow === 'budgets' && <FinanceBudgetWorkspace activePeriodId={periodId} />}
