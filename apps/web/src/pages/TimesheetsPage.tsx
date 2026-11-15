@@ -145,6 +145,8 @@ const DIMENSIONS: { key: ReadinessDimension; label: string; field: keyof Commerc
 // Mirrors shifts_status_check; PostgREST cannot expose CHECK values.
 const SHIFT_STATUSES = ['scheduled', 'published', 'accepted', 'declined', 'in_progress', 'completed', 'missed', 'cancelled'];
 const EDITABLE_TIMESHEET = new Set(['submitted', 'branch_checked']);
+// Approved time can be corrected until it is in a payroll export batch; the correction returns it to submitted.
+const CORRECTABLE_TIMESHEET = new Set(['submitted', 'branch_checked', 'approved']);
 const MAX_WINDOW_DAYS = 62;
 
 const isoDate = (date: Date) => date.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
@@ -687,7 +689,7 @@ const TimesheetsPage: React.FC = () => {
     return () => window.clearTimeout(t);
   }, [notice]);
 
-  const editable = editingTimesheet ? !workingInBranch && EDITABLE_TIMESHEET.has(editingTimesheet.status) && !editingTimesheet.payroll_export_batch_id : false;
+  const editable = editingTimesheet ? !workingInBranch && CORRECTABLE_TIMESHEET.has(editingTimesheet.status) && !editingTimesheet.payroll_export_batch_id : false;
   const staffLink = (staffId: string) => `/admin/people-hr?profile=${staffId}&profileTab=employment`;
   const visibleShiftRows = shiftHoursRows.filter((row) => (staffFilter === 'all' || row.staff_id === staffFilter) && (statusFilter === 'all' || row.hours_status === statusFilter));
   const shiftTotals = shiftHoursTotals(visibleShiftRows);
@@ -816,7 +818,7 @@ const TimesheetsPage: React.FC = () => {
                         <td>{row.pay_code_override || row.hourly_rate_override != null ? <span title="Pay override on this timesheet only">{row.pay_code_override ?? 'Rule code'}{row.hourly_rate_override != null ? ` · $${Number(row.hourly_rate_override).toFixed(2)}` : ''}</span> : 'From pay rate'}</td>
                         <td><span className={statusBadge(row.status)}>{plainWords(row.status)}</span></td>
                         <td className="row-actions">
-                          {isAdmin && <button type="button" className="icon-btn" title={EDITABLE_TIMESHEET.has(row.status) ? 'Edit timesheet' : 'View timesheet'} aria-label={`${EDITABLE_TIMESHEET.has(row.status) ? 'Edit' : 'View'} timesheet for ${names[row.staff_id] ?? 'staff member'}`} onClick={() => void openTimesheetEdit(row)}><Edit3 size={16} /></button>}
+                          {isAdmin && <button type="button" className="icon-btn" title={CORRECTABLE_TIMESHEET.has(row.status) ? 'Edit timesheet' : 'View timesheet'} aria-label={`${CORRECTABLE_TIMESHEET.has(row.status) ? 'Edit' : 'View'} timesheet for ${names[row.staff_id] ?? 'staff member'}`} onClick={() => void openTimesheetEdit(row)}><Edit3 size={16} /></button>}
                           <button type="button" className="btn btn-sm btn-secondary" onClick={() => setPrintingTimesheet(row)}><Printer size={14} /> Print / Save PDF</button>
                           {row.status === 'submitted' && workingInBranch && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleReview(row, 'branch_checked')} disabled={saving}><ShieldCheck size={14} /> Branch check</button>}
                           {!workingInBranch && isAdmin && EDITABLE_TIMESHEET.has(row.status) && <button type="button" className="btn btn-sm btn-primary" onClick={() => setReviewing({ row, decision: 'approved', notes: '' })} disabled={saving}><CheckCircle2 size={14} /> Approve</button>}
