@@ -104,12 +104,14 @@ test('per-shift timesheets confirm matching hours and recover a missed replaceme
   });
   await signInAsAdmin(page, '/admin/timesheets');
   const confirmed = page.getByRole('row').filter({ hasText: 'Hours auto-confirmed' });
-  await expect(confirmed).toHaveClass('shift-hours-confirmed');
+  await expect(confirmed).toContainText('Approval: Awaiting approval');
   await expect(confirmed.getByRole('button', { name: 'Edit shift hours for Ana Ngata' })).toBeVisible();
   await expect(confirmed).toContainText('Fixture workplace');
-  await expect(page.getByRole('row').filter({ hasText: 'Needs review' })).toHaveClass('shift-hours-review');
+  await expect(page.getByRole('row').filter({ hasText: 'Needs review' })).toContainText('Approval: Awaiting approval');
   const missed = page.getByRole('row').filter({ hasText: 'Missed shift' });
-  await expect(missed).toHaveClass('shift-hours-missed');
+  await expect(missed).toContainText('Approval: Awaiting approval');
+  expect(await confirmed.locator('td').first().evaluate(cell => getComputedStyle(cell).backgroundColor))
+    .toBe(await missed.locator('td').first().evaluate(cell => getComputedStyle(cell).backgroundColor));
   await expect(missed).toContainText('8:00 pm');
   await missed.getByRole('button', { name: 'Edit shift hours for Ana Ngata' }).click();
   const dialog = page.getByRole('dialog', { name: 'Payable shift hours' });

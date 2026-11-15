@@ -31,6 +31,15 @@ an Atlas flag nor conformity with an old screen is evidence of usable behavior.
 Track interrupted work and resulting corrections in
 [`BUILD_RECOVERY_QUEUE.md`](../BUILD_RECOVERY_QUEUE.md).
 
+Shift-hours row colours represent the explicit human approval decision, not
+automatic attendance matching: amber awaiting approval, green approved, red
+rejected, and a neutral read-only state for finalised payroll. Always show the
+approval text as well. Keep Edit, Approve and Reject discoverable on each
+eligible row. Saving a correction requires a separate approval; it must never
+silently approve the changed hours. Overnight corrections retain the whole
+shift as source evidence while each linked payroll period receives only its
+NZ-local share, including its share of unpaid breaks.
+
 ### Owner ruling 2026-11-07: Staff Profile is the workforce record of action
 
 After a hire is confirmed, Staff Profile is the primary place to complete and

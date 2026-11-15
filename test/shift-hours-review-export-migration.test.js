@@ -9,6 +9,13 @@ const root = path.resolve(__dirname, '..');
 const schema = fs.readFileSync(path.join(root, 'supabase/schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20261115101502_shift_hours_review_exports.sql'), 'utf8');
 const sourceReader = fs.readFileSync(path.join(root, 'supabase/migrations/20261111120000_timesheet_shift_rows_rates.sql'), 'utf8');
+const legacyReview = fs.readFileSync(path.join(root, 'supabase/migrations/20261108220000_shift_timesheet_review.sql'), 'utf8');
+const sliceRepair = fs.readFileSync(path.join(root, 'supabase/migrations/20261115205645_fix_overnight_shift_correction_slices.sql'), 'utf8');
+const legacyFn = (name) => {
+  const start = legacyReview.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
+  assert.notEqual(start, -1, name);
+  return legacyReview.slice(start, legacyReview.indexOf('$function$;', start) + '$function$;'.length);
+};
 const definition = (kind, name, end) => {
   const start = schema.indexOf(`${kind} "public"."${name}"`);
   assert.notEqual(start, -1, name);
@@ -74,8 +81,14 @@ test('shift review preserves source evidence, guards decisions and corrects appr
       CREATE TABLE public.officer_gps_log(shift_id uuid);
       CREATE TABLE public.shift_debriefs(shift_id uuid);
       ${sourceReader}
-      ${fn('correct_timesheet_shift_hours')}
+      ${legacyFn('correct_timesheet_shift_hours')}
       ${fn('reopen_approved_timesheet')}
+      CREATE FUNCTION public.get_recorded_officer_timesheet_work(date,date)
+        RETURNS TABLE(source_type text,source_id uuid,work_status text,started_at timestamptz,ended_at timestamptz,
+          calculated_minutes integer,label text,metadata jsonb)
+        LANGUAGE sql AS $$ SELECT null::text,null::uuid,null::text,null::timestamptz,null::timestamptz,
+          null::integer,null::text,null::jsonb WHERE false $$;
+      ${legacyFn('get_officer_timesheet_work')}
       INSERT INTO public.organizations VALUES ('${org}','Employer'),('${client}','Agreement recipient'),('${placeOwner}','Place owner');
       INSERT INTO public.user_profiles VALUES
         ('${admin}','${org}','${org}','admin',null,'Reviewer'),
@@ -101,6 +114,7 @@ test('shift review preserves source evidence, guards decisions and corrects appr
         VALUES ('${id(15)}','${org}','${shift}','${officer}','meal',
           '2020-06-01T01:00Z','2020-06-01T01:30Z',false,'${id(18)}');
       ${migration}
+      ${sliceRepair}
     `);
     let rows = read();
     assert.equal(typeof rows[0].source_revision, 'string', 'reader must bind decisions to actual source evidence');
@@ -202,6 +216,81 @@ test('shift review preserves source evidence, guards decisions and corrects appr
     assert.equal(read()[0].can_edit_hours, false);
     fails(as(admin, correction.replace(id(31), id(32))), /finalis|export|paid/i);
     assert.equal(sql(`SELECT status FROM public.timesheets WHERE id='${sheet}'`), 'paid');
+
+    const nightShift = id(60), nightSheet = id(61), firstSheet = id(62);
+    sql(`INSERT INTO public.shifts(id,organization_id,officer_user_id,service_type,scheduled_start,scheduled_end,
+        actual_start,actual_end,status,updated_at,location_id,service_agreement_location_id)
+      VALUES ('${nightShift}','${org}','${officer}','static_guarding','2020-06-01T10:00Z','2020-06-01T18:00Z',
+        '2020-06-01T09:58Z','2020-06-01T18:20Z','completed','2020-06-02T06:00Z','${place}','${link}');
+      INSERT INTO public.timesheets(id,organization_id,staff_id,period_start,period_end,status,
+        actual_hours,work_derived_hours,overtime_hours,adjustment_hours,revision)
+      VALUES ('${nightSheet}','${org}','${staff}','2020-06-02','2020-06-03','rejected',6.33,6.33,0,0,1);
+      INSERT INTO public.timesheet_work_entries(organization_id,timesheet_id,source_type,source_id,work_status,
+        started_at,ended_at,calculated_minutes)
+      VALUES ('${org}','${nightSheet}','shift','${nightShift}','completed','2020-06-01T12:00Z','2020-06-01T18:20Z',380);`);
+    const nightRow = () => read().find(row => row.id === nightShift);
+    const nightCorrection = (request, unpaid = 0, version = nightRow()) =>
+      `SELECT public.correct_reviewed_timesheet_shift_hours('${request}','${nightShift}','${version.updated_at}',
+        ${version.correction_updated_at ? `'${version.correction_updated_at}'` : 'null'},'${staff}',
+        '2020-06-01T10:00Z','2020-06-01T18:00Z',${unpaid},'Use verified roster hours','${version.source_revision}');`;
+    const overnightRequest = nightCorrection(id(63));
+    sql(as(admin, overnightRequest));
+    assert.equal(sql(`SELECT started_at='2020-06-01T12:00Z'::timestamptz
+      AND ended_at='2020-06-01T18:00Z'::timestamptz AND calculated_minutes=360
+      FROM public.timesheet_work_entries WHERE timesheet_id='${nightSheet}'`), 't',
+    'a next-day-only header receives only its midnight-to-finish portion, not the whole overnight shift');
+    assert.equal(sql(`SELECT status||'|'||actual_hours FROM public.timesheets WHERE id='${nightSheet}'`), 'submitted|6.00');
+    assert.equal(sql(`SELECT payable_start='2020-06-01T10:00Z'::timestamptz
+      AND payable_end='2020-06-01T18:00Z'::timestamptz FROM public.shift_timesheet_hour_corrections
+      WHERE shift_id='${nightShift}'`), 't', 'the source correction still records the full shift');
+    const revision = sql(`SELECT revision FROM public.timesheets WHERE id='${nightSheet}'`);
+    sql(as(admin, overnightRequest));
+    assert.equal(sql(`SELECT revision FROM public.timesheets WHERE id='${nightSheet}'`), revision, 'retry does not apply the slice twice');
+    assert.equal(nightRow().review_status, 'needs_review', 'saving is not human approval');
+
+    sql(`INSERT INTO public.timesheets(id,organization_id,staff_id,period_start,period_end,status,
+        actual_hours,work_derived_hours,overtime_hours,adjustment_hours,revision,approved_by,approved_at)
+      VALUES ('${firstSheet}','${org}','${staff}','2020-06-01','2020-06-01','approved',2,2,0,0,1,'${admin}','2020-06-03');
+      INSERT INTO public.timesheet_work_entries(organization_id,timesheet_id,source_type,source_id,work_status,
+        started_at,ended_at,calculated_minutes)
+      VALUES ('${org}','${firstSheet}','shift','${nightShift}','completed','2020-06-01T10:00Z','2020-06-01T12:00Z',120);`);
+    sql(as(admin, nightCorrection(id(64), 31)));
+    assert.equal(sql(`SELECT sum(calculated_minutes) FROM public.timesheet_work_entries WHERE source_id='${nightShift}'`), '449',
+      'adjacent periods preserve the eight-hour shift less exactly 31 unpaid minutes');
+    assert.equal(sql(`SELECT calculated_minutes||'|'||(metadata->>'unpaid_break_minutes')
+      FROM public.timesheet_work_entries WHERE timesheet_id='${firstSheet}'`), '112|8');
+    assert.equal(sql(`SELECT calculated_minutes||'|'||(metadata->>'unpaid_break_minutes')
+      FROM public.timesheet_work_entries WHERE timesheet_id='${nightSheet}'`), '337|23');
+    assert.equal(sql(`SELECT bool_and(status='submitted' AND approved_by IS NULL)
+      FROM public.timesheets WHERE id IN ('${firstSheet}','${nightSheet}')`), 't');
+    const officerSlices = JSON.parse(sql(as(officer, `SELECT json_agg(w) FROM (
+      SELECT calculated_minutes,metadata->>'unpaid_break_minutes' AS unpaid
+      FROM public.get_officer_timesheet_work('2020-06-01','2020-06-01') WHERE source_id='${nightShift}'
+      UNION ALL SELECT calculated_minutes,metadata->>'unpaid_break_minutes'
+      FROM public.get_officer_timesheet_work('2020-06-02','2020-06-03') WHERE source_id='${nightShift}') w;`)));
+    assert.deepEqual(officerSlices, [{ calculated_minutes: 112, unpaid: '8' }, { calculated_minutes: 337, unpaid: '23' }],
+      'officer resubmission uses the same payable allocation as the correction');
+    sql(as(admin, decision(id(65), [reviewedRow(nightRow())])));
+    assert.equal(nightRow().review_status, 'approved');
+    sql(`UPDATE public.timesheets SET period_start='2020-06-03',period_end='2020-06-04' WHERE id='${nightSheet}'`);
+    fails(as(admin, nightCorrection(id(67))), /does not overlap.*reconcile/i);
+    assert.equal(nightRow().review_status, 'approved', 'a non-overlapping correction rolls back invalidation of the approval');
+    assert.equal(sql(`SELECT sum(calculated_minutes) FROM public.timesheet_work_entries WHERE source_id='${nightShift}'`), '449');
+    sql(`UPDATE public.timesheets SET period_start='2020-06-02',period_end='2020-06-03' WHERE id='${nightSheet}'`);
+    sql(`UPDATE public.timesheets SET payroll_snapshot='{}'::jsonb WHERE id='${nightSheet}'`);
+    fails(as(admin, nightCorrection(id(66))), /finalis|export|paid/i);
+    assert.equal(sql(`SELECT actual_start='2020-06-01T09:58Z'::timestamptz
+      AND actual_end='2020-06-01T18:20Z'::timestamptz FROM public.shifts WHERE id='${nightShift}'`), 't');
+    assert.equal(sql(`SELECT has_function_privilege('authenticated',
+      'ops.shift_payable_period_slice(timestamptz,timestamptz,integer,date,date)','EXECUTE')`), 'f',
+    'the internal allocator is not a new client-accessible write or read path');
+    assert.equal(sql(`SELECT sum(calculated_minutes)||'|'||sum(deduction) FROM (
+      SELECT * FROM ops.shift_payable_period_slice('2020-06-01T10:00:00.5Z','2020-06-01T18:00:00.5Z',31,'2020-06-01','2020-06-01')
+      UNION ALL SELECT * FROM ops.shift_payable_period_slice('2020-06-01T10:00:00.5Z','2020-06-01T18:00:00.5Z',31,'2020-06-02','2020-06-03')
+      ) slices`), '449|31', 'sub-minute boundary fragments cannot lose a gross minute or duplicate unpaid time');
+    assert.equal(sql(`SELECT calculated_minutes FROM ops.shift_payable_period_slice(
+      '2020-06-01T10:00Z','2020-06-01T10:00:30Z',0,'2020-06-01','2020-06-01')`), '0');
+    sql(sliceRepair);
   } finally {
     if (created) docker(['rm', '--force', name]);
   }

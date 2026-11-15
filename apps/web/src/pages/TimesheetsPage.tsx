@@ -331,7 +331,7 @@ const TimesheetsPage: React.FC = () => {
       if (!data || data.shift_id !== editingHours.id || data.staff_id !== hoursForm.staffId || data.hours_status !== 'review') {
         throw new Error('Payable correction receipt was not confirmed.');
       }
-      setNotice('Payable shift hours saved for review. Recorded attendance remains unchanged.');
+      setNotice('Payable shift hours saved for review. Use Approve on the row after checking the hours. Recorded attendance remains unchanged.');
       setEditingHours(null); hoursRequest.current = null;
       await loadShiftHours();
     } catch (err) { setError(shiftHoursError(err)); }
@@ -492,7 +492,7 @@ const TimesheetsPage: React.FC = () => {
                 </>}
               </dl>}
             </div>
-            <p>Shift hours are recorded automatically. Auto-confirmed means the times match; human hours approval is separate from payroll payment.</p>
+            <p>Shift hours are recorded automatically. Auto-confirmed means the times match, not that they are approved. Row colours show human review: amber awaiting approval, green approved, red rejected. Payroll payment is separate.</p>
             {shiftTotals.ratesVisible && <p>Pay and charge amounts above are hourly-rate references, not final payroll earnings or invoice totals.</p>}
             <div className="timesheets-filters" role="group" aria-label="Review selected shift hours">
               <button type="button" className="btn btn-secondary" disabled={loading || saving} onClick={() => setSelectedHours(visibleShiftRows.filter((row) => row.can_review_hours && row.review_status !== 'approved').slice(0, 100).map((row) => row.id))}>Select unapproved shown (max 100)</button>
@@ -506,7 +506,7 @@ const TimesheetsPage: React.FC = () => {
                 <caption className="sr-only">One timesheet entry per shift. Pay hours are payable finish minus start, less the unpaid break.</caption>
                 <thead><tr><th>Review selection</th><th>Staff member</th><th>Location / client</th><th>Service</th><th>Rostered start / finish</th><th>Recorded start / finish</th><th>Payable start / finish</th><th>Rostered hours</th><th>Unpaid break</th><th>Pay hours</th><th>Calculation / approval</th><th>Actions</th></tr></thead>
                 <tbody>{visibleShiftRows.map((row) => { const figures = shiftHoursFigures(row); return (
-                  <tr key={row.id} className={`shift-hours-${row.hours_status}`}>
+                  <tr key={row.id} className={`shift-approval-${row.review_status}`}>
                     <td><input type="checkbox" aria-label={`Select shift hours for ${row.staff_name ?? 'staff member'} at ${when(row.scheduled_start)}`} checked={selectedHours.includes(row.id)} disabled={saving || !row.can_edit_hours || row.payroll_adjustment_pending || (!selectedHours.includes(row.id) && selectedHours.length >= 100)} onChange={(event) => setSelectedHours((current) => event.target.checked ? [...current, row.id] : current.filter((id) => id !== row.id))} /></td>
                     <td>{row.staff_name ?? 'Staff identity unavailable'}</td><td>{row.location_name ?? 'Location not linked'}<small>{row.client_name ?? 'Agreement client not linked'}</small>{row.client_link_problem && <small>{row.client_link_problem}</small>}</td><td>{serviceLabel(row.service_type)}</td>
                     <td>{when(row.scheduled_start)}<br />{when(row.scheduled_end)}</td>
@@ -515,13 +515,17 @@ const TimesheetsPage: React.FC = () => {
                     <td>{formatHours(figures.rosteredHours)}</td>
                     <td>{formatMinutes(figures.unpaidMinutes)}<small>Recorded {Number(row.recorded_unpaid_minutes).toFixed(1)} · planned {row.planned_unpaid_minutes}</small></td>
                     <td>{formatHours(figures.payHours)}</td>
-                    <td><strong>{SHIFT_HOURS_LABELS[row.hours_status]}</strong><small>Approval: {row.review_status === 'needs_review' ? 'Awaiting approval' : plainWords(row.review_status)}</small>
+                    <td><strong className="shift-approval-label">Approval: {row.review_status === 'needs_review' ? 'Awaiting approval' : plainWords(row.review_status)}</strong><small>{SHIFT_HOURS_LABELS[row.hours_status]}</small>
                       {row.manual_update && <small>Manual payable update</small>}
                       {row.review_reason && <small>Previous review: {row.review_reason}</small>}
                       {row.payroll_adjustment_pending && <small>Unallocated payroll adjustment requires reconciliation.</small>}
                       {row.hours_status === 'review' && <small>{row.correction_reason ?? [row.start_mismatch && 'Start differs', row.finish_mismatch && 'Finish differs', row.unpaid_break_mismatch && 'Unpaid break differs'].filter(Boolean).join('; ')}</small>}
                     </td>
-                    <td>{row.can_edit_hours ? <button className="icon-btn" type="button" aria-label={`Edit shift hours for ${row.staff_name ?? 'staff member'}`} title="Edit payable shift hours; approval will need review again" disabled={saving} onClick={() => openHoursEdit(row)}><Edit3 size={16} /></button>
+                    <td>{row.can_edit_hours && row.review_status !== 'finalised' ? <div className="shift-hours-actions">
+                      <button className="btn btn-secondary" type="button" aria-label={`Edit shift hours for ${row.staff_name ?? 'staff member'}`} title="Edit payable shift hours; approval will need review again" disabled={saving} onClick={() => openHoursEdit(row)}><Edit3 size={16} /> Edit</button>
+                      {row.review_status !== 'approved' && <button className="btn btn-primary" type="button" aria-label={`Approve shift hours for ${row.staff_name ?? 'staff member'}`} disabled={saving || !row.can_review_hours || row.payroll_adjustment_pending} title={!row.can_review_hours || row.payroll_adjustment_pending ? 'Correct incomplete hours or reconcile payroll adjustments before approving' : 'Review and approve these shift hours'} onClick={() => { setError(null); setHoursReview({ rows: [row], decision: 'approved', reason: '' }); }}>Approve</button>}
+                      {row.review_status !== 'rejected' && <button className="btn btn-secondary" type="button" aria-label={`Reject shift hours for ${row.staff_name ?? 'staff member'}`} disabled={saving || row.payroll_adjustment_pending} onClick={() => { setError(null); setHoursReview({ rows: [row], decision: 'rejected', reason: '' }); }}>Reject</button>}
+                    </div>
                       : <small>{row.review_status === 'finalised' ? 'Read-only: payroll finalised. An amendment is required.' : 'Employer payroll authority and an ended shift are required.'}</small>}</td>
                   </tr>); })}</tbody>
               </table></div>}
