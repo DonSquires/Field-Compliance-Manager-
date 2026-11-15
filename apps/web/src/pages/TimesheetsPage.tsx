@@ -574,7 +574,7 @@ const TimesheetsPage: React.FC = () => {
     try {
       let revision = sheet.revision ?? 1;
       if (hoursChanged) {
-        const { data, error: rpcError } = await supabase.rpc('correct_timesheet_hours', { p_timesheet_id: sheet.id, p_expected_status: sheet.status, p_actual_hours: actual, p_overtime_hours: overtime, p_reason: editForm.reason.trim() });
+        const { data, error: rpcError } = await supabase.rpc('correct_timesheet_hours', { p_timesheet_id: sheet.id, p_expected_status: sheet.status, p_expected_revision: revision, p_actual_hours: actual, p_overtime_hours: overtime, p_reason: editForm.reason.trim() });
         if (rpcError) throw rpcError;
         const updated = (Array.isArray(data) ? data[0] : data) as TimesheetRow | null;
         revision = updated?.revision ?? revision;
