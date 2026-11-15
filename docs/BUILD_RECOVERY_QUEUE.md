@@ -58,8 +58,12 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   stale reuse after reapproval. Date/staff filters, unauthorized access,
   correction audit history and exact queue execute ACLs remain covered.
   All runtime/migration, web and offline browser CI checks passed. Protected
-  rebase merge `e4926b92` completed at 09:18:16 UTC; governed migration
-  acceptance remains pending.
+  rebase merge `e4926b92` completed at 09:18:16 UTC. Live migration
+  `20261115090108` and both revision-bearing result signatures are verified,
+  with original ACLs/security/search_path retained. Automatic catalog PR #524
+  merged as descendant `80e61fbb`; the existing timer recorded its successful
+  governed receipt at 09:27:55.897 UTC. Production web deployment `7801337547`
+  separately succeeded at 09:19:07 UTC. No live payroll writes were performed.
   The exact VB-18 lookup still returns no row; the owner's report remains
   unresolved, not disproved.
 - [ ] **R04: location checkpoint reads and edits.** Preserved
@@ -74,10 +78,27 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   access, create/replay, rename/status, geometry verification reset, history,
   audit and unchanged execute ACLs. Five focused tests pass. Authority helpers
   are synthetic fixtures, not proof of full production policy or visual map
-  acceptance. CI, protected publication and governed live acceptance remain.
+  acceptance. Signed PR #525 has 22 passing Linux integration tests; all CI
+  checks passed and protected rebase merge `ff812763` completed at 09:39:01 UTC.
+  Migration `20261115091507` is now ledgered; both live function bodies exactly
+  match the reviewed repair, with original ACLs/security/search_path retained.
+  Production web deployment `7801559448` succeeded at 09:39:55 UTC. The first
+  CLI migration-ledger repair hit temporary-role authentication error `28P01`;
+  the existing timer's automatic retry succeeded without an ad hoc database
+  write. Final catalog/pointer receipt and a human reload remain open.
+  The owner's screenshot now
+  corroborates the exact error in Manage place while it remains loading;
+  [redacted evidence is on the repair](https://github.com/DonSquires/Field-Compliance-Manager-/pull/525#issuecomment-6892327877).
 - [ ] **R05: officer gate/checkpoint capture.** Preserve and review
   `wt-officer-gate-capture`; verify geometry meaning, actor/tenant authority,
   provenance, retries and the actual officer entry path before release.
+  Fresh live preflight at Atlas source `80e61fbb` confirms the proposed writer
+  is absent, and no web/mobile caller exists. The preserved plan's separate
+  Officer Places gate mode is not built. Its disposable PostgreSQL test reaches
+  creation/history/replay, then fails on stale expected wording for the working
+  missing-map guard. The draft also replaces the current history-read policy
+  wholesale; reconcile it with current access rules before promotion. Source
+  worktree remains untouched; source-corpus business values were not promoted.
 - [ ] **R06: CRM client profile, PR #514.** Current CI passes and the PR is
   draft. Reconcile reported broader browser failures with the latest head;
   verify draft preservation, client/place context, findability and return path.
@@ -114,7 +135,7 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
   Browser/human checks and resulting corrections remain open.
 - [ ] **R12: integration/release hygiene.** This isolated branch was advanced
   to reviewed PR #515 head `cf223456`; the main checkout now tracks released
-  main `623981e9`, preserving its unrelated untracked files.
+  main, tracking `origin/main`, preserving its unrelated untracked files.
   Keep signed verified release identity and record deploy/migration receipts.
 
 ## P2: finish or explicitly retire other recent proposals
@@ -167,9 +188,19 @@ action. An open chat, green preview, merged PR or Atlas flag is not completion.
 - [ ] **R32: Bob code graph.** Preserve the untracked graph module/tests and
   four integration edits in `wt-bob-code-graph`; establish useful capability
   and compatibility with current Builder before accepting any patch.
+  Owner-requested untracked-file review confirms the module/test are absent
+  from main. All nine preserved integration tests pass: source provenance,
+  directed navigation, ambiguity, stale/missing snapshots and private-path
+  filtering. Both existing worker-image manifest tests also pass. Current
+  Builder compatibility and control-plane delivery remain unverified; do not
+  bulk-copy the older integration files.
 - [ ] **R33: Vibe history UI.** Preserve the substantial uncommitted history
   implementation/tests in `wt-bob-vibe-history`; review it separately from the
   smaller failed-turn recovery PR, including history findability and pagination.
+  Its untracked browser test already has a newer counterpart on main from
+  #469 (`0bc83b1c`), including reference search/rename coverage missing from the
+  preserved version. Do not overwrite that newer test. The remaining tracked
+  UI/CSS/unit-test/documentation edits still need independent reconciliation.
 - [ ] **R34: patrol import/work classification.** The dispatch-zone preservation
   commit contains 31 changed files and historical schema changes. Recover by
   feature and current-schema comparison, not a bulk cherry-pick or snapshot
@@ -273,3 +304,21 @@ meaning risk and two task-continuity hypotheses. Do not equate these categories.
   tracked under R03. No VB-18 row was returned by the exact-reference lookup;
   keep the owner's report as an unresolved lead.
 - Pending items above remain unchecked until their specific evidence is recorded.
+
+## Untracked-file review requested by the owner
+
+Read-only inventory covered all 17 registered Windows worktrees: **18 untracked
+files across nine trees**. Untracked is a Git state, not a quality judgement.
+No candidate was deleted or automatically committed by this inspection.
+
+| Candidate | Files | Disposition / next action |
+| --- | ---: | --- |
+| Current recovery tree's queue and checkpoint migrations/tests | 4 | Queue repair delivered in #523; checkpoint repair merged in #525 and its live bodies/ledger verified. Their untracked state reflects this tree's older base, not missing publication. |
+| Preserved checkpoint migration and two function definitions | 3 | Useful source for R04; recovered into the qualification-only forward repair. Preserve originals. |
+| Officer gate migration, function definition and plan | 3 | Useful unfinished R05 work. No live writer or officer UI entry path; reconcile policy and complete executable coverage before promotion. |
+| Bob code-graph module and test | 2 | Useful missing R32 capability; nine tests pass. Reconcile integration and packaging with current main. |
+| Vibe history browser test | 1 | Older variant of the test delivered by #469; current main has additional reference/rename coverage. Preserve, but do not replace newer coverage. |
+| Graph exclusion configuration | 1 | Supporting R32 configuration excluding sample corpus, dependencies, generated output, snapshots, schema snapshot and workflows. Review with the graph pipeline, not as app code. |
+| Builder author-budget plan | 1 | Operational evidence. Read-only VPS verification confirms both staged and running base allocations are already 96; no restart or configuration write was performed. Other plan limits were not reverified here. |
+| Automatic-timesheet/cost-allocation design | 1 | Useful historical draft, explicitly not the approved direction. Reconcile details with the approved three-area design and bounded Workforce plan; do not silently expand that slice into loaded-cost posting. |
+| Main checkout's Edge debug and JASS configurations | 2 | Local editor/extension settings, not application repairs. Edge points to the extension start page; JASS targets Warcraft scripting files. Preserve untracked and do not publish as FCM defaults. |
