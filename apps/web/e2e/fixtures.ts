@@ -594,7 +594,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     }
     if (table === 'create_operating_organization_workplace') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '27272727-2727-4727-8727-272727272727', name: payload.p_name }; workplaces.push(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'create_operating_cost_centre') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '28282828-2828-4828-8828-282828282828', code: payload.p_code, name: payload.p_name }; costCentres.push(row); await route.fulfill(fulfillJson(row)); return; }
-    if (table === 'create_roster_slot') { await route.fulfill(fulfillJson({ id: '30303030-3030-4030-8030-303030303030', status: 'published' })); return; }
+    if (table === 'create_roster_slot' || table === 'create_roster_slot_with_break') { await route.fulfill(fulfillJson({ id: '30303030-3030-4030-8030-303030303030', status: 'published' })); return; }
     if (table === 'materialize_roster_slot') { await route.fulfill(fulfillJson([{ slot_id: '30303030-3030-4030-8030-303030303030', shift_id: '31313131-3131-4131-8131-313131313131', created: true }])); return; }
     if (table === 'manage_roster_slot') { adminSlotStatus = 'cancelled'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'cancelled', shift_id: null, shift_status: null }])); return; }
     if (table === 'reassign_roster_slot') { adminSlotStaffId = SECOND_OFFICER_ID; adminSlotStatus = 'published'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'published', staff_id: SECOND_OFFICER_ID, shift_id: null, shift_status: null }])); return; }

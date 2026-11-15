@@ -10,6 +10,158 @@ test.beforeEach(async ({ page }) => {
 	}));
 });
 
+test('roster removes unused place selectors without clearing other workspace context', async ({ page }) => {
+  await page.route('**/rest/v1/rpc/get_operating_organization_contexts', (route) => route.fulfill({ json: [{
+    organization_id: '33333333-3333-4333-8333-333333333333', organization_name: 'Harbour Compliance Services',
+    authority_basis: 'organisation_home', role_at_branch: 'admin', module_access: ['roster'], can_be_rostered: false, is_default: true,
+  }] }));
+  await page.route('**/rest/v1/service_agreement_locations*', (route) => route.fulfill({ json: [{
+    id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424',
+    site_id: '25252525-2525-4525-8525-252525252525', zone_id: null,
+  }] }));
+  await page.route('**/rest/v1/client_sites*', (route) => route.fulfill({ json: [{
+    id: '25252525-2525-4525-8525-252525252525', name: 'Civic Centre', address: '1 Civic Square',
+    site_type: 'commercial', location_id: null, client_organization_id: '40404040-4040-4040-8040-404040404040',
+    service_agreement_id: '24242424-2424-4424-8424-242424242424', active: true,
+  }] }));
+  await signInAsAdmin(page, '/admin/roster-targets');
+  const context = page.getByRole('region', { name: 'Service place context' });
+  await expect(context.getByLabel('Service agreement')).toHaveValue('24242424-2424-4424-8424-242424242424');
+  await context.getByLabel('Service site or zone').selectOption('');
+  const selectedPlace = await context.getByLabel('Service site or zone').inputValue();
+  await page.getByRole('navigation', { name: 'Roster sections' }).getByRole('button', { name: 'Roster board', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Roster', exact: true })).toBeVisible();
+  await expect(context).toHaveCount(0);
+  await expect(page.getByLabel('Roster branch')).toHaveValue('33333333-3333-4333-8333-333333333333');
+  await page.getByRole('navigation', { name: 'Roster sections' }).getByRole('button', { name: 'Work units & coverage', exact: true }).click();
+  await expect(context.getByLabel('Service site or zone')).toHaveValue(selectedPlace);
+});
+
+test('compact roster gives the calendar most of the viewport', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  await signInAsAdmin(page, '/admin/roster');
+  await expect(page.locator('.roster-board').getByText('Ana Ngata', { exact: true })).toBeVisible();
+  const layout = await page.locator('.roster-board').evaluate((element) => ({
+    top: element.getBoundingClientRect().top,
+    height: element.getBoundingClientRect().height,
+    bodyWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+  expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  expect(layout.top).toBeLessThanOrEqual(mobile ? 400 : 230);
+  expect(layout.height).toBeGreaterThanOrEqual(mobile ? 240 : 495);
+  await expect(page.getByRole('complementary', { name: 'Officer directory' })).toBeHidden();
+  for (const control of [page.getByRole('button', { name: 'Create shift', exact: true }), page.getByLabel('Roster branch')]) {
+    await expect(control).toBeVisible();
+    expect(await control.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  }
+  await page.screenshot({ path: testInfo.outputPath('compact-roster.png') });
+});
+
+test('roster secondary tools retain planning actions and visible filter state', async ({ page }) => {
+  await page.route('**/rest/v1/rpc/preview_roster_from_templates', (route) => route.fulfill({ json: {
+    templates_applied: 1, candidate_slots: 2, existing_slots: 1, new_slots: 1,
+  } }));
+  await signInAsAdmin(page, '/admin/roster');
+  const tools = page.getByText('Tools', { exact: true });
+  await tools.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Fill from templates', exact: true }).click();
+  const template = page.getByRole('dialog', { name: /from templates/ });
+  await expect(template).toBeVisible();
+  await expect.poll(() => template.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press('Tab');
+    // Native dialogs may tab through browser chrome, but not background controls.
+    await expect.poll(() => template.evaluate((element) => element.contains(document.activeElement) || document.activeElement === document.body)).toBe(true);
+  }
+  await expect(page.getByRole('button', { name: 'Staff availability', exact: true })).toBeHidden();
+  await template.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(tools).toBeFocused();
+  await tools.click();
+  await page.getByRole('button', { name: 'Staff availability', exact: true }).click();
+  const availability = page.getByRole('dialog', { name: 'Staff availability' });
+  await expect(availability).toBeVisible();
+  await expect.poll(() => availability.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(availability).toBeHidden();
+  await expect(tools).toBeFocused();
+  await page.locator('.roster-operational-dock > summary').click();
+  const restriction = page.locator('.roster-availability-queue').getByRole('button', { name: /Jordan Lee/ });
+  await restriction.click();
+  await expect.poll(() => availability.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(restriction).toBeFocused();
+  await page.locator('.roster-operational-dock > summary').click();
+  await page.getByText('View options', { exact: true }).click();
+  await page.getByLabel('Staff readiness').selectOption('risk');
+  await page.keyboard.press('Escape');
+  await expect(page.getByLabel('Staff readiness')).toBeHidden();
+  await expect(page.getByRole('button', { name: /Clear filters/ })).toBeVisible();
+  await expect(page.locator('.roster-board').getByText('Ana Ngata', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: /Clear filters/ }).click();
+  await expect(page.locator('.roster-board').getByText('Ana Ngata', { exact: true })).toBeVisible();
+  await page.getByText('View options', { exact: true }).click();
+  await page.getByRole('button', { name: 'Staff details', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Officer directory' })).toBeVisible();
+});
+
+test('roster controls and opened tools fit phone and intermediate workspace widths', async ({ page }, testInfo) => {
+  const widths = testInfo.project.name === 'mobile-chromium' ? [375, 390, 760] : [768, 1024, 1280];
+  await signInAsAdmin(page, '/admin/roster');
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const control of [page.getByRole('button', { name: 'Create shift', exact: true }), page.getByLabel('Roster branch'), page.getByLabel('Search officers'), page.getByText('View options', { exact: true })]) {
+      const bounds = await control.boundingBox();
+      expect(bounds, `control exists at ${width}px`).not.toBeNull();
+      expect(bounds!.x, `control left at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width, `control right at ${width}px`).toBeLessThanOrEqual(width);
+    }
+    await page.getByText('Tools', { exact: true }).click();
+    const popup = page.locator('.roster-toolbar-actions .roster-toolbar-popover');
+    const bounds = await popup.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x, `popup left at ${width}px`).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width, `popup right at ${width}px`).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
+
+test('changing roster horizon uses the selected horizon for the current period', async ({ page }) => {
+  await signInAsAdmin(page, '/admin/roster');
+  await page.getByRole('button', { name: 'Month', exact: true }).click();
+  await page.getByRole('button', { name: 'Week', exact: true }).click();
+  await expect(page.getByLabel('Roster range start')).toHaveValue('2026-08-24');
+  await expect(page.locator('.roster-board').getByText('Roster Administration', { exact: true })).toBeVisible();
+});
+
+test('long branch and staff names keep roster controls within the viewport', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  const name = 'Northern Regional Operations and Shared Services for Extended District Coverage';
+  await page.route('**/rest/v1/rpc/get_operating_organization_contexts', (route) => route.fulfill({ json: [{
+    organization_id: '41414141-4141-4141-8141-414141414141', organization_name: name,
+    authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['roster'], can_be_rostered: false, is_default: true,
+  }] }));
+  await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', (route) => route.fulfill({ json: [{
+    user_id: '22222222-2222-4222-8222-222222222222', staff_id: '22222222-2222-4222-8222-222222222222',
+    display_name: 'Alexandra Catherine Sample-Extended-Name', employment_type: 'permanent', work_ready: true,
+    credential_expiry: '2027-06-01', credential_verified: true,
+  }] }));
+  await signInAsAdmin(page, '/admin/roster');
+  await expect(page.getByLabel('Roster branch').locator('option:checked')).toHaveText(name);
+  await expect(page.locator('.roster-board').getByRole('button', { name: /^AC Alexandra Catherine/ })).toBeVisible();
+  for (const control of [page.getByLabel('Roster branch'), page.getByRole('button', { name: 'Create shift', exact: true }), page.getByText('View options', { exact: true })]) {
+    const bounds = await control.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('roster command workbench keeps directory, range and governed timesheet review inline', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   const staffId = '22222222-2222-4222-8222-222222222222';
@@ -27,6 +179,8 @@ test('roster command workbench keeps directory, range and governed timesheet rev
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: sheetId, status }) });
   });
   await signInAsAdmin(page, '/admin/roster');
+  await page.getByText('View options', { exact: true }).click();
+  await page.getByRole('button', { name: 'Staff details', exact: true }).click();
   const directory = page.getByRole('complementary', { name: 'Officer directory' });
   const board = page.locator('.roster-board');
   await expect(directory.getByText('Ana Ngata', { exact: true })).toBeVisible();
@@ -72,6 +226,8 @@ test('roster directory never invents licences and timesheet read failures stay u
   await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ user_id: '22222222-2222-4222-8222-222222222222', staff_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', employment_type: 'permanent', work_ready: true, credential_expiry: null, credential_verified: null }]) }));
   await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'Local timesheet review authority required' }) }));
   await signInAsAdmin(page, '/admin/roster');
+  await page.getByText('View options', { exact: true }).click();
+  await page.getByRole('button', { name: 'Staff details', exact: true }).click();
   const directory = page.getByRole('complementary', { name: 'Officer directory' });
   await expect(directory.getByText('Credentials not recorded')).toBeVisible();
   await expect(directory.getByText(/licence clear/i)).toHaveCount(0);
@@ -165,8 +321,8 @@ test('enterprise roster week board is operational and visually stable', async ({
  });
  expect(headerColors).toEqual({ background: 'rgb(13, 25, 39)', color: 'rgb(130, 150, 168)' });
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
- if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
- await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);const stickyAtMonthEnd=await board.evaluate((element)=>{element.scrollLeft=element.scrollWidth;const boardLeft=element.getBoundingClientRect().left;return{headerOffset:Math.round(element.querySelector('.roster-board-head>div')!.getBoundingClientRect().left-boardLeft),rowOffset:Math.round(element.querySelector('.roster-person')!.getBoundingClientRect().left-boardLeft)};});expect(stickyAtMonthEnd).toEqual({headerOffset:1,rowOffset:1});for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await board.evaluate((element)=>{element.scrollLeft=0;});await page.getByRole('button',{name:'Week',exact:true}).click();
+ if((page.viewportSize()?.width??0)<900){await expect(board).toHaveAccessibleDescription(/Scroll within the schedule/);const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
+ await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);const stickyAtMonthEnd=await board.evaluate((element)=>{element.scrollLeft=element.scrollWidth;const boardLeft=element.getBoundingClientRect().left;return{headerOffset:Math.round(element.querySelector('.roster-board-head>div')!.getBoundingClientRect().left-boardLeft),rowOffset:Math.round(element.querySelector('.roster-person')!.getBoundingClientRect().left-boardLeft)};});expect(stickyAtMonthEnd).toEqual({headerOffset:1,rowOffset:1});for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.locator('.roster-board-head').getByText('Provincial anniversary day')).toBeVisible();await expect(page.locator('.roster-board-head').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-toolbar-period')).toHaveScreenshot('roster-calendar-controls.png');await page.getByText('View options',{exact:true}).click();await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await page.keyboard.press('Escape');await board.evaluate((element)=>{element.scrollLeft=0;});await page.getByRole('button',{name:'Week',exact:true}).click();
  await page.locator('.roster-operational-dock > summary').click();
  await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const availabilityDialog=page.getByRole('dialog',{name:'Staff availability'});await expect(availabilityDialog).toBeVisible();await expect(availabilityDialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');await expect(availabilityDialog.getByText('Unavailable on Sundays')).toBeVisible();await availabilityDialog.getByRole('button',{name:'Close',exact:true}).click();
  const commercialQueue=page.locator('.roster-commercial-queue');
@@ -195,7 +351,7 @@ test('enterprise roster week board is operational and visually stable', async ({
  if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');
  await page.getByRole('button',{name:/08:00–16:00 site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('On track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
  const slotQueue=page.locator('.roster-slot-queue');await slotQueue.getByRole('button',{name:/Roster Administration/}).click();await expect(page.getByText('Roster slot',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Reassign'}).click();const reassignDialog=page.getByRole('dialog',{name:'Reassign roster slot?'});await expect(reassignDialog.getByRole('button',{name:'Confirm reassignment'})).toBeDisabled();await reassignDialog.getByLabel('Replacement officer').selectOption({label:'Jordan Lee'});await reassignDialog.getByLabel('Reassignment reason').fill('Coverage plan changed after supervisor review.');await expect(reassignDialog).toHaveScreenshot('roster-reassign-slot-dialog.png');await reassignDialog.getByRole('button',{name:'Confirm reassignment'}).click();await expect(page.getByText('Roster slot reassigned. The replacement officer has been asked to accept it.')).toBeVisible();await slotQueue.getByRole('button',{name:/Roster Administration/}).click();const cancelSlot=page.getByRole('button',{name:'Cancel slot'});await cancelSlot.scrollIntoViewIfNeeded();await cancelSlot.click();const cancelDialog=page.getByRole('dialog',{name:'Cancel roster slot?'});await expect(cancelDialog.getByRole('button',{name:'Confirm cancellation'})).toBeDisabled();await cancelDialog.getByLabel('Cancellation reason').fill('Internal priorities changed for this roster period.');await expect(cancelDialog).toHaveScreenshot('roster-cancel-slot-dialog.png');await cancelDialog.getByRole('button',{name:'Confirm cancellation'}).click();await expect(page.getByText('Roster slot cancelled, and its shift with it.')).toBeVisible();
- await page.getByRole('button',{name:'risk'}).click(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
+ await page.getByText('View options',{exact:true}).click();await page.getByLabel('Staff readiness').selectOption('risk');await page.keyboard.press('Escape');await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata. They will see it on their schedule and can accept or decline.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
 });
 
@@ -360,7 +516,7 @@ test('work-unit planning can create and advertise an open shift without rosterab
         let materializeCalled = false;
         await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => await route.fulfill(json([])));
         await page.route('**/rest/v1/roster_slots**', async (route) => await route.fulfill(json([])));
-        await page.route('**/rest/v1/rpc/create_roster_slot', async (route) => {
+        await page.route('**/rest/v1/rpc/create_roster_slot_with_break', async (route) => {
                 createPayload = JSON.parse(route.request().postData() ?? '{}');
                 await route.fulfill(json({
                         id: 'a1a1a1a1-0000-4000-8000-000000000003',
@@ -426,16 +582,11 @@ test('work-unit add targets the chosen unit even when another draft is selected'
 
 test('roster opens the branch timesheet correction and approval queue directly', async ({ page }) => {
         await signInAsAdmin(page, '/admin/roster');
-        await page.getByRole('button', { name: 'Open HR workspace' }).click();
-        await expect(page).toHaveURL(/\/admin\/people-hr\?tab=timesheets$/);
-        await expect(page.getByRole('heading', { name: /Branch timesheets/ })).toBeVisible();
-
-        await page.getByRole('button', { name: 'Edit hours' }).click();
-        await expect(page.getByRole('dialog', { name: 'Edit timesheet hours' })).toBeVisible();
-        await page.getByRole('dialog', { name: 'Edit timesheet hours' }).getByRole('button', { name: 'Cancel' }).click();
-
-        await page.getByRole('button', { name: 'Branch check' }).click();
-        await expect(page.getByRole('dialog', { name: 'Branch check timesheet?' })).toBeVisible();
+        await page.getByText('Tools', { exact: true }).click();
+        await page.locator('.roster-toolbar-popover').getByRole('button', { name: 'Timesheets & approvals', exact: true }).click();
+        await expect(page).toHaveURL(/\/admin\/timesheets$/);
+        await expect(page.getByRole('heading', { name: 'Timesheets & approvals', exact: true })).toBeVisible();
+        await expect(page.getByLabel('Hours approval status')).toBeVisible();
 });
 
 test('roster page explains what to set up first when the branch has nothing to roster', async ({ page }) => {
@@ -467,7 +618,7 @@ test('the Create shift dialog shows the officer\'s rest, hours and days in a row
         const notes = dialog.locator('.roster-assignment-note');
         await expect(notes.nth(0)).toHaveClass(/is-stop/);
         await expect(notes.nth(0)).toContainText("The roster will refuse this: Only 4 hours' rest from the nearest other shift; this organisation requires 10.");
-        await expect(notes.nth(1)).toContainText('Security licence expires 28 Aug, before this shift ends.');
+        await expect(notes.nth(1)).toContainText('Security licence expires 28 Aug 2026, before this shift ends.');
         expect(requested).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222' });
         expect(String((requested as Record<string, unknown> | null)?.p_scheduled_start)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
         // the server decides; the dialog still lets the rosterer try and shows the refusal inline
@@ -478,7 +629,7 @@ test('when the employer has no rest and hours rules the Create shift dialog says
         await page.route('**/rest/v1/rpc/preview_roster_assignment', async (route) => {
                 await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', work_ready: true, rules: null, rest_hours: null, week_start: '2026-08-24', week_hours: 4, consecutive_days: 1, availability_conflict: false, conflict: null, credential_warnings: [] }) });
         });
-        await page.route('**/rest/v1/rpc/create_roster_slot', async (route) => {
+        await page.route('**/rest/v1/rpc/create_roster_slot_with_break', async (route) => {
                 await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: "Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10", details: null, hint: null }) });
         });
         await signInAsAdmin(page, '/admin/roster');
@@ -487,12 +638,13 @@ test('when the employer has no rest and hours rules the Create shift dialog says
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
         const notes = dialog.locator('.roster-assignment-note');
-        await expect(notes.nth(0)).toContainText('4 h in the week starting 24 Aug · no other shift nearby · day 1 in a row.');
+        await expect(notes.nth(0)).toContainText('4 h in the week starting 24 Aug 2026 · no other shift nearby · day 1 in a row.');
         await expect(notes.nth(1)).toContainText('No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in Rosters › Shift setup & open shifts › Rest & hours rules.');
         // a server refusal lands inside the dialog, not behind it
         await dialog.getByRole('button', { name: 'Create shift' }).click();
-        await expect(dialog.locator('.roster-dialog-error')).toContainText("Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10");
+        const refusal = dialog.getByRole('alert').filter({ hasText: "Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10" });
+        await expect(refusal).toBeVisible();
         // changing the shift clears the refusal that was about the previous times
         await dialog.getByLabel('End').fill('2026-09-05T23:00');
-        await expect(dialog.locator('.roster-dialog-error')).toHaveCount(0);
+        await expect(refusal).toHaveCount(0);
 });
