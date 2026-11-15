@@ -357,7 +357,7 @@ const OfficerTimesheetPage: React.FC = () => {
               <div className="action-buttons">
                 {t.status === 'pending' && <button className="btn btn-sm btn-secondary" onClick={() => handleApproveTimesheet(t.id)}>Approve</button>}
                 {t.status === 'approved' && <button className="btn btn-sm btn-danger" onClick={() => handleCancelTimesheet(t.id)}>Cancel</button>}
-                <button className="btn btn-sm btn-primary" onClick={() => handleEditTimesheet(t.id)}>Edit</button>
+                {t.status === 'rejected' && <button className="btn btn-sm btn-primary" onClick={() => handleEditTimesheet(t.id)}>Edit</button>}
               </div>
             </td>
                 </tr>
