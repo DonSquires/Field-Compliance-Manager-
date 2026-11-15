@@ -44849,6 +44849,7 @@ export type Database = {
               id: string
               period_end: string
               period_start: string
+              revision: number
               scheduled_hours: number
               staff_id: string
               status: string
@@ -44872,6 +44873,7 @@ export type Database = {
               id: string
               period_end: string
               period_start: string
+              revision: number
               scheduled_hours: number
               staff_id: string
               status: string
