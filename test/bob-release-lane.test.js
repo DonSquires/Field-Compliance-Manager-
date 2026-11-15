@@ -127,8 +127,9 @@ test('release lane refuses a main branch head with an unverified author', (t) =>
     });
     return execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   };
-  const verifiedHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'verified');
-  const unverifiedHead = commit('DonSquires', 'squires.don@gmail.com', 'unverified');
+  const verifiedHead = commit('DonSquires', 'squires.don@gmail.com', 'verified');
+  const obsoleteHead = commit('Don Squires', '256263525+DonSquires@users.noreply.github.com', 'obsolete');
+  const unverifiedHead = commit('Fixture', 'fixture@example.com', 'unverified');
   const bashRepo = process.platform === 'win32'
     ? repo.replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, '/')
     : repo;
@@ -138,9 +139,11 @@ test('release lane refuses a main branch head with an unverified author', (t) =>
   });
   const accepted = runGuard(verifiedHead);
   assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
-  const refused = runGuard(unverifiedHead);
-  assert.equal(refused.status, 1);
-  assert.match(refused.stderr, /main branch-head author is not the verified GitHub identity/);
+  for (const head of [obsoleteHead, unverifiedHead]) {
+    const refused = runGuard(head);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /main branch-head author is not the verified GitHub identity/);
+  }
   assert.ok(source.indexOf('if ! verify_main_author') < source.indexOf('# 2. What is live?'));
 });
 

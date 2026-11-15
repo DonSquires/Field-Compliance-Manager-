@@ -65,15 +65,19 @@ test('Builder can require an explicitly configured verified GitHub commit identi
     process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
     process.env.BOB_BUILDER_GIT_EMAIL = 'unverified@example.com';
     assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
-    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
-    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
-    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
     process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
+    process.env.BOB_BUILDER_GIT_EMAIL = 'squires.don@gmail.com';
     assert.deepEqual(builderCommitIdentity({ requireVerified: true }), {
-      name: 'Don Squires',
-      email: VERIFIED_GITHUB_EMAIL,
+      name: 'DonSquires',
+      email: 'squires.don@gmail.com',
     });
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL.toUpperCase();
     assert.throws(() => builderCommitIdentity({ requireVerified: true }), /verified GitHub identity/);
   } finally {
@@ -304,7 +308,7 @@ test('GitHub publication rejects an unverified workspace head even when its reco
   const previousName = process.env.BOB_BUILDER_GIT_NAME;
   const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
   try {
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '22345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
     assert.throws(
@@ -332,7 +336,7 @@ test('Bob preserves a concurrent agent commit while advancing with a verified re
     git(repo.root, ['-c', 'user.name=Concurrent Agent', '-c', 'user.email=don@squires.local', 'commit', '-qm', 'concurrent app work']);
     const concurrentSha = git(repo.root, ['rev-parse', 'HEAD']);
 
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const committed = commitVerifiedPatch({
       workspacePath: workspace.workspacePath,
@@ -344,7 +348,7 @@ test('Bob preserves a concurrent agent commit while advancing with a verified re
     assert.equal(git(repo.root, ['show', '-s', '--format=%ae', committed.commitSha]), VERIFIED_GITHUB_EMAIL);
     assert.equal(git(repo.root, ['rev-parse', `${committed.commitSha}^`]), repo.sha);
 
-    git(repo.root, ['-c', 'user.name=Don Squires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'merge', '--no-ff', '-qm', 'merge Bob after concurrent work', committed.commitSha]);
+    git(repo.root, ['-c', 'user.name=DonSquires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'merge', '--no-ff', '-qm', 'merge Bob after concurrent work', committed.commitSha]);
     const releaseSha = git(repo.root, ['rev-parse', 'HEAD']);
     assert.equal(git(repo.root, ['merge-base', '--is-ancestor', concurrentSha, releaseSha]), '');
     assert.equal(git(repo.root, ['merge-base', '--is-ancestor', committed.commitSha, releaseSha]), '');
@@ -465,7 +469,7 @@ test('publication may replace only remote branch tips this workspace produced it
   const previousName = process.env.BOB_BUILDER_GIT_NAME;
   const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
   try {
-    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_NAME = 'DonSquires';
     process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     const remote = path.join(repo.root, '.remote.git');
     git(repo.root, ['init', '-q', '--bare', remote]);
@@ -480,7 +484,7 @@ test('publication may replace only remote branch tips this workspace produced it
     git(repo.root, ['add', 'apps/web/src/main-only.ts']);
     git(repo.root, ['commit', '-qm', 'main moved']);
     const main = git(repo.root, ['rev-parse', 'HEAD']);
-    git(workspace.workspacePath, ['-c', 'user.name=Don Squires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'rebase', '-q', main]);
+    git(workspace.workspacePath, ['-c', 'user.name=DonSquires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'rebase', '-q', main]);
     const rebased = git(workspace.workspacePath, ['rev-parse', 'HEAD']);
     assert.throws(() => publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: rebased }), /rejected|non-fast-forward|failed to push/i);
     publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: rebased, replaceOwnHistory: true });

@@ -7,7 +7,7 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
 
 1. fetches authoritative GitHub `main` through a pinned deploy key and strict host-key checking (the historical Gitea mirror is fallback only),
 2. refuses to proceed unless the fetched `main` head author is exactly
-   `Don Squires <256263525+DonSquires@users.noreply.github.com>`, then compares it with the last
+   `DonSquires <squires.don@gmail.com>`, then compares it with the last
    release the lane put live (`/var/lib/bob/release-lane/deployed_sha`;
    bootstrapped from the newest `/srv/fcm/releases/<sha>` worktree),
 3. classifies the changed paths into targets — new `supabase/migrations/*.sql`, changed edge
@@ -25,7 +25,7 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
    `schema.sql` and `src/types/database.ts` (verified identity) on `bob/catalog-<sha8>`, opens a
    pull request with `BOB_GITHUB_ACCESS_TOKEN` and rebase-merges it only if it touches nothing but
    those two generated files. The refresh requires both the configured and generated author and
-   committer to be `Don Squires <256263525+DonSquires@users.noreply.github.com>`. Builder publication
+   committer to be `DonSquires <squires.don@gmail.com>`. Builder publication
    likewise requires the configured identity and actual branch-head author to match exactly.
    Rebase preserves the verified author instead of substituting the GitHub account's
    default email. The owner's merge of the migration is the approval (owner ruling 2026-10-21);
@@ -40,8 +40,9 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
 Before creating a release-bound commit, set and verify the author:
 
 ```bash
-git config user.name "Don Squires"
-git config user.email "256263525+DonSquires@users.noreply.github.com"
+git config user.name "DonSquires"
+git config user.email "squires.don@gmail.com"
+git config commit.gpgsign true
 git config --get user.name
 git config --get user.email
 ```
@@ -66,6 +67,17 @@ this blocked the lane after #504 on 2026-11-14. If a wrong-author commit has
 already landed, do not rewrite `main` or bypass the identity guard. Merge a
 subsequent verified-author commit through a PR, verify the resulting head, and
 let the lane retry the complete tree.
+
+The verified author is the exact identity above, not the account's noreply
+address. Keep Builder publication, catalog refresh and the hook policy aligned
+with it. Codespaces signing may use `GitHub <noreply@github.com>` as the
+committer; do not disable signing to substitute a different author.
+
+If the installed lane itself still rejects the approved identity, it cannot
+self-update past that guard. After the correction passes checks and merges,
+install only the reviewed lane script using the pinned SSH identity, validate
+its syntax and let the existing timer retry. Do not bypass the guard, advance
+`deployed_sha` manually or force a busy control-plane restart.
 
 ## Install (once, on the VPS host)
 
