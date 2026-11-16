@@ -18,8 +18,9 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   await expect(placeAddress).toContainText('1 Civic Square, Nelson');
   expect(await placeAddress.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   const map = page.getByRole('region', { name: 'Map for Civic Events House' });
-  await expect(map.getByText('3 verified place boundaries')).toBeVisible();
-  await expect(map.getByText('1 Site or work area need review')).toBeVisible();
+  await expect(map.getByText('Sites 2 · 1 confirmed')).toBeVisible();
+  await expect(map.getByText('Work areas 2 · 2 confirmed')).toBeVisible();
+  await expect(map.getByText('1 needs review')).toBeVisible();
   const canvas = map.locator('.house-map-canvas');
   await expect(canvas).toBeVisible();
   expect(await map.locator('.leaflet-overlay-pane path').count()).toBeGreaterThanOrEqual(2);

@@ -129,3 +129,21 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+.house-map-review-list.is-advisory li { color: #f2d49b; }
+.house-map-review-list.is-advisory li em { color: #9eb2bd; }
+
+.house-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 7px 14px;
+  border-top: 1px solid #294252;
+  background: #0c1b26;
+  color: #9eb2bd;
+  font-size: 12px;
+}
+
+.house-map-legend > span { display: flex; align-items: center; gap: 6px; }
+.house-map-legend-area { width: 18px; height: 12px; border: 2px dashed #f0b35a; background: rgba(240, 179, 90, 0.06); }
+.house-map-legend-part { width: 18px; height: 12px; border: 2px solid #ffd59a; background: rgba(255, 213, 154, 0.16); }
+.house-map-legend-checkpoint { width: 10px; height: 10px; border: 2px solid #0b1924; border-radius: 50%; background: #4cc38a; box-shadow: 0 0 0 1px #4cc38a; }

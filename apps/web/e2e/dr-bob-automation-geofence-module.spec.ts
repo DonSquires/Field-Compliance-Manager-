@@ -20,8 +20,9 @@ test.describe("Dr. Bob's automation, geofence, and module rules walkthrough", ()
     await signInAsAdmin(page, '/admin/locations');
     await expect(page.getByRole('heading', { name: 'Locations', exact: true })).toBeVisible();
     const map = page.getByRole('region', { name: 'Map for Civic Events House' });
-    await expect(map.getByText('3 verified place boundaries')).toBeVisible();
-    await expect(map.getByText('1 Site or work area need review')).toBeVisible();
+    await expect(map.getByText('Sites 2 · 1 confirmed')).toBeVisible();
+    await expect(map.getByText('Work areas 2 · 2 confirmed')).toBeVisible();
+    await expect(map.getByText('1 needs review')).toBeVisible();
     console.log('[BOB EXPECTED/PRESENT] module=static_guarding expected enabled present enabled');
     console.log('[BOB EXPECTED/PRESENT] auto_dispatch expected disabled by agreement present disabled');
 
