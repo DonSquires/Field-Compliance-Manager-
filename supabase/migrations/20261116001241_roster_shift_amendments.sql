@@ -498,3 +498,45 @@ CREATE TRIGGER a_roster_slot_assignment_serialization
 CREATE TRIGGER a_field_shift_assignment_serialization
   BEFORE INSERT OR UPDATE OF officer_user_id,scheduled_start,scheduled_end,status ON public.shifts
   FOR EACH ROW EXECUTE FUNCTION public.enforce_roster_assignment_serialization();
+
+CREATE OR REPLACE FUNCTION public.enforce_roster_slot_availability()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO public
+AS $function$
+DECLARE v_fatigue text;
+BEGIN
+  IF current_setting('fcm.historical_labour_import',true) = 'on'
+    AND NEW.status = 'completed' AND NEW.scheduled_end <= now()
+    AND NEW.external_refs->>'source' = 'rm_patrol_log_labour' THEN RETURN NEW; END IF;
+  -- Closing evidenced attendance must not requalify the officer for work already done.
+  IF TG_OP = 'UPDATE' AND NEW.status = 'completed'
+    AND OLD.status IN ('published','accepted','completed')
+    AND NEW.staff_id IS NOT DISTINCT FROM OLD.staff_id
+    AND NEW.work_unit_id IS NOT DISTINCT FROM OLD.work_unit_id
+    AND NEW.organization_id IS NOT DISTINCT FROM OLD.organization_id
+    AND NEW.linked_shift_id IS NOT DISTINCT FROM OLD.linked_shift_id
+    AND EXISTS(
+      SELECT 1 FROM public.shifts s JOIN public.staff_profiles p ON p.id = NEW.staff_id
+      WHERE s.id = NEW.linked_shift_id AND s.organization_id = NEW.organization_id
+        AND s.officer_user_id = coalesce(p.user_id,p.id) AND s.status = 'completed'
+        AND s.actual_start IS NOT NULL AND s.actual_end IS NOT NULL
+        AND (
+          (NEW.scheduled_start IS NOT DISTINCT FROM OLD.scheduled_start
+            AND NEW.scheduled_end IS NOT DISTINCT FROM OLD.scheduled_end)
+          OR (NEW.scheduled_start = least(OLD.scheduled_start,s.actual_start)
+            AND NEW.scheduled_end = s.actual_end)
+        )
+    ) THEN RETURN NEW;
+  END IF;
+  IF NEW.staff_id IS NOT NULL AND NEW.status NOT IN ('declined','cancelled') THEN
+    IF public.staff_has_roster_availability_conflict(NEW.staff_id,NEW.scheduled_start,NEW.scheduled_end) THEN
+      RAISE EXCEPTION 'Staff member is unavailable during this roster slot';
+    END IF;
+    v_fatigue := public.staff_fatigue_conflict(NEW.staff_id,NEW.scheduled_start,NEW.scheduled_end,NEW.id);
+    IF v_fatigue IS NOT NULL THEN RAISE EXCEPTION 'Fatigue rule breach: %',v_fatigue; END IF;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.enforce_roster_slot_availability() FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.enforce_roster_slot_availability() TO postgres,service_role;
