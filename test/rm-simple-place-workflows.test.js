@@ -15,6 +15,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./person-interactions-write-
 if (process.env.BOB_TEST_POSTGRES === '1') require('./geofence-place-enrichment-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./location-checkpoint-ambiguity-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-boundary-history-order.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./location-client-billing-migration.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
