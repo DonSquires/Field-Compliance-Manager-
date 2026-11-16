@@ -6,6 +6,20 @@ import { supabase } from '../lib/supabase';
 
 type Props = { officerId: string; organizationId: string | null; shiftId: string | null };
 type Checkpoint = { id: string; name: string; gps_lat: number | null; gps_lng: number | null; radius_meters: number; client_site_id: string | null; zone_id: string | null };
+type PendingCapture = {
+  rawCode: string;
+  checkpointName: string;
+  args: {
+    p_client_request_id: string; p_shift_id: string; p_checkpoint_id: string;
+    p_gps_lat: number; p_gps_lng: number; p_gps_accuracy: number | null;
+    p_gps_distance_from_checkpoint: number | null; p_within_radius: boolean | null;
+  };
+};
+
+// PostgREST returns a SQLSTATE or PGRST code once the server has decided; transport failures carry none.
+function isServerRejection(error: { code?: string | null }): boolean {
+  return typeof error.code === 'string' && error.code.length > 0;
+}
 
 function checkpointErrorMessage(error: unknown): string {
   if (error instanceof Error && /QR code|GPS accuracy|outside the checkpoint radius|Patrol session/.test(error.message)) return error.message;
@@ -23,50 +37,64 @@ function distanceMetres(from: Location.LocationObject, checkpoint: Checkpoint): 
   return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function OfficerCheckpointScanner({ officerId, organizationId, shiftId }: Props) {
+export function OfficerCheckpointScanner({ shiftId }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const requestIdRef = useRef(crypto.randomUUID());
+  // A capture whose outcome is unknown is resent unchanged under its original request ID.
+  const pendingRef = useRef<PendingCapture | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setScanned(false);
-      requestIdRef.current = crypto.randomUUID();
-    }
+    if (!open) setScanned(false);
   }, [open]);
 
-  const recordVisit = async (rawCode: string) => {
-    if (!supabase || !organizationId || !shiftId || busy || scanned) return;
-    setScanned(true);
-    setBusy(true);
-    try {
-      const [{ data: checkpoint, error: checkpointError }, location] = await Promise.all([
-        supabase.from('patrol_checkpoints').select('id, name, gps_lat, gps_lng, radius_meters, client_site_id, zone_id').eq('organization_id', organizationId).eq('qr_code', rawCode).eq('active', true).maybeSingle(),
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
-      ]);
-      if (checkpointError) throw checkpointError;
-      if (!checkpoint) throw new Error('This QR code is not an active checkpoint for your organization.');
-      const typedCheckpoint = checkpoint as Checkpoint;
-      const distance = distanceMetres(location, typedCheckpoint);
-      const accuracy = location.coords.accuracy ?? null;
-      if (distance !== null && accuracy !== null && accuracy > typedCheckpoint.radius_meters) throw new Error('GPS accuracy is too poor for this checkpoint. Move to open sky and retry.');
-      if (distance !== null && distance > typedCheckpoint.radius_meters) throw new Error('You are outside the checkpoint radius. Move closer and retry.');
-
-      const { data, error: visitError } = await supabase.rpc('record_officer_checkpoint_visit', {
-        p_client_request_id: requestIdRef.current,
+  const capture = async (rawCode: string): Promise<PendingCapture> => {
+    if (!supabase || !shiftId) throw new Error('No active shift is available for this checkpoint.');
+    const [{ data: rows, error: checkpointError }, location] = await Promise.all([
+      supabase.rpc('resolve_officer_checkpoint_qr', { p_shift_id: shiftId, p_qr_code: rawCode }),
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+    ]);
+    if (checkpointError) throw checkpointError;
+    const checkpoint = (Array.isArray(rows) ? rows[0] : rows) as Checkpoint | undefined;
+    if (!checkpoint) throw new Error('This QR code is not an active checkpoint for your current shift.');
+    const distance = distanceMetres(location, checkpoint);
+    const accuracy = location.coords.accuracy ?? null;
+    if (distance !== null && accuracy !== null && accuracy > checkpoint.radius_meters) throw new Error('GPS accuracy is too poor for this checkpoint. Move to open sky and retry.');
+    if (distance !== null && distance > checkpoint.radius_meters) throw new Error('You are outside the checkpoint radius. Move closer and retry.');
+    return {
+      rawCode,
+      checkpointName: checkpoint.name,
+      args: {
+        p_client_request_id: crypto.randomUUID(),
         p_shift_id: shiftId,
-        p_checkpoint_id: typedCheckpoint.id,
+        p_checkpoint_id: checkpoint.id,
         p_gps_lat: location.coords.latitude,
         p_gps_lng: location.coords.longitude,
         p_gps_accuracy: accuracy,
         p_gps_distance_from_checkpoint: distance,
         p_within_radius: distance === null ? null : true,
-      });
-      if (visitError || !data) throw visitError ?? new Error('Checkpoint visit was not confirmed.');
+      },
+    };
+  };
+
+  const recordVisit = async (rawCode: string) => {
+    if (!supabase || !shiftId || busy || scanned) return;
+    setScanned(true);
+    setBusy(true);
+    try {
+      const prior = pendingRef.current;
+      const pending = prior && prior.rawCode === rawCode && prior.args.p_shift_id === shiftId ? prior : await capture(rawCode);
+      pendingRef.current = pending;
+      const { data, error: visitError } = await supabase.rpc('record_officer_checkpoint_visit', pending.args);
+      if (visitError) {
+        if (isServerRejection(visitError)) pendingRef.current = null;
+        throw visitError;
+      }
+      if (!data) throw new Error('Checkpoint visit was not confirmed.');
+      pendingRef.current = null;
       setOpen(false);
-      Alert.alert('Checkpoint confirmed', `${typedCheckpoint.name} was recorded.`);
+      Alert.alert('Checkpoint confirmed', `${pending.checkpointName} was recorded.`);
     } catch (error) {
       setScanned(false);
       Alert.alert('Checkpoint not confirmed', checkpointErrorMessage(error));

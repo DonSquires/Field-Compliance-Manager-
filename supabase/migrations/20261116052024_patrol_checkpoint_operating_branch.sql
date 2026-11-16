@@ -27,18 +27,14 @@ BEGIN
     RAISE EXCEPTION 'Active officer identity required';
   END IF;
 
-  -- The owned on-duty assignment, not the profile's home branch, is the operating context.
+  -- The owned assignment, not the profile's home branch, is the operating context.
   -- Serialize retries with one another and with shift closure/amendment.
   SELECT s.organization_id INTO v_org FROM public.shifts s
-  WHERE s.id=p_shift_id AND s.officer_user_id=v_actor AND s.status='in_progress'
+  WHERE s.id=p_shift_id AND s.officer_user_id=v_actor
   FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Checkpoint visit must be recorded for your active shift'; END IF;
-  v_at := clock_timestamp();
 
-  SELECT * INTO v_checkpoint FROM public.patrol_checkpoints
-  WHERE id=p_checkpoint_id AND organization_id=v_org AND active=true;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Checkpoint is not active for your organization'; END IF;
-
+  -- A committed capture whose response was lost is recovered even after the shift closes.
   SELECT * INTO v_visit FROM public.patrol_checkpoint_visits
   WHERE organization_id=v_org AND officer_user_id=v_actor AND client_request_id=p_client_request_id;
   IF FOUND THEN
@@ -51,6 +47,15 @@ BEGIN
     RETURN QUERY SELECT v_visit.id,v_visit.patrol_id,v_visit.visited_at,false;
     RETURN;
   END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.shifts s WHERE s.id=p_shift_id AND s.status='in_progress') THEN
+    RAISE EXCEPTION 'Checkpoint visit must be recorded for your active shift';
+  END IF;
+  v_at := clock_timestamp();
+
+  SELECT * INTO v_checkpoint FROM public.patrol_checkpoints
+  WHERE id=p_checkpoint_id AND organization_id=v_org AND active=true;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Checkpoint is not active for your organization'; END IF;
 
   -- Compatibility-only client proximity claims never determine server verification.
   IF p_gps_lat IS NOT NULL AND p_gps_lng IS NOT NULL
@@ -111,3 +116,18 @@ REVOKE ALL ON FUNCTION public.record_officer_checkpoint_visit(uuid,uuid,uuid,dou
 FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.record_officer_checkpoint_visit(uuid,uuid,uuid,double precision,double precision,double precision,double precision,boolean)
 TO authenticated,service_role;
+
+-- Officers may work shifts in a branch their profile RLS cannot read; resolve QR codes in the owned shift's branch.
+CREATE FUNCTION public.resolve_officer_checkpoint_qr(p_shift_id uuid,p_qr_code text)
+RETURNS TABLE(id uuid,name text,gps_lat double precision,gps_lng double precision,
+  radius_meters integer,client_site_id uuid,zone_id uuid)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+AS $function$
+  SELECT c.id,c.name,c.gps_lat,c.gps_lng,c.radius_meters,c.client_site_id,c.zone_id
+  FROM public.shifts s
+  JOIN public.user_profiles p ON p.id=auth.uid() AND p.deactivated_at IS NULL
+  JOIN public.patrol_checkpoints c ON c.organization_id=s.organization_id AND c.qr_code=p_qr_code AND c.active
+  WHERE s.id=p_shift_id AND s.officer_user_id=auth.uid() AND s.status='in_progress'
+$function$;
+REVOKE ALL ON FUNCTION public.resolve_officer_checkpoint_qr(uuid,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.resolve_officer_checkpoint_qr(uuid,text) TO authenticated;
