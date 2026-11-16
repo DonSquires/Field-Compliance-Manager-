@@ -61,6 +61,29 @@ describe('location house map', () => {
     expect(source).toContain('onSelectFacet({ type, id: facet.id })');
   });
 
+  it('counts each layer and keeps one review gate instead of calling work areas place boundaries', () => {
+    expect(source).toContain('placeLayerGates(sites, zones, checkpointsProvided ? checkpoints : undefined)');
+    expect(source).toContain('layerGates.review.label');
+    expect(source).not.toContain('verified place boundar');
+    expect(source).not.toContain('Site or work area{unresolvedFacets');
+  });
+
+  it('keeps checkpoints visible at any zoom and tells parent areas from their parts', () => {
+    expect(source).toContain('L.circleMarker([checkpoint.gps_lat, checkpoint.gps_lng]');
+    expect(source).toContain('L.circle([checkpoint.gps_lat, checkpoint.gps_lng]');
+    expect(source).toContain(' · part of ${parent.name}');
+    expect(source).toContain('house-map-legend');
+    expect(source).toContain('<span className="house-map-legend-area" />Work area');
+    expect(source).toContain('<span className="house-map-legend-part" />Part of an area');
+    expect(source).toContain('<span className="house-map-legend-checkpoint" />Checkpoint');
+  });
+
+  it('lists advisory containment warnings in the review-list style without blocking anything', () => {
+    expect(source).toContain('placeAdvisories(sites, zones, checkpoints)');
+    expect(source).toContain('house-map-review-list is-advisory');
+    expect(source).toContain('Advisory only. Nothing is blocked');
+  });
+
   it('resolves selected points through the canonical geofence spine', () => {
     expect(source).toContain("supabase.rpc('resolve_operational_context_authorized'");
     expect(source).toContain("supabase.rpc('is_zone_closed'");

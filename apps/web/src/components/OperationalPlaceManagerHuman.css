@@ -334,3 +334,10 @@
   .place-manager-boundary .house-map-canvas { height: 360px; }
   .place-manager-restriction-history article { align-items: stretch; display: grid; }
 }
+.place-manager-part-of { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; margin-top: 13px; padding: 12px; border: 1px solid #2a414e; border-radius: 5px; background: #0d1c25; }
+.place-manager-part-of p { grid-column: 1 / -1; grid-row: 2; margin: 0; color: #8fa4ae; font-size: 12px; }
+.place-manager-part-of > div { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.place-manager-part-of .is-success, .place-manager-part-of .is-error { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.place-manager-part-of .is-success { color: #c8f2e7; }
+.place-manager-part-of .is-error { color: #ffd5cf; }
+@media (max-width: 760px) { .place-manager-part-of { grid-template-columns: 1fr; } .place-manager-part-of p { grid-row: auto; } }

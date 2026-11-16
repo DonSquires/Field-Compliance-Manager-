@@ -69,6 +69,25 @@ describe('human operational controls', () => {
     expect(manager).not.toMatch(/supabase\.from\(/);
   });
 
+  it('sets a work area as part of another through the governed parent command, with its own save state', () => {
+    expect(manager).toContain("supabase.rpc('set_location_zone_parent', { p_zone_id: zone.id, p_parent_zone_id: partOf || null, p_expected_version: zone.configuration_version })");
+    expect(manager).toContain('partOfOptions(data.zones, zone.id)');
+    expect(manager).toContain('<option value="">Not part of another area</option>');
+    expect(manager).toContain('Save part of');
+    expect(manager).toContain("partOfState === 'saving'");
+    expect(manager).toContain("partOfState === 'saved'");
+    expect(manager).toContain('The area could not be moved. Reload and try again.');
+    expect(manager).toContain('orderZonesByParent(data.zones)');
+  });
+
+  it('keeps unsaved Area settings when the parent is saved, and reports Saved only after the reload succeeds', () => {
+    // Saving the parent reloads the zone with a new object and version; the settings form must reset only for a different area.
+    expect(manager).toMatch(/\}, \[creatingZone, zone\?\.id\]\);/);
+    expect(manager).not.toMatch(/\}, \[creatingZone, zone\]\);/);
+    expect(manager).toContain('if (!(await load(zone.id))) {');
+    expect(manager).toMatch(/const load = useCallback\(async \(preferredZoneId\?: string\): Promise<boolean> =>/);
+  });
+
   it('labels user lifecycle and access commands', () => {
     for (const label of ['Resend', 'Reactivate', 'Deactivate', 'Edit user']) expect(users).toContain(label);
   });

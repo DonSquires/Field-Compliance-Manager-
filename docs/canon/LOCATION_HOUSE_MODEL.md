@@ -185,6 +185,17 @@ narrowly:
 - Site facets are unaffected: a zone still never hangs off a site, and
   `client_sites` still never nests.
 
+**Note 2026-11-17 — governed editor.** `parent_zone_id` now has one governed
+editor, `set_location_zone_parent` (migration
+`20261117010000_zone_parent_setting.sql`), surfaced as "Part of" in the Work
+areas step. It accepts only a parent on the same organisation and the same
+house, never itself, a verification point or one of its own parts (no cycles),
+checks the expected configuration version, bumps it and writes `audit_log`.
+It returns advisory containment (how much of the child lies inside the parent,
+and which of the provider's active checkpoints on it lie outside), which never
+blocks. The relation remains reporting-only: `resolve_context` is unchanged and
+still picks the smallest containing confirmed zone.
+
 ## Ruling correction 2026-09-23 (later same day) — `active_build_cleanup` delete scope
 
 > Owner ruling: "while we are building and seeding, you have permission to

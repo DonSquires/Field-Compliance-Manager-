@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, LandPlot, MapPinned, ShieldCheck, Siren, X
 import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap, type EditableEntity, type HouseMapCheckpoint, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
 import { WorkingZonePolicyEditor } from './WorkingZonePolicyEditor';
+import { orderZonesByParent, partOfOptions } from '../lib/placeLayers';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
 import './OperationalPlaceManagerHuman.css';
@@ -137,6 +138,9 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const [checkpointFormOpen, setCheckpointFormOpen] = useState(false);
   const [placingCheckpoint, setPlacingCheckpoint] = useState(false);
   const [checkpointReviewed, setCheckpointReviewed] = useState('');
+  const [partOf, setPartOf] = useState('');
+  const [partOfState, setPartOfState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [partOfError, setPartOfError] = useState<string | null>(null);
 
   const site = data?.sites.find((item) => item.id === siteId) ?? null;
   const zone = data?.zones.find((item) => item.id === zoneId) ?? null;
@@ -151,14 +155,14 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const isFreedomCamping = zoneForm.moduleKey === 'freedom_camping';
   const selectedRestrictions = useMemo(() => data?.closures.filter((item) => item.zone_id === zoneId) ?? [], [data?.closures, zoneId]);
 
-  const load = useCallback(async (preferredZoneId?: string) => {
+  const load = useCallback(async (preferredZoneId?: string): Promise<boolean> => {
     setError(null);
     const [editorResponse, geographyResponse] = await Promise.all([
       supabase.rpc('get_crm_operational_place_editor', { p_location_id: locationId }),
       supabase.rpc('get_crm_operational_geography'),
     ]);
     const loadError = editorResponse.error ?? geographyResponse.error;
-    if (loadError) { setError(loadError.message); return; }
+    if (loadError) { setError(loadError.message); return false; }
 
     const editor = editorResponse.data as Omit<EditorData, 'location' | 'sites' | 'zones'> & {
       location: Omit<EditorData['location'], 'address'>;
@@ -177,7 +181,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     const checkpointResponse = profile?.organizationId
       ? await supabase.rpc('get_location_patrol_checkpoints', { p_location_id: locationId })
       : { data: [], error: null };
-    if (checkpointResponse.error) { setError(checkpointResponse.error.message); return; }
+    if (checkpointResponse.error) { setError(checkpointResponse.error.message); return false; }
     setCheckpoints((checkpointResponse.data as Checkpoint[]) ?? []);
     setData(next);
     setSiteId((current) => next.sites.some((item) => item.id === current) ? current : next.sites[0]?.id ?? '');
@@ -195,6 +199,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
       if (initialZoneId && next.zones.some((item) => item.id === initialZoneId)) return `zone:${initialZoneId}`;
       return next.sites[0] ? `site:${next.sites[0].id}` : next.zones[0] ? `zone:${next.zones[0].id}` : '';
     });
+    return true;
   }, [initialZoneId, locationId, profile?.organizationId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -213,7 +218,36 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
       scv: zone.scv_required,
       workflow: zone.enforcement_workflow_override ?? '',
     });
-  }, [creatingZone, zone]);
+    // Keyed on identity, not the object: a reload after saving the parent must not discard unsaved settings edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creatingZone, zone?.id]);
+  useEffect(() => {
+    setPartOf(zone?.parent_zone_id ?? '');
+  }, [zone?.id, zone?.parent_zone_id]);
+  useEffect(() => {
+    setPartOfState('idle');
+    setPartOfError(null);
+  }, [zone?.id]);
+
+  const savePartOf = async () => {
+    if (!zone) return;
+    setPartOfState('saving'); setPartOfError(null);
+    const { error: parentError } = await supabase.rpc('set_location_zone_parent', { p_zone_id: zone.id, p_parent_zone_id: partOf || null, p_expected_version: zone.configuration_version });
+    if (parentError) {
+      // Only the command's own plain-language refusals are shown; anything else gets safe copy.
+      const known = /cannot be part of|same organisation|same place|nested at most|changed since it was opened|not work areas|cannot be a parent/i.test(parentError.message);
+      setPartOfError(known ? parentError.message : 'The area could not be moved. Reload and try again.');
+      setPartOfState('error');
+      return;
+    }
+    if (!(await load(zone.id))) {
+      setPartOfError('The area was moved, but the place could not be reloaded. Reload to see the change.');
+      setPartOfState('error');
+      return;
+    }
+    setPartOfState('saved');
+    onSaved();
+  };
 
   const complete = async (action: () => PromiseLike<{ error: { message: string } | null }>, message: string) => {
     setBusy(true); setError(null); setNotice(null);
@@ -457,7 +491,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
           </form>
         ) : view === 'zones' ? (
           <><form onSubmit={(event) => void saveZone(event)}>
-            <div className="place-manager-heading"><div><h3>{creatingZone ? 'Add a work area' : 'Work area settings'}</h3><p>A work area is the named part of this place where a service and its rules apply.</p></div><div>{!creatingZone && <select aria-label="Work area to edit" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setBoundaryTarget(`zone:${event.target.value}`); }}>{data.zones.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}<button type="button" onClick={creatingZone ? () => setCreatingZone(false) : startNewZone}>{creatingZone ? 'Cancel' : 'Add work area'}</button></div></div>
+            <div className="place-manager-heading"><div><h3>{creatingZone ? 'Add a work area' : 'Work area settings'}</h3><p>A work area is the named part of this place where a service and its rules apply.</p></div><div>{!creatingZone && <select aria-label="Work area to edit" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setBoundaryTarget(`zone:${event.target.value}`); }}>{orderZonesByParent(data.zones).map(({ zone: item, depth }) => <option value={item.id} key={item.id}>{`${'\u00a0\u00a0\u00a0'.repeat(depth)}${depth ? '↳ ' : ''}${item.name}`}</option>)}</select>}<button type="button" onClick={creatingZone ? () => setCreatingZone(false) : startNewZone}>{creatingZone ? 'Cancel' : 'Add work area'}</button></div></div>
             {(zone || creatingZone) ? <>
               <div className="place-manager-help"><MapPinned size={17} /><div><strong>{creatingZone ? 'Name the area officers will recognise.' : 'These settings tell officers what applies after GPS selects this area.'}</strong><span>The boundary itself is drawn and confirmed in the next step.</span></div></div>
               <div className="place-manager-grid is-three">
@@ -471,13 +505,22 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
               <footer><span>{creatingZone ? 'Saving creates the area, then opens its map boundary.' : `Saved version ${zone?.configuration_version ?? 0}`}</span><button type="submit" className="is-primary" disabled={busy || !zoneForm.name.trim()}>{creatingZone ? 'Save and draw boundary' : 'Save area settings'}</button></footer>
             </> : <div className="place-manager-empty">No work area exists yet. Add one to describe where a service applies.</div>}
           </form>
+          {zone && !creatingZone && <section className="place-manager-part-of" aria-label="Part of another work area">
+            <label><span>Part of</span><select value={partOf} disabled={partOfState === 'saving'} onChange={(event) => { setPartOf(event.target.value); setPartOfState('idle'); setPartOfError(null); }}><option value="">Not part of another area</option>{partOfOptions(data.zones, zone.id).map(({ zone: item, depth }) => <option value={item.id} key={item.id}>{`${'\u00a0\u00a0\u00a0'.repeat(depth)}${depth ? '↳ ' : ''}${item.name}`}</option>)}</select></label>
+            <p>For grouping and reporting only. GPS still matches the smallest confirmed work area, and nothing is blocked if the shapes overlap.</p>
+            <div>
+              {partOfState === 'saved' && <span className="is-success" role="status"><CheckCircle2 size={14} />Saved</span>}
+              {partOfState === 'error' && partOfError && <span className="is-error" role="alert"><AlertTriangle size={14} />{partOfError}</span>}
+              <button type="button" onClick={() => void savePartOf()} disabled={partOfState === 'saving' || partOf === (zone.parent_zone_id ?? '')}>{partOfState === 'saving' ? 'Saving' : 'Save part of'}</button>
+            </div>
+          </section>}
           {zone && !creatingZone && zone.module_key === zoneForm.moduleKey && ['parking_enforcement', 'freedom_camping'].includes(zone.module_key) && <WorkingZonePolicyEditor key={zone.id} zoneId={zone.id} moduleKey={zone.module_key} configurationVersion={zone.configuration_version} onSaved={() => { void load(zone.id); onSaved(); }} />}
           </>
         ) : view === 'boundary' ? (
           <div className="place-manager-boundary">
             <div className="place-manager-heading"><div><h3>Draw or update a boundary</h3><p>Choose a Site or work area, inspect the real map, then confirm the shape officers may rely on.</p></div><select aria-label="Boundary to edit" value={boundaryTarget} onChange={(event) => setBoundaryTarget(event.target.value)}><optgroup label="Sites">{data.sites.map((item) => <option value={`site:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup><optgroup label="Work areas">{data.zones.map((item) => <option value={`zone:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup></select></div>
             <div className="place-manager-help"><LandPlot size={17} /><div><strong>Use the map, not GeoJSON.</strong><span>Find the LINZ parcel, draw corners over satellite imagery, or use a measured radius. A boundary is not used by officers until a person confirms it.</span></div></div>
-            {editableEntity ? <LocationHouseMap key={boundaryTarget} data-testid="test-location-house-map" organizationId={data.location.organization_id} house={data.location} sites={data.sites} zones={data.zones} editableEntity={editableEntity} onSelectFacet={(facet) => { setNotice(null); setBoundaryTarget(`${facet.type === 'client_site' ? 'site' : 'zone'}:${facet.id}`); }} /> : <div className="place-manager-empty">Add a Site or work area before drawing a boundary.</div>}
+            {editableEntity ? <LocationHouseMap key={boundaryTarget} data-testid="test-location-house-map" organizationId={data.location.organization_id} house={data.location} sites={data.sites} zones={data.zones} checkpoints={checkpoints} editableEntity={editableEntity} onSelectFacet={(facet) => { setNotice(null); setBoundaryTarget(`${facet.type === 'client_site' ? 'site' : 'zone'}:${facet.id}`); }} /> : <div className="place-manager-empty">Add a Site or work area before drawing a boundary.</div>}
           </div>
         ) : view === 'checkpoints' ? (
           <div className="place-manager-checkpoints">

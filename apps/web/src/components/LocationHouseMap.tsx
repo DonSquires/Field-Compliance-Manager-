@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AlertTriangle, Building2, CheckCircle2, Crosshair, LandPlot, LoaderCircle, MapPin, PenTool, ShieldCheck, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, Crosshair, LandPlot, Layers, LoaderCircle, MapPin, PenTool, ShieldCheck, Undo2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
+import { placeAdvisories, placeLayerGates, type ParentContainment } from '../lib/placeLayers';
 import './LocationHouseMap.css';
 import './LocationHouseMapSpine.css';
 import './LocationHouseMapEditing.css';
@@ -48,6 +49,9 @@ export interface HouseMapZone {
   center_point?: GeoJSON.Point | null;
   boundary_status: string;
   boundary_verification: string;
+  /** Reporting-only "Part of" relation; never used for GPS resolution. */
+  parent_zone_id?: string | null;
+  parent_containment?: ParentContainment | null;
 }
 
 export interface HouseMapCheckpoint {
@@ -58,6 +62,8 @@ export interface HouseMapCheckpoint {
   radius_meters: number;
   checkpoint_verification: string;
   active: boolean;
+  zone_id?: string | null;
+  client_site_id?: string | null;
 }
 
 interface LinzPreview {
@@ -144,7 +150,12 @@ const RESOLUTION_LABEL: Record<string, string> = {
   unresolved_invalid: 'Boundary shape needs repair',
 };
 
-export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary, onSelectFacet, checkpoints = [], checkpointDraftPoint, checkpointPlacement = false, onCheckpointPosition }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null; onSelectFacet?: (facet: { type: EditableEntity['type']; id: string }) => void; checkpoints?: HouseMapCheckpoint[]; checkpointDraftPoint?: { lat: number; lng: number } | null; checkpointPlacement?: boolean; onCheckpointPosition?: (point: { lat: number; lng: number }) => void }) {
+const NO_CHECKPOINTS: HouseMapCheckpoint[] = [];
+
+export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary, onSelectFacet, checkpoints: checkpointsProp, checkpointDraftPoint, checkpointPlacement = false, onCheckpointPosition }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null; onSelectFacet?: (facet: { type: EditableEntity['type']; id: string }) => void; checkpoints?: HouseMapCheckpoint[]; checkpointDraftPoint?: { lat: number; lng: number } | null; checkpointPlacement?: boolean; onCheckpointPosition?: (point: { lat: number; lng: number }) => void }) {
+  // Only a caller that loaded checkpoints may claim a count; otherwise "Checkpoints 0" would be false.
+  const checkpointsProvided = checkpointsProp !== undefined;
+  const checkpoints = checkpointsProp ?? NO_CHECKPOINTS;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
@@ -214,11 +225,18 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         bounds.extend(point.getLatLng());
       }
     });
-    zones.forEach((zone) => {
-      if (zone.boundary) addBoundary(zone.boundary, { color: '#f0b35a', weight: 2, dashArray: '7 5', fillColor: '#f0b35a', fillOpacity: 0.1 }, `Zone: ${zone.name}`);
+    // Larger areas first so a part drawn inside its area stays on top and clickable.
+    const zoneOrder = [...zones].sort((a, b) => Number(Boolean(a.parent_zone_id)) - Number(Boolean(b.parent_zone_id)));
+    zoneOrder.forEach((zone) => {
+      const parent = zone.parent_zone_id ? zones.find((item) => item.id === zone.parent_zone_id) : undefined;
+      const label = `Zone: ${zone.name}${parent ? ` · part of ${parent.name}` : ''}`;
+      const style: L.PathOptions = parent
+        ? { color: '#ffd59a', weight: 2, fillColor: '#ffd59a', fillOpacity: 0.16 }
+        : { color: '#f0b35a', weight: 2, dashArray: '7 5', fillColor: '#f0b35a', fillOpacity: 0.06 };
+      if (zone.boundary) addBoundary(zone.boundary, style, label);
       else if (zone.center_point?.coordinates?.length === 2) {
         const [lng, lat] = zone.center_point.coordinates;
-        const point = L.circleMarker([lat, lng], { radius: 6, color: '#f0b35a', fillColor: '#9a5f18', fillOpacity: 0.9, interactive }).bindTooltip(`Zone: ${zone.name}`).addTo(overlay);
+        const point = L.circleMarker([lat, lng], { radius: 6, color: '#f0b35a', fillColor: '#9a5f18', fillOpacity: 0.9, interactive }).bindTooltip(label).addTo(overlay);
         bounds.extend(point.getLatLng());
       }
     });
@@ -246,14 +264,19 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     checkpoints.forEach((checkpoint) => {
       if (checkpoint.gps_lat == null || checkpoint.gps_lng == null) return;
       const verified = checkpoint.checkpoint_verification === 'verified';
-      const circle = L.circle([checkpoint.gps_lat, checkpoint.gps_lng], {
+      const color = checkpoint.active ? (verified ? '#4cc38a' : '#e5aa45') : '#879aaa';
+      const tooltip = `Checkpoint: ${checkpoint.name} · ${verified ? 'verified' : 'unverified'}${checkpoint.active ? '' : ' · inactive'}`;
+      L.circle([checkpoint.gps_lat, checkpoint.gps_lng], {
         radius: checkpoint.radius_meters,
-        color: checkpoint.active ? (verified ? '#4cc38a' : '#e5aa45') : '#879aaa',
+        color,
         weight: 2,
         fillOpacity: checkpoint.active ? 0.18 : 0.08,
         interactive,
-      }).bindTooltip(`Checkpoint: ${checkpoint.name} · ${verified ? 'verified' : 'unverified'}${checkpoint.active ? '' : ' · inactive'}`);
-      circle.addTo(overlay);
+      }).bindTooltip(tooltip).addTo(overlay);
+      // A 10-20 m radius is sub-pixel at whole-place zoom; the fixed-size pin keeps every checkpoint visible.
+      L.circleMarker([checkpoint.gps_lat, checkpoint.gps_lng], {
+        radius: 5, color: '#0b1924', weight: 2, fillColor: color, fillOpacity: 1, interactive,
+      }).bindTooltip(tooltip).addTo(overlay);
       bounds.extend([checkpoint.gps_lat, checkpoint.gps_lng]);
     });
     if (checkpointDraftPoint) {
@@ -446,16 +469,17 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     })();
   };
 
-  const verifiedPlaces = [...sites, ...zones].filter((place) => place.boundary && place.boundary_verification === 'verified').length;
+  const layerGates = placeLayerGates(sites, zones, checkpointsProvided ? checkpoints : undefined);
+  const advisories = placeAdvisories(sites, zones, checkpoints);
   const reviewFacets = [
     ...sites.map((facet) => ({ facet, type: 'client_site' as const, kind: 'Site' })),
     ...zones.map((facet) => ({ facet, type: 'location_zone' as const, kind: 'Work area' })),
   ].filter(({ facet }) => !facet.boundary || facet.boundary_verification !== 'verified');
-  const unresolvedFacets = reviewFacets.length;
   return <section className="house-map" aria-label={`Map for ${house.name}`}>
     <header><div><span>Place boundary map</span><h3>{house.name}</h3><p>{house.address ?? 'Address not recorded'}</p></div><button type="button" onClick={() => void previewLinzBoundary()} disabled={resolving || (!house.address && !house.name)}>{resolving ? <LoaderCircle size={15} className="is-spinning" /> : <LandPlot size={15} />}{resolving ? 'Finding LINZ boundary' : 'Find LINZ boundary'}</button></header>
-    <div className="house-map-gates"><span className={verifiedPlaces ? 'is-ready' : 'is-blocked'}><ShieldCheck size={14} /><strong>{verifiedPlaces}</strong> verified place boundar{verifiedPlaces === 1 ? 'y' : 'ies'}</span><span className={unresolvedFacets ? 'is-blocked' : 'is-ready'}><AlertTriangle size={14} /><strong>{unresolvedFacets}</strong> Site or work area{unresolvedFacets === 1 ? '' : 's'} need review</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Checking this point' : 'Click the map to check a location'}</span></div>
+    <div className="house-map-gates">{layerGates.layers.map((label) => <span key={label}><Layers size={14} />{label}</span>)}<span className={layerGates.ready ? 'is-ready' : 'is-blocked'}>{layerGates.ready ? <ShieldCheck size={14} /> : <AlertTriangle size={14} />}{layerGates.review.label}</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Checking this point' : 'Click the map to check a location'}</span></div>
     {reviewFacets.length > 0 && <ul className="house-map-review-list" aria-label="Sites and work areas that still need a confirmed boundary">{reviewFacets.map(({ facet, type, kind }) => <li key={facet.id}><span><strong>{facet.name}</strong> · {kind} · {facet.boundary ? 'boundary saved, not yet confirmed' : 'no boundary yet'}</span>{facet.id === editableEntity?.id ? <em>Selected below</em> : onSelectFacet && <button type="button" onClick={() => onSelectFacet({ type, id: facet.id })}>Set this boundary</button>}</li>)}</ul>}
+    {advisories.length > 0 && <ul className="house-map-review-list is-advisory" aria-label="Advisory containment warnings">{advisories.map((item) => <li key={item.id}><span>{item.text}</span></li>)}<li><em>Advisory only. Nothing is blocked; GPS still matches the smallest confirmed work area.</em></li></ul>}
     {error && <div className="house-map-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
     {linzPreview && <><div className="house-map-message is-success" role="status"><CheckCircle2 size={15} /><span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : `Read-only LINZ ${linzPreview.kind === 'parcel' ? 'land-lot' : 'building'} preview`}</strong>{linzPreview.address} · {linzPreview.match}</span></div><div className="house-map-lot-details"><div><span>Canonical address</span><strong>{linzPreview.address}</strong></div><div><span>Source</span><strong>{linzPreview.source.replaceAll('_', ' ')}</strong></div><div><span>Geometry</span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : linzPreview.kind === 'parcel' ? 'LINZ parcel / land lot' : 'LINZ building outline'}</strong></div>{Object.entries(linzPreview.properties).filter(([, value]) => value !== null && value !== '').slice(0, 6).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></div>)}</div></>}
     {resolution && <div className={`house-map-resolution is-${resolution.resolution_status === 'resolved' ? 'resolved' : 'unresolved'}`} role="status"><div><span>Map check</span><strong>{RESOLUTION_LABEL[resolution.resolution_status] ?? 'Location could not be confirmed'}</strong></div><div><span>Provider service area</span><strong>{resolution.in_operating_bounds ? 'Inside' : resolution.out_of_bounds_district ? `Outside · ${resolution.out_of_bounds_district}` : 'Outside'}</strong></div><div><span>Matched work area</span><strong>{resolution.matched_zone_id ? zones.find((zone) => zone.id === resolution.matched_zone_id)?.name ?? 'Matched work area' : 'No verified active work area'}</strong></div><div><span>Site match</span><strong>{resolution.site_id ? resolution.on_site ? 'Inside the Site' : 'Work area matched · outside Site boundary' : 'No verified Site match'}</strong></div><div><span>Service</span><strong>{resolution.matched_module_key?.replaceAll('_', ' ') ?? 'None'}</strong></div><div><span>Rules loaded</span><strong>{resolution.effective_rules ? `${Object.keys(resolution.effective_rules).length} applicable setting${Object.keys(resolution.effective_rules).length === 1 ? '' : 's'}` : 'None'}</strong></div><div className={closure ? 'is-warning' : ''}><span>Temporary restriction</span><strong>{closure ? `${closure.closure_type.replaceAll('_', ' ')} · ${closure.reason ?? 'No reason recorded'}` : 'None in force'}</strong></div>{resolution.governor_overlap_flag && <div className="is-warning"><span>Jurisdiction</span><strong>Overlapping authority needs review</strong></div>}</div>}
@@ -478,6 +502,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
       </div>
     </div>}
     <div className="house-map-canvas" ref={containerRef} />
+    <div className="house-map-legend" aria-label="Map legend"><span><span className="house-map-legend-area" />Work area</span><span><span className="house-map-legend-part" />Part of an area</span><span><span className="house-map-legend-checkpoint" />Checkpoint</span></div>
     <footer><span><Building2 size={13} />Boundary shows where work applies</span><span><MapPin size={13} />Area settings control what officers do</span><span><LandPlot size={13} />LINZ supplies the property outline</span><em>{editableEntity ? 'Officers use only a saved and confirmed boundary. A preview alone changes nothing.' : 'A LINZ preview changes nothing until it is saved and confirmed.'}</em></footer>
   </section>;
 }
