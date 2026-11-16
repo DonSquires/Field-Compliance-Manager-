@@ -6,6 +6,7 @@ import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, t
 import { commercialIssueAreas, commercialStatusLabel, contractedDaysWords, contractedHoursWords, plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
 import { credentialTypeLabel } from '../lib/credentialWords';
 import { validateRosterContact } from '../lib/rosterContact';
+import { readRosterEditContext, readRosterAmendmentReceipt, type RosterEditContext } from '../lib/rosterAmendment';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
 import { RosterTimesheetPanel } from './RosterHRPage';
@@ -162,6 +163,7 @@ const startOfWeek = (date: Date) => { const value = new Date(date); value.setDat
 const addDays = (date: Date, days: number) => { const value = new Date(date); value.setDate(value.getDate() + days); return value; };
 const isoDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 const localInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+const plannedLocalInput = (value: string) => localInput(new Date(value));
 
 import { useWorkforceScope } from '../lib/workforceScope';
 
@@ -236,15 +238,41 @@ const RosterOperationsPage: React.FC = () => {
   const [replacementStaffId, setReplacementStaffId] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [editingSlot, setEditingSlot] = useState<RosterSlot | null>(null);
+  const [editContext, setEditContext] = useState<RosterEditContext | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editReason, setEditReason] = useState('');
+  const [handoverAt, setHandoverAt] = useState('');
+  const [handoverSafe, setHandoverSafe] = useState(false);
+  const editorSequence = useRef(0);
+  const editorRequest = useRef<{ fingerprint: string; id: string } | null>(null);
+  const editorDialogRef = useRef<HTMLDialogElement>(null);
   const [copyingSlot, setCopyingSlot] = useState<RosterSlot | null>(null);
   const [repeatDialog, setRepeatDialog] = useState<{ slot: RosterSlot; from: string; to: string } | null>(null);
-  const [contactDialog, setContactDialog] = useState<{ slot: RosterSlot; name: string; phone: string; version: string | null } | null>(null);
-  const [contactError, setContactError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<{ officerId: string; workUnitId: string; start: string; end: string; notes: string; contactName: string; contactPhone: string; contactVersion: string | null; contactReviewed: boolean; clientRequestId: string; publish: boolean; breakMinutes: string; breakUnpaid: boolean }>({ officerId: '', workUnitId: '', start: '', end: '', notes: '', contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false, clientRequestId: '', publish: true, breakMinutes: '0', breakUnpaid: false });
   const [unitCoverage, setUnitCoverage] = useState<CoveragePreview | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentPreview | null>(null);
+  const needsHandover = Boolean(editContext?.shift?.actual_start && !editContext.shift.actual_end
+    && (form.workUnitId !== editContext.slot.work_unit_id
+      || (staff.find((person) => person.id === form.officerId)?.staffId
+        ?? (form.officerId === editContext.slot.staff_id ? editContext.slot.staff_id : null)) !== editContext.slot.staff_id));
+  const closeEditor = () => { if (!saving) { editorSequence.current += 1; setShowCreate(false); } };
+  useEffect(() => {
+    if (!showCreate || !editorDialogRef.current) return;
+    const dialog = editorDialogRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.showModal();
+    return () => { dialog.close(); if (opener?.isConnected) opener.focus(); };
+  }, [showCreate]);
+  useEffect(() => {
+    editorSequence.current += 1;
+    setShowCreate(false); setEditContext(null); setEditLoading(false); setSaving(false);
+    return () => { editorSequence.current += 1; };
+  }, [operatingOrganizationId]);
+  useEffect(() => {
+    if (needsHandover) setForm((current) => ({ ...current, start: handoverAt }));
+  }, [needsHandover, handoverAt]);
 
   const period = useMemo(() => rosterPeriod(periodAnchor, horizon), [horizon, periodAnchor]);
   const { days, start: weekStart, end: weekEnd } = period;
@@ -452,7 +480,7 @@ const RosterOperationsPage: React.FC = () => {
   useEffect(() => {
     setSelectedShiftId(null); setSelectedSlotId(null); setTimesheetCount(null);
     setSelectedSourceAssignment(null);
-    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setContactDialog(null); setAttendanceAction(null); setAdminAttendanceDialog(null);
+    setShowCreate(false); setAvailabilityDialog(null); setPublishDialog(null); setTemplateDialog(null); setRepeatDialog(null); setAttendanceAction(null); setAdminAttendanceDialog(null);
     setNotice(null);
   }, [operatingOrganizationId]);
   const periodLabel = `${weekStart.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} – ${addDays(weekEnd, -1).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -488,6 +516,7 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const openCreate = (person?: Staff, day?: Date, workUnitOverride?: string) => {
+    editorSequence.current += 1; setEditContext(null); setEditLoading(false);
     setCopyingSlot(null);
     setFormError(null);
     const start = day ? new Date(day) : new Date(); start.setHours(8, 0, 0, 0); const end = new Date(start); end.setHours(16, 0, 0, 0);
@@ -501,7 +530,13 @@ const RosterOperationsPage: React.FC = () => {
     setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false, clientRequestId: crypto.randomUUID(), publish: true, breakMinutes: '0', breakUnpaid: false }); setShowCreate(true);
   };
 
-  const openEdit = (slot: RosterSlot) => {
+  const openEdit = async (slot: RosterSlot) => {
+    const sequence = ++editorSequence.current;
+    const org = operatingOrganizationId ?? profile?.organizationId;
+    setEditContext(null); setEditLoading(true); setEditReason(''); setHandoverSafe(false);
+    editorRequest.current = null;
+    const now = new Date();
+    setHandoverAt(`${localInput(now)}:${String(now.getSeconds()).padStart(2, '0')}`);
     setCopyingSlot(null);
     setFormError(null);
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
@@ -524,9 +559,33 @@ const RosterOperationsPage: React.FC = () => {
     });
     setSelectedSlotId(null);
     setShowCreate(true);
+    try {
+      const { data, error: contextError } = await supabase.rpc('get_roster_slot_edit_context', { p_slot_id: slot.id });
+      if (sequence !== editorSequence.current) return;
+      const context = readRosterEditContext(data);
+      if (contextError || !context || context.slot.id !== slot.id || context.slot.organization_id !== org) {
+        setFormError(contextError?.message ?? 'Current shift details could not be verified. Reload before editing.');
+        return;
+      }
+      const person = staff.find((candidate) => candidate.staffId === context.slot.staff_id);
+      setEditingSlot({ ...slot, ...context.slot });
+      setEditContext(context);
+      setForm((current) => ({
+        ...current, officerId: person?.id ?? context.slot.staff_id ?? '', workUnitId: context.slot.work_unit_id,
+        start: plannedLocalInput(context.slot.scheduled_start), end: plannedLocalInput(context.slot.scheduled_end),
+        notes: context.slot.notes ?? '', breakMinutes: String(context.slot.planned_break_minutes),
+        breakUnpaid: context.slot.break_unpaid, contactName: context.contact?.contact_name ?? '',
+        contactPhone: context.contact?.contact_phone ?? '', contactVersion: context.contact?.version ?? null,
+      }));
+    } catch (failure) {
+      if (sequence === editorSequence.current) setFormError(adminAttendanceErrorMessage(failure));
+    } finally {
+      if (sequence === editorSequence.current) setEditLoading(false);
+    }
   };
 
   const openCopy = (slot: RosterSlot) => {
+    editorSequence.current += 1; setEditContext(null); setEditLoading(false);
     setFormError(null);
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
     const contact = slotContact(slot);
@@ -552,55 +611,64 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(false);
   };
 
-  const saveSlotContact = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!contactDialog) return;
-    const validation = validateRosterContact(contactDialog.name, contactDialog.phone);
-    if (validation) { setContactError(validation); return; }
-    setSaving(true); setContactError(null); setNotice(null);
-    const { data, error: saveError } = await supabase.rpc('set_roster_slot_contact', {
-      p_slot_id: contactDialog.slot.id, p_expected_status: contactDialog.slot.status,
-      p_contact_name: contactDialog.name.trim() || null, p_contact_phone: contactDialog.phone.trim() || null,
-      p_expected_version: contactDialog.version,
-    });
-    if (saveError || !data || data.roster_slot_id !== contactDialog.slot.id || typeof data.changed !== 'boolean') {
-      setContactError(saveError?.message ?? 'The shift contact could not be confirmed. Refresh and retry.');
-    }
-    else { setNotice('Shift contact saved. It is available to the assigned officer once the shift is published.'); setContactDialog(null); await load(); }
-    setSaving(false);
-  };
-
   const updateDraft = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!editingSlot) return;
+    if (!editingSlot || !editContext || saving) return;
     setSaving(true); setError(null); setFormError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId);
-    if (!person) { setFormError('A work-ready staff member is required.'); setSaving(false); return; }
-    const blocker = credentialBlocker(person, form.end); if (blocker) { setFormError(blocker); setSaving(false); return; }
-    const unit = workUnits.find((candidate) => candidate.id === editingSlot.work_unit_id);
+    const retainedStaffId = person?.staffId ?? (form.officerId === editContext.slot.staff_id ? editContext.slot.staff_id : null);
+    const dimensionsChanged = retainedStaffId !== editContext.slot.staff_id
+      || form.workUnitId !== editContext.slot.work_unit_id
+      || form.start !== plannedLocalInput(editContext.slot.scheduled_start)
+      || form.end !== plannedLocalInput(editContext.slot.scheduled_end);
+    const blocker = dimensionsChanged && person ? credentialBlocker(person, form.end) : null;
+    if (blocker) { setFormError(blocker); setSaving(false); return; }
+    const unit = workUnits.find((candidate) => candidate.id === form.workUnitId)
+      ?? (form.workUnitId === editContext.slot.work_unit_id ? editContext.work_unit : null);
     if (!unit) { setFormError('The work unit could not be confirmed. Refresh the roster.'); setSaving(false); return; }
     const isStatic = unit.work_unit_type === 'static';
     const validation = isStatic ? validateRosterContact(form.contactName, form.contactPhone) : null;
     if (validation) { setFormError(validation); setSaving(false); return; }
-    const args = {
-      p_slot_id: editingSlot.id,
-      p_expected_status: editingSlot.status,
-      p_staff_id: person.staffId,
-      p_scheduled_start: new Date(form.start).toISOString(),
-      p_scheduled_end: new Date(form.end).toISOString(),
-      p_notes: form.notes.trim() || null,
-      p_planned_break_minutes: Number(form.breakMinutes),
-      p_break_unpaid: form.breakUnpaid,
-    };
-    const { data: updated, error: updateError } = await supabase.rpc(
-      isStatic ? 'update_static_roster_slot_with_contact' : 'update_roster_slot_with_break',
-      isStatic ? { ...args, p_contact_name: form.contactName.trim() || null, p_contact_phone: form.contactPhone.trim() || null, p_expected_contact_version: form.contactVersion } : args,
-    );
-    if (updateError || !updated || updated.id !== editingSlot.id || updated.status !== 'draft') {
-      setFormError(updateError?.message ?? 'The draft update could not be confirmed. Refresh the roster.');
+    const sequence = editorSequence.current;
+    try {
+      const args = {
+        p_slot_id: editingSlot.id, p_expected_updated_at: editContext.slot.updated_at,
+        p_expected_shift_updated_at: editContext.shift?.updated_at ?? null,
+        p_changes: {
+          staff_id: retainedStaffId, work_unit_id: form.workUnitId,
+          scheduled_start: !needsHandover && form.start === plannedLocalInput(editContext.slot.scheduled_start)
+            ? editContext.slot.scheduled_start : new Date(form.start).toISOString(),
+          scheduled_end: form.end === plannedLocalInput(editContext.slot.scheduled_end)
+            ? editContext.slot.scheduled_end : new Date(form.end).toISOString(),
+          planned_break_minutes: Number(form.breakMinutes), break_unpaid: form.breakUnpaid, notes: form.notes.trim() || null,
+          contact_name: isStatic ? form.contactName.trim() || null : null,
+          contact_phone: isStatic ? form.contactPhone.trim() || null : null,
+          expected_contact_version: editContext.contact?.version ?? null,
+        },
+        p_reason: editReason.trim(), p_handover_at: needsHandover ? new Date(handoverAt).toISOString() : null,
+        p_officer_safety_confirmed: needsHandover && handoverSafe,
+      };
+      const fingerprint = JSON.stringify(args);
+      if (editorRequest.current?.fingerprint !== fingerprint) editorRequest.current = { fingerprint, id: crypto.randomUUID() };
+      const requestId = editorRequest.current.id;
+      const { data, error: updateError } = await supabase.rpc('amend_roster_slot', { ...args, p_client_request_id: requestId });
+      if (sequence !== editorSequence.current) return;
+      const receipt = readRosterAmendmentReceipt(data);
+      if (updateError) { setFormError(adminAttendanceErrorMessage(updateError)); return; }
+      if (!receipt || receipt.slot_id !== editingSlot.id || receipt.client_request_id !== requestId
+        || receipt.source !== (needsHandover ? 'roster_slot_handover' : 'roster_slot_amended')) {
+        setFormError('The save receipt could not be verified. Keep these details and retry the same request, or reconcile the roster before making another change.');
+        return;
+      }
+      setNotice(needsHandover
+        ? `Handover saved. Original work preserved; the replacement must accept and start. ${receipt.released_dispatch_jobs} dispatch jobs returned to the queue; ${receipt.resolved_welfare_alerts} welfare alerts resolved.`
+        : 'Shift plan saved. Recorded attendance, breaks and existing payroll or invoice snapshots are unchanged.');
+      setEditingSlot(null); setShowCreate(false); await load();
+    } catch (failure) {
+      if (sequence === editorSequence.current) setFormError(adminAttendanceErrorMessage(failure));
+    } finally {
+      if (sequence === editorSequence.current) setSaving(false);
     }
-    else { setNotice('Draft roster slot updated. Review it before publishing.'); setEditingSlot(null); setShowCreate(false); await load(); }
-    setSaving(false);
   };
 
   const createAssignment = async (event: React.FormEvent) => {
@@ -1043,30 +1111,36 @@ const RosterOperationsPage: React.FC = () => {
       {selectedSlotUnit?.workshop_work_order_id && <><p>Client billing, place or asset, job lead and completion are managed on the linked work order. This slot plans labour only and does not change the job lead.</p><button type="button" onClick={() => navigate(`/admin/workshop?workOrderId=${selectedSlotUnit.workshop_work_order_id}`)}>Open work order</button></>}
       {selectedSlot.notes && <p>{selectedSlot.notes}</p>}
       </div>
-      <footer className="roster-inspector-actions">{selectedSlotUnit?.work_unit_type === 'static' && ['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button type="button" onClick={() => { const contact = slotContact(selectedSlot); setContactError(null); setContactDialog({ slot: selectedSlot, name: contact?.contact_name ?? '', phone: contact?.contact_phone ?? '', version: contact?.version ?? null }); }}>Edit shift contact</button>}{selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type="button" onClick={() => openEdit(selectedSlot)}>Edit draft</button>}{!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}{selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}{['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}{['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}{['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}{['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}</footer>
+      <footer className="roster-inspector-actions">
+        {['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button type="button" onClick={() => void openEdit(selectedSlot)}>Edit shift</button>}
+        {!['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}
+        {selectedSlot.status === 'draft' && <button className="is-primary" onClick={() => setSlotAction('publish')}>Publish slot</button>}
+        {['draft', 'published', 'declined'].includes(selectedSlot.status) && <button disabled={saving} onClick={() => void offerOvertime()}>Offer overtime</button>}
+        {['published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('unpublish'); }}>Recall to draft</button>}
+        {['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button onClick={() => { setReplacementStaffId(''); setSlotReason(''); setSlotAction('reassign'); }}>Reassign</button>}
+        {['draft', 'published', 'accepted'].includes(selectedSlot.status) && <button onClick={() => { setSlotReason(''); setSlotAction('cancel'); }}>Cancel slot</button>}
+      </footer>
     </aside>}
-    {contactDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={saveSlotContact} role="dialog" aria-modal="true" aria-labelledby="shift-contact-title">
-      <header><div><span>Roster assignment</span><h2 id="shift-contact-title">Edit shift contact</h2></div><button type="button" onClick={() => setContactDialog(null)} aria-label="Close shift contact"><X /></button></header>
-      <p>Designate the person or phone number for this specific shift. Leave both blank to remove the contact.</p>
-      {contactError && <p className="roster-contact-error" role="alert">{contactError}</p>}
-      <label><span>Contact person</span><input maxLength={120} value={contactDialog.name} onChange={(event) => setContactDialog({ ...contactDialog, name: event.target.value })} /></label>
-      <label><span>Contact phone</span><input type="tel" maxLength={50} value={contactDialog.phone} onChange={(event) => setContactDialog({ ...contactDialog, phone: event.target.value })} /></label>
-      <footer><button type="button" onClick={() => setContactDialog(null)}>Cancel</button><button type="submit" disabled={saving}>{saving ? 'Saving' : 'Save contact'}</button></footer>
-    </form></div>}
     {selectedSlot && slotAction && <div className="roster-dialog-backdrop"><form className="roster-dialog roster-slot-dialog" onSubmit={manageSlot} role="dialog" aria-modal="true" aria-labelledby="slot-action-title"><header><div><span>Roster lifecycle</span><h2 id="slot-action-title">{slotAction === 'publish' ? 'Publish roster slot?' : slotAction === 'unpublish' ? 'Recall roster slot to draft?' : slotAction === 'reassign' ? 'Reassign roster slot?' : 'Cancel roster slot?'}</h2></div><button type="button" onClick={() => setSlotAction(null)}><X /></button></header><p>{slotAction === 'publish' ? 'The officer will see this shift on their schedule and can accept or decline it. Field work also gets its shift record now; office and internal work stays a roster slot only.' : slotAction === 'unpublish' ? 'The slot goes back to draft. If its shift has not started, the shift is cancelled.' : slotAction === 'reassign' ? 'The replacement officer must accept the assignment. The shift only moves to them if nothing has been recorded on it yet.' : 'If the linked shift has not started and nothing has been recorded on it, it is cancelled too.'}</p>{slotAction === 'reassign' && <label><span>Replacement officer</span><select required value={replacementStaffId} onChange={(event) => setReplacementStaffId(event.target.value)}><option value="">Select work-ready staff</option>{staff.filter((person) => person.workReady && person.staffId !== selectedSlot.staff_id).map((person) => <option value={person.staffId} key={person.staffId}>{person.name}</option>)}</select></label>}{slotAction !== 'publish' && <label><span>{slotAction === 'reassign' ? 'Reassignment reason' : slotAction === 'unpublish' ? 'Recall reason' : 'Cancellation reason'}</span><textarea required rows={4} value={slotReason} onChange={(event) => setSlotReason(event.target.value)} /></label>}<footer><button type="button" onClick={() => setSlotAction(null)}>Back</button><button type="submit" disabled={saving || (slotAction !== 'publish' && (!slotReason.trim() || (slotAction === 'reassign' && !replacementStaffId)))}>{saving ? 'Saving' : slotAction === 'publish' ? 'Confirm publication' : slotAction === 'unpublish' ? 'Confirm recall' : slotAction === 'reassign' ? 'Confirm reassignment' : 'Confirm cancellation'}</button></footer></form></div>}
-    {showCreate && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={createAssignment} role="dialog" aria-modal="true" aria-labelledby="create-shift-title">
-      <header><div><span>Roster assignment</span><h2 id="create-shift-title">{editingSlot ? 'Edit draft shift' : 'Create shift'}</h2></div><button type="button" onClick={() => setShowCreate(false)} aria-label="Close shift form"><X /></button></header>
+    {showCreate && <dialog ref={editorDialogRef} className="roster-planning-modal roster-editor-modal" aria-labelledby="create-shift-title" onCancel={(event) => { event.preventDefault(); closeEditor(); }}><form className="roster-dialog roster-editor-form" onSubmit={createAssignment}>
+      <header><div><span>Roster assignment</span><h2 id="create-shift-title">{editingSlot ? 'Edit shift' : 'Create shift'}</h2></div><button type="button" disabled={saving} onClick={closeEditor} aria-label="Close shift form"><X /></button></header>
+      <div className="roster-editor-body">
+      {editLoading && <p role="status">Loading current shift, contact and handover checks…</p>}
       {formError && <p className="roster-contact-error" role="alert">{formError}</p>}
-      <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={Boolean(editingSlot)} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">{editingSlot ? 'Select work-ready staff' : 'Open shift — advertise to available staff'}</option>{staff.filter((person) => person.workReady).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
-      <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required disabled={Boolean(editingSlot)} value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value, contactName: '', contactPhone: '', contactVersion: null, contactReviewed: false })}><option value="">Select the work this shift covers</option>{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
-      <div><label><span>Start</span><input type="datetime-local" required value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
+      {editingSlot && formError && !editLoading && <button type="button" disabled={saving} onClick={() => void openEdit(editingSlot)}>Discard changes and reload shift</button>}
+      <fieldset className="roster-editor-fields" disabled={saving || editLoading || Boolean(editingSlot && !editContext)}>
+      {editingSlot && <p>Edit the planned shift only. Recorded attendance, actual breaks, completed work and existing financial snapshots are preserved.</p>}
+      <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={needsHandover} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">Open shift — advertise to available staff</option>{editContext?.slot.staff_id && !staff.some((person) => person.staffId === editContext.slot.staff_id) && <option value={editContext.slot.staff_id}>Current assigned officer (not currently rosterable)</option>}{staff.filter((person) => person.workReady || person.staffId === editContext?.slot.staff_id).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
+      <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value, contactName: '', contactPhone: '', contactReviewed: false })}><option value="">Select the work this shift covers</option>{editContext && !workUnits.some((unit) => unit.id === editContext.slot.work_unit_id) && <option value={editContext.work_unit.id}>{editContext.work_unit.name} (not in active setup)</option>}{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
+      <div><label><span>Start</span><input type="datetime-local" required readOnly={needsHandover} value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
       <label><span>Planned break (minutes, optional)</span><input type="number" min="0" max="240" step="1" required value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></label>
       <label><input type="checkbox" checked={form.breakUnpaid} disabled={Number(form.breakMinutes) === 0} onChange={(event) => setForm({ ...form, breakUnpaid: event.target.checked })} /><span>Unpaid break</span></label>
       <p>Zero means no planned allowance. Only actual recorded unpaid break time is deducted. Statutory rest and meal entitlements still apply.</p>
       {unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
       {assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}
       <label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-      {workUnits.find((unit) => unit.id === form.workUnitId)?.work_unit_type === 'static' && <fieldset className="roster-contact-fields">
+      {(workUnits.find((unit) => unit.id === form.workUnitId)?.work_unit_type
+        ?? (editContext?.work_unit.id === form.workUnitId ? editContext.work_unit.work_unit_type : null)) === 'static' && <fieldset className="roster-contact-fields">
         <legend>Shift contact (optional)</legend>
         <p>Only enter the person or number designated for this shift. The assigned officer can see it with the shift details.</p>
         {copyingSlot && <p>Review the copied contact for this shift before saving.</p>}
@@ -1074,10 +1148,20 @@ const RosterOperationsPage: React.FC = () => {
         <label><span>Contact phone</span><input type="tel" maxLength={50} value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value, contactReviewed: false })} /></label>
         {copyingSlot && (form.contactName.trim() || form.contactPhone.trim()) && <label className="roster-contact-review"><input type="checkbox" checked={form.contactReviewed} onChange={(event) => setForm({ ...form, contactReviewed: event.target.checked })} /><span>I confirmed this contact for the new shift.</span></label>}
       </fieldset>}
+      {editingSlot && <label><span>Reason for change</span><textarea required minLength={5} maxLength={1000} rows={2} value={editReason} onChange={(event) => setEditReason(event.target.value)} /></label>}
+      {needsHandover && <fieldset className="roster-contact-fields">
+        <legend>Live responsibility handover</legend>
+        <p>The original officer keeps their recorded work. A separate published remainder starts at this time; the replacement accepts and starts normally. Same-run patrols carry only outstanding visits, not completed visits.</p>
+        <label><span>Handover at</span><input type="datetime-local" step="1" required value={handoverAt} onChange={(event) => setHandoverAt(event.target.value)} /></label>
+        <p>{editContext?.finish_preview?.open_dispatch_jobs ?? 0} open dispatch jobs return to the queue. {editContext?.finish_preview?.open_welfare_alerts ?? 0} welfare alerts require an officer safety check.</p>
+        <label><input type="checkbox" required={Boolean(editContext?.finish_preview?.open_welfare_alerts)} checked={handoverSafe} onChange={(event) => setHandoverSafe(event.target.checked)} /><span>I checked the original officer is safe.</span></label>
+      </fieldset>}
       {!editingSlot && <label className="roster-publish"><input type="checkbox" aria-label="Publish immediately" checked={form.publish} onChange={(event) => setForm({ ...form, publish: event.target.checked })} /><span><UserCheck /><b>{form.officerId ? 'Publish immediately' : 'Advertise open shift immediately'}</b><small>{form.officerId ? 'The officer sees it straight away and can accept or decline. Leave off to keep it as a draft you publish later.' : 'Publish the unassigned slot so it can be offered to eligible staff. Leave off to keep it as a planning draft.'}</small></span></label>}
       {error && <p className="roster-assignment-note is-stop roster-dialog-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /><span>{error}</span></p>}
-      <footer><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" disabled={saving || Boolean(editingSlot && !form.officerId) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Saving' : editingSlot ? 'Save draft' : 'Create shift'}</button></footer>
-    </form></div>}
+      </fieldset>
+      </div>
+      <footer><button type="button" disabled={saving} onClick={closeEditor}>Cancel</button><button type="submit" disabled={saving || editLoading || Boolean(editingSlot && !editContext) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Saving' : editingSlot ? needsHandover ? 'Confirm handover' : 'Save shift' : 'Create shift'}</button></footer>
+    </form></dialog>}
   </div>;
 };
 

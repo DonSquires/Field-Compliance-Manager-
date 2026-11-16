@@ -2,6 +2,42 @@
 
 # Unified Field-Operations Model
 
+## Owner ruling 2026-11-16 - planned amendments and live handovers
+
+The roster inspector is a viewport-bounded drawer with independently scrollable
+details and persistent actions. One **Edit shift** form covers officer, work
+unit, planned start/end, planned unpaid-break allowance, briefing and the
+designated static-shift contact, before or after publication/start.
+
+An active administrator with operating authority for the branch may amend the
+plan with a reason, fresh slot/linked-shift/contact versions and an idempotent
+request receipt. Notes, contact and planned-break corrections do not revalidate
+an unchanged assignment against unrelated readiness changes. Assignment/time
+changes retain availability, eligibility, contract, overlap and fatigue checks.
+Assignment writers share a per-person transaction guard; contention explicitly
+requires a retry rather than allowing concurrent overlapping assignments.
+Completed/cancelled or historical source records are not editable here.
+
+Changing the officer or work unit/place after actual work starts is a **timed
+responsibility handover**, not a reassignment of history. Atomically finish the
+original segment through the governed administrative finish path and publish a
+separate, unstarted remainder. The replacement accepts/starts normally. Preserve
+the original actual start, recorded breaks, completed visits, evidence, GPS,
+approved payroll and existing invoice snapshots. Audit the original planned
+interval before truncating its planned segment at the confirmed handover time.
+The new segment's planned-break allowance is explicitly reviewed; it is not an
+automatic deduction or a substitute for statutory entitlements.
+
+Same-run patrol handovers carry outstanding pending/en-route non-dispatch visits
+and their unfinished module configuration, never regenerate the full route or
+copy actual visit evidence. Lock outstanding visits before finishing the source;
+concurrent visit changes require a retry, never resurrect a cancelled visit.
+Dispatch returns to its queue. Open welfare alerts
+require explicit confirmation that the original officer is safe. Validation or
+safety failure rolls back the entire handover. Exactly contiguous, audited
+segments of the same person's continuous duty share one fatigue/rest interval;
+the complete duty still counts toward weekly-hours and consecutive-day limits.
+
 ## Refining Layer — Unified Field-Operations Model
 
 > Status: design authority for the field-operations refinement. Records decisions

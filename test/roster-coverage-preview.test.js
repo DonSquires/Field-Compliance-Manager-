@@ -30,9 +30,9 @@ test('the Create shift dialog tells the rosterer, in plain words, and never bloc
   assert.match(rosterPage, /has no verified boundary\$\{preview\.place_kind === 'zone' \? ' \(it is a zone, not a site\)' : ''\}, so the officer cannot record arriving or leaving the post\./);
   assert.match(rosterPage, /className=\{`roster-coverage-note is-\$\{words\.tone\}`\} role=\{words\.tone === 'warn' \? 'alert' : 'status'\}/);
   // the submit button's disabled condition does not depend on the preview; a new shift may be an
-  // open (unassigned) slot, so only editing an existing draft slot requires an officer
-  assert.match(rosterPage, /disabled=\{saving \|\| Boolean\(editingSlot && !form\.officerId\) \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}>\{saving \? 'Saving' : editingSlot \? 'Save draft' : 'Create shift'\}/);
-  assert.doesNotMatch(rosterPage, /disabled=\{[^}]*preview[^}]*\}>\{saving \? 'Saving' : editingSlot \? 'Save draft' : 'Create shift'\}/);
+  // open (unassigned) slot. Editing additionally requires fresh authoritative context.
+  assert.match(rosterPage, /disabled=\{saving \|\| editLoading \|\| Boolean\(editingSlot && !editContext\) \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}/);
+  assert.doesNotMatch(rosterPage, /disabled=\{[^}]*unitCoverage[^}]*\}/);
   assert.match(rosterPage, /p_staff_id: person\?\.staffId \?\? null/);
 });
 

@@ -31,9 +31,10 @@ describe('governed Bob roster plans', () => {
   });
 
   it('exposes separate human edit and publish controls', () => {
-    expect(page).toContain('const openEdit = (slot: RosterSlot)');
-    expect(page).toContain("selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type=\"button\" onClick={() => openEdit(selectedSlot)}>Edit draft</button>");
-    expect(page).toContain('update_roster_slot');
+    expect(page).toContain('const openEdit = async (slot: RosterSlot)');
+    expect(page).toContain("onClick={() => void openEdit(selectedSlot)}>Edit shift</button>");
+    expect(page).toContain("supabase.rpc('get_roster_slot_edit_context'");
+    expect(page).toContain("supabase.rpc('amend_roster_slot'");
     expect(page).toContain("setSlotAction('publish')");
   });
 });

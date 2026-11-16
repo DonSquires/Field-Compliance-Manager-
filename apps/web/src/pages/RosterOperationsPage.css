@@ -799,3 +799,16 @@
 .roster-dialog .roster-contact-review input{width:18px;height:18px;flex:none}
 .roster-contact-error{padding:10px;border:1px solid #b54747;border-radius:6px;color:var(--color-text-primary,#e7eef5);background:var(--color-bg-elevated,#35191b)}
 .roster-dialog .roster-dialog-check{display:flex;align-items:flex-start;gap:10px}.roster-dialog .roster-dialog-check input{width:auto;flex:none;margin-top:2px}.roster-dialog .roster-dialog-check>span{color:inherit;font-size:14px;font-weight:600;text-transform:none}
+.roster-editor-modal { width: min(680px, calc(100vw - 24px)); }
+.roster-dialog.roster-editor-form { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; height: min(880px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); overflow: hidden; }
+.roster-editor-form > header, .roster-editor-form > footer { flex: 0 0 auto; }
+.roster-dialog > .roster-editor-body { display: block; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.roster-editor-fields { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.roster-editor-fields label { display: grid; gap: 6px; min-width: 0; }
+.roster-editor-fields > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.roster-editor-form :is(button,input,select) { min-height: 44px; }
+.roster-editor-form input[type="checkbox"] { width: 24px; height: 24px; min-height: 24px; }
+.roster-editor-form label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.roster-editor-form footer { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.roster-editor-form :is(button,input,select,textarea):focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+@media(max-width: 560px) { .roster-editor-fields > div { grid-template-columns: minmax(0, 1fr); } }
