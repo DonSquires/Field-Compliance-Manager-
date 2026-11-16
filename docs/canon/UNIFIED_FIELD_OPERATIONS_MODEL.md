@@ -430,6 +430,50 @@ Reactive path (needs more research before build):
 
 ---
 
+## Owner-approved direction 2026-11-16: patrol responsibility and site charging
+
+The existing location **Operational setup** is the workspace for patrols,
+work areas, checkpoints and site charging. Do not introduce another top-level
+patrol configuration page. Selecting responsibility means an ongoing named run
+and its rosterable work unit, not one dated officer shift.
+
+Operational allocation is versioned by effective NZ service date. A confirmed
+preview may update only the selected schedule's safe future unstarted plans.
+Other contracts' stops, started or evidenced work, attendance, GPS, completed
+visits and financial snapshots remain intact. Lock and revalidate the previewed
+work against officer starts and source changes; retries return the original
+audited receipt without generating stops again. Initial roster publication and
+ad-hoc shift creation remain supported; they are not permission to regenerate
+an existing historical or evidenced plan.
+
+The operational workspace does not silently vary contractual visit counts,
+days, service windows, dwell requirements or SLA. Show those commitments and
+direct contractual changes through the existing agreement/variation authority.
+As ruled in [ORG_SERVICE_MODEL.md](ORG_SERVICE_MODEL.md), client invitation or
+acceptance governs disclosure, not the provider's authority to deliver service.
+An authorized location awaiting a patrol schedule is an incomplete setup, not
+automatically a permission error.
+
+Reuse agreement commercial terms and scoped billing rate rules; do not copy
+monetary values into another rate store. The source may be the client's
+agreement, an existing applicable charge rate, or a governed new charge rate.
+The supported fixed bases are a completed visit, a root patrol shift at the
+place, and an NZ service day. Existing monthly/agreement-period settlement
+continues separately without duplicate fees.
+
+Hourly billing requires an explicit per-place/agreement choice: **officer-hours**
+sums qualified officer presence, while **site coverage** unions simultaneous
+presence so two officers together for an hour produce one coverage hour.
+Neither basis is an implicit default. Use existing raw GPS capture and an
+explicit versioned evidence policy with accuracy and maximum-gap limits.
+Uncertain, missing, gapped or unverified-boundary evidence requires review;
+manual arrive/depart buttons do not manufacture billable GPS hours. Preserve
+source, boundary and policy provenance, compute money from raw qualified
+seconds before final cents rounding, and leave payroll independent.
+
+These are delivery requirements, not a claim that the complete charging path
+is already deployed or exercised.
+
 ## Live status against this model (verified 2026-09-14, project `dotczcyyzgabmtmnglqj`)
 
 | Model element | Live truth | Reading |
