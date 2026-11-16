@@ -488,6 +488,11 @@ policy to turn past unqualified fixes into automatic billing evidence. Individua
 points use the verified boundary history and policy effective at capture,
 including the whole GPS accuracy disk. A reliable inside point alone is not
 proof of a complete onsite interval or authorization to invoice it.
+Presence projection requires confirmed outside fixes on both sides, at least
+two distinct reliable inside capture instants, consistent fence/policy versions
+and acceptable sample gaps. Count only first-to-last inside elapsed time;
+re-entry excludes the off-site gap. Uncertain neighbors are source evidence,
+not confirmed entry/exit anchors, and finishing duty never invents an exit.
 
 These are delivery requirements, not a claim that the complete charging path
 is already deployed or exercised.

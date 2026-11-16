@@ -194,3 +194,108 @@ COMMENT ON FUNCTION public.classify_patrol_presence_fix_internal(uuid,uuid)
 IS 'Private read-only classification of one canonical GPS fix against its operating policy and verified historical place fence. A reliable point is not a qualified presence interval or a billable hour.';
 REVOKE ALL ON FUNCTION public.classify_patrol_presence_fix_internal(uuid,uuid)
 FROM PUBLIC,anon,authenticated,service_role;
+
+CREATE FUNCTION public.project_patrol_presence_intervals_internal(p_shift_id uuid,p_service_agreement_location_id uuid)
+RETURNS TABLE(started_at timestamptz,ended_at timestamptz,duration_seconds numeric,
+  policy_id uuid,boundary_history_id uuid,inside_fix_count integer,source_event_ids uuid[],
+  entry_event_ids uuid[],exit_event_ids uuid[],qualification_state text,reason text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public
+AS $$
+DECLARE
+  v_shift public.shifts%rowtype;
+BEGIN
+  SELECT * INTO v_shift FROM public.shifts s WHERE s.id=p_shift_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Source shift is required'; END IF;
+  IF NOT EXISTS(
+    SELECT 1 FROM public.shift_stops ss
+    JOIN public.shift_stop_modules m ON m.shift_stop_id=ss.id AND m.organization_id=ss.organization_id
+    JOIN public.service_agreement_locations l ON l.id=m.service_agreement_location_id
+    JOIN public.service_agreements a ON a.id=l.service_agreement_id
+    WHERE ss.shift_id=v_shift.id AND ss.organization_id=v_shift.organization_id
+      AND l.id=p_service_agreement_location_id
+      AND ss.site_id IS NOT DISTINCT FROM l.site_id AND ss.zone_id IS NOT DISTINCT FROM l.zone_id
+      AND (v_shift.organization_id=a.provider_organization_id
+        OR v_shift.organization_id=ANY(public.get_descendant_organizations(a.provider_organization_id)))
+  ) THEN RAISE EXCEPTION 'An explicit contracted stop attribution in this operating shift is required'; END IF;
+
+  RETURN QUERY
+  WITH fixes AS MATERIALIZED (
+    SELECT g.id,g.recorded_at,c.policy_id,c.boundary_history_id,c.classification,p.max_gap_seconds
+    FROM public.officer_gps_log g
+    CROSS JOIN LATERAL public.classify_patrol_presence_fix_internal(g.id,p_service_agreement_location_id) c
+    LEFT JOIN public.patrol_billing_evidence_policies p ON p.id=c.policy_id
+    WHERE g.shift_id=v_shift.id AND g.officer_id=v_shift.officer_user_id
+      AND g.organization_id=v_shift.organization_id AND g.recorded_at>=v_shift.actual_start
+      AND g.recorded_at<=least(coalesce(v_shift.actual_end,CURRENT_TIMESTAMP),CURRENT_TIMESTAMP)
+  ), moments AS (
+    SELECT f.recorded_at,(array_agg(f.policy_id ORDER BY f.id))[1] AS policy_id,
+      (array_agg(f.boundary_history_id ORDER BY f.id))[1] AS boundary_history_id,
+      min(f.max_gap_seconds) AS max_gap_seconds,array_agg(f.id ORDER BY f.id) AS source_ids,
+      CASE WHEN bool_and(f.classification='inside') THEN 'inside'
+        WHEN bool_and(f.classification='outside') THEN 'outside' ELSE 'uncertain' END AS point_state
+    FROM fixes f GROUP BY f.recorded_at
+  ), neighbors AS (
+    SELECT m.*,lag(m.recorded_at) OVER w AS prior_at,lead(m.recorded_at) OVER w AS next_at,
+      lag(m.point_state) OVER w AS prior_state,lead(m.point_state) OVER w AS next_state,
+      lag(m.policy_id) OVER w AS prior_policy,lead(m.policy_id) OVER w AS next_policy,
+      lag(m.boundary_history_id) OVER w AS prior_boundary,lead(m.boundary_history_id) OVER w AS next_boundary,
+      lag(m.source_ids) OVER w AS prior_sources,lead(m.source_ids) OVER w AS next_sources
+    FROM moments m WINDOW w AS (ORDER BY m.recorded_at)
+  ), grouped AS MATERIALIZED (
+    SELECT n.*,sum(CASE WHEN n.point_state='inside' AND n.prior_state='inside'
+      AND n.policy_id IS NOT DISTINCT FROM n.prior_policy
+      AND n.boundary_history_id IS NOT DISTINCT FROM n.prior_boundary
+      AND extract(epoch FROM n.recorded_at-n.prior_at)<=n.max_gap_seconds THEN 0 ELSE 1 END)
+      OVER (ORDER BY n.recorded_at) AS segment_id
+    FROM neighbors n
+  ), spans AS (
+    SELECT g.segment_id,g.policy_id,g.boundary_history_id,min(g.recorded_at) AS first_at,
+      max(g.recorded_at) AS last_at,count(*)::integer AS fix_count,min(g.max_gap_seconds) AS gap_seconds
+    FROM grouped g WHERE g.point_state='inside'
+    GROUP BY g.segment_id,g.policy_id,g.boundary_history_id
+  ), resolved AS (
+    SELECT s.*,
+      CASE WHEN a.prior_state='outside' AND a.prior_policy=s.policy_id
+        AND a.prior_boundary=s.boundary_history_id
+        AND extract(epoch FROM s.first_at-a.prior_at)<=s.gap_seconds
+        THEN a.prior_sources END AS prior_sources,
+      CASE WHEN b.next_state='outside' AND b.next_policy=s.policy_id
+        AND b.next_boundary=s.boundary_history_id
+        AND extract(epoch FROM b.next_at-s.last_at)<=s.gap_seconds
+        THEN b.next_sources END AS next_sources,
+      ARRAY(SELECT q.id FROM (
+        SELECT unnest(g.source_ids) AS id FROM grouped g WHERE g.segment_id=s.segment_id
+        UNION SELECT unnest(a.prior_sources)
+        UNION SELECT unnest(b.next_sources)
+      ) q ORDER BY q.id) AS all_sources,
+      CASE
+        WHEN s.fix_count<2 THEN 'insufficient_inside_fixes'
+        WHEN a.prior_state IS DISTINCT FROM 'outside' THEN 'missing_confirmed_entry'
+        WHEN b.next_state IS DISTINCT FROM 'outside' THEN 'missing_confirmed_exit'
+        WHEN a.prior_policy IS DISTINCT FROM s.policy_id OR b.next_policy IS DISTINCT FROM s.policy_id
+          OR a.prior_boundary IS DISTINCT FROM s.boundary_history_id OR b.next_boundary IS DISTINCT FROM s.boundary_history_id
+          THEN 'evidence_context_changed'
+        WHEN extract(epoch FROM s.first_at-a.prior_at)>s.gap_seconds
+          OR extract(epoch FROM b.next_at-s.last_at)>s.gap_seconds THEN 'sample_gap'
+        ELSE 'paired_boundary_evidence'
+      END AS resolution
+    FROM spans s
+    JOIN grouped a ON a.segment_id=s.segment_id AND a.recorded_at=s.first_at
+    JOIN grouped b ON b.segment_id=s.segment_id AND b.recorded_at=s.last_at
+  )
+  SELECT r.first_at,r.last_at,extract(epoch FROM r.last_at-r.first_at),r.policy_id,r.boundary_history_id,
+    r.fix_count,r.all_sources,coalesce(r.prior_sources,'{}'::uuid[]),coalesce(r.next_sources,'{}'::uuid[]),
+    CASE WHEN r.resolution='paired_boundary_evidence' THEN 'qualified' ELSE 'review' END,r.resolution
+  FROM resolved r
+  UNION ALL
+  SELECT NULL::timestamptz,NULL::timestamptz,NULL::numeric,NULL::uuid,NULL::uuid,0,
+    ARRAY(SELECT f.id FROM fixes f ORDER BY f.id),'{}'::uuid[],'{}'::uuid[],'review',
+    CASE WHEN v_shift.actual_start IS NULL THEN 'missing_actual_start'
+      WHEN NOT EXISTS(SELECT 1 FROM fixes) THEN 'missing_gps' ELSE 'no_qualified_inside_fixes' END
+  WHERE NOT EXISTS(SELECT 1 FROM resolved);
+END;
+$$;
+COMMENT ON FUNCTION public.project_patrol_presence_intervals_internal(uuid,uuid)
+IS 'Private read-only projection of GPS presence for an explicitly attributed contracted stop. Distinct capture instants, consistent policy/fence, accuracy and gap limits, confirmed entry and exit, and at least two inside fixes are required. Uses only first-to-last inside elapsed seconds. Does not persist, claim or invoice evidence.';
+REVOKE ALL ON FUNCTION public.project_patrol_presence_intervals_internal(uuid,uuid)
+FROM PUBLIC,anon,authenticated,service_role;

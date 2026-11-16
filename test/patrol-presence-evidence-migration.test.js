@@ -58,7 +58,8 @@ test('patrol GPS policy and point evidence preserve effective versions and never
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
         SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       ${['organizations', 'user_profiles', 'service_agreements', 'service_agreement_locations',
-        'shifts', 'officer_gps_log', 'geofence_boundary_history', 'audit_log'].map(table).join('\n')}
+        'shifts', 'shift_stops', 'shift_stop_modules',
+        'officer_gps_log', 'geofence_boundary_history', 'audit_log'].map(table).join('\n')}
       CREATE FUNCTION public.is_admin_for_org(uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT EXISTS(SELECT 1 FROM public.user_profiles p WHERE p.id=auth.uid()
           AND p.role='admin' AND p.deactivated_at IS NULL
@@ -151,6 +152,99 @@ test('patrol GPS policy and point evidence preserve effective versions and never
       sql(`UPDATE public.patrol_billing_evidence_policies SET effective_from=now()-interval '30 minutes'
         WHERE id='${id(60)}'`);
       assert.equal(classify(70).reason, 'missing_effective_policy');
+    });
+
+    await t.test('paired boundaries qualify only the inside span; gaps, uncertainty and incomplete pairs require review', () => {
+      sql(`UPDATE public.patrol_billing_evidence_policies SET effective_from=now()-interval '3 hours' WHERE id='${id(60)}';
+        UPDATE public.geofence_boundary_history SET created_at=now()-interval '3 hours',
+          boundary=ST_MakeEnvelope(173.999,-41.001,174.001,-40.999,4326) WHERE id='${id(61)}';
+        INSERT INTO public.user_profiles(id,organization_id,role,display_name)
+          VALUES('${id(8)}','${id(2)}','officer','Second away officer');
+        INSERT INTO public.shifts(id,organization_id,officer_user_id,service_type,scheduled_start,scheduled_end,status,actual_start)
+          VALUES('${id(21)}','${id(20)}','${id(8)}','general_patrol',now()-interval '2 hours',
+            now()+interval '6 hours','in_progress',now()-interval '2 hours');
+        INSERT INTO public.shift_stops(id,organization_id,shift_id,site_id,module_key,sla_arrive_by,status)
+          VALUES('${id(22)}','${id(20)}','${id(21)}','${id(11)}','patrol',now(),'completed');
+        INSERT INTO public.shift_stop_modules(organization_id,shift_stop_id,module_key,service_agreement_location_id)
+          VALUES('${id(20)}','${id(22)}','patrol','${id(12)}');
+        INSERT INTO public.officer_gps_log(id,organization_id,officer_id,shift_id,gps_point,gps_lat,gps_lng,
+          accuracy_meters,recorded_at,client_event_id)
+        SELECT ('00000000-0000-4000-8000-'||lpad((100+n)::text,12,'0'))::uuid,'${id(20)}','${id(8)}','${id(21)}',
+          ST_SetSRID(ST_Point(CASE WHEN n IN (0,12) THEN 174.01 ELSE 174 END,-41),4326),
+          -41,CASE WHEN n IN (0,12) THEN 174.01 ELSE 174 END,5,
+          now()-interval '1 hour'+n*interval '1 minute',gen_random_uuid()
+        FROM generate_series(0,12) n;`);
+      const project = () => JSON.parse(sql(`SELECT jsonb_agg(to_jsonb(r) ORDER BY r.started_at)
+        FROM public.project_patrol_presence_intervals_internal('${id(21)}','${id(12)}') r`));
+      const paired = project();
+      assert.equal(paired.length, 1);
+      assert.equal(paired[0].qualification_state, 'qualified');
+      assert.equal(Number(paired[0].duration_seconds), 600);
+      assert.equal(paired[0].inside_fix_count, 11);
+      assert.deepEqual(paired[0].entry_event_ids, [id(100)]);
+      assert.deepEqual(paired[0].exit_event_ids, [id(112)]);
+      const captures = sql(`SELECT jsonb_agg(to_jsonb(g) ORDER BY g.id DESC)
+        FROM public.officer_gps_log g WHERE g.shift_id='${id(21)}'`);
+      const restore = () => sql(`DELETE FROM public.officer_gps_log WHERE shift_id='${id(21)}';
+        INSERT INTO public.officer_gps_log SELECT * FROM jsonb_populate_recordset(
+          NULL::public.officer_gps_log,${literal(captures)}::jsonb)`);
+      restore();
+      assert.deepEqual(project(), paired, 'Insertion order does not change derived presence');
+      sql(`UPDATE public.officer_gps_log SET gps_lng=174.01,gps_point=ST_SetSRID(ST_Point(174.01,-41),4326)
+        WHERE id IN ('${id(106)}','${id(107)}')`);
+      const reentered = project();
+      assert.ok(reentered.every(interval => interval.qualification_state==='qualified'));
+      assert.deepEqual(reentered.map(interval => Number(interval.duration_seconds)), [240, 180],
+        'Re-entry never bills the off-site gap');
+      restore();
+      sql(`INSERT INTO public.officer_gps_log SELECT * FROM jsonb_populate_record(
+        NULL::public.officer_gps_log,(SELECT to_jsonb(g)||jsonb_build_object('id','${id(999)}',
+          'client_event_id','${id(999)}') FROM public.officer_gps_log g WHERE id='${id(101)}'))`);
+      assert.equal(project()[0].inside_fix_count, 11, 'Duplicate instants are not additional inside fixes');
+      restore();
+      sql(`INSERT INTO public.geofence_boundary_history(id,entity_type,entity_id,boundary,
+          verification_state,verified_by,verified_at,changed_via,version,created_at)
+        SELECT '${id(63)}','client_site','${id(11)}',ST_MakeEnvelope(173.999,-41.001,174.001,-40.999,4326),
+          'verified','${id(4)}',g.recorded_at,'verification',3,g.recorded_at
+        FROM public.officer_gps_log g WHERE g.id='${id(105)}'`);
+      assert.ok(project().every(interval => interval.qualification_state==='review'),
+        'Presence is not paired across different boundary versions');
+      sql(`DELETE FROM public.geofence_boundary_history WHERE id='${id(63)}';
+        UPDATE public.patrol_billing_evidence_policies SET effective_to=(
+          SELECT recorded_at FROM public.officer_gps_log WHERE id='${id(105)}') WHERE id='${id(60)}';
+        INSERT INTO public.patrol_billing_evidence_policies(id,organization_id,accuracy_meters,max_gap_seconds,
+          effective_from,version,created_by,created_at)
+        SELECT '${id(64)}','${id(20)}',20,120,g.recorded_at,2,'${id(4)}',g.recorded_at
+        FROM public.officer_gps_log g WHERE g.id='${id(105)}'`);
+      assert.ok(project().every(interval => interval.qualification_state==='review'),
+        'Presence is not paired across different policy versions');
+      sql(`DELETE FROM public.patrol_billing_evidence_policies WHERE id='${id(64)}';
+        UPDATE public.patrol_billing_evidence_policies SET effective_to=NULL WHERE id='${id(60)}'`);
+      sql(`UPDATE public.officer_gps_log SET accuracy_meters=NULL WHERE id='${id(106)}'`);
+      const uncertain = project();
+      assert.ok(uncertain.every(interval => interval.qualification_state==='review'));
+      assert.deepEqual(uncertain[0].exit_event_ids, [], 'An uncertain fix is not a confirmed exit');
+      assert.deepEqual(uncertain[1].entry_event_ids, [], 'An uncertain fix is not a confirmed entry');
+      sql(`UPDATE public.officer_gps_log SET accuracy_meters=5 WHERE id='${id(106)}';
+        UPDATE public.patrol_billing_evidence_policies SET max_gap_seconds=30 WHERE id='${id(60)}'`);
+      assert.ok(project().every(interval => interval.qualification_state==='review'));
+      sql(`UPDATE public.patrol_billing_evidence_policies SET max_gap_seconds=120 WHERE id='${id(60)}';
+        DELETE FROM public.officer_gps_log WHERE id='${id(112)}'`);
+      assert.equal(project()[0].reason, 'missing_confirmed_exit');
+      sql(`DELETE FROM public.officer_gps_log WHERE id='${id(100)}'`);
+      assert.equal(project()[0].qualification_state, 'review');
+      restore();
+      sql(`UPDATE public.shifts SET actual_end=(SELECT recorded_at FROM public.officer_gps_log
+        WHERE id='${id(105)}') WHERE id='${id(21)}'`);
+      assert.equal(project()[0].reason, 'missing_confirmed_exit', 'Finishing duty never invents an outside fix');
+      sql(`INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,name)
+        VALUES('${id(15)}','${id(1)}','${id(2)}','Other contract at the same place');
+        INSERT INTO public.service_agreement_locations(id,service_agreement_id,site_id)
+        VALUES('${id(13)}','${id(15)}','${id(11)}')`);
+      assert.throws(() => sql(`SELECT * FROM public.project_patrol_presence_intervals_internal(
+        '${id(21)}','${id(13)}')`), /explicit contracted stop attribution/i);
+      assert.throws(() => as(4, `SELECT * FROM public.project_patrol_presence_intervals_internal(
+        '${id(21)}','${id(12)}')`), /permission denied/i);
     });
   } finally {
     if (created) docker(['rm', '-f', name]);
