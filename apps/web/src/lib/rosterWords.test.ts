@@ -20,6 +20,13 @@ describe('roster plain words', () => {
     expect(shiftStatusLabel('something_new')).toBe('Something new');
   });
 
+  it('labels officer-started shifts as unscheduled instead of not sent', () => {
+    expect(shiftStatusLabel('scheduled', 'ad_hoc')).toBe('Unscheduled – officer starting');
+    expect(shiftStatusLabel('in_progress', 'ad_hoc')).toBe('Unscheduled – on shift now');
+    expect(shiftStatusLabel('completed', 'ad_hoc')).toBe('Unscheduled – completed');
+    expect(shiftStatusLabel('scheduled', 'rostered')).toBe('Scheduled – not sent yet');
+  });
+
   it('tells the rosterer what each slot status means for them', () => {
     expect(slotStatusLabel('draft')).toBe('Draft \u2013 not sent yet');
     expect(slotStatusLabel('published')).toBe('Waiting for officer');

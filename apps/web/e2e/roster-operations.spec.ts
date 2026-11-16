@@ -825,3 +825,29 @@ test('when the employer has no rest and hours rules the Create shift dialog says
         await dialog.getByLabel('End').fill('2026-09-05T23:00');
         await expect(refusal).toHaveCount(0);
 });
+
+test.describe('officer-started shifts', () => {
+test.use({ timezoneId: 'Pacific/Auckland' });
+test('shows an officer-started shift as unscheduled instead of not sent', async ({ page }) => {
+  const shift = {
+    id: '46464646-4646-4646-8646-464646464646', organization_id: '41414141-4141-4141-8141-414141414141',
+    officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'static_guarding', shift_origin: 'ad_hoc',
+    scheduled_start: '2026-08-29T09:46:00.000Z', scheduled_end: '2026-08-29T21:46:00.000Z', status: 'scheduled',
+    shift_health: null, total_stops: 1, completed_stops: 0, notes: null, actual_start: null, actual_end: null,
+    updated_at: '2026-08-29T09:46:00.000Z',
+  };
+  const selects: string[] = [];
+  await page.route('**/rest/v1/roster_slots*', (route) => route.fulfill({ json: [] }));
+  await page.route('**/rest/v1/shifts*', (route) => {
+    selects.push(new URL(route.request().url()).searchParams.get('select') ?? '');
+    return route.fulfill({ json: [shift] });
+  });
+  await signInAsAdmin(page, '/admin/roster');
+  const card = page.locator('.roster-shift.is-unscheduled');
+  await expect(card).toContainText('Unscheduled – officer starting');
+  await expect(page.getByText('Scheduled – not sent yet')).toHaveCount(0);
+  expect(selects.some((value) => value.split(',').includes('shift_origin'))).toBe(true);
+  await card.click();
+  await expect(page.locator('.roster-inspector')).toContainText('Unscheduled – officer starting');
+});
+});

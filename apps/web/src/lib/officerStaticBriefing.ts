@@ -1,3 +1,4 @@
+import { edgeFunctionErrorMessage } from './edgeFunctionError';
 import { supabase } from './supabase';
 import { parseSafetyBriefing, type SafetyBriefing } from './safetyBriefing';
 
@@ -17,7 +18,10 @@ export interface OfficerStaticBriefing {
 export async function fetchOfficerStaticBriefing(shiftId: string | null, stopId: string | null = null): Promise<OfficerStaticBriefing> {
   const body = stopId ? { shift_id: shiftId, stop_id: stopId } : { shift_id: shiftId };
   const { data, error } = await supabase.functions.invoke('officer-shift-briefing', { body });
-  if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'The private shift briefing could not be loaded.');
+  if (error || data?.error) {
+    const fallback = error?.message && !/non-2xx status code/i.test(error.message) ? error.message : 'The private shift briefing could not be loaded.';
+    throw new Error(data?.error ?? await edgeFunctionErrorMessage(error, fallback));
+  }
   if (data?.post === null && data?.safety === null) return { post: null, safety: null, privacy: { status: 'unavailable' }, requirements: null, roster_notes: null, work_unit_name: null, contacts: [] };
   if (!data?.post || !['checked', 'partly_withheld', 'unavailable'].includes(data.privacy?.status)
     || (data.requirements !== null && (!Array.isArray(data.requirements) || data.requirements.some((value: unknown) => typeof value !== 'string')))

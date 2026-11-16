@@ -23,6 +23,12 @@ it('requests the selected assignment and preserves authorised structured contact
   expect(await fetchStaticShiftSafety('chosen')).toEqual(safety);
 });
 
+it('shows the briefing service reason instead of the generic non-2xx message', async () => {
+  const context = new Response(JSON.stringify({ error: 'Static guarding stop is missing' }), { status: 403 });
+  invoke.mockResolvedValue({ data: null, error: Object.assign(new Error('Edge Function returned a non-2xx status code'), { context }) });
+  await expect(fetchStaticShiftSafety('chosen')).rejects.toThrow('Static guarding stop is missing');
+});
+
 it.each(['unavailable', 'partly_withheld'])('blocks start when private review is %s', async (status) => {
   invoke.mockResolvedValue({ data: { ...briefing(), privacy: { status }, safety: null }, error: null });
   await expect(fetchStaticShiftSafety('chosen')).rejects.toThrow(/withheld/);
