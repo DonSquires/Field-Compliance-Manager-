@@ -44,17 +44,43 @@ CREATE INDEX location_patrol_setup_receipts_location_idx ON public.location_patr
 ALTER TABLE public.location_patrol_setup_receipts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.location_patrol_setup_receipts FROM PUBLIC,anon,authenticated,service_role;
 
-CREATE FUNCTION public.patrol_config_route_at(p_config_id uuid,p_date date)
+CREATE FUNCTION public.patrol_shift_work_unit_id(p_shift_id uuid)
 RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
 AS $function$
-  SELECT coalesce((
-    SELECT r.patrol_route_id FROM public.patrol_config_responsibilities r
-    WHERE r.patrol_config_id=c.id AND r.superseded_at IS NULL
-      AND r.effective_from<=p_date AND (r.effective_to IS NULL OR r.effective_to>=p_date)
-    ORDER BY r.effective_from DESC LIMIT 1
-  ),c.patrol_route_id) FROM public.client_site_patrol_config c WHERE c.id=p_config_id
+  SELECT coalesce(s.work_unit_id,
+    (SELECT slot.work_unit_id FROM public.roster_slots slot WHERE slot.id=s.roster_slot_id),
+    (SELECT slot.work_unit_id FROM public.roster_slots slot WHERE slot.linked_shift_id=s.id
+      AND slot.status<>'cancelled' ORDER BY slot.created_at,slot.id LIMIT 1))
+  FROM public.shifts s WHERE s.id=p_shift_id
 $function$;
-REVOKE ALL ON FUNCTION public.patrol_config_route_at(uuid,date) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.patrol_shift_work_unit_id(uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+-- An unallocated shift is served only when the responsible unit is the run's single active patrol unit.
+CREATE FUNCTION public.patrol_work_unit_matches(p_route_id uuid,p_responsible_unit_id uuid,p_shift_unit_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+AS $function$
+  SELECT p_shift_unit_id=p_responsible_unit_id
+    OR (p_shift_unit_id IS NULL AND EXISTS(SELECT 1 FROM public.roster_work_units u
+      WHERE u.id=p_responsible_unit_id AND u.patrol_route_id=p_route_id)
+      AND NOT EXISTS(SELECT 1 FROM public.roster_work_units u WHERE u.patrol_route_id=p_route_id
+        AND u.work_unit_type='patrol' AND u.active AND u.id<>p_responsible_unit_id))
+$function$;
+REVOKE ALL ON FUNCTION public.patrol_work_unit_matches(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+CREATE FUNCTION public.patrol_config_serves(p_config_id uuid,p_date date,p_route_id uuid,p_work_unit_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+AS $function$
+  SELECT coalesce(CASE WHEN r.id IS NULL THEN c.patrol_route_id=p_route_id
+    ELSE r.patrol_route_id=p_route_id AND public.patrol_work_unit_matches(r.patrol_route_id,r.work_unit_id,p_work_unit_id)
+    END,false)
+  FROM public.client_site_patrol_config c
+  LEFT JOIN LATERAL(SELECT x.* FROM public.patrol_config_responsibilities x
+    WHERE x.patrol_config_id=c.id AND x.superseded_at IS NULL
+      AND x.effective_from<=p_date AND (x.effective_to IS NULL OR x.effective_to>=p_date)
+    ORDER BY x.effective_from DESC LIMIT 1) r ON true
+  WHERE c.id=p_config_id
+$function$;
+REVOKE ALL ON FUNCTION public.patrol_config_serves(uuid,date,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 
 CREATE FUNCTION public.patrol_shift_plan_locked_reason(p_shift_id uuid)
 RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
@@ -94,6 +120,7 @@ DECLARE
   v_day integer:=extract(isodow FROM p_shift_date)::integer;
   v_month integer:=extract(month FROM p_shift_date)::integer;
   v_module_count integer; v_windowed boolean; v_reason text; v_initial_materialization boolean;
+  v_shift_unit uuid; v_resp public.patrol_config_responsibilities%rowtype;
 BEGIN
   SELECT * INTO v_shift FROM public.shifts WHERE id=p_shift_id;
   IF NOT FOUND OR p_shift_date IS NULL THEN RAISE EXCEPTION 'Shift and NZ service date are required'; END IF;
@@ -116,14 +143,20 @@ BEGIN
   END IF;
   DELETE FROM public.shift_stops WHERE shift_id=p_shift_id AND NOT is_adhoc
     AND (p_config_id IS NULL OR patrol_config_id=p_config_id);
+  v_shift_unit:=public.patrol_shift_work_unit_id(p_shift_id);
   FOR v_config IN SELECT c.* FROM public.client_site_patrol_config c
     WHERE c.organization_id=v_shift.organization_id AND c.active AND c.time_window_type<>'as_attended'
-      AND public.patrol_config_route_at(c.id,p_shift_date)=v_shift.patrol_route_id
+      AND public.patrol_config_serves(c.id,p_shift_date,v_shift.patrol_route_id,v_shift_unit)
       AND (p_config_id IS NULL OR c.id=p_config_id)
       AND (array_length(c.active_days,1) IS NULL OR v_day=ANY(c.active_days))
       AND (array_length(c.active_months,1) IS NULL OR cardinality(c.active_months)=0 OR v_month=ANY(c.active_months))
     ORDER BY c.preferred_stop_order,c.id
   LOOP
+    v_resp:=NULL;
+    SELECT * INTO v_resp FROM public.patrol_config_responsibilities r
+      WHERE r.patrol_config_id=v_config.id AND r.superseded_at IS NULL
+        AND r.effective_from<=p_shift_date AND (r.effective_to IS NULL OR r.effective_to>=p_shift_date)
+      ORDER BY r.effective_from DESC LIMIT 1;
     v_visits:=greatest(coalesce(v_config.visits_per_shift,1),1);
     v_windowed:=v_config.time_window_type='fixed' AND v_config.window_start IS NOT NULL;
     IF v_windowed THEN
@@ -157,13 +190,17 @@ BEGIN
       INSERT INTO public.shift_stop_modules(organization_id,shift_stop_id,module_key,is_required,
         service_agreement_module_id,service_agreement_location_id)
         SELECT v_shift.organization_id,v_stop_id,m.module_key,m.is_required,
-          m.service_agreement_module_id,m.service_agreement_location_id
+          coalesce(m.service_agreement_module_id,
+            CASE WHEN m.module_key=v_config.module_key THEN v_resp.service_agreement_module_id END),
+          coalesce(m.service_agreement_location_id,v_resp.service_agreement_location_id)
         FROM public.patrol_route_stop_modules m WHERE m.patrol_config_id=v_config.id AND m.active
         ON CONFLICT(shift_stop_id,module_key) DO NOTHING;
       GET DIAGNOSTICS v_module_count=ROW_COUNT;
       IF v_module_count=0 THEN
-        INSERT INTO public.shift_stop_modules(organization_id,shift_stop_id,module_key,is_required)
-          VALUES(v_shift.organization_id,v_stop_id,v_config.module_key,true)
+        INSERT INTO public.shift_stop_modules(organization_id,shift_stop_id,module_key,is_required,
+          service_agreement_module_id,service_agreement_location_id)
+          VALUES(v_shift.organization_id,v_stop_id,v_config.module_key,true,
+            v_resp.service_agreement_module_id,v_resp.service_agreement_location_id)
           ON CONFLICT(shift_stop_id,module_key) DO NOTHING;
       END IF;
       v_stop_count:=v_stop_count+1;
@@ -240,7 +277,15 @@ BEGIN
     JOIN public.service_agreements a ON a.id=d.service_agreement_id
     JOIN public.service_agreement_locations sal ON sal.service_agreement_id=a.id AND sal.status='active'
       AND (sal.site_id=cfg.site_id OR sal.zone_id=cfg.zone_id)
-    JOIN public.service_agreement_modules sam ON sam.service_agreement_id=a.id AND sam.module_key=d.module_key AND sam.enabled
+    JOIN LATERAL(
+      SELECT module.* FROM public.service_agreement_modules module
+      WHERE module.service_agreement_id=a.id AND module.enabled
+        AND module.module_key=ANY(array_remove(ARRAY[d.module_key,cfg.module_key,
+          CASE WHEN cfg.module_key='general_patrol' THEN 'patrol' END],NULL))
+      ORDER BY CASE WHEN module.module_key=d.module_key THEN 0
+        WHEN module.module_key=cfg.module_key THEN 1 ELSE 2 END,module.id
+      LIMIT 1
+    ) sam ON true
     LEFT JOIN public.client_sites s ON s.id=cfg.site_id AND s.active AND s.client_organization_id=a.client_organization_id
     LEFT JOIN public.location_zones z ON z.id=cfg.zone_id AND z.is_active AND NOT z.is_verification_point
     JOIN public.locations l ON l.id=p_location_id AND l.organization_id=a.client_organization_id
@@ -340,13 +385,17 @@ BEGIN
             WHERE st.shift_id=s.id AND st.patrol_config_id=(v_config->>'id')::uuid),'[]')) AS item
       FROM public.shifts s WHERE s.organization_id=v_org
         AND (s.scheduled_start AT TIME ZONE 'Pacific/Auckland')::date>=v_from
-        AND (s.patrol_route_id=(p_changes->>'patrol_route_id')::uuid
-          OR s.patrol_route_id=public.patrol_config_route_at((v_config->>'id')::uuid,
-            (s.scheduled_start AT TIME ZONE 'Pacific/Auckland')::date)
+        AND ((s.patrol_route_id=(p_changes->>'patrol_route_id')::uuid
+            AND public.patrol_work_unit_matches(s.patrol_route_id,(p_changes->>'work_unit_id')::uuid,
+              public.patrol_shift_work_unit_id(s.id)))
+          OR public.patrol_config_serves((v_config->>'id')::uuid,
+            (s.scheduled_start AT TIME ZONE 'Pacific/Auckland')::date,s.patrol_route_id,public.patrol_shift_work_unit_id(s.id))
           OR EXISTS(SELECT 1 FROM public.shift_stops st WHERE st.shift_id=s.id AND st.patrol_config_id=(v_config->>'id')::uuid))
     ) candidates;
   v_snapshot:=jsonb_build_object('actor',auth.uid(),'location',p_location_id,
-    'version',v_setup->>'version','changes',p_changes,'billing_workspace',v_rates,'affected',v_affected,'blocked',v_blocked);
+    'version',v_setup->>'version','changes',p_changes,'billing_workspace',v_rates,'affected',v_affected,'blocked',v_blocked,
+    'stop_modules',(SELECT coalesce(jsonb_agg(to_jsonb(m) ORDER BY m.id),'[]'::jsonb)
+      FROM public.patrol_route_stop_modules m WHERE m.patrol_config_id=(v_config->>'id')::uuid));
   RETURN jsonb_build_object('version',v_setup->>'version','preview_fingerprint',md5(v_snapshot::text),
     'affected',v_affected,'blocked',v_blocked,'billing_workspace',v_rates,'contractual_terms',v_config->'contractual_terms');
 END;
@@ -487,17 +536,17 @@ BEGIN
     INTO v_stop_count,v_config_count,v_window_start,v_window_end,v_visits_max,v_min_gap
     FROM public.client_site_patrol_config c
     WHERE c.organization_id=v_unit.organization_id AND c.active AND c.time_window_type<>'as_attended'
-      AND public.patrol_config_route_at(c.id,p_shift_date)=v_unit.patrol_route_id;
+      AND public.patrol_config_serves(c.id,p_shift_date,v_unit.patrol_route_id,v_unit.id);
     SELECT coalesce(array_agg(DISTINCT d ORDER BY d),'{}') INTO v_days
     FROM public.client_site_patrol_config c
     CROSS JOIN LATERAL unnest(CASE WHEN array_length(c.active_days,1) IS NULL
       THEN '{1,2,3,4,5,6,7}'::integer[] ELSE c.active_days END) d
     WHERE c.organization_id=v_unit.organization_id AND c.active AND c.time_window_type<>'as_attended'
-      AND public.patrol_config_route_at(c.id,p_shift_date)=v_unit.patrol_route_id;
+      AND public.patrol_config_serves(c.id,p_shift_date,v_unit.patrol_route_id,v_unit.id);
     IF p_scheduled_start IS NOT NULL AND p_scheduled_end IS NOT NULL AND p_scheduled_end>p_scheduled_start THEN
       FOR v_cfg IN SELECT c.* FROM public.client_site_patrol_config c
         WHERE c.organization_id=v_unit.organization_id AND c.active AND c.time_window_type<>'as_attended'
-          AND public.patrol_config_route_at(c.id,p_shift_date)=v_unit.patrol_route_id
+          AND public.patrol_config_serves(c.id,p_shift_date,v_unit.patrol_route_id,v_unit.id)
           AND (array_length(c.active_days,1) IS NULL OR v_dow=ANY(c.active_days))
           AND (array_length(c.active_months,1) IS NULL OR cardinality(c.active_months)=0 OR v_month=ANY(c.active_months))
       LOOP

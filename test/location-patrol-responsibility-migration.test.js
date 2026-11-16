@@ -78,7 +78,7 @@ test('location patrol responsibility versions confirmed future plans without cha
         'patrol_route_stop_modules', 'roster_work_units', 'shifts', 'shift_stops', 'shift_stop_modules',
         'patrol_stop_charge_lines', 'shift_stop_actions', 'patrol_checkpoint_visits', 'patrols',
         'officer_gps_log', 'safety_briefing_acknowledgements', 'rate_rules', 'crm_commercial_settings',
-        'audit_log'].map(table).join('\n')}
+        'roster_slots', 'audit_log'].map(table).join('\n')}
       ALTER TABLE public.shift_stop_modules ADD UNIQUE(shift_stop_id,module_key);
       ALTER TABLE public.shift_stop_modules ADD FOREIGN KEY(shift_stop_id)
         REFERENCES public.shift_stops(id) ON DELETE CASCADE;
@@ -326,6 +326,87 @@ test('location patrol responsibility versions confirmed future plans without cha
       sql(`UPDATE public.rate_rules SET amount=99 WHERE id='${id(95)}'`);
       assert.equal(get().version, before.version, 'Today-only workspace is not a proxy for the selected future rate');
       fails(id(4), save(amendment, before.version, plan.preview_fingerprint, id(96)), /changed|reload|stale/i);
+    });
+
+    const plusDays = days => sql(`SELECT ((clock_timestamp() AT TIME ZONE 'Pacific/Auckland')::date+${days})::text`);
+    const stopModules = shift => sql(`SELECT coalesce(string_agg(m.service_agreement_location_id||'/'||m.service_agreement_module_id,','),'none')
+      FROM public.shift_stop_modules m JOIN public.shift_stops s ON s.id=m.shift_stop_id
+      WHERE s.shift_id='${id(shift)}' AND s.patrol_config_id='${id(42)}'`);
+
+    await t.test('CRM patrol schedules resolve their aliased agreement module', () => {
+      sql(`INSERT INTO public.locations(id,organization_id,name,canonical_place_id)
+          VALUES('${id(100)}','${id(2)}','CRM location','${id(101)}');
+        INSERT INTO public.client_sites(id,location_id,client_organization_id,organization_id,name)
+          VALUES('${id(102)}','${id(100)}','${id(2)}','${id(2)}','CRM site');
+        INSERT INTO public.service_agreements(id,provider_organization_id,client_organization_id,name,starts_on,ends_on,invitation_status)
+          VALUES('${id(103)}','${id(1)}','${id(2)}','CRM contract','2020-01-01','2099-12-31','accepted');
+        INSERT INTO public.service_agreement_locations(id,service_agreement_id,site_id) VALUES('${id(104)}','${id(103)}','${id(102)}');
+        INSERT INTO public.service_agreement_modules(id,service_agreement_id,module_key) VALUES('${id(105)}','${id(103)}','patrol');
+        INSERT INTO public.crm_commercial_settings(service_agreement_id,base_rate_per_hour) VALUES('${id(103)}',50);
+        INSERT INTO public.service_agreement_delivery_schedules(id,service_agreement_id,site_id,module_key,
+          capability_key,work_model,active_days,visits_per_shift,min_gap_between_visits_minutes,pricing_basis)
+          VALUES('${id(106)}','${id(103)}','${id(102)}','general_patrol','patrol','scheduled_visits','{1,2,3,4,5,6,7}',1,60,'hourly');
+        INSERT INTO public.client_site_patrol_config(id,organization_id,site_id,patrol_route_id,module_key,delivery_schedule_id,time_window_type)
+          VALUES('${id(107)}','${id(20)}','${id(102)}','${id(30)}','general_patrol','${id(106)}','fixed')`);
+      const setup = json(id(4), `public.get_location_patrol_setup('${id(100)}')`);
+      const config = setup.configs.find(row => row.id === id(107));
+      assert.ok(config, 'CRM-created general_patrol schedule is offered for setup');
+      assert.equal(config.service_agreement_module_id, id(105));
+      const plan = json(id(4), `public.preview_location_patrol_setup('${id(100)}',${literal(JSON.stringify({
+        ...changes, patrol_config_id: id(107), service_agreement_location_id: id(104),
+        service_agreement_module_id: id(105), effective_from: plusDays(30) }))}::jsonb)`);
+      assert.equal(plan.contractual_terms.id, id(106));
+    });
+
+    await t.test('changing stop-module mappings after preview requires fresh confirmation', () => {
+      const current = get().billing_workspaces[0].selections.find(s => s.service_agreement_location_id === id(12)) ??
+        get().billing_workspaces[0].selections[0];
+      const amendment = { ...changes, patrol_route_id: id(30), work_unit_id: id(35),
+        billing: { ...changes.billing, expected_selection_id: current.id, expected_updated_at: current.updated_at } };
+      const before = get();
+      const plan = preview(amendment);
+      sql(`UPDATE public.patrol_route_stop_modules SET is_required=false WHERE patrol_config_id='${id(42)}'`);
+      try {
+        fails(id(4), save(amendment, before.version, plan.preview_fingerprint, id(97)), /changed|reload|stale/i);
+      } finally {
+        sql(`UPDATE public.patrol_route_stop_modules SET is_required=true WHERE patrol_config_id='${id(42)}'`);
+      }
+      const control = sql(`BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${id(4)}';
+        SELECT ${save(amendment, before.version, plan.preview_fingerprint, id(98))}->>'replayed'; ROLLBACK;`);
+      assert.equal(control, 'false', 'The same preview saves once the mapping is restored');
+    });
+
+    await t.test('stop generation and coverage honour the responsible work unit on a shared run', () => {
+      const day = plusDays(4);
+      sql(`INSERT INTO public.roster_work_units(id,organization_id,name,work_unit_type,service_type,patrol_route_id)
+          VALUES('${id(37)}','${id(20)}','Night patrol two','patrol','general_patrol','${id(31)}');
+        INSERT INTO public.shifts(id,organization_id,officer_user_id,service_type,patrol_route_id,work_unit_id,scheduled_start,scheduled_end,status)
+          SELECT ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'${id(20)}','${id(21)}','general_patrol','${id(31)}',
+            CASE n WHEN 60 THEN '${id(36)}'::uuid WHEN 61 THEN '${id(37)}'::uuid END,
+            ('${day}'::date + time '20:00') AT TIME ZONE 'Pacific/Auckland',
+            ('${day}'::date + time '23:00') AT TIME ZONE 'Pacific/Auckland','published'
+          FROM generate_series(60,63) n;
+        INSERT INTO public.roster_slots(organization_id,work_unit_id,scheduled_start,scheduled_end,status,client_request_id,linked_shift_id)
+          SELECT organization_id,'${id(37)}',scheduled_start,scheduled_end,'published','${id(108)}',id
+          FROM public.shifts WHERE id='${id(62)}'`);
+      for (const shift of [60, 61, 62, 63]) sql(`SELECT public.generate_shift_stops('${id(shift)}','${day}')`);
+      const counts = [60, 61, 62, 63].map(shift => sql(`SELECT count(*) FROM public.shift_stops
+        WHERE shift_id='${id(shift)}' AND patrol_config_id='${id(42)}'`));
+      assert.deepEqual(counts, ['1', '0', '0', '0']);
+      const coverage = unit => json(id(4), `public.preview_work_unit_coverage('${unit}','${day}')`).stop_count;
+      assert.equal(coverage(id(36)), 1);
+      assert.equal(coverage(id(37)), 0);
+    });
+
+    await t.test('generated stop modules carry the responsibility contract attribution', () => {
+      const day = plusDays(4);
+      sql(`UPDATE public.patrol_route_stop_modules SET service_agreement_location_id=NULL,service_agreement_module_id=NULL
+        WHERE patrol_config_id='${id(42)}'`);
+      sql(`SELECT public.generate_shift_stops('${id(60)}','${day}')`);
+      assert.equal(stopModules(60), `${id(12)}/${id(14)}`);
+      sql(`DELETE FROM public.patrol_route_stop_modules WHERE patrol_config_id='${id(42)}'`);
+      sql(`SELECT public.generate_shift_stops('${id(60)}','${day}')`);
+      assert.equal(stopModules(60), `${id(12)}/${id(14)}`);
     });
   } finally {
     if (created) docker(['rm', '-f', name]);

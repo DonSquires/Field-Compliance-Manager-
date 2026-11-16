@@ -156,6 +156,29 @@ test('checkpoint capture follows the assigned operating shift while preserving s
       assert.equal(sql(`SELECT count(*) FROM public.patrols WHERE officer_user_id='${id(4)}' AND shift_id='${id(11)}'`), '1');
       assert.equal(sql(`SELECT count(*) FROM public.patrol_checkpoint_visits WHERE client_request_id='${id(44)}'`), '1');
     });
+
+    await t.test('QR codes resolve in the owned active shift branch, not the profile branch', () => {
+      sql(`UPDATE public.patrol_checkpoints SET qr_code='QR-'||right(id::text,2)`);
+      const resolve = (actor, shift, code) => as(actor,
+        `SELECT coalesce(string_agg(id::text,','),'none') FROM public.resolve_officer_checkpoint_qr('${id(shift)}','${code}')`);
+      assert.equal(resolve(3, 10, 'QR-20'), id(20));
+      assert.equal(resolve(3, 10, 'QR-21'), 'none', 'Home-branch checkpoints are not in the operating branch');
+      assert.equal(resolve(3, 11, 'QR-20'), 'none', 'Another officer shift resolves nothing');
+      assert.equal(resolve(3, 13, 'QR-20'), 'none', 'Closed shifts resolve nothing');
+      assert.throws(() => sql(`SET ROLE anon; SELECT * FROM public.resolve_officer_checkpoint_qr('${id(10)}','QR-20')`),
+        /permission denied/i);
+    });
+
+    await t.test('a committed capture is recovered after its checkpoint or shift closes', () => {
+      sql(`UPDATE public.patrol_checkpoints SET active=false WHERE id='${id(20)}'`);
+      assert.equal(JSON.parse(as(3, call(40))).created, false);
+      sql(`UPDATE public.shifts SET status='completed' WHERE id='${id(10)}'`);
+      const replay = JSON.parse(as(3, call(40)));
+      assert.equal(replay.created, false);
+      fail(3, call(40, 10, 20, '-41,174'), /replay|different|conflict/i);
+      fail(3, call(45), /active shift/i);
+      assert.equal(sql(`SELECT count(*) FROM public.patrol_checkpoint_visits WHERE client_request_id='${id(45)}'`), '0');
+    });
   } finally {
     if (created) docker(['rm', '-f', name]);
   }
