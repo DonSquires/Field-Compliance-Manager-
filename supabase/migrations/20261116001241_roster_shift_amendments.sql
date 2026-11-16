@@ -77,6 +77,8 @@ DECLARE
   v_previous uuid;
   v_start timestamptz := p_scheduled_start;
   v_boundary timestamptz := p_scheduled_start;
+  v_audited_boundary timestamptz;
+  v_current_live boolean;
   v_context jsonb := nullif(current_setting('fcm.roster_handover_request',true),'')::jsonb;
 BEGIN
   SELECT organization_id INTO v_org FROM public.staff_profiles WHERE id = p_staff_id;
@@ -89,11 +91,16 @@ BEGIN
     WHERE s.id = p_exclude_slot_id AND s.staff_id = p_staff_id
       AND sh.officer_user_id = coalesce(p.user_id,p.id) AND sh.organization_id = s.organization_id
       AND sh.status = 'in_progress' AND sh.actual_start IS NOT NULL AND sh.actual_end IS NULL;
-  IF NOT FOUND THEN v_start := p_scheduled_start; v_boundary := p_scheduled_start; END IF;
-  SELECT a.target_id INTO v_previous FROM public.audit_log a
+  v_current_live := FOUND;
+  IF NOT v_current_live THEN v_start := p_scheduled_start; v_boundary := p_scheduled_start; END IF;
+  -- Live plan times can change repeatedly; continuity follows the immutable handover audit.
+  SELECT a.target_id,
+      CASE WHEN v_current_live THEN (a.metadata->'resulting'->>'scheduled_end')::timestamptz END
+    INTO v_previous,v_audited_boundary FROM public.audit_log a
     WHERE a.action = 'roster_slot_handover' AND a.target_table = 'roster_slots'
       AND a.metadata->'receipt'->>'replacement_slot_id' = p_exclude_slot_id::text
     ORDER BY a.created_at DESC LIMIT 1;
+  v_boundary := coalesce(v_audited_boundary,v_boundary);
   IF v_previous IS NULL AND v_context IS NOT NULL THEN
     SELECT s.id INTO v_previous FROM public.roster_slots s
       JOIN public.shifts sh ON sh.id = s.linked_shift_id
@@ -112,11 +119,12 @@ BEGIN
         AND s.scheduled_start < v_boundary;
     EXIT WHEN NOT FOUND;
     v_start := least(v_start,v_source.scheduled_start,(SELECT actual_start FROM public.shifts WHERE id = v_source.linked_shift_id));
-    v_boundary := v_source.scheduled_start;
-    SELECT a.target_id INTO v_previous FROM public.audit_log a
+    SELECT a.target_id,(a.metadata->'resulting'->>'scheduled_end')::timestamptz
+      INTO v_previous,v_audited_boundary FROM public.audit_log a
       WHERE a.action = 'roster_slot_handover' AND a.target_table = 'roster_slots'
         AND a.metadata->'receipt'->>'replacement_slot_id' = v_source.id::text
       ORDER BY a.created_at DESC LIMIT 1;
+    v_boundary := coalesce(v_audited_boundary,v_source.scheduled_start);
   END LOOP;
   SELECT * INTO v_load FROM public.roster_assignment_load(p_staff_id,v_start,p_scheduled_end,p_exclude_slot_id);
   IF v_load.rest_hours IS NOT NULL AND v_load.rest_hours < v_rules.min_rest_hours_between_shifts THEN
