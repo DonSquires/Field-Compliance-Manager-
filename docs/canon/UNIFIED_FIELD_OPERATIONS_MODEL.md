@@ -20,6 +20,15 @@ assignment checks. A completed segment may only retain its plan or be bounded
 to its evidenced actual attendance here.
 Assignment writers share a per-person transaction guard; contention explicitly
 requires a retry rather than allowing concurrent overlapping assignments.
+The guard checks both roster responsibility and standalone field attendance,
+excluding only a slot's own linked field record. Declined/cancelled/missed field
+shifts do not reserve time; completed field work occupies its recorded interval,
+falling back to its plan only where attendance bounds are absent.
+Replacement assignments, including internal/workshop handovers, require an
+effective rosterable branch authorization when staff work outside their home
+organization. Moving a live planned start never removes recorded duty or its
+audited predecessor segments from fatigue checks. Cancelling a proposed
+handover restores the administrator's prior planned-start input.
 Completed/cancelled or historical source records are not editable here.
 
 Changing the officer or work unit/place after actual work starts is a **timed

@@ -257,6 +257,7 @@ const RosterOperationsPage: React.FC = () => {
     && (form.workUnitId !== editContext.slot.work_unit_id
       || (staff.find((person) => person.id === form.officerId)?.staffId
         ?? (form.officerId === editContext.slot.staff_id ? editContext.slot.staff_id : null)) !== editContext.slot.staff_id));
+  const effectiveStart = needsHandover ? handoverAt : form.start;
   const closeEditor = () => { if (!saving) { editorSequence.current += 1; setShowCreate(false); } };
   useEffect(() => {
     if (!showCreate || !editorDialogRef.current) return;
@@ -270,33 +271,30 @@ const RosterOperationsPage: React.FC = () => {
     setShowCreate(false); setEditContext(null); setEditLoading(false); setSaving(false);
     return () => { editorSequence.current += 1; };
   }, [operatingOrganizationId]);
-  useEffect(() => {
-    if (needsHandover) setForm((current) => ({ ...current, start: handoverAt }));
-  }, [needsHandover, handoverAt]);
 
   const period = useMemo(() => rosterPeriod(periodAnchor, horizon), [horizon, periodAnchor]);
   const { days, start: weekStart, end: weekEnd } = period;
 
   // ATLAS READS: preview_work_unit_coverage — advisory before the slot exists, same day rule as generate_shift_stops
   useEffect(() => {
-    if (!showCreate || !form.workUnitId || !form.start) { setUnitCoverage(null); return; }
+    if (!showCreate || !form.workUnitId || !effectiveStart) { setUnitCoverage(null); return; }
     let cancelled = false;
-    const startDate = new Date(form.start);
+    const startDate = new Date(effectiveStart);
     const endDate = form.end ? new Date(form.end) : null;
     const shiftDate = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
     supabase.rpc('preview_work_unit_coverage', { p_work_unit_id: form.workUnitId, p_shift_date: shiftDate, p_scheduled_start: startDate.toISOString(), p_scheduled_end: endDate && endDate > startDate ? endDate.toISOString() : null }).then(({ data }) => { const preview = data as CoveragePreview | null; if (!cancelled) setUnitCoverage(preview && typeof preview === 'object' && !Array.isArray(preview) && 'kind' in preview ? preview : null); });
     return () => { cancelled = true; };
-  }, [showCreate, form.workUnitId, form.start, form.end]);
+  }, [showCreate, form.workUnitId, effectiveStart, form.end]);
   // ATLAS READS: preview_roster_assignment — the same rest/hours/days check the slot trigger enforces, shown before the slot exists
   // the last refusal was about the previous officer/times; a changed shift starts clean
-  useEffect(() => { if (showCreate) { setError(null); setFormError(null); } }, [showCreate, form.officerId, form.start, form.end]);
+  useEffect(() => { if (showCreate) { setError(null); setFormError(null); } }, [showCreate, form.officerId, effectiveStart, form.end]);
   useEffect(() => {
     const person = staff.find((candidate) => candidate.id === form.officerId);
-    if (!showCreate || !person || !form.start || !form.end || new Date(form.end) <= new Date(form.start)) { setAssignmentPreview(null); return; }
+    if (!showCreate || !person || !effectiveStart || !form.end || new Date(form.end) <= new Date(effectiveStart)) { setAssignmentPreview(null); return; }
     let cancelled = false;
-    supabase.rpc('preview_roster_assignment', { p_staff_id: person.staffId, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString() }).then(({ data }) => { const preview = data as AssignmentPreview | null; if (!cancelled) setAssignmentPreview(preview && typeof preview === 'object' && !Array.isArray(preview) && 'week_hours' in preview ? preview : null); });
+    supabase.rpc('preview_roster_assignment', { p_staff_id: person.staffId, p_scheduled_start: new Date(effectiveStart).toISOString(), p_scheduled_end: new Date(form.end).toISOString() }).then(({ data }) => { const preview = data as AssignmentPreview | null; if (!cancelled) setAssignmentPreview(preview && typeof preview === 'object' && !Array.isArray(preview) && 'week_hours' in preview ? preview : null); });
     return () => { cancelled = true; };
-  }, [showCreate, form.officerId, form.start, form.end, staff]);
+  }, [showCreate, form.officerId, effectiveStart, form.end, staff]);
   const holidays = useMemo(() => nzRosterHolidays(weekStart, weekEnd, calendarRegion), [calendarRegion, weekEnd, weekStart]);
 
   const attachAdminAttendance = useCallback(async (organizationId: string, rosterShifts: Shift[]): Promise<Shift[]> => {
@@ -637,7 +635,7 @@ const RosterOperationsPage: React.FC = () => {
         p_changes: {
           staff_id: retainedStaffId, work_unit_id: form.workUnitId,
           scheduled_start: !needsHandover && form.start === plannedLocalInput(editContext.slot.scheduled_start)
-            ? editContext.slot.scheduled_start : new Date(form.start).toISOString(),
+            ? editContext.slot.scheduled_start : new Date(effectiveStart).toISOString(),
           scheduled_end: form.end === plannedLocalInput(editContext.slot.scheduled_end)
             ? editContext.slot.scheduled_end : new Date(form.end).toISOString(),
           planned_break_minutes: Number(form.breakMinutes), break_unpaid: form.breakUnpaid, notes: form.notes.trim() || null,
@@ -1132,11 +1130,11 @@ const RosterOperationsPage: React.FC = () => {
       {editingSlot && <p>Edit the planned shift only. Recorded attendance, actual breaks, completed work and existing financial snapshots are preserved.</p>}
       <label htmlFor="roster-officer"><span>Officer</span></label><select id="roster-officer" required={needsHandover} value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}><option value="">Open shift — advertise to available staff</option>{editContext?.slot.staff_id && !staff.some((person) => person.staffId === editContext.slot.staff_id) && <option value={editContext.slot.staff_id}>Current assigned officer (not currently rosterable)</option>}{staff.filter((person) => person.workReady || person.staffId === editContext?.slot.staff_id).map((person) => <option value={person.id} key={person.id}>{person.name}</option>)}</select>
       <label htmlFor="roster-service"><span>Work unit</span></label><select id="roster-service" required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value, contactName: '', contactPhone: '', contactReviewed: false })}><option value="">Select the work this shift covers</option>{editContext && !workUnits.some((unit) => unit.id === editContext.slot.work_unit_id) && <option value={editContext.work_unit.id}>{editContext.work_unit.name} (not in active setup)</option>}{workUnits.filter((unit) => !unit.external_refs?.historical_only).map((unit) => <option value={unit.id} key={unit.id}>{unit.name} · {workUnitTypeLabel(unit.work_unit_type)}</option>)}</select>
-      <div><label><span>Start</span><input type="datetime-local" required readOnly={needsHandover} value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
+      <div><label><span>Start</span><input type="datetime-local" required readOnly={needsHandover} value={effectiveStart} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label><label><span>End</span><input type="datetime-local" required value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label></div>
       <label><span>Planned break (minutes, optional)</span><input type="number" min="0" max="240" step="1" required value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></label>
       <label><input type="checkbox" checked={form.breakUnpaid} disabled={Number(form.breakMinutes) === 0} onChange={(event) => setForm({ ...form, breakUnpaid: event.target.checked })} /><span>Unpaid break</span></label>
       <p>Zero means no planned allowance. Only actual recorded unpaid break time is deducted. Statutory rest and meal entitlements still apply.</p>
-      {unitCoverage && form.start && (() => { const words = coverageWords(unitCoverage, form.start); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
+      {unitCoverage && effectiveStart && (() => { const words = coverageWords(unitCoverage, effectiveStart); return <p className={`roster-coverage-note is-${words.tone}`} role={words.tone === 'warn' ? 'alert' : 'status'}>{words.tone === 'warn' ? <AlertTriangle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}<span>{words.text}</span></p>; })()}
       {assignmentPreview && assignmentWords(assignmentPreview).map((note, index) => <p key={index} className={`roster-assignment-note is-${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>{note.tone === 'ok' ? <UserCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}<span>{note.text}</span></p>)}
       <label><span>Briefing notes</span><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {(workUnits.find((unit) => unit.id === form.workUnitId)?.work_unit_type
@@ -1160,7 +1158,7 @@ const RosterOperationsPage: React.FC = () => {
       {error && <p className="roster-assignment-note is-stop roster-dialog-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /><span>{error}</span></p>}
       </fieldset>
       </div>
-      <footer><button type="button" disabled={saving} onClick={closeEditor}>Cancel</button><button type="submit" disabled={saving || editLoading || Boolean(editingSlot && !editContext) || !form.workUnitId || !form.start || !form.end}>{saving ? 'Saving' : editingSlot ? needsHandover ? 'Confirm handover' : 'Save shift' : 'Create shift'}</button></footer>
+      <footer><button type="button" disabled={saving} onClick={closeEditor}>Cancel</button><button type="submit" disabled={saving || editLoading || Boolean(editingSlot && !editContext) || !form.workUnitId || !effectiveStart || !form.end}>{saving ? 'Saving' : editingSlot ? needsHandover ? 'Confirm handover' : 'Save shift' : 'Create shift'}</button></footer>
     </form></dialog>}
   </div>;
 };
