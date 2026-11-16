@@ -107,10 +107,12 @@ test('roster edit context and amendments enforce active authority, versions and 
       CREATE TABLE shift_stop_actions(id uuid, shift_id uuid);
       CREATE TABLE staff_skills(staff_id uuid, skill_name text, certified boolean, certification_expiry date);
       CREATE TABLE notification_calls(recipient uuid, payload jsonb, dedup_key text);
-      CREATE TABLE validation_flags(unavailable boolean, fatigue text);
-      INSERT INTO validation_flags VALUES(false,NULL);
+      CREATE TABLE validation_flags(unavailable boolean, fatigue text, unavailable_staff uuid);
+      INSERT INTO validation_flags VALUES(false,NULL,NULL);
       CREATE FUNCTION public.staff_has_roster_availability_conflict(uuid,timestamptz,timestamptz)
-        RETURNS boolean LANGUAGE sql AS $$ SELECT unavailable FROM public.validation_flags $$;
+        RETURNS boolean LANGUAGE sql AS $$
+          SELECT unavailable OR coalesce($1=unavailable_staff,false) FROM public.validation_flags
+        $$;
       CREATE FUNCTION public.staff_fatigue_conflict(uuid,timestamptz,timestamptz,uuid)
         RETURNS text LANGUAGE sql AS $$ SELECT fatigue FROM public.validation_flags $$;
       CREATE FUNCTION public.get_descendant_organizations(uuid) RETURNS uuid[] LANGUAGE sql AS $$ SELECT '{}'::uuid[] $$;
@@ -419,6 +421,10 @@ test('roster edit context and amendments enforce active authority, versions and 
     assert.equal(sql(`SELECT count(*) FROM shifts`).trim(), '1');
     assert.equal(sql(`SELECT status FROM dispatch_jobs WHERE id='${id(800)}'`).trim(), 'on_scene');
     sql(`UPDATE staff_profiles SET work_ready=true WHERE id='${id(22)}'`);
+    sql(`UPDATE validation_flags SET unavailable_staff='${id(22)}'`);
+    fails(handoverCall(id(1300), true), /unavailable/i);
+    assert.equal(sql(`SELECT row_to_json(s) FROM shifts s WHERE id='${id(500)}'`).trim(), beforeHandover);
+    sql('UPDATE validation_flags SET unavailable_staff=NULL');
     const stopCancellation = backgroundSql(`BEGIN;
       SET LOCAL application_name='roster-stop-cancellation-race';
       UPDATE shift_stops SET status='cancelled' WHERE id='${id(602)}';
@@ -430,7 +436,11 @@ test('roster edit context and amendments enforce active authority, versions and 
       await stopCancellation;
     }
     assert.equal(sql(`SELECT status FROM shifts WHERE id='${id(500)}'`).trim(), 'in_progress');
+    sql(`UPDATE validation_flags SET unavailable_staff='${id(21)}'`);
     const handoverReceipt = JSON.parse(sql(handoverCall(id(1300), true)).trim());
+    fails(`${as(id(1))} UPDATE roster_slots SET scheduled_end=scheduled_end+interval '1 hour'
+      WHERE id='${id(300)}'; ROLLBACK;`, /unavailable/i);
+    sql('UPDATE validation_flags SET unavailable_staff=NULL');
     assert.equal(handoverReceipt.source, 'roster_slot_handover');
     assert.ok(handoverReceipt.replacement_slot_id);
     assert.ok(handoverReceipt.replacement_shift_id);

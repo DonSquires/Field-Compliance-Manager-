@@ -14,6 +14,10 @@ plan with a reason, fresh slot/linked-shift/contact versions and an idempotent
 request receipt. Notes, contact and planned-break corrections do not revalidate
 an unchanged assignment against unrelated readiness changes. Assignment/time
 changes retain availability, eligibility, contract, overlap and fatigue checks.
+Completing an already-recorded attendance segment does not requalify its source
+officer against later availability changes; the replacement still passes all
+assignment checks. A completed segment may only retain its plan or be bounded
+to its evidenced actual attendance here.
 Assignment writers share a per-person transaction guard; contention explicitly
 requires a retry rather than allowing concurrent overlapping assignments.
 Completed/cancelled or historical source records are not editable here.
