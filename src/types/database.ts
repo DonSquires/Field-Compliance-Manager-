@@ -37237,6 +37237,19 @@ export type Database = {
         Args: { p_service_agreement_id: string }
         Returns: boolean
       }
+      amend_roster_slot: {
+        Args: {
+          p_changes: Json
+          p_client_request_id: string
+          p_expected_shift_updated_at: string
+          p_expected_updated_at: string
+          p_handover_at?: string
+          p_officer_safety_confirmed?: boolean
+          p_reason: string
+          p_slot_id: string
+        }
+        Returns: Json
+      }
       apply_biosecurity_photo_review_to_perception: {
         Args: { p_assessment_id: string }
         Returns: undefined
@@ -45719,6 +45732,10 @@ export type Database = {
           staff_id: string
           work_unit_name: string
         }[]
+      }
+      get_roster_slot_edit_context: {
+        Args: { p_slot_id: string }
+        Returns: Json
       }
       get_safety_review_workspace: {
         Args: { p_location_id?: string; p_organization_id: string }
