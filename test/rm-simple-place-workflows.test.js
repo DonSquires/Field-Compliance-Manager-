@@ -18,6 +18,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-boundary-history-or
 if (process.env.BOB_TEST_POSTGRES === '1') require('./location-client-billing-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./location-patrol-responsibility-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./checkpoint-operating-branch-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-presence-evidence-migration.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
