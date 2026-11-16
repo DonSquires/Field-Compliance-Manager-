@@ -454,6 +454,14 @@ acceptance governs disclosure, not the provider's authority to deliver service.
 An authorized location awaiting a patrol schedule is an incomplete setup, not
 automatically a permission error.
 
+Checkpoint capture follows the active officer's owned, on-duty shift in its
+operating branch, not the profile's home branch. Checkpoints remain scoped to
+that operating organization. Concurrent retries serialize with the shift and
+return the original receipt; reusing a request for different capture data is
+an explicit conflict. Server-calculated proximity and checkpoint-verification
+snapshots remain authoritative. No matching planned visit, or multiple matching
+visits, leaves attribution unresolved and audited rather than guessing a stop.
+
 Reuse agreement commercial terms and scoped billing rate rules; do not copy
 monetary values into another rate store. The source may be the client's
 agreement, an existing applicable charge rate, or a governed new charge rate.
