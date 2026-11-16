@@ -10,6 +10,89 @@ test.beforeEach(async ({ page }) => {
 	}));
 });
 
+test('slot inspector keeps actions in view while long details scroll independently', async ({ page }, testInfo) => {
+  const width = testInfo.project.name === 'mobile-chromium' ? 390 : 1280;
+  await page.setViewportSize({ width, height: 600 });
+  await page.route('**/rest/v1/roster_slots*', (route) => route.fulfill({ json: [{
+    id: '32323232-3232-4232-8232-323232323232',
+    work_unit_id: '20202020-2020-4020-8020-202020202020',
+    staff_id: '22222222-2222-4222-8222-222222222222',
+    scheduled_start: '2026-08-30T21:00:00.000Z', scheduled_end: '2026-08-31T05:00:00.000Z',
+    status: 'draft', linked_shift_id: null, planned_break_minutes: 30, break_unpaid: true,
+    notes: `${'Check the north entrance and record the handover. '.repeat(180)}${'reference-'.repeat(60)}`,
+  }] }));
+  await signInAsAdmin(page, '/admin/roster');
+  await page.locator('.roster-operational-dock > summary').click();
+  await page.locator('.roster-slot-queue').getByRole('button', { name: /Civic Centre Static Post/ }).click();
+  const inspector = page.locator('.roster-slot-inspector');
+  await expect(inspector).toBeVisible();
+  const actions = inspector.locator('footer').getByRole('button');
+  await expect(actions).toHaveCount(8);
+  const assertActionsInView = async () => {
+    for (const button of await actions.all()) {
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(600);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  };
+  await assertActionsInView();
+  await page.screenshot({ path: testInfo.outputPath('slot-drawer-long-details.png') });
+  await expect(page.getByRole('complementary', { name: 'Roster slot details' })).toBeVisible();
+  await expect(inspector.locator('dl > div').filter({ has: page.getByText('Planned hours', { exact: true }) })).toContainText('8 h');
+  await expect(inspector.locator('dl > div').filter({ has: page.getByText('Planned break', { exact: true }) })).toContainText('30 min unpaid');
+  const pagePosition = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+  const close = inspector.getByRole('button', { name: 'Close', exact: true });
+  const closePosition = await close.boundingBox();
+  const body = inspector.locator('.roster-inspector-body');
+  await body.hover();
+  await page.mouse.wheel(0, 100000);
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.mouse.wheel(0, 100000);
+  await assertActionsInView();
+  expect(await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))).toEqual(pagePosition);
+  expect(await close.boundingBox()).toEqual(closePosition);
+  expect(await inspector.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await close.focus();
+  await page.keyboard.press('Enter');
+  await expect(inspector).toHaveCount(0);
+});
+
+for (const state of [
+  { status: 'in_progress', slotStatus: 'accepted', label: 'On shift now', actualEnd: null },
+  { status: 'completed', slotStatus: 'completed', label: 'Completed', actualEnd: '2026-08-31T05:00:00.000Z' },
+]) {
+  test(`slot inspector reports the linked field shift as ${state.status}`, async ({ page }) => {
+    const shiftId = '45454545-4545-4545-8545-454545454545';
+    await page.route('**/rest/v1/shifts*', (route) => route.fulfill({ json: [{
+      id: shiftId, officer_user_id: '22222222-2222-4222-8222-222222222222',
+      service_type: 'static_guarding', scheduled_start: '2026-08-30T21:00:00.000Z',
+      scheduled_end: '2026-08-31T05:00:00.000Z', status: state.status, shift_health: 'green',
+      total_stops: 0, completed_stops: 0, notes: null,
+      actual_start: '2026-08-30T21:00:00.000Z', actual_end: state.actualEnd,
+    }] }));
+    await page.route('**/rest/v1/roster_slots*', (route) => route.fulfill({ json: [{
+      id: '32323232-3232-4232-8232-323232323232',
+      work_unit_id: '20202020-2020-4020-8020-202020202020',
+      staff_id: '22222222-2222-4222-8222-222222222222',
+      scheduled_start: '2026-08-30T21:00:00.000Z', scheduled_end: '2026-08-31T05:00:00.000Z',
+      status: state.slotStatus, linked_shift_id: shiftId, planned_break_minutes: 30, break_unpaid: true,
+      notes: null,
+    }] }));
+    await signInAsAdmin(page, '/admin/roster');
+    await page.locator('.roster-operational-dock > summary').click();
+    await page.locator('.roster-slot-queue').getByRole('button', { name: /Civic Centre Static Post/ }).click();
+    const fieldShift = page.locator('.roster-slot-inspector dl > div')
+      .filter({ has: page.getByText('Field shift', { exact: true }) });
+    await expect(fieldShift).toContainText(state.label);
+    await expect(fieldShift).not.toContainText('the officer can start it');
+  });
+}
+
 test('roster removes unused place selectors without clearing other workspace context', async ({ page }) => {
   await page.route('**/rest/v1/rpc/get_operating_organization_contexts', (route) => route.fulfill({ json: [{
     organization_id: '33333333-3333-4333-8333-333333333333', organization_name: 'Harbour Compliance Services',
