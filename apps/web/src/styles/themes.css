@@ -815,6 +815,16 @@
   background: #fbe9e9;
 }
 
+.admin-shell[data-theme='light'] .roster-shift.is-unscheduled {
+  --console-dark-secondary-bg: #f1eafc;
+  --console-dark-secondary-text: #3d2466;
+  --console-dark-button-border: #9a84c7;
+  border-color: #9a84c7;
+  color: #3d2466;
+  background: #f1eafc;
+  box-shadow: inset 3px 0 0 #6b3fb0;
+}
+
 .admin-shell[data-theme='light'] .roster-history-table-wrap,
 .admin-shell[data-theme='light'] .roster-history th,
 .admin-shell[data-theme='light'] .roster-history td {

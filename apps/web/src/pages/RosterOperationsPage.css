@@ -812,3 +812,6 @@
 .roster-editor-form footer { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .roster-editor-form :is(button,input,select,textarea):focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
 @media(max-width: 560px) { .roster-editor-fields > div { grid-template-columns: minmax(0, 1fr); } }
+/* Officer-started work was never rostered: a dashed violet card, plus the 'Unscheduled' label, so colour is not the only cue. */
+/* The shared dark-surface button rule in themes.css paints cards from --console-dark-* variables, so set them here as well. */
+.roster-shift.is-unscheduled { --console-dark-secondary-bg: #221a35; --console-dark-secondary-text: #ece3ff; --console-dark-button-border: #6d5a99; border-style: dashed; border-color: #6d5a99; color: #ece3ff; background: #221a35; box-shadow: inset 3px 0 0 #c39bff; }

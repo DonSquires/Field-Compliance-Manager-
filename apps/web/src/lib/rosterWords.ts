@@ -23,8 +23,16 @@ const SHIFT_STATUS_LABELS: Record<string, string> = {
   missed: 'Missed – nobody attended',
 };
 
-/** Field shift status code -> what the rosterer sees on the board. */
-export const shiftStatusLabel = (status: string): string => SHIFT_STATUS_LABELS[status] ?? plainWords(status);
+/**
+ * Field shift status code -> what the rosterer sees on the board. An officer-started
+ * (`ad_hoc`) shift was never rostered or sent, so it reads as unscheduled.
+ */
+export const shiftStatusLabel = (status: string, origin?: string | null): string => {
+  const label = SHIFT_STATUS_LABELS[status] ?? plainWords(status);
+  if (origin !== 'ad_hoc') return label;
+  if (status === 'scheduled') return 'Unscheduled – officer starting';
+  return `Unscheduled – ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+};
 
 /** `in_progress` -> `In progress`; null/empty -> the fallback. */
 export const plainWords = (value: string | null | undefined, fallback = 'Not recorded'): string => {
