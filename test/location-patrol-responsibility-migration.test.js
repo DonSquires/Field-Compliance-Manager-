@@ -20,6 +20,9 @@ const table = name => {
   return `${schema.slice(start, schema.indexOf('\n);', start) + 3)}
     ALTER TABLE public.${name} ADD PRIMARY KEY(id);`;
 };
+// After the live catalog refresh the snapshot holds this migration's generator; replay the one it replaces.
+const generatorBeforeMigration = fs.readFileSync(
+  path.join(__dirname, 'fixtures/generate-shift-stops-before-patrol-responsibility.sql'), 'utf8');
 const literal = value => value == null ? 'NULL' : `'${String(value).replaceAll("'", "''")}'`;
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -95,7 +98,7 @@ test('location patrol responsibility versions confirmed future plans without cha
       ${definition('manage_operating_branch_rate_rule')}
       ${definition('resolve_rate_rule')}
       ${definition('patrol_window_bounds')}
-      ${definition('generate_shift_stops')}
+      ${generatorBeforeMigration}
       ${definition('preview_work_unit_coverage')}
       ${definition('start_officer_shift')}
       CREATE TABLE public.reference_codes(id uuid,organization_id uuid,code_type text,code text,is_active boolean);
