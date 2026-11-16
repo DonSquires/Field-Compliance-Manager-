@@ -27,8 +27,10 @@ falling back to its plan only where attendance bounds are absent.
 Replacement assignments, including internal/workshop handovers, require an
 effective rosterable branch authorization when staff work outside their home
 organization. Moving a live planned start never removes recorded duty or its
-audited predecessor segments from fatigue checks. Cancelling a proposed
-handover restores the administrator's prior planned-start input.
+audited predecessor segments from fatigue checks, including after successive
+timing edits; continuity follows the original handover audit, not a mutable plan.
+Cancelling a proposed handover restores the administrator's prior planned-start
+input.
 Completed/cancelled or historical source records are not editable here.
 
 Changing the officer or work unit/place after actual work starts is a **timed

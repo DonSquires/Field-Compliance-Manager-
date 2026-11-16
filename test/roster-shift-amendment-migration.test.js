@@ -561,11 +561,21 @@ test('roster edit context and amendments enforce active authority, versions and 
           'completed','${id(560)}');
       INSERT INTO audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
         VALUES('${id(100)}','${id(1)}','roster_slot_handover','roster_slots','${id(320)}',
-          jsonb_build_object('receipt',jsonb_build_object('replacement_slot_id','${id(321)}')));
+          jsonb_build_object('receipt',jsonb_build_object('replacement_slot_id','${id(321)}'),
+            'resulting',jsonb_build_object('scheduled_end',now()-interval '2 hours')));
       INSERT INTO roster_slots(id,organization_id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id)
         VALUES('${id(321)}','${id(100)}','${id(10)}','${id(23)}',now()-interval '2 hours',now()+interval '4 hours',
           'accepted','${id(561)}');
-      UPDATE organization_fatigue_rules SET max_hours_per_week=7;
+      SET LOCAL request.jwt.claim.sub='${id(1)}';
+      SELECT amend_roster_slot('${id(1449)}','${id(321)}',
+        (SELECT updated_at FROM roster_slots WHERE id='${id(321)}'),
+        (SELECT updated_at FROM shifts WHERE id='${id(561)}'),
+        jsonb_build_object('staff_id','${id(23)}','work_unit_id','${id(10)}',
+          'scheduled_start',now()-interval '30 minutes','scheduled_end',now()+interval '4 hours',
+          'planned_break_minutes',0,'break_unpaid',false,'notes',NULL,
+          'contact_name',NULL,'contact_phone',NULL,'expected_contact_version',NULL),
+        'First timing change must not rewrite attendance',NULL,false);
+      UPDATE organization_fatigue_rules SET max_hours_per_week=7.8,min_rest_hours_between_shifts=0;
       SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${id(1)}';
       SELECT amend_roster_slot('${id(1450)}','${id(321)}',
         (SELECT updated_at FROM roster_slots WHERE id='${id(321)}'),
