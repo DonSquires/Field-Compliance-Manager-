@@ -81,7 +81,7 @@ test('a licence that outlives the shift never blocks rostering; expired or unver
   assert.match(rosterPage, /has unverified credentials on file\. Verify them in People › Credentials first\./);
   assert.match(rosterPage, /has an expired credential\$\{person\.credentialExpiry \? ` \(\$\{dayWords\(person\.credentialExpiry\)\}\)` : ''\}\. Record the renewal in People › Credentials first\./);
   assert.match(rosterPage, /has a credential expiring \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People › Credentials first\./);
-  assert.match(rosterPage, /const blocker = credentialBlocker\(person, form\.end\); if \(blocker\)/);
+  assert.match(rosterPage, /const blocker = dimensionsChanged && person \? credentialBlocker\(person, form\.end\) : null/);
   assert.match(rosterPage, /const blocker = person \? credentialBlocker\(person, form\.end\) : null; if \(blocker\)/);
   assert.match(rosterPage, /\{credentialBadgeWords\(person\)\}<\/i>/);
   assert.match(rosterPage, /return `Credential expires \$\{person\.credentialExpiry \? dayWords\(person\.credentialExpiry\) : 'soon'\}`;/);

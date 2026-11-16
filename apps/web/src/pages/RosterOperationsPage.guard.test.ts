@@ -39,12 +39,15 @@ describe('enterprise roster operations', () => {
   });
   it('creates slots and materializes only field work through governed RPCs', () => {
     expect(page).toContain("isStatic ? 'create_static_roster_slot_with_contact' : 'create_roster_slot_with_break'");
-    expect(page).toContain("isStatic ? 'update_static_roster_slot_with_contact' : 'update_roster_slot_with_break'");
+    expect(page).toContain("supabase.rpc('amend_roster_slot'");
+    expect(page).toContain('p_expected_updated_at: editContext.slot.updated_at');
+    expect(page).toContain('p_expected_shift_updated_at: editContext.shift?.updated_at ?? null');
+    expect(page).toContain('expected_contact_version: editContext.contact?.version ?? null');
     expect(page).toContain('p_planned_break_minutes: Number(form.breakMinutes)');
     expect(page).toContain('p_break_unpaid: form.breakUnpaid');
     expect(page).not.toContain("supabase.rpc('materialize_roster_slot'");
     expect(page).toContain('Open shift — advertise to available staff');
-    expect(page).toContain('required={Boolean(editingSlot)}');
+    expect(page).toContain('required={needsHandover}');
     expect(page).not.toContain(".from('shifts').insert");
   });
   it('manages typed slot lifecycle only through governed admin RPCs', () => {
@@ -97,7 +100,7 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('Staff schedule');
     expect(page).toContain('Work unit schedule');
     expect(page).toContain("openCreate(undefined, day, unit.id)");
-    expect(page).toContain("selectedSlot.status === 'draft' && selectedSlot.staff_id && <button type=\"button\" onClick={() => openEdit(selectedSlot)}>Edit draft</button>");
+    expect(page).toContain("['draft', 'published', 'accepted', 'declined'].includes(selectedSlot.status) && <button type=\"button\" onClick={() => void openEdit(selectedSlot)}>Edit shift</button>");
     expect(page).toContain('setEditingSlot(null)');
     expect(page).toContain("scheduleMode === 'staff' && staff.length === 0");
     expect(page).toContain('<select aria-label="Staff readiness"');

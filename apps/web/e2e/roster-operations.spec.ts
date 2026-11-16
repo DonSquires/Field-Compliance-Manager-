@@ -10,6 +10,83 @@ test.beforeEach(async ({ page }) => {
 	}));
 });
 
+test.describe('live planned amendments', () => {
+test.use({ timezoneId: 'Pacific/Auckland' });
+for (const handover of [false, true]) {
+test(`live shift editor ${handover ? 'hands over responsibility' : 'saves the full plan'} with version checks and preserves a failed request for retry`, async ({ page }, testInfo) => {
+  const slot = {
+    id: '32323232-3232-4232-8232-323232323232', organization_id: '41414141-4141-4141-8141-414141414141',
+    work_unit_id: '20202020-2020-4020-8020-202020202020', staff_id: '22222222-2222-4222-8222-222222222222',
+    scheduled_start: '2026-08-30T21:00:00.000Z', scheduled_end: '2026-08-31T05:00:00.000Z',
+    updated_at: '2026-08-30T20:00:00.000Z', linked_shift_id: '45454545-4545-4545-8545-454545454545',
+    status: 'accepted', notes: 'Original briefing', planned_break_minutes: 30, break_unpaid: true,
+  };
+  const shift = {
+    id: slot.linked_shift_id, organization_id: slot.organization_id, officer_user_id: slot.staff_id,
+    scheduled_start: slot.scheduled_start, scheduled_end: slot.scheduled_end, service_type: 'static_guarding',
+    status: 'in_progress', actual_start: slot.scheduled_start, actual_end: null, updated_at: slot.updated_at,
+    total_stops: 1, notes: slot.notes,
+  };
+  await page.route('**/rest/v1/roster_slots*', (route) => route.fulfill({ json: [slot] }));
+  await page.route('**/rest/v1/shifts*', (route) => route.fulfill({ json: [shift] }));
+  await page.route('**/rest/v1/rpc/get_roster_slot_edit_context', (route) => route.fulfill({ json: {
+    slot, shift, work_unit: { id: slot.work_unit_id, name: 'Civic Centre Static Post', work_unit_type: 'static' },
+    contact: null, finish_preview: { open_dispatch_jobs: 1, open_welfare_alerts: 1 },
+  } }));
+  const requests: Record<string, unknown>[] = [];
+  await page.route('**/rest/v1/rpc/amend_roster_slot', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>;
+    requests.push(request);
+    if (requests.length === 1) {
+      await route.fulfill({ status: 503, json: { message: 'Save response unavailable; retry the same request' } });
+      return;
+    }
+    await route.fulfill({ json: {
+      client_request_id: request.p_client_request_id, source: handover ? 'roster_slot_handover' : 'roster_slot_amended', slot_id: slot.id,
+      shift_id: shift.id, slot_updated_at: slot.updated_at, shift_updated_at: shift.updated_at,
+      replacement_slot_id: handover ? '56565656-5656-4565-8565-565656565656' : null,
+      replacement_shift_id: null, replacement_slot_updated_at: handover ? slot.updated_at : null,
+      replacement_shift_updated_at: null, released_dispatch_jobs: 0, resolved_welfare_alerts: 0, replayed: true,
+    } });
+  });
+  await signInAsAdmin(page, '/admin/roster');
+  await page.clock.setFixedTime(new Date('2026-08-31T09:30:00+12:00'));
+  await page.locator('.roster-operational-dock > summary').click();
+  await page.locator('.roster-slot-queue').getByRole('button', { name: /Civic Centre Static Post/ }).click();
+  await page.getByRole('button', { name: 'Edit shift', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit shift', exact: true });
+  await expect(editor.getByLabel('Work unit')).toBeEnabled();
+  await expect(editor.getByLabel('Officer', { exact: true })).toBeEnabled();
+  await editor.getByLabel('Briefing notes').fill('Revised safe briefing');
+  await editor.getByLabel('Planned break (minutes, optional)').fill('20');
+  await editor.getByLabel('Reason for change').fill('Confirmed new briefing with the officer');
+  if (handover) {
+    await editor.getByLabel('Work unit').selectOption('23232323-2323-4323-8323-232323232323');
+    await editor.getByLabel('Handover at').fill('2026-08-31T09:29');
+    await expect(editor.getByText('1 open dispatch jobs return to the queue. 1 welfare alerts require an officer safety check.')).toBeVisible();
+    await editor.getByLabel('I checked the original officer is safe.').check();
+  }
+  const save = editor.getByRole('button', { name: handover ? 'Confirm handover' : 'Save shift', exact: true });
+  const bounds = await save.boundingBox();
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await page.screenshot({ path: testInfo.outputPath('full-shift-editor.png') });
+  await save.click();
+  await expect(editor.getByRole('alert')).toContainText('Save response unavailable');
+  await expect(editor.getByLabel('Briefing notes')).toHaveValue('Revised safe briefing');
+  await save.click();
+  await expect(editor).toHaveCount(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[0]).toMatchObject({
+    p_expected_updated_at: slot.updated_at, p_expected_shift_updated_at: shift.updated_at,
+    p_changes: { planned_break_minutes: 20, notes: 'Revised safe briefing', expected_contact_version: null },
+  });
+  expect(requests[0].p_handover_at).toBe(handover ? '2026-08-30T21:29:00.000Z' : null);
+  await expect(page.getByRole('status').filter({ hasText: handover ? 'Handover saved' : 'Shift plan saved' })).toBeVisible();
+});
+}
+});
+
 test('slot inspector keeps actions in view while long details scroll independently', async ({ page }, testInfo) => {
   const width = testInfo.project.name === 'mobile-chromium' ? 390 : 1280;
   await page.setViewportSize({ width, height: 600 });
@@ -27,7 +104,7 @@ test('slot inspector keeps actions in view while long details scroll independent
   const inspector = page.locator('.roster-slot-inspector');
   await expect(inspector).toBeVisible();
   const actions = inspector.locator('footer').getByRole('button');
-  await expect(actions).toHaveCount(8);
+  await expect(actions).toHaveCount(7);
   const assertActionsInView = async () => {
     for (const button of await actions.all()) {
       const box = await button.boundingBox();
