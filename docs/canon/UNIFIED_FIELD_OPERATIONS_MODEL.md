@@ -479,6 +479,16 @@ manual arrive/depart buttons do not manufacture billable GPS hours. Preserve
 source, boundary and policy provenance, compute money from raw qualified
 seconds before final cents rounding, and leave payroll independent.
 
+Evidence limits belong to the shift's operating organization, not the
+officer's home organization or an assumed agreement-wide GPS policy. Authorized
+administrators append positive finite accuracy and sample-gap limits, with
+fresh-version protection and actor-bound retry receipts. Effective immediately
+means the server save time; future versions are explicit. Do not backdate a new
+policy to turn past unqualified fixes into automatic billing evidence. Individual
+points use the verified boundary history and policy effective at capture,
+including the whole GPS accuracy disk. A reliable inside point alone is not
+proof of a complete onsite interval or authorization to invoice it.
+
 These are delivery requirements, not a claim that the complete charging path
 is already deployed or exercised.
 
