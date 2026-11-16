@@ -65,6 +65,22 @@ test(`live shift editor ${handover ? 'hands over responsibility' : 'saves the fu
     await editor.getByLabel('Handover at').fill('2026-08-31T09:29');
     await expect(editor.getByText('1 open dispatch jobs return to the queue. 1 welfare alerts require an officer safety check.')).toBeVisible();
     await editor.getByLabel('I checked the original officer is safe.').check();
+  } else {
+    const plannedStart = await editor.getByLabel('Start', { exact: true }).inputValue();
+    await editor.getByLabel('Work unit').selectOption('23232323-2323-4323-8323-232323232323');
+    await expect(editor.getByLabel('Handover at')).toBeVisible();
+    await editor.getByLabel('Work unit').selectOption(slot.work_unit_id);
+    await expect(editor.getByLabel('Start', { exact: true })).toHaveValue(plannedStart);
+    await editor.getByLabel('Start', { exact: true }).fill('2026-08-31T08:45');
+    const officer = editor.getByLabel('Officer', { exact: true });
+    const originalOfficer = await officer.inputValue();
+    const alternativeOfficer = await officer.locator(`option:not([value=""]):not([value="${originalOfficer}"])`).first().getAttribute('value');
+    expect(alternativeOfficer).toBeTruthy();
+    await officer.selectOption(alternativeOfficer!);
+    await editor.getByLabel('Handover at').fill('2026-08-31T09:28');
+    await officer.selectOption(originalOfficer);
+    await expect(editor.getByLabel('Start', { exact: true })).toHaveValue('2026-08-31T08:45');
+    await editor.getByLabel('Start', { exact: true }).fill(plannedStart);
   }
   const save = editor.getByRole('button', { name: handover ? 'Confirm handover' : 'Save shift', exact: true });
   const bounds = await save.boundingBox();
@@ -79,7 +95,8 @@ test(`live shift editor ${handover ? 'hands over responsibility' : 'saves the fu
   expect(requests[1]).toEqual(requests[0]);
   expect(requests[0]).toMatchObject({
     p_expected_updated_at: slot.updated_at, p_expected_shift_updated_at: shift.updated_at,
-    p_changes: { planned_break_minutes: 20, notes: 'Revised safe briefing', expected_contact_version: null },
+    p_changes: { planned_break_minutes: 20, notes: 'Revised safe briefing', expected_contact_version: null,
+      scheduled_start: handover ? '2026-08-30T21:29:00.000Z' : slot.scheduled_start },
   });
   expect(requests[0].p_handover_at).toBe(handover ? '2026-08-30T21:29:00.000Z' : null);
   await expect(page.getByRole('status').filter({ hasText: handover ? 'Handover saved' : 'Shift plan saved' })).toBeVisible();

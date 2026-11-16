@@ -76,12 +76,20 @@ DECLARE
   v_source public.roster_slots%rowtype;
   v_previous uuid;
   v_start timestamptz := p_scheduled_start;
+  v_boundary timestamptz := p_scheduled_start;
   v_context jsonb := nullif(current_setting('fcm.roster_handover_request',true),'')::jsonb;
 BEGIN
   SELECT organization_id INTO v_org FROM public.staff_profiles WHERE id = p_staff_id;
   IF v_org IS NULL THEN RETURN NULL; END IF;
   SELECT * INTO v_rules FROM public.organization_fatigue_rules WHERE organization_id = v_org;
   IF NOT FOUND OR NOT v_rules.enforced THEN RETURN NULL; END IF;
+  SELECT least(p_scheduled_start,sh.actual_start),s.scheduled_start INTO v_start,v_boundary
+    FROM public.roster_slots s JOIN public.shifts sh ON sh.id = s.linked_shift_id
+      JOIN public.staff_profiles p ON p.id = s.staff_id
+    WHERE s.id = p_exclude_slot_id AND s.staff_id = p_staff_id
+      AND sh.officer_user_id = coalesce(p.user_id,p.id) AND sh.organization_id = s.organization_id
+      AND sh.status = 'in_progress' AND sh.actual_start IS NOT NULL AND sh.actual_end IS NULL;
+  IF NOT FOUND THEN v_start := p_scheduled_start; v_boundary := p_scheduled_start; END IF;
   SELECT a.target_id INTO v_previous FROM public.audit_log a
     WHERE a.action = 'roster_slot_handover' AND a.target_table = 'roster_slots'
       AND a.metadata->'receipt'->>'replacement_slot_id' = p_exclude_slot_id::text
@@ -100,10 +108,11 @@ BEGIN
   WHILE v_previous IS NOT NULL LOOP
     SELECT s.* INTO v_source FROM public.roster_slots s JOIN public.shifts sh ON sh.id = s.linked_shift_id
       WHERE s.id = v_previous AND s.staff_id = p_staff_id AND s.status = 'completed'
-        AND sh.status = 'completed' AND sh.actual_end = v_start AND s.scheduled_end = v_start
-        AND s.scheduled_start < v_start;
+        AND sh.status = 'completed' AND sh.actual_end = v_boundary AND s.scheduled_end = v_boundary
+        AND s.scheduled_start < v_boundary;
     EXIT WHEN NOT FOUND;
-    v_start := least(v_source.scheduled_start,(SELECT actual_start FROM public.shifts WHERE id = v_source.linked_shift_id));
+    v_start := least(v_start,v_source.scheduled_start,(SELECT actual_start FROM public.shifts WHERE id = v_source.linked_shift_id));
+    v_boundary := v_source.scheduled_start;
     SELECT a.target_id INTO v_previous FROM public.audit_log a
       WHERE a.action = 'roster_slot_handover' AND a.target_table = 'roster_slots'
         AND a.metadata->'receipt'->>'replacement_slot_id' = v_source.id::text
@@ -141,6 +150,7 @@ DECLARE
   v_shift public.shifts%rowtype;
   v_unit public.roster_work_units%rowtype;
   v_staff public.staff_profiles%rowtype;
+  v_profile public.user_profiles%rowtype;
   v_contact public.roster_slot_contacts%rowtype;
   v_existing public.audit_log%rowtype;
   v_replacement public.roster_slots%rowtype;
@@ -164,6 +174,7 @@ DECLARE
   v_live boolean;
   v_dimensions boolean;
   v_handover boolean;
+  v_branch_authorized boolean;
   v_user uuid;
   v_keys text[] := ARRAY['staff_id','work_unit_id','scheduled_start','scheduled_end',
     'planned_break_minutes','break_unpaid','notes','contact_name','contact_phone','expected_contact_version'];
@@ -283,6 +294,44 @@ BEGIN
     RAISE EXCEPTION 'Shift contact applies only to a static work unit';
   END IF;
   v_before := to_jsonb(v_slot);
+  IF v_dimensions THEN
+    IF NOT v_unit.active THEN RAISE EXCEPTION 'Active work unit required'; END IF;
+    IF NOT EXISTS(SELECT 1 FROM public.organizations WHERE id = v_slot.organization_id AND active) THEN
+      RAISE EXCEPTION 'Operating organisation not found';
+    END IF;
+    IF v_staff_id IS NOT NULL THEN
+      SELECT * INTO v_staff FROM public.staff_profiles WHERE id = v_staff_id AND work_ready;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Work-ready authorized staff profile required'; END IF;
+      v_user := coalesce(v_staff.user_id,v_staff.id);
+      SELECT EXISTS(SELECT 1 FROM public.staff_branch_authorisations a
+        WHERE a.user_id = v_user AND a.branch_org_id = v_slot.organization_id
+          AND a.status = 'active' AND a.can_be_rostered
+          AND (a.starts_on IS NULL OR a.starts_on <= current_date)
+          AND (a.ends_on IS NULL OR a.ends_on >= current_date)) INTO v_branch_authorized;
+      IF v_staff.organization_id IS DISTINCT FROM v_slot.organization_id AND NOT v_branch_authorized THEN
+        RAISE EXCEPTION 'Work-ready authorized staff profile required';
+      END IF;
+      IF v_unit.work_unit_type IN ('patrol','static') THEN
+        SELECT * INTO v_profile FROM public.user_profiles WHERE id = v_user
+          AND organization_id IS NOT NULL AND deactivated_at IS NULL AND role IN ('officer','admin_officer');
+        IF NOT FOUND THEN RAISE EXCEPTION 'Active field officer required'; END IF;
+        IF v_profile.organization_id IS DISTINCT FROM v_slot.organization_id AND NOT v_branch_authorized THEN
+          RAISE EXCEPTION 'Officer is not authorized to be rostered at this branch';
+        END IF;
+        IF nullif(btrim(v_unit.service_type),'') IS NULL THEN RAISE EXCEPTION 'Service type is required'; END IF;
+      END IF;
+      IF EXISTS(SELECT 1 FROM public.leave_requests l WHERE l.staff_id = v_staff_id AND l.status = 'approved'
+        AND daterange(l.starts_on,l.ends_on,'[]') && daterange(v_start::date,v_end::date,'[]')) THEN
+        RAISE EXCEPTION 'Staff member has approved leave';
+      END IF;
+    END IF;
+    IF v_unit.work_unit_type = 'static' AND NOT EXISTS(
+      SELECT 1 FROM public.service_agreement_locations l
+        JOIN public.service_agreement_modules m ON m.service_agreement_id = l.service_agreement_id
+      WHERE l.id = v_unit.service_agreement_location_id AND l.status = 'active'
+        AND m.id = v_unit.service_agreement_module_id AND m.enabled AND m.module_key = 'static_guarding'
+    ) THEN RAISE EXCEPTION 'Static work unit contract is no longer active'; END IF;
+  END IF;
 
   IF v_handover THEN
     IF p_handover_at IS NULL OR p_handover_at <= v_shift.actual_start
@@ -310,11 +359,17 @@ BEGIN
     SELECT * INTO v_replacement FROM public.create_roster_slot_with_break(
       p_client_request_id,v_unit_id,v_staff_id,v_start,v_end,false,v_notes,v_break,v_unpaid);
     IF v_unit.work_unit_type = 'patrol' AND v_unit_id = v_slot.work_unit_id THEN
-      SELECT * INTO v_staff FROM public.staff_profiles WHERE id = v_staff_id;
-      SELECT * INTO v_replacement_shift FROM public.create_roster_shift(
-        coalesce(v_staff.user_id,v_staff.id),v_unit.service_type,v_start,v_end,NULL,NULL,
-        v_unit.patrol_route_id,v_notes,true,v_slot.organization_id);
-      UPDATE public.shifts SET roster_slot_id = v_replacement.id WHERE id = v_replacement_shift.id;
+      -- Link on insertion for overlap checks, without materializing the full route again.
+      INSERT INTO public.shifts(organization_id,officer_user_id,service_type,patrol_route_id,
+        scheduled_start,scheduled_end,status,notes,roster_slot_id)
+      VALUES(v_slot.organization_id,v_user,btrim(v_unit.service_type),v_unit.patrol_route_id,
+        v_start,v_end,'published',v_notes,v_replacement.id)
+      RETURNING * INTO v_replacement_shift;
+      INSERT INTO public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+      VALUES(v_slot.organization_id,auth.uid(),'roster_shift_created','shifts',v_replacement_shift.id,
+        jsonb_build_object('officer_user_id',v_user,'officer_home_organization_id',v_profile.organization_id,
+          'staff_id',v_staff.id,'scheduled_start',v_start,'scheduled_end',v_end,'status','published',
+          'handover_source_shift_id',v_shift.id));
       FOR v_stop IN SELECT * FROM public.shift_stops WHERE id = ANY(coalesce(v_remaining,'{}'::uuid[]))
         ORDER BY stop_order,id LOOP
         INSERT INTO public.shift_stops(organization_id,shift_id,patrol_config_id,site_id,zone_id,module_key,
@@ -346,41 +401,25 @@ BEGIN
     PERFORM set_config('fcm.roster_handover_request','',true);
   ELSE
     IF v_dimensions THEN
-      IF NOT v_unit.active THEN RAISE EXCEPTION 'Active work unit required'; END IF;
       IF NOT v_live AND v_start < now()-interval '5 minutes' THEN
         RAISE EXCEPTION 'Shift timing is outside the accepted publication range';
       END IF;
       IF v_staff_id IS NOT NULL THEN
-        SELECT * INTO v_staff FROM public.staff_profiles WHERE id = v_staff_id AND work_ready;
-        IF NOT FOUND OR NOT (v_staff.organization_id = v_slot.organization_id OR EXISTS(
-          SELECT 1 FROM public.staff_branch_authorisations a WHERE a.user_id = coalesce(v_staff.user_id,v_staff.id)
-            AND a.branch_org_id = v_slot.organization_id AND a.status = 'active' AND a.can_be_rostered
-            AND (a.starts_on IS NULL OR a.starts_on <= current_date) AND (a.ends_on IS NULL OR a.ends_on >= current_date)
-        )) THEN RAISE EXCEPTION 'Work-ready authorized staff profile required'; END IF;
-        IF v_unit.work_unit_type IN ('patrol','static') AND NOT EXISTS(
-          SELECT 1 FROM public.user_profiles p WHERE p.id = coalesce(v_staff.user_id,v_staff.id)
-            AND p.deactivated_at IS NULL AND p.role IN ('officer','admin_officer')
-        ) THEN RAISE EXCEPTION 'Active field officer required'; END IF;
-        IF EXISTS(SELECT 1 FROM public.leave_requests l WHERE l.staff_id = v_staff_id AND l.status = 'approved'
-          AND daterange(l.starts_on,l.ends_on,'[]') && daterange(v_start::date,v_end::date,'[]')) THEN
-          RAISE EXCEPTION 'Staff member has approved leave';
-        END IF;
-        IF EXISTS(SELECT 1 FROM public.roster_slots s WHERE s.id <> v_slot.id AND s.staff_id = v_staff_id
-          AND s.status NOT IN ('declined','cancelled') AND s.scheduled_start < v_end AND s.scheduled_end > v_start) THEN
+        IF EXISTS(SELECT 1 FROM public.roster_slots s
+          LEFT JOIN public.shifts sh ON sh.id = s.linked_shift_id AND sh.status = 'completed'
+          WHERE s.id <> v_slot.id AND s.staff_id = v_staff_id AND s.status NOT IN ('declined','cancelled')
+            AND coalesce(sh.actual_start,s.scheduled_start) < v_end
+            AND coalesce(sh.actual_end,s.scheduled_end) > v_start) THEN
           RAISE EXCEPTION 'Staff member already has an overlapping roster slot';
         END IF;
         IF EXISTS(SELECT 1 FROM public.shifts s WHERE s.id IS DISTINCT FROM v_shift.id
           AND s.officer_user_id = coalesce(v_staff.user_id,v_staff.id)
-          AND s.status NOT IN ('cancelled','missed') AND s.scheduled_start < v_end AND s.scheduled_end > v_start) THEN
+          AND s.status NOT IN ('declined','cancelled','missed')
+          AND (CASE WHEN s.status = 'completed' THEN coalesce(s.actual_start,s.scheduled_start) ELSE s.scheduled_start END) < v_end
+          AND (CASE WHEN s.status = 'completed' THEN coalesce(s.actual_end,s.scheduled_end) ELSE s.scheduled_end END) > v_start) THEN
           RAISE EXCEPTION 'Officer already has an overlapping field shift';
         END IF;
       END IF;
-      IF v_unit.work_unit_type = 'static' AND NOT EXISTS(
-        SELECT 1 FROM public.service_agreement_locations l
-          JOIN public.service_agreement_modules m ON m.service_agreement_id = l.service_agreement_id
-        WHERE l.id = v_unit.service_agreement_location_id AND l.status = 'active'
-          AND m.id = v_unit.service_agreement_module_id AND m.enabled AND m.module_key = 'static_guarding'
-      ) THEN RAISE EXCEPTION 'Static work unit contract is no longer active'; END IF;
       IF v_shift.id IS NOT NULL AND NOT v_live THEN
         IF EXISTS(SELECT 1 FROM public.shift_stop_actions WHERE shift_id = v_shift.id)
           OR EXISTS(SELECT 1 FROM public.patrols WHERE shift_id = v_shift.id AND status = 'in_progress')
@@ -458,34 +497,43 @@ CREATE OR REPLACE FUNCTION public.enforce_roster_assignment_serialization()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO pg_catalog, public
 AS $function$
-DECLARE v_person uuid;
+DECLARE
+  v_person uuid;
+  v_slot_id uuid;
+  v_shift_id uuid;
 BEGIN
   IF NEW.status IN ('completed','cancelled','declined','missed') THEN RETURN NEW; END IF;
   IF TG_TABLE_NAME = 'roster_slots' THEN
     IF NEW.staff_id IS NULL THEN RETURN NEW; END IF;
     SELECT coalesce(user_id,id) INTO v_person FROM public.staff_profiles WHERE id = NEW.staff_id;
+    v_slot_id := NEW.id;
+    v_shift_id := NEW.linked_shift_id;
   ELSE
     v_person := NEW.officer_user_id;
+    v_slot_id := NEW.roster_slot_id;
+    v_shift_id := NEW.id;
   END IF;
   IF v_person IS NULL THEN RETURN NEW; END IF;
   IF NOT pg_catalog.pg_try_advisory_xact_lock(
     pg_catalog.hashtextextended('roster_staff:' || v_person::text,0)) THEN
     RAISE EXCEPTION 'Concurrent staff assignment; reload and retry' USING ERRCODE = '55P03';
   END IF;
-  IF TG_TABLE_NAME = 'roster_slots' THEN
-    IF EXISTS(
-      SELECT 1 FROM public.roster_slots s JOIN public.staff_profiles p ON p.id = s.staff_id
-      WHERE s.id <> NEW.id AND coalesce(p.user_id,p.id) = v_person
-        AND s.status NOT IN ('declined','cancelled')
-        AND s.scheduled_start < NEW.scheduled_end AND s.scheduled_end > NEW.scheduled_start
-    ) THEN RAISE EXCEPTION 'Staff member already has an overlapping roster slot'; END IF;
-  ELSE
-    IF EXISTS(
-      SELECT 1 FROM public.shifts s WHERE s.id <> NEW.id AND s.officer_user_id = v_person
-        AND s.status NOT IN ('declined','cancelled','missed')
-        AND s.scheduled_start < NEW.scheduled_end AND s.scheduled_end > NEW.scheduled_start
-    ) THEN RAISE EXCEPTION 'Officer already has an overlapping field shift'; END IF;
-  END IF;
+  IF EXISTS(
+    SELECT 1 FROM public.roster_slots s JOIN public.staff_profiles p ON p.id = s.staff_id
+      LEFT JOIN public.shifts sh ON sh.id = s.linked_shift_id AND sh.status = 'completed'
+    WHERE s.id IS DISTINCT FROM v_slot_id
+      AND (v_shift_id IS NULL OR s.linked_shift_id IS DISTINCT FROM v_shift_id)
+      AND coalesce(p.user_id,p.id) = v_person AND s.status NOT IN ('declined','cancelled')
+      AND coalesce(sh.actual_start,s.scheduled_start) < NEW.scheduled_end
+      AND coalesce(sh.actual_end,s.scheduled_end) > NEW.scheduled_start
+  ) THEN RAISE EXCEPTION 'Staff member already has an overlapping roster slot'; END IF;
+  IF EXISTS(
+    SELECT 1 FROM public.shifts s WHERE s.id IS DISTINCT FROM v_shift_id
+      AND (v_slot_id IS NULL OR s.roster_slot_id IS DISTINCT FROM v_slot_id)
+      AND s.officer_user_id = v_person AND s.status NOT IN ('declined','cancelled','missed')
+      AND (CASE WHEN s.status = 'completed' THEN coalesce(s.actual_start,s.scheduled_start) ELSE s.scheduled_start END) < NEW.scheduled_end
+      AND (CASE WHEN s.status = 'completed' THEN coalesce(s.actual_end,s.scheduled_end) ELSE s.scheduled_end END) > NEW.scheduled_start
+  ) THEN RAISE EXCEPTION 'Officer already has an overlapping field shift'; END IF;
   RETURN NEW;
 END;
 $function$;

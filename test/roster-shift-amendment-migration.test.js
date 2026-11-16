@@ -89,7 +89,8 @@ test('roster edit context and amendments enforce active authority, versions and 
         updated_at timestamptz DEFAULT clock_timestamp(), service_type text, location_id uuid, zone_id uuid,
         patrol_route_id uuid, roster_slot_id uuid, notes text, ended_reason text,
         total_stops integer DEFAULT 0, completed_stops integer DEFAULT 0, generated_at timestamptz,
-        service_agreement_location_id uuid,service_agreement_module_id uuid);
+        service_agreement_location_id uuid,service_agreement_module_id uuid,
+        work_unit_id uuid,module_key text,shift_origin text,created_at timestamptz DEFAULT clock_timestamp());
       ALTER TABLE shifts ALTER COLUMN id SET DEFAULT gen_random_uuid();
       CREATE TABLE roster_slot_contacts(roster_slot_id uuid PRIMARY KEY, contact_name text, contact_phone text,
         version uuid DEFAULT gen_random_uuid(), updated_at timestamptz DEFAULT clock_timestamp(), updated_by uuid);
@@ -103,6 +104,9 @@ test('roster edit context and amendments enforce active authority, versions and 
       CREATE TABLE service_agreement_locations(id uuid, status text, site_id uuid, zone_id uuid, service_agreement_id uuid);
       CREATE TABLE service_agreement_modules(id uuid, service_agreement_id uuid, enabled boolean, module_key text);
       CREATE TABLE client_sites(id uuid, location_id uuid);
+      CREATE TABLE locations(id uuid, organization_id uuid);
+      CREATE TABLE location_zones(id uuid, location_id uuid);
+      CREATE FUNCTION public.has_location_access(uuid,uuid) RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
       CREATE TABLE patrols(id uuid, shift_id uuid, status text);
       CREATE TABLE shift_stop_actions(id uuid, shift_id uuid);
       CREATE TABLE staff_skills(staff_id uuid, skill_name text, certified boolean, certification_expiry date);
@@ -171,7 +175,7 @@ test('roster edit context and amendments enforce active authority, versions and 
       INSERT INTO dispatch_jobs(id,shift_id,status) VALUES ('${id(800)}','${id(500)}','on_scene');
       INSERT INTO welfare_alerts(id,shift_id,status) VALUES ('${id(900)}','${id(500)}','pending');
       ${['create_roster_slot','set_roster_slot_break','create_roster_slot_with_break',
-        'create_roster_shift','materialize_roster_slot_core','materialize_roster_slot','manage_roster_slot',
+        'create_roster_shift','start_ad_hoc_officer_shift','materialize_roster_slot_core','materialize_roster_slot','manage_roster_slot',
         'set_roster_slot_contact','close_unfinished_officer_shift','record_admin_shift_attendance',
         'enforce_roster_slot_availability','tg_enforce_roster_slot_skill_requirements',
         'tg_touch_updated_at'].map(liveFunction).join('\n')}
@@ -300,7 +304,31 @@ test('roster edit context and amendments enforce active authority, versions and 
     fails(liveCall(id(1150), { ...liveChanges, expected_contact_version: currentLive.contact.version,
       scheduled_end: new Date(Date.now() + 7 * 3600_000).toISOString() },
     currentLive.slot.updated_at, currentLive.shift.updated_at), /overlap/i);
+    sql(`UPDATE shifts SET status='declined' WHERE id='${id(550)}'`);
+    sql(liveCall(id(1151), { ...liveChanges, expected_contact_version: currentLive.contact.version,
+      scheduled_end: new Date(Date.now() + 7 * 3600_000).toISOString() },
+    currentLive.slot.updated_at, currentLive.shift.updated_at).replace('COMMIT;', 'ROLLBACK;'));
     sql(`DELETE FROM shifts WHERE id='${id(550)}'`);
+    sql(`INSERT INTO organization_fatigue_rules(organization_id,min_rest_hours_between_shifts,max_hours_per_week)
+      VALUES('${id(100)}',0,8)`);
+    fails(liveCall(id(1152), { ...liveChanges, expected_contact_version: currentLive.contact.version,
+      scheduled_start: new Date(Date.now() + 3600_000).toISOString(),
+      scheduled_end: new Date(Date.now() + 7 * 3600_000).toISOString() },
+    currentLive.slot.updated_at, currentLive.shift.updated_at), /over.*hour.limit/i);
+    sql(`DELETE FROM organization_fatigue_rules WHERE organization_id='${id(100)}'`);
+    const adHoc = JSON.parse(sql(`BEGIN;
+      INSERT INTO shifts(id,organization_id,officer_user_id,status,scheduled_start,scheduled_end,actual_start,actual_end)
+      VALUES('${id(551)}','${id(100)}','${id(5)}','completed',now()-interval '3 hours',now()+interval '9 hours',
+        now()-interval '3 hours',now()-interval '2 hours');
+      SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${id(5)}';
+      SELECT row_to_json(s) FROM start_ad_hoc_officer_shift('${id(11)}','administration') s;
+      ROLLBACK;`).trim());
+    assert.equal(adHoc.status, 'scheduled', 'Completed ad-hoc placeholders must not reserve unworked hours');
+    fails(`BEGIN;
+      INSERT INTO shifts(id,organization_id,officer_user_id,status,scheduled_start,scheduled_end)
+      VALUES('${id(551)}','${id(100)}','${id(5)}','completed',now()-interval '3 hours',now()+interval '9 hours');
+      SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${id(5)}';
+      SELECT start_ad_hoc_officer_shift('${id(11)}','administration'); COMMIT;`, /overlap/i);
 
     let raceContext = JSON.parse(sql(`${as(id(1))} SELECT get_roster_slot_edit_context('${id(301)}'); COMMIT;`).trim());
     const execDocker = promisify(execFile);
@@ -421,6 +449,28 @@ test('roster edit context and amendments enforce active authority, versions and 
     assert.equal(sql(`SELECT count(*) FROM shifts`).trim(), '1');
     assert.equal(sql(`SELECT status FROM dispatch_jobs WHERE id='${id(800)}'`).trim(), 'on_scene');
     sql(`UPDATE staff_profiles SET work_ready=true WHERE id='${id(22)}'`);
+    sql(`UPDATE staff_profiles SET organization_id='${id(200)}' WHERE id='${id(22)}';
+      INSERT INTO staff_branch_authorisations(user_id,branch_org_id,status,can_be_rostered)
+        VALUES('${id(5)}','${id(100)}','active',false)`);
+    for (const boundary of [
+      'can_be_rostered=false,starts_on=NULL,ends_on=NULL',
+      'can_be_rostered=true,starts_on=current_date+1,ends_on=NULL',
+      'can_be_rostered=true,starts_on=NULL,ends_on=current_date-1',
+    ]) {
+      sql(`UPDATE staff_branch_authorisations SET ${boundary} WHERE user_id='${id(5)}'`);
+      fails(liveCall(randomUUID(), { ...handoverChanges, work_unit_id: id(11) },
+        handoverContext.slot.updated_at, handoverContext.shift.updated_at, handoverAt, true),
+      /authorized|authorised|rosterable/i);
+      assert.equal(sql(`SELECT row_to_json(s) FROM shifts s WHERE id='${id(500)}'`).trim(), beforeHandover);
+    }
+    sql(`DELETE FROM staff_branch_authorisations WHERE user_id='${id(5)}';
+      UPDATE staff_profiles SET organization_id='${id(100)}' WHERE id='${id(22)}';
+      INSERT INTO shifts(id,organization_id,officer_user_id,status,scheduled_start,scheduled_end)
+        VALUES('${id(552)}','${id(100)}','${id(5)}','published',now(),now()+interval '3 hours')`);
+    fails(liveCall(randomUUID(), { ...handoverChanges, work_unit_id: id(11) },
+      handoverContext.slot.updated_at, handoverContext.shift.updated_at, handoverAt, true), /overlap/i);
+    assert.equal(sql(`SELECT row_to_json(s) FROM shifts s WHERE id='${id(500)}'`).trim(), beforeHandover);
+    sql(`DELETE FROM shifts WHERE id='${id(552)}'`);
     sql(`UPDATE validation_flags SET unavailable_staff='${id(22)}'`);
     fails(handoverCall(id(1300), true), /unavailable/i);
     assert.equal(sql(`SELECT row_to_json(s) FROM shifts s WHERE id='${id(500)}'`).trim(), beforeHandover);
@@ -486,6 +536,9 @@ test('roster edit context and amendments enforce active authority, versions and 
     const placeReceipt = JSON.parse(sql(placeCall).trim());
     assert.equal(placeReceipt.source, 'roster_slot_handover');
     assert.equal(placeReceipt.replacement_shift_id, null);
+    fails(`${as(id(1))} SELECT create_roster_shift('${id(5)}','patrol',
+      now()+interval '1 hour',now()+interval '2 hours',NULL,NULL,NULL,
+      'Must not double-book an internal responsibility segment',true,'${id(100)}'); COMMIT;`, /overlap/i);
     const rest = sql(`SELECT staff_fatigue_conflict('${id(22)}','${placeTime}',
       '${placeChanges.scheduled_end}','${placeReceipt.replacement_slot_id}')`).trim();
     assert.equal(rest, '', 'A responsibility segment is not a new rested duty');
@@ -494,6 +547,34 @@ test('roster edit context and amendments enforce active authority, versions and 
       '${placeChanges.scheduled_end}','${placeReceipt.replacement_slot_id}')`), /over.*hour.limit/i,
     'Continuation must still enforce the complete duty hours');
     sql(`UPDATE organization_fatigue_rules SET max_hours_per_week=60`);
+    fails(`BEGIN;
+      INSERT INTO user_profiles(id,organization_id,role) VALUES('${id(6)}','${id(100)}','officer');
+      INSERT INTO staff_profiles VALUES('${id(23)}','${id(6)}','${id(100)}',true);
+      INSERT INTO shifts(id,organization_id,officer_user_id,status,scheduled_start,scheduled_end,
+        actual_start,actual_end,roster_slot_id) VALUES
+        ('${id(560)}','${id(100)}','${id(6)}','completed',now()-interval '4 hours',now()-interval '2 hours',
+          now()-interval '4 hours',now()-interval '2 hours','${id(320)}'),
+        ('${id(561)}','${id(100)}','${id(6)}','in_progress',now()-interval '2 hours',now()+interval '4 hours',
+          now()-interval '90 minutes',NULL,'${id(321)}');
+      INSERT INTO roster_slots(id,organization_id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id)
+        VALUES('${id(320)}','${id(100)}','${id(10)}','${id(23)}',now()-interval '4 hours',now()-interval '2 hours',
+          'completed','${id(560)}');
+      INSERT INTO audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+        VALUES('${id(100)}','${id(1)}','roster_slot_handover','roster_slots','${id(320)}',
+          jsonb_build_object('receipt',jsonb_build_object('replacement_slot_id','${id(321)}')));
+      INSERT INTO roster_slots(id,organization_id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id)
+        VALUES('${id(321)}','${id(100)}','${id(10)}','${id(23)}',now()-interval '2 hours',now()+interval '4 hours',
+          'accepted','${id(561)}');
+      UPDATE organization_fatigue_rules SET max_hours_per_week=7;
+      SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${id(1)}';
+      SELECT amend_roster_slot('${id(1450)}','${id(321)}',
+        (SELECT updated_at FROM roster_slots WHERE id='${id(321)}'),
+        (SELECT updated_at FROM shifts WHERE id='${id(561)}'),
+        jsonb_build_object('staff_id','${id(23)}','work_unit_id','${id(10)}',
+          'scheduled_start',now()+interval '1 hour','scheduled_end',now()+interval '4 hours',
+          'planned_break_minutes',0,'break_unpaid',false,'notes',NULL,
+          'contact_name',NULL,'contact_phone',NULL,'expected_contact_version',NULL),
+        'Retiming must retain actual duty and its audited predecessor',NULL,false); COMMIT;`, /over.*hour.limit/i);
     const futureStart = new Date(Date.now() + 3 * 86400_000).toISOString();
     const futureEnd = new Date(Date.now() + 3 * 86400_000 + 8 * 3600_000).toISOString();
     const published = JSON.parse(sql(`${as(id(1))}

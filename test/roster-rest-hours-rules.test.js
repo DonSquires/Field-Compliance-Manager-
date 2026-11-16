@@ -47,7 +47,7 @@ test('rules are written only through the governed, audited RPC with sane ranges'
 });
 
 test('the rosterer sees rest, hours and days in a row before the shift exists, and a refusal lands inside the dialog', () => {
-  assert.match(rosterPage, /supabase\.rpc\('preview_roster_assignment', \{ p_staff_id: person\.staffId, p_scheduled_start: new Date\(form\.start\)\.toISOString\(\), p_scheduled_end: new Date\(form\.end\)\.toISOString\(\) \}\)/);
+  assert.match(rosterPage, /supabase\.rpc\('preview_roster_assignment', \{ p_staff_id: person\.staffId, p_scheduled_start: new Date\(effectiveStart\)\.toISOString\(\), p_scheduled_end: new Date\(form\.end\)\.toISOString\(\) \}\)/);
   assert.match(rosterPage, /The roster will refuse this: \$\{preview\.conflict\}\./);
   assert.match(rosterPage, /rest from the nearest other shift/);
   assert.match(rosterPage, /No rest and hours rules are set for this officer\\'s employer, so the roster is not checking fatigue\. Set them in Rosters › Shift setup & open shifts › Rest & hours rules\./);
