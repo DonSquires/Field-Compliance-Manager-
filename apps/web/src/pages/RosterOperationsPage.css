@@ -136,6 +136,54 @@
 .roster-command-workbench .roster-metrics > div { padding: 6px; border: 1px solid #2c3b4d; }
 .roster-command-workbench > .roster-message { flex: 0 0 auto; margin: 0; padding: 7px 10px; max-height: 90px; overflow: auto; }
 .roster-command-workbench .roster-inspector { max-height: calc(100dvh - 70px); }
+.roster-command-workbench .roster-slot-inspector {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100vw);
+  max-height: calc(100dvh - 58px);
+  padding: 0;
+  overflow: hidden;
+}
+.roster-command-workbench .roster-slot-inspector > header {
+  flex: 0 0 auto;
+  gap: 12px;
+  padding: 16px;
+}
+.roster-slot-inspector > header > div { min-width: 0; overflow-wrap: anywhere; }
+.roster-command-workbench .roster-slot-inspector > header > button {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.roster-slot-inspector .roster-inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.roster-slot-inspector .roster-inspector-body dl { margin: 0; }
+.roster-slot-inspector .roster-inspector-body p { white-space: pre-wrap; }
+.roster-slot-inspector .roster-inspector-actions {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 60%;
+  margin: 0;
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-border);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.roster-slot-inspector .roster-inspector-actions > button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .roster-command-workbench .roster-ops-header button.is-primary,
 .roster-command-workbench .roster-dialog button[type="submit"] { color: #fff; background: #234364; border: 1px solid #6d8bac; }
 .admin-shell[data-theme] .roster-ops.roster-command-workbench { color: #edf2f7; }

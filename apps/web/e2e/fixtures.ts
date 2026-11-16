@@ -569,7 +569,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     }
     if (table === 'roster_work_units') { await route.fulfill(fulfillJson(workUnits)); return; }
     if (table === 'roster_skill_catalog') { await route.fulfill(fulfillJson(rosterSkillCatalog)); return; }
-    if (table === 'roster_slots') { await route.fulfill(fulfillJson([{ id: '32323232-3232-4232-8232-323232323232', work_unit_id: '23232323-2323-4323-8323-232323232323', staff_id: adminSlotStaffId, scheduled_start: '2026-08-28T21:00:00.000Z', scheduled_end: '2026-08-29T01:00:00.000Z', status: adminSlotStatus, linked_shift_id: null, notes: 'Roster administration' }])); return; }
+    if (table === 'roster_slots') { await route.fulfill(fulfillJson([{ id: '32323232-3232-4232-8232-323232323232', work_unit_id: '23232323-2323-4323-8323-232323232323', staff_id: adminSlotStaffId, scheduled_start: '2026-08-28T21:00:00.000Z', scheduled_end: '2026-08-29T01:00:00.000Z', status: adminSlotStatus, linked_shift_id: null, planned_break_minutes: 0, break_unpaid: false, notes: 'Roster administration' }])); return; }
     if (table === 'patrol_routes') { await route.fulfill(fulfillJson([{ id: '19191919-1919-4919-8919-191919191919', name: 'North District Patrol' }])); return; }
     if (table === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null }])); return; }
     if (table === 'service_agreement_modules') { await route.fulfill(fulfillJson([{ id: '22222222-2222-4222-8222-222222222229', service_agreement_id: '24242424-2424-4424-8424-242424242424', module_key: 'static_guarding' }])); return; }
