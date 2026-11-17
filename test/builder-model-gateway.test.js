@@ -347,6 +347,16 @@ test('native definitions remain private, scoped, well-formed and included in pro
   assert.equal(validateModelRequest(request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools }), c), 'prompt exceeds configured limit');
 });
 
+test('document review models are restricted to private endpoints and providers', () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://ollama:11434';
+  const local = request({ provider: 'ollama', model: 'approved-local', builder_mode: 'document_reviewer' });
+  assert.equal(validateModelRequest(local, c), null);
+  assert.match(validateModelRequest(request({ builder_mode: 'document_reviewer' }), c), /requires private inference/);
+  c.ollama.baseUrl = 'https://documents.example';
+  assert.match(validateModelRequest(local, c), /endpoint must be private/);
+});
+
 test('VPS planning times out at the provider, cools down after two failures, and automatically recovers', async t => {
   let clock = Date.now() - 600001;
   t.mock.method(Date, 'now', () => clock);

@@ -25,7 +25,7 @@ type ReferenceResult = {
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'approved' | 'error';
 type OutputFormat = 'print' | 'docx';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string; sourceChannel: string; currentScope: string; authorable: boolean };
-type SourcePromotionProposal = { id: string; document_version_id: string; target_type: string; status: string; proposed_payload: Record<string, unknown>; source_map: Record<string, unknown>; created_at: string; review_reason: string | null };
+type SourcePromotionProposal = { id: string; document_version_id: string; target_type: string; status: string; proposed_payload: Record<string, unknown>; source_map: Record<string, unknown>; created_at: string; review_reason: string | null; applied_target_id?: string | null };
 type SourceClassification = { privacy_class: string; confidence: number | null; rationale: string | null; contains_pii: boolean; contains_operational_security: boolean; contains_financial_data: boolean; contains_legal_privilege: boolean; classifier_source: string; reviewed_at: string | null; created_at: string };
 type SourceProposalTarget = 'crm_agreement' | 'site_brief' | 'credential' | 'finance_reconciliation' | 'hr_case' | 'investigation_link';
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
@@ -81,6 +81,9 @@ export default function BobDocumentStudioPage() {
   const [sourceProposalBusyId, setSourceProposalBusyId] = useState<string | null>(null);
   const [sourceClassification, setSourceClassification] = useState<SourceClassification | null>(null);
   const [sourceOcrRequired, setSourceOcrRequired] = useState(false);
+  const [sourceReviewVersionId, setSourceReviewVersionId] = useState<string | null>(null);
+  const [sourceReviewReason, setSourceReviewReason] = useState<string | null>(null);
+  const [sourceReviewError, setSourceReviewError] = useState(false);
   const [classificationForm, setClassificationForm] = useState({ privacyClass: 'tenant_sensitive', containsPii: false, containsOperationalSecurity: false, containsFinancialData: false, containsLegalPrivilege: false, reason: '' });
   const [classificationBusy, setClassificationBusy] = useState(false);
   const [proposalTarget, setProposalTarget] = useState<SourceProposalTarget>('crm_agreement');
@@ -507,6 +510,8 @@ export default function BobDocumentStudioPage() {
 
   useEffect(() => {
     const versionId = selectedFile?.versionId;
+    setSourceProposals([]);
+    setSourceProposalReasons({});
     if (!versionId) {
       setSourceProposals([]);
       setSourceProposalReasons({});
@@ -514,7 +519,7 @@ export default function BobDocumentStudioPage() {
     }
     let active = true;
     void supabase.from('document_promotion_proposals')
-      .select('id,document_version_id,target_type,status,proposed_payload,source_map,created_at,review_reason')
+      .select('id,document_version_id,target_type,status,proposed_payload,source_map,created_at,review_reason,applied_target_id')
       .eq('document_version_id', versionId)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
@@ -529,6 +534,10 @@ export default function BobDocumentStudioPage() {
 
   useEffect(() => {
     const versionId = selectedFile?.versionId;
+    setSourceReviewVersionId(null);
+    setSourceReviewReason(null);
+    setSourceReviewError(false);
+    setSourceClassification(null);
     if (!versionId) {
       setSourceClassification(null);
       setSourceOcrRequired(false);
@@ -536,15 +545,19 @@ export default function BobDocumentStudioPage() {
     }
     let active = true;
     void supabase.from('document_versions')
-      .select('id,ocr_required,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at)')
+      .select('id,ocr_required,metadata_json,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at)')
       .eq('id', versionId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (!active) return;
-        if (error) {
-          setNotice(error.message);
+        if (error || !data) {
+          setSourceReviewError(true);
+          setNotice(error?.message ?? 'Source review could not be loaded for this version.');
           return;
         }
+        setSourceReviewVersionId(versionId);
+        const review = data.metadata_json?.automated_review;
+        setSourceReviewReason(typeof review?.reason === 'string' ? review.reason : null);
         const classifications = (data?.document_classifications ?? []) as SourceClassification[];
         const latest = [...classifications].sort((left, right) => right.created_at.localeCompare(left.created_at))[0] ?? null;
         setSourceClassification(latest);
@@ -562,9 +575,10 @@ export default function BobDocumentStudioPage() {
   }, [selectedFile?.versionId]);
 
   const canReviewSourceDocuments = isAdminTierRole(profile?.role);
+  const sourceReviewReady = Boolean(selectedFile && sourceReviewVersionId === selectedFile.versionId);
   const reviewSourceClassification = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selectedFile || !canReviewSourceDocuments || !classificationForm.reason.trim()) return;
+    if (!selectedFile || !sourceReviewReady || !canReviewSourceDocuments || !classificationForm.reason.trim()) return;
     setClassificationBusy(true);
     setNotice(null);
     const { data, error } = await supabase.rpc('review_document_classification', {
@@ -587,7 +601,7 @@ export default function BobDocumentStudioPage() {
   };
 
   const promoteSelectedDocument = async () => {
-    if (!selectedFile || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at || !sourceClassification.privacy_class) return;
+    if (!selectedFile || !sourceReviewReady || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at || !sourceClassification.privacy_class) return;
     setClassificationBusy(true);
     setNotice(null);
     const { data, error } = await supabase.functions.invoke('bob-document-promote', {
@@ -603,7 +617,7 @@ export default function BobDocumentStudioPage() {
   };
 
   const prepareSourceProposal = async () => {
-    if (!selectedFile || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at) return;
+    if (!selectedFile || !sourceReviewReady || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at) return;
     if (sourceProposals.some((proposal) => proposal.target_type === proposalTarget && ['proposed', 'approved', 'applied'].includes(proposal.status))) return;
     setProposalBusy(true);
     setNotice(null);
@@ -683,7 +697,8 @@ export default function BobDocumentStudioPage() {
             <p>Classification, tenant-library promotion, and domain proposals stay attached to this source version.</p>
             {sourceOcrRequired && <p className="bob-source-governance-warning" role="status">OCR is required before this document can be promoted or proposed.</p>}
             {sourceClassification && <div className="bob-source-classification-summary"><strong>{sourceClassification.privacy_class.replaceAll('_', ' ')}</strong>{sourceClassification.contains_pii && <span>PII</span>}{sourceClassification.contains_operational_security && <span>Operational security</span>}{sourceClassification.contains_financial_data && <span>Financial data</span>}{sourceClassification.contains_legal_privilege && <span>Legal privilege</span>}<small>{sourceClassification.rationale ?? 'No classification rationale recorded.'}</small></div>}
-            {canReviewSourceDocuments ? <>
+            {sourceReviewReady && sourceReviewReason && <p role="status">{sourceReviewReason}</p>}
+            {canReviewSourceDocuments && sourceReviewReady ? <>
               <form className="bob-source-classification-form" onSubmit={reviewSourceClassification}>
                 <label><span>Privacy class</span><select value={classificationForm.privacyClass} onChange={(event) => setClassificationForm((current) => ({ ...current, privacyClass: event.target.value }))}><option value="public">Public</option><option value="internal_non_sensitive">Internal non-sensitive</option><option value="tenant_sensitive">Tenant sensitive</option><option value="restricted">Restricted</option></select></label>
                 <div className="bob-source-classification-flags"><label><input type="checkbox" checked={classificationForm.containsPii} onChange={(event) => setClassificationForm((current) => ({ ...current, containsPii: event.target.checked }))} /><span>Contains PII</span></label><label><input type="checkbox" checked={classificationForm.containsOperationalSecurity} onChange={(event) => setClassificationForm((current) => ({ ...current, containsOperationalSecurity: event.target.checked }))} /><span>Operational security</span></label><label><input type="checkbox" checked={classificationForm.containsFinancialData} onChange={(event) => setClassificationForm((current) => ({ ...current, containsFinancialData: event.target.checked }))} /><span>Financial data</span></label><label><input type="checkbox" checked={classificationForm.containsLegalPrivilege} onChange={(event) => setClassificationForm((current) => ({ ...current, containsLegalPrivilege: event.target.checked }))} /><span>Legal privilege</span></label></div>
@@ -693,9 +708,9 @@ export default function BobDocumentStudioPage() {
               <button type="button" disabled={classificationBusy || sourceOcrRequired || !sourceClassification?.reviewed_at} onClick={() => void promoteSelectedDocument()}>{classificationBusy ? 'Working…' : 'Promote to tenant library'}</button>
               <label className="bob-source-proposal-target"><span>Domain proposal target</span><select value={proposalTarget} onChange={(event) => setProposalTarget(event.target.value as SourceProposalTarget)}><option value="crm_agreement">CRM agreement</option><option value="site_brief">Site brief</option><option value="credential">Credential</option><option value="finance_reconciliation">Finance reconciliation</option><option value="hr_case">HR case</option><option value="investigation_link">Investigation link</option></select></label>
               <button type="button" disabled={proposalBusy || sourceOcrRequired || !sourceClassification?.reviewed_at || sourceProposals.some((proposal) => proposal.target_type === proposalTarget && ['proposed', 'approved', 'applied'].includes(proposal.status))} onClick={() => void prepareSourceProposal()}>{proposalBusy ? 'Preparing…' : 'Prepare domain proposal'}</button>
-            </> : <p>Classification and promotion decisions require an organisation administrator.</p>}
+            </> : <p role="status">{!sourceReviewReady ? sourceReviewError ? 'Source review is unavailable. Reopen this document to retry.' : 'Loading source review for this version...' : 'Classification and promotion decisions require an organisation administrator.'}</p>}
           </section>}
-          {sourceProposals.length > 0 && <section className="bob-source-proposals" aria-label="Proposals for selected document"><div className="bob-document-section-heading"><span>Domain proposals</span><small>{sourceProposals.filter((proposal) => proposal.status === 'proposed').length} awaiting review</small></div>{sourceProposals.map((proposal) => <article className="bob-source-proposal" key={proposal.id}><div className="bob-source-proposal-heading"><strong>{proposal.target_type.replaceAll('_', ' ')}</strong><span>{proposal.status}</span></div><details><summary>Proposed fields</summary><pre>{JSON.stringify(proposal.proposed_payload, null, 2)}</pre></details>{typeof proposal.source_map.source_excerpt === 'string' && <details><summary>Source excerpt</summary><p>{proposal.source_map.source_excerpt}</p></details>}{proposal.status === 'proposed' ? <><label><span>Review reason</span><textarea rows={3} required value={sourceProposalReasons[proposal.id] ?? ''} onChange={(event) => setSourceProposalReasons((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="Explain what source evidence supports this decision and what remains uncertain." /></label><div className="bob-source-proposal-actions"><button type="button" className="bob-document-reject" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'rejected')}>Reject proposal</button><button type="button" className="bob-document-review" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'approved')}>{sourceProposalBusyId === proposal.id ? 'Recording…' : 'Approve proposal'}</button></div></> : <p className="bob-source-proposal-boundary">This review records a proposal decision only; it has not created an authoritative {proposal.target_type.replaceAll('_', ' ')} record.</p>}</article>)}</section>}
+          {sourceProposals.length > 0 && <section className="bob-source-proposals" aria-label="Proposals for selected document"><div className="bob-document-section-heading"><span>Domain proposals</span><small>{sourceProposals.filter((proposal) => proposal.status === 'proposed').length} awaiting review</small></div>{sourceProposals.filter((proposal) => proposal.document_version_id === selectedFile?.versionId).map((proposal) => <article className="bob-source-proposal" key={proposal.id}><div className="bob-source-proposal-heading"><strong>{proposal.target_type.replaceAll('_', ' ')}</strong><span>{proposal.status}</span></div>{proposal.review_reason && <p role="status">{proposal.review_reason}</p>}<details><summary>Proposed fields</summary><pre>{JSON.stringify(proposal.proposed_payload, null, 2)}</pre></details>{typeof proposal.source_map.source_excerpt === 'string' && <details><summary>Source excerpt</summary><p>{proposal.source_map.source_excerpt}</p></details>}{proposal.status === 'proposed' ? <><label><span>Review reason</span><textarea rows={3} required value={sourceProposalReasons[proposal.id] ?? ''} onChange={(event) => setSourceProposalReasons((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="Explain what source evidence supports this decision and what remains uncertain." /></label><div className="bob-source-proposal-actions"><button type="button" className="bob-document-reject" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'rejected')}>Reject proposal</button><button type="button" className="bob-document-review" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'approved')}>{sourceProposalBusyId === proposal.id ? 'Recording…' : 'Approve proposal'}</button></div></> : <p className="bob-source-proposal-boundary">{proposal.status === 'applied' ? `Applied to ${proposal.target_type.replaceAll('_', ' ')} record ${proposal.applied_target_id ?? '(see audit receipt)'}.` : `This proposal has not created an authoritative ${proposal.target_type.replaceAll('_', ' ')} record.`}</p>}</article>)}</section>}
           <div className="bob-document-section-heading"><span>Document setup</span></div>
           {sourceContext && <div className="bob-source-context" role="status" aria-label="Source context for document"><span className="bob-source-type">{sourceContext.type.replace('_', ' ').toUpperCase()}</span><strong>{sourceContext.label}</strong><p className="bob-source-prompt">{sourceContext.prompt}</p></div>}
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
