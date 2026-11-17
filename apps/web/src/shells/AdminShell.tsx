@@ -780,6 +780,12 @@ const AdminShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal 
       navigateToPage(destination.page as AdminPage);
       return true;
     }
+    if (destination.kind === 'admin_document_studio') {
+      setActivePage('document-studio');
+      setMobileMenuOpen(false);
+      navigate(`/admin/document-studio?document=${encodeURIComponent(destination.documentId)}&version=${encodeURIComponent(destination.versionId)}`);
+      return true;
+    }
     if (destination.kind === 'admin_crm_account') {
       // /admin/crm?account=<id> opens that Client Portfolio
       setActivePage('crm');

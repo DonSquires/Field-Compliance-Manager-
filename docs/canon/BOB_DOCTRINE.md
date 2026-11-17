@@ -948,3 +948,54 @@ push and migration application remain unavailable to the authoring runner.
 Production migration, edge deployment and web release remain in the single
 managed release lane after successful checks and merge. Vibe preview remains
 available for owner review.
+
+### 2026-11-17 — Bob and Oracle automate document review (Don Squires)
+
+> "Bob and Oracle can process this information with their skills and knowledge base; remove human approval for this review queue."
+
+**Ruling.** The document-review work areas in Approval Activity are automated:
+Bob authors and extracts; a distinct private Oracle reviewer checks the source,
+field claims, classification and proposed target; the server-owned document
+automation gate records the decision and applies complete proposals. This
+supersedes per-item human approval for Bob document drafts, document source
+classification/reference promotion and document-promotion proposals only. It
+does not authorize Bob or Oracle to impersonate a person, expose source text to
+external model providers, issue/pay invoices, sign or send documents, activate
+service agreements, make an identity match, or make a legal, enforcement or
+compliance conclusion not explicitly present in an authoritative source.
+
+**Decision contract.** An approval/application requires two distinct configured
+in-house model identities (Bob and Oracle) to agree, complete text extraction,
+an unchanged source hash, exact source citations for every promoted field, no
+`[TO CONFIRM]` fields, schema-valid target values and an idempotent audited
+receipt. The independent Oracle checks the source itself; it does not merely
+repeat Bob's summary. Deterministic Guardian rules, not either model, enforce
+tenant scope, allowed target operations and privacy. Missing OCR, disagreement,
+low confidence, unresolved fields, unavailable private models or any other
+inability to finish receive an explicit blocked receipt, not approval. Bob tells
+the user what failed and opens the exact Document Studio source/draft review
+page so the user can inspect it and give direction. It must not silently reject,
+discard or leave a pending item without an actionable explanation.
+
+**Privacy and effects.** PII, financial, legal-privilege and operational-
+security flags are sticky across both reviews. Restricted and tenant-sensitive
+material remains in its source tenant and cannot enter the global reference
+library. Global reference promotion is limited to complete, provenance-backed
+public/internal-non-sensitive sources with both independent approvals and no
+privacy flags. Target application uses the existing target-specific validation
+and creates drafts only; no invoice payment, external delivery, credential
+verification, access grant, enforcement action or legal determination follows.
+Machine decisions are recorded as Bob/Oracle automation, never as a human
+reviewer, with both provider/model identities, source/version hash, evidence
+map, decision and target receipt in the audit trail.
+
+**Implementation boundary (2026-11-17).** The initial worker independently
+verifies stored UTF-8 TXT/MD/CSV/TSV bytes before private model review. Other
+formats, missing OCR, and authored drafts without frozen independent evidence
+receive a blocked/quarantined receipt and an exact-version Studio notification.
+Only complete, source-verified unissued invoice drafts can be auto-applied,
+against an existing current operational relationship. Agreement creation is not
+an inert draft in the current access model and remains blocked, as do credential,
+HR, site and investigation effects without their own deterministic machine path.
+Opening the notification takes the user to the exact version; background work
+does not interrupt an unrelated unsaved page with unsolicited navigation.

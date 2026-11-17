@@ -71,3 +71,33 @@ test('document review deep link opens the exact draft in Studio and records its 
     p_review_reason: 'Synthetic review: source and operational details checked.',
   });
 });
+
+test('automation fallback shows its reason and waits for exact-version review data', async ({ page }) => {
+  const documentId = '91919191-9191-4191-8191-919191919191';
+  const versionId = '92929292-9292-4292-8292-929292929292';
+  const reason = 'Extracted text does not match the stored source bytes. Re-extraction is required before review.';
+  let releaseReview: () => void = () => {};
+  const reviewReady = new Promise<void>((resolve) => { releaseReview = resolve; });
+  await page.route('**/rest/v1/documents*', async (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{
+      id: documentId, original_filename: 'Synthetic source.txt', updated_at: '2026-11-17T09:00:00Z',
+      source_channel: 'chat_upload', current_scope: 'quarantined',
+      document_versions: [{ id: versionId, extracted_text: 'Synthetic source text', metadata_json: {}, created_at: '2026-11-17T09:00:00Z' }],
+    }]),
+  }));
+  await page.route('**/rest/v1/document_versions*', async (route) => {
+    await reviewReady;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      id: versionId, ocr_required: false, metadata_json: { automated_review: { decision: 'blocked', reason } }, document_classifications: [],
+    }) });
+  });
+  await signInAsAdmin(page, `/admin/document-studio?document=${documentId}&version=${versionId}`);
+  await expect(page.getByRole('region', { name: 'Selected file details' })).toContainText('Synthetic source.txt');
+  await expect(page.getByText('Loading source review for this version...')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record classification review' })).toHaveCount(0);
+  releaseReview();
+  await expect(page.getByText(reason, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record classification review' })).toBeDisabled();
+  await page.getByLabel('Classification review reason').fill('Synthetic source inspected; extraction needs correction.');
+  await expect(page.getByRole('button', { name: 'Record classification review' })).toBeEnabled();
+});

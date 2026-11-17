@@ -18,6 +18,7 @@ const { collectRepositoryContext, normalizeHealthPath, isHealthTestPath } = requ
 const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
+const { buildDocumentReviewItems, processDocumentReviewItems, verifyDocumentSourceBytes } = require('./builder-document-review');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
@@ -850,6 +851,10 @@ const routineRepairEnabled = process.env.BOB_ROUTINE_SELF_HEAL !== 'false';
 const changeRequestAutobuildEnabled = process.env.BOB_CHANGE_REQUEST_AUTOBUILD !== 'false';
 const autopilotIntervalMs = Math.max(15_000, Number(process.env.BOB_BUILDER_AUTOPILOT_INTERVAL_MS) || 60_000);
 let autopilotBusy = false;
+const documentReviewEnabled = process.env.BOB_DOCUMENT_REVIEW_AUTOMATION !== 'false';
+const documentReviewIntervalMs = Math.max(30_000, Number(process.env.BOB_DOCUMENT_REVIEW_INTERVAL_MS) || 120_000);
+let documentReviewBusy = false;
+let documentReviewOffset = 0;
 let mainHealthInFlight = null;
 let interruptedModelRecoveryPromise = null;
 
@@ -1513,6 +1518,117 @@ async function retireOldBuilderWorkspaces() {
   }
   lastWorkspaceRetentionAt = Date.now();
   record('autopilot', 'builder.workspace.retention_checked', 'builder', { counts });
+}
+
+async function documentReviewOnce() {
+  if (documentReviewBusy || !builderSupabase || !modelGatewayToken) return [];
+  documentReviewBusy = true;
+  try {
+    const [documentsResult, proposalsResult, receiptsResult, health] = await Promise.all([
+      builderSupabase.from('documents')
+        .select('id,organization_id,original_filename,current_scope,sha256,storage_bucket,storage_object_ref,document_versions(id,extracted_text,ocr_required,created_at,updated_at,metadata_json,document_classifications(privacy_class,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,created_at))')
+        .not('organization_id', 'is', null)
+        .in('current_scope', ['conversation_only', 'tenant', 'quarantined'])
+        .order('id', { ascending: true }).range(documentReviewOffset, documentReviewOffset + 99),
+      builderSupabase.from('document_promotion_proposals')
+        .select('id,organization_id,target_type,status,proposed_payload,source_map,created_at,document_version:document_versions(id,extracted_text,ocr_required,updated_at,documents(id,organization_id,original_filename,sha256,storage_bucket,storage_object_ref))')
+        .not('organization_id', 'is', null).eq('status', 'proposed')
+        .order('created_at', { ascending: true }).limit(100),
+      builderSupabase.from('bob_document_auto_review_receipts')
+        .select('id,organization_id,proposal_id,review_kind,status')
+        .in('status', ['approved']).eq('review_kind', 'promotion').limit(10),
+      modelHealth(modelGatewayConfig).catch(() => ({})),
+    ]);
+    if (documentsResult.error || proposalsResult.error || receiptsResult.error) {
+      throw new Error('tenant-scoped document review queue could not be loaded');
+    }
+
+    const items = buildDocumentReviewItems({ documents: documentsResult.data || [], proposals: proposalsResult.data || [] });
+    const documents = documentsResult.data || [];
+    const versionIds = [...new Set(items.map(item => item.documentVersionId))];
+    const terminalReceiptsResult = versionIds.length
+      ? await builderSupabase.from('bob_document_auto_review_receipts')
+        .select('document_version_id,proposal_id,review_kind,source_text_sha256,status')
+        .in('document_version_id', versionIds).in('status', ['approved', 'rejected', 'quarantined', 'blocked', 'applied']).limit(500)
+      : { data: [], error: null };
+    if (terminalReceiptsResult.error) throw new Error('document review receipts could not be checked');
+    const terminalKeys = new Set((terminalReceiptsResult.data || []).map(receipt =>
+      `${receipt.review_kind}:${receipt.document_version_id}:${receipt.proposal_id || '-'}:${receipt.source_text_sha256}`));
+    const pending = items.filter(item => {
+      if (item.subjectKind === 'promotion' && (receiptsResult.data || []).some(receipt => receipt.proposal_id === item.proposalId)) return false;
+      return !terminalKeys.has(`${item.subjectKind}:${item.documentVersionId}:${item.proposalId || '-'}:${item.sourceTextHash}`);
+    });
+    const byOrganization = new Map();
+    for (const item of pending) {
+      const organizationId = item.organizationId || documents.find(document => document.id === item.documentId)?.organization_id;
+      if (!organizationId) continue;
+      const tenantItems = byOrganization.get(organizationId) || [];
+      tenantItems.push({ ...item, organizationId });
+      byOrganization.set(organizationId, tenantItems);
+    }
+
+    const outcomes = [];
+    for (const [organizationId, tenantItems] of byOrganization) {
+      if (outcomes.length >= 10) break;
+      const result = await processDocumentReviewItems({
+        items: tenantItems, health, config: modelGatewayConfig, invoke: invokeBuilderModel, limit: Math.min(2, 10 - outcomes.length),
+        verifySource: async item => {
+          if (!/\.(?:txt|md|csv|tsv)$/i.test(String(item.fileName || ''))) return verifyDocumentSourceBytes(item, null);
+          if (!item.storageBucket || !item.storageObjectRef) throw new Error('Stored source is unavailable');
+          const { data, error } = await builderSupabase.storage.from(item.storageBucket).download(item.storageObjectRef);
+          if (error || !data || data.size > 144000) throw new Error('Stored source cannot be verified');
+          return verifyDocumentSourceBytes(item, new Uint8Array(await data.arrayBuffer()));
+        },
+        claim: async item => {
+          const { data, error } = await builderSupabase.rpc('claim_bob_document_auto_review', {
+            p_document_version_id: item.documentVersionId,
+            p_review_kind: item.subjectKind,
+            p_proposal_id: item.proposalId || null,
+            p_source_text_sha256: item.sourceTextHash,
+          });
+          if (error) throw error;
+          const claim = Array.isArray(data) ? data[0] : data;
+          return { receipt_id: claim?.receipt_id, state: claim?.state, claimed: claim?.claimed === true, attempt_token: claim?.attempt_token };
+        },
+        finish: async (item, receiptId, review) => {
+          const { data, error } = await builderSupabase.rpc('finish_bob_document_auto_review', {
+            p_receipt_id: receiptId,
+            p_decision: review.decision,
+            p_decision_reason: review.reason,
+            p_reviewers: review.reviewers || [],
+            p_source_claims: review.source_claims || [],
+            p_classification: review.classification || null,
+            p_scope: item.targetScope || null,
+            p_promotion_metadata: review.promotion_metadata || {},
+            p_attempt_token: review.attempt_token,
+          });
+          if (error) throw error;
+          return data;
+        },
+        applyProposal: async (_item, receiptId) => {
+          const { data, error } = await builderSupabase.rpc('apply_bob_document_auto_proposal', { p_receipt_id: receiptId });
+          if (error) throw error;
+          return data?.status || 'applied';
+        },
+      });
+      outcomes.push(...result.map(result => ({ ...result, organization_id: organizationId })));
+    }
+
+    for (const receipt of receiptsResult.data || []) {
+      const { data, error } = await builderSupabase.rpc('apply_bob_document_auto_proposal', { p_receipt_id: receipt.id });
+      outcomes.push({ id: receipt.proposal_id, organization_id: receipt.organization_id, outcome: error ? 'apply_retry_pending' : data?.status || 'applied' });
+    }
+    if (pending.length <= outcomes.filter(outcome => outcome.outcome !== 'claim_unavailable' && outcome.outcome !== 'finish_retry_pending').length) {
+      documentReviewOffset = (documentsResult.data || []).length === 100 ? documentReviewOffset + 100 : 0;
+    }
+    if (outcomes.length) record('document-review', 'queue.processed', 'documents', { count: outcomes.length, outcomes });
+    return outcomes;
+  } catch (error) {
+    record('document-review', 'queue.failed', 'documents', { error: String(error.message || error).slice(0, 300) });
+    return [];
+  } finally {
+    documentReviewBusy = false;
+  }
 }
 
 async function autopilotOnce() {
@@ -2284,6 +2400,11 @@ if (autopilotEnabled && builderSupabase) {
   const autopilotTimer = setInterval(() => { autopilotOnce().catch(() => {}); }, autopilotIntervalMs);
   autopilotTimer.unref?.();
   setTimeout(() => { autopilotOnce().catch(() => {}); }, 5_000).unref?.();
+}
+if (builderSupabase && documentReviewEnabled) {
+  const documentReviewTimer = setInterval(() => { documentReviewOnce().catch(() => {}); }, documentReviewIntervalMs);
+  documentReviewTimer.unref?.();
+  setTimeout(() => { documentReviewOnce().catch(() => {}); }, 12_000).unref?.();
 }
 
 if (productionHumanTestEnabled) {
