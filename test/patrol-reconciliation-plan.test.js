@@ -48,6 +48,27 @@ test('source corrections update only when the linked FCM baseline remains unchan
   assert.equal(conflict.actions[0].reason, 'fcm_record_changed_since_last_sync');
 });
 
+test('observation identity and timestamp corrections are held in preview while notes can update', async () => {
+  const { buildReconciliationPlan, recordFingerprint, row, sourcePlan } = await fixture();
+  const observation = { ...row, plate: 'ABC123', officer_id: 'officer-1', officer_notes: 'original' };
+  const plan = { ...sourcePlan, events: [], observations: [observation] };
+  const baseline = buildReconciliationPlan({ sourcePlan: plan, existing: [] }).actions[0].desired;
+  const current = [{ external_ref: row.external_ref, id: 'existing-id', kind: 'observation',
+    source_file: 'source.xlsx', source_sheet: 'DATA', record: baseline }];
+  const checkpoints = [{ external_ref: row.external_ref, record_id: 'existing-id', kind: 'observation',
+    source_file: 'source.xlsx', source_sheet: 'DATA', record_fingerprint: recordFingerprint(baseline),
+    source_fingerprint: recordFingerprint(baseline) }];
+  for (const [field, value] of [['occurred_at', '2026-10-19T13:00:00+12:00'],
+    ['plate', 'XYZ789'], ['officer_id', 'officer-2']]) {
+    const changed = { ...plan, observations: [{ ...observation, [field]: value }] };
+    const result = buildReconciliationPlan({ sourcePlan: changed, existing: current, checkpoints }).actions[0];
+    assert.equal(result.operation, 'hold');
+    assert.equal(result.reason, 'observation_mirror_correction_requires_review');
+  }
+  const notesOnly = { ...plan, observations: [{ ...observation, officer_notes: 'corrected' }] };
+  assert.equal(buildReconciliationPlan({ sourcePlan: notesOnly, existing: current, checkpoints }).actions[0].operation, 'update');
+});
+
 test('unversioned same-source differences go to governed correction; unkeyed rows, changed source identity, and duplicate keys are held', async () => {
   const { buildReconciliationPlan, sourcePlan, existing } = await fixture();
   sourcePlan.events[0].payload.comments = 'different';
@@ -55,7 +76,9 @@ test('unversioned same-source differences go to governed correction; unkeyed row
   assert.equal(corrected.operation, 'legacy_correct');
   assert.equal(corrected.record_id, 'existing-id');
   const observationPlan = { ...sourcePlan, events: [], observations: [{ ...sourcePlan.events[0], plate: 'ABC123' }] };
-  const observationExisting = [{ ...existing[0], kind: 'observation' }];
+  const observationRecord = buildReconciliationPlan({ sourcePlan: observationPlan, existing: [] }).actions[0].desired;
+  const observationExisting = [{ ...existing[0], kind: 'observation',
+    record: { ...observationRecord, officer_notes: 'different' } }];
   assert.equal(buildReconciliationPlan({ sourcePlan: observationPlan, existing: observationExisting }).actions[0].operation,
     'legacy_correct');
   sourcePlan.events[0].payload.job_number = null;

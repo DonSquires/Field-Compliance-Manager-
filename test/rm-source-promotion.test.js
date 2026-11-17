@@ -285,7 +285,8 @@ test('a later held sheet prevents earlier sheet sync and place registration', as
     },
   });
   assert.equal(result.status, 'held');
-  assert.equal(result.reason, 'sheet_source_place_difference_requires_review');
+  assert.equal(result.reason, 'sheet_new_places_require_review');
+  assert.equal(result.sheets[1].reason, 'source_place_difference_requires_review');
   assert.ok(calls.every(([, commit]) => !commit));
   assert.deepEqual(registrations, [false]);
 });
@@ -993,7 +994,66 @@ test('retained duplicate uploads remain reviewable even after the source photo c
 const unresolved = (count) => Array.from({ length: count }, (_, index) => ({ name: `New Place ${index}`, reserve_codes: [],
   locations: [`New Place ${index}`], source_rows: [index] }));
 
-test('unknown places are previewed without being created, then registered and re-exported on commit', async () => {
+test('commit holds unresolved places even when registration preview proposes a match', async () => {
+  for (const receipt of [
+    { name: 'New Place 0', status: 'created', zone_id: 'zone-new', agreement_linked: true },
+    { name: 'New Place 0', status: 'existing', zone_id: 'zone-existing', agreement_linked: true, coverage_added: false },
+  ]) {
+    const registrations = [];
+    const writes = [];
+    const result = await promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps(),
+      exportPlan: async ({ placeOverlay }) => ({ ...plan(), unresolved_places: placeOverlay ? [] : unresolved(1) }),
+      registerPlaces: async ({ commit }) => { registrations.push(commit); return [receipt]; },
+      syncPlan: async ({ commit }) => { if (commit) writes.push('sync'); return {
+        status: commit ? 'committed' : 'ready', requested: { inserts: 1 }, plan_summary: { hold: 0 },
+        plan_hold_reasons: {}, summary: {},
+      }; },
+      beforeWrite: async () => writes.push('intent'),
+    });
+    assert.equal(result.status, 'held');
+    assert.equal(result.reason, 'sheet_new_places_require_review');
+    assert.ok(registrations.every(commit => !commit));
+    assert.deepEqual(writes, []);
+  }
+});
+
+test('a later sheet with an unresolved place prevents earlier sheet writes', async () => {
+  const map = sourceMap();
+  map.workbooks[WORKBOOK].sheets.push({ ...map.workbooks[WORKBOOK].sheets[0], sheet: '2026', client_code: 'THOMAS2026' });
+  const writes = [];
+  const result = await promoteWorkbookVersion({ version, map, commit: true, ...deps(),
+    exportPlan: async ({ sheet, placeOverlay }) => ({ ...plan(),
+      manifest: { client_code: sheet.client_code, target_client_organization_id: CLIENT },
+      unresolved_places: sheet.client_code === 'THOMAS2026' && !placeOverlay ? unresolved(1) : [],
+    }),
+    registerPlaces: async ({ commit }) => {
+      if (commit) writes.push('registration');
+      return [{ name: 'New Place 0', status: 'created', zone_id: 'zone-new', agreement_linked: true }];
+    },
+    syncPlan: async ({ commit }) => {
+      if (commit) writes.push('sync');
+      return { status: commit ? 'committed' : 'ready', requested: { inserts: 1 },
+        plan_summary: { hold: 0 }, plan_hold_reasons: {}, summary: {} };
+    },
+  });
+  assert.equal(result.status, 'held');
+  assert.equal(result.reason, 'sheet_new_places_require_review');
+  assert.equal(result.partial_commit, undefined);
+  assert.deepEqual(writes, []);
+});
+
+test('an already-batched preview cannot acknowledge an unresolved place', async () => {
+  const result = await promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps(),
+    exportPlan: async ({ placeOverlay }) => ({ ...plan(), unresolved_places: placeOverlay ? [] : unresolved(1) }),
+    registerPlaces: async () => [{ name: 'New Place 0', status: 'created', zone_id: 'zone-new', agreement_linked: true }],
+    syncPlan: async () => { throw new Error('ERROR: P0001: This source and import configuration already has a closed review batch'); },
+  });
+  assert.equal(result.status, 'held');
+  assert.equal(result.reason, 'sheet_new_places_require_review');
+  assert.equal(result.receipt_id, undefined);
+});
+
+test('unknown places are previewed without being created and held on commit', async () => {
   const exports = [];
   const registrations = [];
   const validations = [];
@@ -1012,19 +1072,21 @@ test('unknown places are previewed without being created, then registered and re
         requested: { inserts: 1, updates: 0 }, plan_summary: { hold: 0 }, plan_hold_reasons: {}, summary: {} };
     } });
   const preview = await run(false);
-  assert.equal(preview.status, 'previewed');
+  assert.equal(preview.status, 'held');
+  assert.equal(preview.reason, 'sheet_new_places_require_review');
   assert.deepEqual(preview.sheets[0].places, [{ name: 'New Place 0', status: 'created', zone_id: 'zone-new', agreement_linked: true }]);
   assert.equal(preview.sheets[0].server_validation, 'not_run');
   assert.deepEqual(exports, [null, { 'New Place 0': 'zone-new' }]);
   const applied = await run(true);
-  assert.equal(applied.status, 'applied');
-  assert.deepEqual(registrations, [false, false, false, true]);
+  assert.equal(applied.status, 'held');
+  assert.equal(applied.reason, 'sheet_new_places_require_review');
+  assert.deepEqual(registrations, [false, false]);
   assert.deepEqual(validations.map(item => [item.commit, Boolean(item.planningOnly)]),
-    [[false, true], [false, true], [false, true], [false, false], [true, false]]);
+    [[false, true], [false, true]]);
   assert.deepEqual(exports.at(-1), { 'New Place 0': 'zone-new' });
 });
 
-test('a closed batch discovered after place registration is held, not acknowledged', async () => {
+test('prospective place registration never reaches a post-write batch check', async () => {
   const registrations = [];
   const result = await promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps(),
     exportPlan: async ({ placeOverlay }) => ({ ...plan(), unresolved_places: placeOverlay ? [] : unresolved(1) }),
@@ -1039,10 +1101,10 @@ test('a closed batch discovered after place registration is held, not acknowledg
     },
   });
   assert.equal(result.status, 'held');
-  assert.equal(result.reason, 'sheet_already_batched_after_place_registration_review');
-  assert.equal(result.partial_commit, true);
+  assert.equal(result.reason, 'sheet_new_places_require_review');
+  assert.equal(result.partial_commit, undefined);
   assert.equal(result.receipt_id, undefined);
-  assert.deepEqual(registrations, [false, false, true]);
+  assert.deepEqual(registrations, [false]);
 });
 
 test('a conflict revealed by the prospective place overlay prevents registration and sync', async () => {
@@ -1112,7 +1174,8 @@ test('preview checks prospective places without claiming server validation', asy
       return { status: 'planning_only', server_validation: 'not_run', requested: { inserts: 1 },
         plan_summary: { hold: 0 }, plan_hold_reasons: {}, summary: {} };
     } });
-  assert.equal(preview.status, 'previewed');
+  assert.equal(preview.status, 'held');
+  assert.equal(preview.reason, 'sheet_new_places_require_review');
   assert.deepEqual(exports, [null, { 'New Place 0': 'zone-covered', 'New Place 1': 'zone-linked-now', 'New Place 2': 'zone-new' }]);
   assert.deepEqual(planningCalls, [true]);
   assert.equal(preview.sheets[0].server_validation, 'not_run');

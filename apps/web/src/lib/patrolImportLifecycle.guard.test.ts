@@ -8,7 +8,9 @@ const atlas = readFileSync(resolve(process.cwd(), '../../scripts/atlas-refresh.j
 describe('governed patrol import lifecycle', () => {
   it('binds source and derivative provenance before staging', () => {
     expect(importer).toContain("const derivativeHash = createHash('sha256').update(derivativeInput).digest('hex');");
-    expect(importer).toContain("const effectiveSourceHash = sourceHash ?? createHash('sha256').update(sourceBytes).digest('hex');");
+    expect(importer).toContain("const inputHash = createHash('sha256').update(sourceBytes).digest('hex');");
+    expect(importer).toContain('sourceHash.toLowerCase() !== inputHash');
+    expect(importer).toContain('const effectiveSourceHash = sourceHash ?? inputHash;');
     expect(importer).toContain('source_sha256: effectiveSourceHash');
     expect(importer).toContain('derivative_sha256: derivativeHash');
     expect(importer).toContain('classification_profile: classificationProfile');
