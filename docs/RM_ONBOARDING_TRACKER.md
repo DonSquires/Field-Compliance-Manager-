@@ -84,7 +84,9 @@ turn beats false completeness.
   that order and holds a key shared by an observation and an event. Legacy
   correction, DART updates and duplicate supersession still need cross-kind
   collision and shared lock-order verification; the staging, baseline and
-  source-update guards do not establish protection for those paths.
+  source-update guards do not establish protection for those paths. The local
+  promoter holds a workbook when its preview requests any of these operations;
+  that gate does not change or establish safety of direct RPC callers.
   The independent release review also found that an unlocked observation's
   source update can change its time, plate or officer without updating its
   INSERT-only `observation_trigger` location-event mirror. The local update

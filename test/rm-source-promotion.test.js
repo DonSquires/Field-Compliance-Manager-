@@ -262,6 +262,51 @@ test('server-held preview rows do not start a committed sync', async () => {
   assert.deepEqual(calls, [false]);
 });
 
+test('unverified correction, supersession, and DART paths are held before any sheet commits', async () => {
+  for (const operation of ['corrections', 'supersedes', 'dart_updates']) {
+    const calls = [];
+    const result = await promoteWorkbookVersion({ version, map: sourceMap(), commit: true, ...deps(),
+      syncPlan: async ({ commit }) => {
+        calls.push(commit);
+        return { status: 'ready', requested: { inserts: 1, [operation]: 1 },
+          plan_summary: { hold: 0 }, plan_hold_reasons: {}, summary: {} };
+      },
+    });
+    assert.equal(result.status, 'held');
+    assert.equal(result.reason, 'sheet_source_correction_path_requires_review');
+    assert.deepEqual(calls, [false]);
+    assert.equal(result.receipt_id, undefined);
+  }
+});
+
+test('a later sheet correction and a closed-batch correction both prevent acknowledgement', async () => {
+  const map = sourceMap();
+  map.workbooks[WORKBOOK].sheets.push({ ...map.workbooks[WORKBOOK].sheets[0], sheet: '2026', client_code: 'THOMAS2026' });
+  for (const closedBatch of [false, true]) {
+    const calls = [];
+    const result = await promoteWorkbookVersion({ version, map, commit: true, ...deps(),
+      exportPlan: async ({ sheet }) => ({ ...plan(),
+        manifest: { client_code: sheet.client_code, target_client_organization_id: CLIENT } }),
+      syncPlan: async ({ sourcePlan, commit }) => {
+        calls.push(commit);
+        const report = { status: 'ready',
+          requested: { inserts: 1, corrections: sourcePlan.manifest.client_code === 'THOMAS2026' ? 1 : 0 },
+          plan_summary: { hold: 0 }, plan_hold_reasons: {}, summary: {} };
+        if (closedBatch && report.requested.corrections) {
+          const error = new Error('ERROR: P0001: This source and import configuration already has a closed review batch');
+          error.sourceSyncReport = report;
+          throw error;
+        }
+        return report;
+      },
+    });
+    assert.equal(result.status, 'held');
+    assert.equal(result.reason, 'sheet_source_correction_path_requires_review');
+    assert.ok(calls.every(commit => !commit));
+    assert.equal(result.receipt_id, undefined);
+  }
+});
+
 test('a later held sheet prevents earlier sheet sync and place registration', async () => {
   const map = sourceMap();
   map.workbooks[WORKBOOK].sheets.push({ ...map.workbooks[WORKBOOK].sheets[0], sheet: '2026', client_code: 'THOMAS2026' });
