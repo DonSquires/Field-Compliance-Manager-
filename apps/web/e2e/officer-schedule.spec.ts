@@ -50,7 +50,7 @@ async function installOverdueShift(page: Page, openStops: boolean, openDispatch 
     active = false;
     await route.fulfill({ json: [{ shift_id: shift.id, shift_status: 'completed', completed_at: '2026-08-29T21:30:00.000Z' }] });
   });
-  await page.route('**/rest/v1/rpc/get_officer_patrol_stops', async (route) => {
+  await page.route('**/rest/v1/rpc/get_officer_patrol_stops_sanitized', async (route) => {
     actions.push({ name: 'raw-stops', args: route.request().postDataJSON() });
     await route.fulfill({ json: null });
   });
@@ -611,7 +611,7 @@ test('End shift says what is still open and will not end the shift until it is c
   await expect(dialog.getByRole('button', { name: 'Record debrief and end shift' })).toBeDisabled();
   await expect(dialog).toHaveScreenshot('officer-end-shift-dialog.png', { maxDiffPixelRatio: 0.03 });
   await dialog.getByRole('button', { name: 'Open stops' }).click();
-  await expect(page).toHaveURL(/\/officer\/patrol$/);
+  await expect(page).toHaveURL(new RegExp(`/officer/patrol\\?shift=${ACTIVE_SHIFT.id}$`));
   expect(completeCalled).toBe(false);
 });
 
@@ -640,7 +640,10 @@ test('when everything is closed, End shift takes the debrief and ends the shift 
 });
 
 test('End shift is one tap from the officer home page while on shift', async ({ page }) => {
-  await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([ACTIVE_SHIFT]) }));
+  await page.route('**/rest/v1/shifts**', async (route) => {
+    const overdueQuery = new URL(route.request().url()).searchParams.get('scheduled_end')?.startsWith('lte.');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(overdueQuery ? [] : [ACTIVE_SHIFT]) });
+  });
   await page.route('**/rest/v1/rpc/get_officer_attendance_readiness', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...readinessBase, debrief_submitted: true, blockers: [], can_end: true }) }));
   await page.route('**/rest/v1/rpc/complete_officer_shift', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: ACTIVE_SHIFT.id, shift_status: 'completed', completed_at: '2026-08-29T21:35:00.000Z' }]) }));
   await signInAsOfficer(page, '/officer');

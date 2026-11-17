@@ -13,11 +13,15 @@
  * accuracy, mandatory-checkpoint completion, idempotency and audit logging.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { supabase } from '../lib/supabase';
-import { countCompletedCheckpoints } from '../lib/checkpointVisit';
 import { OfficerPatrolStops } from '../components/OfficerPatrolStops';
+import { PatrolCheckpointList, type PatrolCheckpoint as Checkpoint, type PatrolCheckpointVisit as CheckpointVisit } from '../components/PatrolCheckpointList';
+import { parsePatrolJourney, type PatrolJourney } from '../lib/officerPatrolJourney';
+import { PATROL_CHECKPOINT_RECORDED, requestPatrolCapture } from '../lib/patrolCheckpointEvents';
 import './PageStyles.css';
 
 interface Shift {
@@ -31,29 +35,7 @@ interface Shift {
   zone_name: string | null;
   route_name: string | null;
   route_code: string | null;
-}
-
-interface Checkpoint {
-  id: string;
-  kind: 'route' | 'site';
-  name: string;
-  description: string | null;
-  qr_code?: string | null;
-  gps_lat?: number | null;
-  gps_lng?: number | null;
-  radius_meters?: number | null;
-  sequence?: number;
-}
-
-interface CheckpointVisit {
-  id?: string;
-  checkpoint_id?: string | null;
-  route_checkpoint_id?: string | null;
-  visited_at: string;
-  scan_method?: string;
-  notes?: string | null;
-  gps_distance_from_checkpoint?: number | null;
-  within_radius?: boolean | null;
+  context_status?: 'available' | 'requires_review' | 'recovery_only';
 }
 
 interface PatrolSession {
@@ -64,15 +46,50 @@ interface PatrolSession {
   ended_at?: string | null;
   checkpoints: Checkpoint[];
   visits: CheckpointVisit[];
+  journey: PatrolJourney;
+}
+
+interface AssignedPatrolRead {
+  shift_id: string;
+  session: { id: string; status: PatrolSession['status']; started_at: string; ended_at: string | null } | null;
+  visits: CheckpointVisit[];
+}
+
+async function readAssignedPatrol(shiftId: string): Promise<AssignedPatrolRead> {
+  const { data, error } = await supabase.rpc('get_assigned_patrol_session', { p_shift_id: shiftId });
+  if (error) throw error;
+  const read = data as AssignedPatrolRead | null;
+  if (!read || read.shift_id !== shiftId || !Array.isArray(read.visits)
+    || (read.session === null && read.visits.length > 0)
+    || (read.session !== null && (!read.session?.id || !Number.isFinite(Date.parse(read.session.started_at))
+      || !['in_progress', 'completed', 'cancelled'].includes(read.session.status)))
+    || read.visits.some((visit) => !visit || typeof visit.id !== 'string'
+      || !Number.isFinite(Date.parse(visit.visited_at)) || typeof visit.scan_method !== 'string'
+      || (typeof visit.checkpoint_id === 'string') === (typeof visit.route_checkpoint_id === 'string')
+      || visit.notes !== null)) {
+    throw new Error('The assigned patrol session could not be confirmed.');
+  }
+  return read;
 }
 
 const PatrolPage: React.FC = () => {
   const { profile } = useAuth();
+  const { search } = useLocation();
+  const navigate = useNavigate();
+  const requestedShiftId = new URLSearchParams(search).get('shift');
+  const requestedShiftRef = useRef(requestedShiftId);
+  requestedShiftRef.current = requestedShiftId;
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
   const [session, setSession] = useState<PatrolSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shiftLoadAttempt, setShiftLoadAttempt] = useState(0);
+  const [sessionLoadAttempt, setSessionLoadAttempt] = useState(0);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [shiftLoadFailed, setShiftLoadFailed] = useState(false);
+  const [shiftWarning, setShiftWarning] = useState<string | null>(null);
   const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
   const [visitNotes, setVisitNotes] = useState('');
   const [recordingVisit, setRecordingVisit] = useState(false);
@@ -80,137 +97,68 @@ const PatrolPage: React.FC = () => {
   const [completingPatrol, setCompletingPatrol] = useState(false);
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
   const [completionNotes, setCompletionNotes] = useState('');
+  const [stopWorkDirty, setStopWorkDirty] = useState(false);
+  const onStopWorkDirtyChange = useCallback((dirty: boolean) => setStopWorkDirty(dirty), []);
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
+  useOfficerUnsavedWork(Boolean(visitNotes || completionNotes || recordingVisit || startingPatrol || completingPatrol));
 
-  // ATLAS READS: patrol_checkpoints, patrol_route_checkpoints
-  const loadCheckpointsForShift = useCallback(
-    async (shift: Shift): Promise<Checkpoint[]> => {
-      if (!profile?.organizationId) return [];
-
-      try {
-        // Priority 1: Route checkpoints if shift has patrol_route_id
-        if (shift.patrol_route_id) {
-          const { data: routeCheckpoints } = await supabase
-            .from('patrol_route_checkpoints')
-            .select('id, name, description, gps_lat, gps_lng, qr_code_data, geofence_radius_meters, sequence_order')
-            .eq('patrol_route_id', shift.patrol_route_id)
-            .order('sequence_order', { ascending: true });
-
-          if (routeCheckpoints && routeCheckpoints.length > 0) {
-            return routeCheckpoints.map((c) => ({
-              id: c.id,
-              kind: 'route' as const,
-              name: c.name,
-              description: c.description,
-              qr_code: c.qr_code_data,
-              gps_lat: c.gps_lat,
-              gps_lng: c.gps_lng,
-              radius_meters: c.geofence_radius_meters,
-              sequence: c.sequence_order,
-            }));
-          }
-        }
-
-        // Priority 2: Zone checkpoints if shift has zone_id
-        if (shift.zone_id) {
-          const { data: zoneCheckpoints } = await supabase
-            .from('patrol_checkpoints')
-            .select('id, name, description, qr_code, gps_lat, gps_lng, radius_meters')
-            .eq('organization_id', profile.organizationId)
-            .eq('zone_id', shift.zone_id)
-            .eq('active', true)
-            .order('name', { ascending: true });
-
-          if (zoneCheckpoints && zoneCheckpoints.length > 0) {
-            return zoneCheckpoints.map((c) => ({ ...c, kind: 'site' as const }));
-          }
-        }
-
-        // Priority 3: Organization-wide active checkpoints
-        const { data: orgCheckpoints } = await supabase
-          .from('patrol_checkpoints')
-          .select('id, name, description, qr_code, gps_lat, gps_lng, radius_meters')
-          .eq('organization_id', profile.organizationId)
-          .eq('active', true)
-          .order('name', { ascending: true })
-          .limit(20);
-
-        return (orgCheckpoints || []).map((c) => ({ ...c, kind: 'site' as const }));
-      } catch (err) {
-        console.error('Failed to load checkpoints:', err);
-        return [];
-      }
-    },
-    [profile?.organizationId]
-  );
-
-  const loadVisits = useCallback(async (patrolId: string): Promise<CheckpointVisit[]> => {
-    // ATLAS READS: patrol_checkpoint_visits
-    const { data, error: err } = await supabase
-      .from('patrol_checkpoint_visits')
-      .select('id, checkpoint_id, route_checkpoint_id, visited_at, scan_method, notes')
-      .eq('patrol_id', patrolId)
-      .order('visited_at', { ascending: true });
-
-    if (err) throw err;
-    return (data as CheckpointVisit[]) || [];
+  const loadVisits = useCallback(async (shiftId: string, patrolId: string): Promise<CheckpointVisit[]> => {
+    const read = await readAssignedPatrol(shiftId);
+    if (read.session?.id !== patrolId) throw new Error('The assigned patrol session changed.');
+    return read.visits;
   }, []);
 
   const loadOrCreateSession = useCallback(
-    async (shift: Shift) => {
-      if (!profile?.organizationId || !profile?.id) return;
+    async (shift: Shift): Promise<PatrolSession> => {
+      if (!profile?.organizationId || !profile?.id) throw new Error('Organisation access is unavailable');
 
-      try {
-        // ATLAS READS: patrols (existing session for this shift)
-        const { data: existing, error: existingErr } = await supabase
-          .from('patrols')
-          .select('id, status, started_at, ended_at')
-          .eq('shift_id', shift.id)
-          .order('started_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { session: existing, visits } = await readAssignedPatrol(shift.id);
 
-        if (existingErr) throw existingErr;
-
-        const checkpoints = await loadCheckpointsForShift(shift);
-
-        if (!existing) {
-          // Not started yet
-          setSession({
-            id: '',
-            shift,
-            status: 'in_progress',
-            started_at: '',
-            checkpoints,
-            visits: [],
-          });
-          return;
-        }
-
-        const visits = await loadVisits(existing.id);
-        setSession({
-          id: existing.id,
-          shift,
-          status: existing.status as PatrolSession['status'],
-          started_at: existing.started_at,
-          ended_at: existing.ended_at,
-          checkpoints,
-          visits,
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load patrol session');
+      // ATLAS READS: get_officer_patrol_journey (assignment-scoped stops and completion requirements)
+      const { data: journeyData, error: journeyError } = await supabase.rpc('get_officer_patrol_journey', { p_shift_id: shift.id });
+      if (journeyError) throw journeyError;
+      const journey = parsePatrolJourney(journeyData, shift.id);
+      if ((journey.patrol_id && journey.patrol_id !== existing?.id)
+        || (existing?.status === 'in_progress' && journey.patrol_id !== existing.id)) {
+        throw new Error('The active patrol session could not be confirmed.');
       }
+      const checkpoints = journey.checkpoints;
+
+      if (!existing) {
+        return {
+          id: '',
+          shift,
+          status: 'in_progress',
+          started_at: '',
+          checkpoints,
+          visits: [],
+          journey,
+        };
+      }
+
+      return {
+        id: existing.id,
+        shift,
+        status: existing.status as PatrolSession['status'],
+        started_at: existing.started_at,
+        ended_at: existing.ended_at,
+        checkpoints,
+        visits,
+        journey,
+      };
     },
-    [profile?.organizationId, profile?.id, loadCheckpointsForShift, loadVisits]
+    [profile?.organizationId, profile?.id]
   );
 
-  // ATLAS READS: shifts (today's shifts for this officer)
+  // ATLAS READS: shifts (today's shifts and in-progress overnight shifts for this officer)
   useEffect(() => {
+    let active = true;
     const loadShifts = async () => {
       if (!profile?.id || !profile.organizationId) {
         setShifts([]);
         setSession(null);
+        setShiftLoadFailed(true);
         setError('Organisation access could not be confirmed. Patrol data is unavailable.');
         setLoading(false);
         return;
@@ -219,26 +167,36 @@ const PatrolPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
+        setShiftWarning(null);
+        setShiftLoadFailed(false);
+        setShifts([]);
+        setSelectedShiftId(null);
+        setSession(null);
 
-        const todayStart = new Date();
+        const now = new Date();
+        const todayStart = new Date(now);
         todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
+        const todayEnd = new Date(now);
         todayEnd.setHours(23, 59, 59, 999);
 
-        const { data, error: err } = await supabase
+        const [direct, scoped] = await Promise.all([supabase
           .from('shifts')
           .select(
             'id, service_type, scheduled_start, scheduled_end, status, zone_id, patrol_route_id, zone:zone_id(name), route:patrol_route_id(name, route_code)'
           )
           .eq('officer_user_id', profile.id)
-          .gte('scheduled_start', todayStart.toISOString())
           .lte('scheduled_start', todayEnd.toISOString())
+          .gte('scheduled_end', now.toISOString())
+          .or(`scheduled_start.gte.${todayStart.toISOString()},and(status.eq.in_progress,scheduled_start.lt.${todayStart.toISOString()})`)
           .in('status', ['published', 'accepted', 'in_progress'])
-          .order('scheduled_start', { ascending: true });
+          .order('scheduled_start', { ascending: true }),
+          supabase.rpc('get_assigned_officer_shift_context')]);
 
-        if (err) throw err;
+        if (direct.error) throw direct.error;
+        if (scoped.error || !Array.isArray(scoped.data)) throw scoped.error ?? new Error('Assigned shifts could not be confirmed.');
+        if (!active) return;
 
-        const formattedShifts: Shift[] = ((data as any[]) || []).map((s) => ({
+        const directShifts: Shift[] = ((direct.data as any[]) || []).map((s) => ({
           id: s.id,
           service_type: s.service_type,
           scheduled_start: s.scheduled_start,
@@ -250,22 +208,82 @@ const PatrolPage: React.FC = () => {
           route_name: s.route?.name ?? null,
           route_code: s.route?.route_code ?? null,
         }));
+        const scopedRows = scoped.data as Shift[];
+        const reviewIds = new Set(scopedRows.filter((shift) => shift.context_status === 'requires_review').map((shift) => shift.id));
+        if (reviewIds.size) setShiftWarning('Some assigned shifts need operations review; their details are unavailable.');
+        const scopedShifts = scopedRows.filter((s) => {
+          const start = Date.parse(s.scheduled_start);
+          const end = Date.parse(s.scheduled_end);
+          return s.context_status !== 'requires_review' && s.context_status !== 'recovery_only'
+            && Number.isFinite(start) && Number.isFinite(end) && start <= todayEnd.getTime()
+            && end >= now.getTime() && (start >= todayStart.getTime() || s.status === 'in_progress');
+        });
+        const byId = new Map(scopedShifts.map((shift) => [shift.id, shift]));
+        directShifts.filter((shift) => !reviewIds.has(shift.id)).forEach((shift) => byId.set(shift.id, shift));
+        const formattedShifts = [...byId.values()].sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
 
         setShifts(formattedShifts);
 
-        if (formattedShifts.length > 0) {
-          setSelectedShiftId(formattedShifts[0].id);
-          await loadOrCreateSession(formattedShifts[0]);
+        const requested = requestedShiftRef.current;
+        if (requested) {
+          if (formattedShifts.some((shift) => shift.id === requested)) {
+            setSelectedShiftId(requested);
+          } else {
+            setError('The selected shift could not be confirmed here. Open your schedule or contact operations.');
+          }
+        } else if (formattedShifts.length > 0) {
+          setSelectedShiftId((formattedShifts.find((shift) => shift.status === 'in_progress') ?? formattedShifts[0]).id);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load shifts');
+        if (!active) return;
+        console.error('Failed to load patrol shifts:', err);
+        setShiftLoadFailed(true);
+        setError('Patrol shifts could not be loaded. Try again or contact operations.');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
-    loadShifts();
-  }, [profile?.id, loadOrCreateSession]);
+    void loadShifts();
+    return () => { active = false; };
+  }, [profile?.id, profile?.organizationId, shiftLoadAttempt]);
+
+  useEffect(() => {
+    if (loading || shiftLoadFailed || !requestedShiftId) return;
+    if (shifts.some((shift) => shift.id === requestedShiftId)) {
+      setSelectedShiftId(requestedShiftId);
+      setError(null);
+    } else {
+      setSelectedShiftId(null);
+      setError('The selected shift could not be confirmed here. Open your schedule or contact operations.');
+    }
+  }, [requestedShiftId, shifts, loading, shiftLoadFailed]);
+
+  const selectedShift = shifts.find((shift) => shift.id === selectedShiftId);
+  useEffect(() => {
+    let active = true;
+    setSession(null);
+    setSessionError(null);
+    setActiveCheckpointId(null);
+    setVisitNotes('');
+    setConfirmingCompletion(false);
+    setCompletionNotes('');
+    if (!selectedShift) {
+      setSessionLoading(false);
+      return () => { active = false; };
+    }
+
+    setSessionLoading(true);
+    void loadOrCreateSession(selectedShift).then((next) => {
+      if (active) setSession(next);
+    }).catch((err) => {
+      console.error('Failed to load patrol session or checkpoints:', err);
+      if (active) setSessionError('Patrol session or checkpoints could not be loaded. Try again or contact operations.');
+    }).finally(() => {
+      if (active) setSessionLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedShift, sessionLoadAttempt, loadOrCreateSession]);
 
   // Patrol duration timer
   useEffect(() => {
@@ -280,6 +298,29 @@ const PatrolPage: React.FC = () => {
     const interval = setInterval(updateTimer, 30000);
     return () => clearInterval(interval);
   }, [session?.started_at, session?.status]);
+
+  useEffect(() => {
+    if (!session?.id || session.status !== 'in_progress') return;
+    const patrolId = session.id;
+    const shiftId = session.shift.id;
+    let active = true;
+    const refresh = (event: Event) => {
+      if (!(event instanceof CustomEvent) || event.detail?.shiftId !== shiftId) return;
+      void loadVisits(shiftId, patrolId).then((visits) => {
+        if (!active) return;
+        setSession((current) => current?.id === patrolId ? {
+          ...current,
+          visits: [...current.visits, ...visits.filter((visit) => !current.visits.some((existing) => existing.id === visit.id))],
+        } : current);
+      }).catch((failure) => {
+        console.error('Failed to refresh recorded checkpoints:', failure);
+        if (active) setError('A checkpoint may have been recorded, but its receipt could not be refreshed. Reload the patrol or contact operations.');
+      });
+    };
+    window.addEventListener(PATROL_CHECKPOINT_RECORDED, refresh);
+    requestPatrolCapture(shiftId);
+    return () => { active = false; window.removeEventListener(PATROL_CHECKPOINT_RECORDED, refresh); };
+  }, [session?.id, session?.status, session?.shift.id, loadVisits]);
 
   const startPatrol = async () => {
     if (!session || startingPatrol) return;
@@ -301,7 +342,7 @@ const PatrolPage: React.FC = () => {
         | null;
       if (!patrol?.id) throw new Error('Patrol session could not be opened. Please try again.');
 
-      const visits = await loadVisits(patrol.id);
+      const visits = await loadVisits(session.shift.id, patrol.id);
       setSession({
         ...session,
         id: patrol.id,
@@ -371,17 +412,25 @@ const PatrolPage: React.FC = () => {
         notes: result.notes,
       };
 
-      setSession({
-        ...session,
-        visits: [...session.visits.filter((v) => v.id !== recorded.id), recorded],
-      });
+      setSession((current) => current?.id === session.id ? {
+        ...current, visits: [...current.visits.filter((v) => v.id !== recorded.id), recorded],
+      } : current);
       setNotice(
         result.created
           ? `Checkpoint "${checkpoint.name}" recorded.`
-          : `Checkpoint "${checkpoint.name}" was already recorded for this patrol.`
+          : `Checkpoint "${checkpoint.name}" was already recorded for this patrol. Draft notes were not saved.`
       );
-      setActiveCheckpointId(null);
-      setVisitNotes('');
+      if (result.created || !visitNotes.trim()) {
+        setActiveCheckpointId(null);
+        setVisitNotes('');
+      }
+      try {
+        const visits = await loadVisits(session.shift.id, session.id);
+        setSession((current) => current?.id === session.id ? { ...current, visits } : current);
+      } catch (refreshError) {
+        console.error('Recorded patrol visit could not be refreshed:', refreshError);
+        setError('The visit was recorded, but its verification details could not be refreshed. Reload the patrol plan or contact operations.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record checkpoint visit');
     } finally {
@@ -435,15 +484,28 @@ const PatrolPage: React.FC = () => {
     );
   }
 
-  const completedCount = session ? countCompletedCheckpoints(session.visits) : 0;
+  const completedCount = session ? session.checkpoints.filter((checkpoint) => session.visits.some((visit) =>
+    checkpoint.kind === 'route' ? visit.route_checkpoint_id === checkpoint.id : visit.checkpoint_id === checkpoint.id)).length : 0;
   const totalCount = session?.checkpoints.length ?? 0;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const stopIds = new Set(session?.journey.stops.map((stop) => stop.id) ?? []);
+  const otherCheckpoints = session?.checkpoints.filter((checkpoint) => !checkpoint.stop_ids.some((id) => stopIds.has(id))) ?? [];
+  const checkpointList = (checkpoints: Checkpoint[], instanceId: string) => session && (
+    <PatrolCheckpointList checkpoints={checkpoints} visits={session.visits} activeCheckpointId={activeCheckpointId}
+      notes={visitNotes} recording={recordingVisit} instanceId={instanceId}
+      onSelect={(id) => {
+        if (id !== activeCheckpointId && visitNotes && !window.confirm('Discard the unsubmitted checkpoint notes?')) return;
+        if (id !== activeCheckpointId) setVisitNotes('');
+        setActiveCheckpointId(id);
+      }}
+      onNotesChange={setVisitNotes} onRecord={(checkpoint) => void visitCheckpoint(checkpoint)} />
+  );
 
   return (
     <div className="page-container patrol-page">
       <header className="page-header">
-        <h1>Field Patrol & Checkpoints</h1>
-        <p className="subtitle">Execute assigned route patrols, verify attendance, record checkpoints</p>
+        <h1>Patrol shifts and stops</h1>
+        <p className="subtitle">Work your assigned places and record patrol checkpoints.</p>
       </header>
 
       {error && (
@@ -454,6 +516,7 @@ const PatrolPage: React.FC = () => {
           {error}
         </div>
       )}
+      {shiftWarning && <div className="alert alert-error" role="alert">{shiftWarning}</div>}
 
       {notice && (
         <div className="alert alert-success" role="status">
@@ -464,25 +527,36 @@ const PatrolPage: React.FC = () => {
         </div>
       )}
 
-      {shifts.length === 0 ? (
+      {shiftLoadFailed ? (
+        <button className="btn btn-secondary" onClick={() => setShiftLoadAttempt((attempt) => attempt + 1)}>Try loading shifts again</button>
+      ) : shifts.length === 0 && !requestedShiftId ? (
         <div className="empty-state" style={{ marginTop: '24px' }}>
           <div style={{ fontSize: '32px', marginBottom: '8px' }}>📋</div>
           <h2>No Patrol Shifts Scheduled Today</h2>
           <p>You don't have any active patrol shifts assigned for today.</p>
+          <p>For an unfinished shift past its scheduled end, <Link to="/officer/schedule">open your schedule</Link> or contact operations.</p>
         </div>
       ) : (
         <div className="patrol-layout" style={{ marginTop: '20px' }}>
           {/* Shift selector list */}
           <div className="shift-selector">
-            <h2 style={{ fontSize: '15px', marginBottom: '12px' }}>Today's Shifts ({shifts.length})</h2>
+            <h2 style={{ fontSize: '15px', marginBottom: '12px' }}>Today's and active overnight shifts ({shifts.length})</h2>
             <div className="shift-list">
               {shifts.map((shift) => (
                 <button
                   key={shift.id}
                   className={`shift-card ${selectedShiftId === shift.id ? 'active' : ''}`}
+                  disabled={recordingVisit || startingPatrol || completingPatrol}
                   onClick={() => {
+                    if (shift.id === selectedShiftId) return;
+                    if ((visitNotes || completionNotes || stopWorkDirty) && !window.confirm('Leave this patrol and lose unsubmitted stop, checkpoint or closing work?')) return;
+                    setStopWorkDirty(false);
                     setSelectedShiftId(shift.id);
-                    loadOrCreateSession(shift);
+                    setError(null);
+                    setNotice(null);
+                    const params = new URLSearchParams(search);
+                    params.set('shift', shift.id);
+                    navigate({ search: `?${params.toString()}` }, { replace: true });
                   }}
                 >
                   <div className="shift-time">
@@ -513,9 +587,27 @@ const PatrolPage: React.FC = () => {
           </div>
 
           {/* Active Patrol Content */}
-          {session && (
+          {selectedShift && (
             <div className="patrol-session">
-              <div className="patrol-header-card">
+              {sessionLoading && <p role="status">Loading patrol session and checkpoints...</p>}
+              {sessionError && (
+                <div className="alert alert-error" role="alert">
+                  <p>{sessionError}</p>
+                  <button className="btn btn-secondary" onClick={() => setSessionLoadAttempt((attempt) => attempt + 1)}>Try loading patrol again</button>
+                </div>
+              )}
+              <OfficerPatrolStops key={selectedShift.id} shiftId={selectedShift.id} journey={session?.journey} onDirtyChange={onStopWorkDirtyChange}
+                renderCheckpoints={(stopId) => {
+                  if (!session) return <p>{sessionLoading ? 'Loading checkpoints...' : 'Checkpoint details are unavailable. Retry loading the patrol plan.'}</p>;
+                  const checkpoints = session.checkpoints.filter((checkpoint) => checkpoint.stop_ids.includes(stopId));
+                  if (!checkpoints.length) return <p>No site or zone checkpoints are linked to this stop. Route checkpoints are listed separately.</p>;
+                  if (!session.id) return <p>Start the patrol session to record these checkpoints: {checkpoints.map((checkpoint) => checkpoint.name).join(', ')}.</p>;
+                  if (session.status !== 'in_progress') return <p>This patrol session is closed.</p>;
+                  return checkpointList(checkpoints, stopId);
+                }} />
+
+              {session && session.shift.id === selectedShiftId && <>
+              <div className="patrol-header-card" style={{ marginTop: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                   <div>
                     <h2 style={{ margin: 0, fontSize: '18px' }}>
@@ -561,108 +653,19 @@ const PatrolPage: React.FC = () => {
                   </button>
                 </div>
               )}
+              </>}
 
-              <OfficerPatrolStops key={session.shift.id} shiftId={session.shift.id} />
-
+              {session && session.shift.id === selectedShiftId && <>
               {session.id && session.status === 'in_progress' && (
                 <div className="checkpoints-container" style={{ marginTop: '16px' }}>
-                  <h3 style={{ fontSize: '15px', marginBottom: '8px' }}>Route Checkpoints ({session.checkpoints.length})</h3>
+                  <h3 style={{ fontSize: '15px', marginBottom: '8px' }}>Other patrol checkpoints ({otherCheckpoints.length})</h3>
 
-                  {session.checkpoints.length === 0 ? (
+                  {otherCheckpoints.length === 0 ? (
                     <div className="empty-state" style={{ padding: '24px' }}>
-                      <p>No designated checkpoints configured for this route or zone.</p>
+                      <p>{session.checkpoints.length ? 'Site checkpoints are shown with their stops above.' : 'No checkpoints are configured for this patrol.'}</p>
                     </div>
                   ) : (
-                    <div className="checkpoints-list">
-                      {session.checkpoints.map((checkpoint, idx) => {
-                        const visit = session.visits.find((v) =>
-                          checkpoint.kind === 'route'
-                            ? v.route_checkpoint_id === checkpoint.id
-                            : v.checkpoint_id === checkpoint.id
-                        );
-                        const isSelected = activeCheckpointId === checkpoint.id;
-
-                        return (
-                          <div
-                            key={checkpoint.id}
-                            className={`checkpoint-item ${visit ? 'completed' : ''}`}
-                            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                <div className="checkpoint-number">{checkpoint.sequence ?? idx + 1}</div>
-                                <div>
-                                  <h4 style={{ margin: 0, fontSize: '14px' }}>{checkpoint.name}</h4>
-                                  {checkpoint.description && (
-                                    <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                                      {checkpoint.description}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div>
-                                {visit ? (
-                                  <span className="badge badge-success">
-                                    ✓ Visited {new Date(visit.visited_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                ) : (
-                                  <button
-                                    className="btn btn-sm btn-secondary"
-                                    onClick={() => setActiveCheckpointId(isSelected ? null : checkpoint.id)}
-                                  >
-                                    {isSelected ? 'Cancel' : 'Record Visit'}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Visit notes & confirmation form */}
-                            {!visit && isSelected && (
-                              <div style={{ marginTop: '8px', padding: '10px', background: 'var(--color-bg-primary)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                                <div className="form-group">
-                                  <label style={{ fontSize: '11px' }}>Officer Observations / Notes (Optional)</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. Site secure, gates locked, no unauthorized vehicles"
-                                    value={visitNotes}
-                                    onChange={(e) => setVisitNotes(e.target.value)}
-                                  />
-                                </div>
-                                <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                                  Your location is captured and checked against this checkpoint. You must be inside
-                                  the checkpoint radius for the visit to be accepted.
-                                </p>
-                                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                                  <button
-                                    className="btn btn-primary btn-sm"
-                                    disabled={recordingVisit}
-                                    onClick={() => visitCheckpoint(checkpoint)}
-                                  >
-                                    {recordingVisit ? 'Recording…' : '✓ Confirm & Record Visit'}
-                                  </button>
-                                  <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => {
-                                      setActiveCheckpointId(null);
-                                      setVisitNotes('');
-                                    }}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {visit?.notes && (
-                              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', paddingLeft: '32px' }}>
-                                Note: {visit.notes}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    checkpointList(otherCheckpoints, 'other')
                   )}
 
                   <div style={{ marginTop: '24px' }}>
@@ -721,8 +724,10 @@ const PatrolPage: React.FC = () => {
                   )}
                 </div>
               )}
+              </>}
             </div>
           )}
+          {!selectedShift && requestedShiftId && <p><Link to="/officer/schedule">Open my schedule</Link></p>}
         </div>
       )}
     </div>

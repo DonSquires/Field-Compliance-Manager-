@@ -17,7 +17,7 @@ type Outcome = 'done' | 'could_not_complete';
 type Draft = { outcome: Outcome; notes: string };
 type StoredAttempt = { draftKey: string; args: Record<string, unknown> };
 
-export const checksOutstanding = (checks: StopCheck[] | undefined) => (checks ?? []).some((check) => !check.outcome);
+export const checksOutstanding = (checks: StopCheck[] | undefined) => !checks || checks.some((check) => !check.outcome);
 
 // A failed save is kept on the device so a retry, even after a restart, resends the exact same request.
 const attemptKey = (stopId: string, checkKey: string) => `fcm:patrol-stop-check:${stopId}:${checkKey}`;
@@ -83,8 +83,10 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: { stopId: stri
     <View style={styles.box}>
       <Text style={styles.heading}>Checks at this place</Text>
       {checks.map((check) => {
+        const words = check.label.replaceAll('_', ' ');
+        const label = words.charAt(0).toUpperCase() + words.slice(1);
         if (check.outcome) {
-          return <Text key={check.check_key} style={styles.recorded}>{check.label} · {check.outcome === 'done' ? 'Done' : "Couldn't complete"}{check.notes ? ` — ${check.notes}` : ''}</Text>;
+          return <Text key={check.check_key} style={styles.recorded}>{label} · {check.outcome === 'done' ? 'Done' : "Couldn't complete"}{check.notes ? ` — ${check.notes}` : ''}</Text>;
         }
         const draft = drafts[check.check_key];
         const noteRequired = draft?.outcome === 'could_not_complete' || (draft?.outcome === 'done' && check.needs_note);
@@ -94,10 +96,10 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: { stopId: stri
         const saving = busy === check.check_key;
         return (
           <View key={check.check_key} style={styles.check}>
-            <Text style={styles.label}>{check.label}{check.needs_photo ? ' · photo needed' : ''}{check.needs_note ? ' · note needed' : ''}</Text>
+            <Text style={styles.label}>{label}{check.needs_photo ? ' · photo needed' : ''}{check.needs_note ? ' · note needed' : ''}</Text>
             <View style={styles.choices}>
               {(['done', 'could_not_complete'] as const).map((outcome) => (
-                <Pressable key={outcome} accessibilityRole="button" accessibilityLabel={`${check.label}: ${outcome === 'done' ? 'Done' : "Couldn't complete"}`} accessibilityState={{ selected: draft?.outcome === outcome, disabled: saving }} disabled={saving}
+                <Pressable key={outcome} accessibilityRole="button" accessibilityLabel={`${label}: ${outcome === 'done' ? 'Done' : "Couldn't complete"}`} accessibilityState={{ selected: draft?.outcome === outcome, disabled: saving }} disabled={saving}
                   onPress={() => setDrafts((current) => ({ ...current, [check.check_key]: { outcome, notes: current[check.check_key]?.notes ?? '' } }))}
                   style={[styles.choice, draft?.outcome === outcome && styles.choiceOn]}>
                   <Text style={[styles.choiceText, draft?.outcome === outcome && styles.choiceTextOn]}>{outcome === 'done' ? 'Done' : "Couldn't complete"}</Text>
@@ -113,7 +115,7 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: { stopId: stri
             {photoBlocked && <Text style={styles.error}>This check needs a photo. Record it on the web officer screen, or choose Couldn&apos;t complete.</Text>}
             {errors[check.check_key] && <Text style={styles.error}>{errors[check.check_key]}</Text>}
             {draft && (
-              <Pressable accessibilityRole="button" accessibilityLabel={`Save ${check.label}`} disabled={!ready || saving} onPress={() => void save(check)} style={[styles.save, (!ready || saving) && styles.disabled]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Save ${label}`} disabled={!ready || saving} onPress={() => void save(check)} style={[styles.save, (!ready || saving) && styles.disabled]}>
                 {saving ? <ActivityIndicator color="#04211e" /> : <Text style={styles.saveText}>Save check</Text>}
               </Pressable>
             )}

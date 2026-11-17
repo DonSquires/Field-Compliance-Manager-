@@ -4,10 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/OfficerPatrolStops.tsx'), 'utf8');
 const patrolPage = readFileSync(resolve(process.cwd(), 'src/pages/PatrolPage.tsx'), 'utf8');
+const briefing = readFileSync(resolve(process.cwd(), 'src/components/OfficerPatrolBriefing.tsx'), 'utf8');
 
 describe('officer contracted stops', () => {
   it('reads and writes only through the governed officer RPCs', () => {
-    expect(source).toContain("supabase.rpc('get_officer_patrol_stops', { p_shift_id: shiftId })");
+    expect(source).toContain("supabase.rpc('get_officer_patrol_stops_sanitized', { p_shift_id: shiftId })");
     expect(source).toContain("supabase.rpc('manage_officer_patrol_stop'");
     expect(source).toContain('p_expected_status: stop.status');
     expect(source).toContain('p_request_id: pendingRequest.current[key]');
@@ -18,9 +19,9 @@ describe('officer contracted stops', () => {
   it('shows one current stop with its brief and one action at a time', () => {
     expect(source).toContain("const current = stops.find((stop) => stop.status === 'on_scene') ?? stops.find((stop) => stop.status === 'pending' || stop.status === 'en_route') ?? null;");
     expect(source).toContain("aria-current={isCurrent ? 'step' : undefined}");
-    expect(source).toContain('<strong>Do here:</strong>');
-    expect(source).toContain('<strong>Access:</strong>');
-    expect(source).toContain('<strong>Safety:</strong>');
+    expect(briefing).toContain('<strong>Do here:</strong>');
+    expect(briefing).toContain('<strong>Access:</strong>');
+    expect(briefing).toContain('<strong>Safety:</strong>');
     expect(source).toContain('`Arrived at ${stop.place.name}`');
     expect(source).toContain('`Leaving ${stop.place.name}`');
   });
@@ -35,6 +36,6 @@ describe('officer contracted stops', () => {
 
   it('is mounted on the officer patrol page for the selected shift', () => {
     expect(patrolPage).toContain("import { OfficerPatrolStops } from '../components/OfficerPatrolStops';");
-    expect(patrolPage).toContain('<OfficerPatrolStops key={session.shift.id} shiftId={session.shift.id} />');
+    expect(patrolPage).toContain('<OfficerPatrolStops key={selectedShift.id} shiftId={selectedShift.id}');
   });
 });

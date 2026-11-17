@@ -51,7 +51,7 @@ test('the accountable officer patrol workflow remains canonical', () => {
     schema,
     /CREATE OR REPLACE FUNCTION "public"\."manage_officer_patrol_stop"/,
   );
-  assert.match(patrolStops, /supabase\.rpc\('get_officer_patrol_stops'/);
+  assert.match(patrolStops, /supabase\.rpc\('get_officer_patrol_stops_sanitized'/);
   assert.match(patrolStops, /supabase\.rpc\('manage_officer_patrol_stop'/);
   assert.match(patrolStops, /setReceipt\(data as StopReceipt\)/);
 });

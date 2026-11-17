@@ -808,7 +808,7 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
       return;
     }
     if (resource === 'shifts') {
-      if (url.searchParams.get('scheduled_end')?.startsWith('lt.')) {
+      if (/^lt(?:e)?\./.test(url.searchParams.get('scheduled_end') ?? '')) {
         await route.fulfill(fulfillJson([]));
         return;
       }

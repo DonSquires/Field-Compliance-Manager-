@@ -951,6 +951,11 @@
   margin-top: 16px;
 }
 
+.patrol-page .patrol-layout { grid-template-columns: minmax(0, 260px) minmax(0, 1fr); }
+.patrol-page .shift-selector, .patrol-page .shift-list, .patrol-page .patrol-session { min-width: 0; }
+.patrol-page .shift-card { display: block; width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.patrol-page .checkpoint-item { min-width: 0; overflow-wrap: anywhere; }
+
 .shift-list,
 .sites-list,
 .checkpoints-list,
@@ -2620,6 +2625,7 @@
   .smoke-layout {
     grid-template-columns: 1fr;
   }
+  .patrol-page .patrol-layout { grid-template-columns: minmax(0, 1fr); }
 
   .officer-next-job { align-items: stretch; flex-direction: column; }
   .officer-next-job .officer-primary-action { width: 100%; }

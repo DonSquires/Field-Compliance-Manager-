@@ -76,6 +76,16 @@ test('selected static post opens its exact shift without a separate arrival acti
   await expect(page.getByText('Site induction')).toBeVisible();
   await expect(page.getByRole('link', { name: '+64000000000' })).toHaveAttribute('href', 'tel:+64000000000');
   await expect(page.getByRole('link', { name: 'Navigate to site' })).toHaveAttribute('target', '_blank');
+  for (const viewport of [{ width: 320, height: 640 }, { width: 375, height: 812 }, { width: 640, height: 320 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }, { width: 2560, height: 1440 }]) {
+    await page.setViewportSize(viewport);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    const action = page.getByRole('button', { name: 'Report an observation or incident' });
+    await action.scrollIntoViewIfNeeded();
+    expect(await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+  }
   await page.getByRole('button', { name: 'Report an observation or incident' }).click();
   await expect(page).toHaveURL(new RegExp(`/officer/report\\?shift=${staticPost.shift.id}$`));
   await page.goBack();

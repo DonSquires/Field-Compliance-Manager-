@@ -111,8 +111,7 @@ const OfficerSchedulePage: React.FC = () => {
   const endShiftDestination = (destination: EndShiftDestination, shift: AssignedShift) => {
     const route = destination === 'stops' ? (isStaticGuardingService(shift.service_type) ? '/officer/site_guard' : '/officer/patrol') : destination === 'home' ? '/officer' : `/officer/${destination}`;
     setEndingShift(null);
-    // Only the static post reads ?shift; other destinations scope themselves to the active shift.
-    navigate(route === '/officer/site_guard' ? `${route}?shift=${encodeURIComponent(shift.id)}` : route);
+    navigate(destination === 'stops' ? `${route}?shift=${encodeURIComponent(shift.id)}` : route);
   };
   const [swapOfficers, setSwapOfficers] = useState<SwapOfficer[]>([]);
   const [swapOfficerId, setSwapOfficerId] = useState('');

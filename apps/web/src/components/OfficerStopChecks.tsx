@@ -2,10 +2,11 @@
  * OfficerStopChecks — the checks the place asks for at this stop, each recorded through record_patrol_stop_check.
  * A failed save keeps its exact request (ID, GPS, photo path) so a retry cannot change what was captured.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { attachOfficerPhoto } from '../lib/officerRecordPhotos';
+import { plainWords } from '../lib/rosterWords';
 
 export interface StopCheck {
   check_key: string;
@@ -21,7 +22,16 @@ type Outcome = 'done' | 'could_not_complete';
 interface Draft { outcome: Outcome; notes: string; photo: File | null }
 interface Attempt { draftKey: string; args: Record<string, unknown> }
 
-export const checksOutstanding = (checks: StopCheck[] | undefined) => (checks ?? []).some(check => !check.outcome);
+export const checksOutstanding = (checks: StopCheck[] | undefined) => !checks || checks.some(check => !check.outcome);
+export const validStopChecks = (value: unknown): value is StopCheck[] => Array.isArray(value) && value.every((check: unknown) =>
+  check !== null && typeof check === 'object'
+  && 'check_key' in check && typeof check.check_key === 'string' && check.check_key.length > 0
+  && 'label' in check && typeof check.label === 'string'
+  && 'needs_photo' in check && typeof check.needs_photo === 'boolean'
+  && 'needs_note' in check && typeof check.needs_note === 'boolean'
+  && 'outcome' in check && (check.outcome === null || check.outcome === 'done' || check.outcome === 'could_not_complete')
+  && 'notes' in check && (check.notes === null || typeof check.notes === 'string')
+  && 'performed_at' in check && (check.performed_at === null || typeof check.performed_at === 'string'));
 
 async function currentPosition(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
   if (!navigator.geolocation) return null;
@@ -42,15 +52,21 @@ async function uploadStopPhoto(stopId: string, file: File): Promise<string> {
 
 const draftKeyOf = (draft: Draft) => JSON.stringify([draft.outcome, draft.notes.trim(), draft.photo?.name ?? null, draft.photo?.size ?? null, draft.photo?.lastModified ?? null]);
 
-export function OfficerStopChecks({ stopId, checks, onRecorded }: {
+export function OfficerStopChecks({ stopId, checks, onRecorded, onDirtyChange }: {
   stopId: string;
   checks: StopCheck[];
   onRecorded: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const attempts = useRef<Record<string, Attempt>>({});
+
+  useEffect(() => {
+    onDirtyChange?.(Object.keys(drafts).length > 0 || saving !== null);
+    return () => onDirtyChange?.(false);
+  }, [drafts, saving, onDirtyChange]);
 
   if (!checks.length) return null;
 
@@ -100,11 +116,12 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: {
       <ul>
         {checks.map(check => {
           const draft = drafts[check.check_key];
+          const label = plainWords(check.label);
           if (check.outcome) {
             return (
               <li key={check.check_key} className="patrol-stop-check is-recorded">
                 {check.outcome === 'done' ? <CheckCircle2 size={16} aria-hidden="true" /> : <XCircle size={16} aria-hidden="true" />}
-                <span><strong>{check.label}</strong> · {check.outcome === 'done' ? 'Done' : "Couldn't complete"}{check.notes ? ` — ${check.notes}` : ''}</span>
+                <span><strong>{label}</strong> · {check.outcome === 'done' ? 'Done' : "Couldn't complete"}{check.notes ? ` — ${check.notes}` : ''}</span>
               </li>
             );
           }
@@ -114,12 +131,12 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: {
           const busy = saving === check.check_key;
           return (
             <li key={check.check_key} className="patrol-stop-check">
-              <span><strong>{check.label}</strong>{check.needs_photo ? ' · photo needed' : ''}{check.needs_note ? ' · note needed' : ''}</span>
-              <div className="patrol-stop-check-choices" role="group" aria-label={`Outcome for ${check.label}`}>
+              <span><strong>{label}</strong>{check.needs_photo ? ' · photo needed' : ''}{check.needs_note ? ' · note needed' : ''}</span>
+              <div className="patrol-stop-check-choices" role="group" aria-label={`Outcome for ${label}`}>
                 <button type="button" className={`btn${draft?.outcome === 'done' ? ' btn-primary' : ''}`} aria-pressed={draft?.outcome === 'done'}
-                  aria-label={`Done ${check.label}`} disabled={busy} onClick={() => edit(check.check_key, { outcome: 'done' })}>Done</button>
+                  aria-label={`Done ${label}`} disabled={busy} onClick={() => edit(check.check_key, { outcome: 'done' })}>Done</button>
                 <button type="button" className={`btn${draft?.outcome === 'could_not_complete' ? ' btn-primary' : ''}`} aria-pressed={draft?.outcome === 'could_not_complete'}
-                  aria-label={`Couldn't complete ${check.label}`} disabled={busy} onClick={() => edit(check.check_key, { outcome: 'could_not_complete' })}>Couldn&apos;t complete</button>
+                  aria-label={`Couldn't complete ${label}`} disabled={busy} onClick={() => edit(check.check_key, { outcome: 'could_not_complete' })}>Couldn&apos;t complete</button>
               </div>
               {draft && (noteRequired || draft.outcome === 'done') && (
                 <label>
@@ -135,7 +152,7 @@ export function OfficerStopChecks({ stopId, checks, onRecorded }: {
               )}
               {errors[check.check_key] && <p role="alert" className="patrol-stop-check-error">{errors[check.check_key]}</p>}
               {draft && (
-                <button type="button" className="btn btn-primary" aria-label={`Save ${check.label}`} disabled={!ready || busy} onClick={() => void save(check)}>
+                <button type="button" className="btn btn-primary" aria-label={`Save ${label}`} disabled={!ready || busy} onClick={() => void save(check)}>
                   {busy ? 'Saving…' : 'Save check'}
                 </button>
               )}

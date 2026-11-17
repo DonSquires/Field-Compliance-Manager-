@@ -93,50 +93,81 @@ test.describe('paired patrol and dispatch acceptance', () => {
   });
 
   test('officer patrol exercises session, checkpoint, completion, and receipt states', async ({ page }) => {
-    await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
+    await page.clock.setFixedTime(new Date('2026-08-30T09:30:00Z'));
     await installOfficerScheduleFixtures(page);
+    await page.addInitScript(() => {
+      navigator.geolocation.getCurrentPosition = (success) => success({
+        coords: { latitude: -41.274, longitude: 173.283, accuracy: 10, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) },
+        timestamp: Date.now(), toJSON: () => ({}),
+      });
+    });
     const browserErrors = monitorBrowserErrors(page);
+    let patrolStatus: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+    let visited = false;
     await page.route('**/rest/v1/shifts**', async (route) => {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'patrol-shift-0001', service_type: 'patrol', scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', status: 'published', zone_id: 'zone-0001', patrol_route_id: 'route-0001', zone: { name: 'North District Patrol' }, route: { name: 'North District Patrol', route_code: 'NDP-01' } }]) });
     });
-    await page.route('**/rest/v1/patrols**', async (route) => {
-      const request = route.request();
-      if (request.method() === 'POST') {
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'patrol-session-0001', status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z' }) });
-        return;
-      }
-      const isSingle = request.headers()['accept']?.includes('vnd.pgrst.object+json');
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(isSingle ? null : []) });
+    await page.route('**/rest/v1/rpc/get_assigned_officer_shift_context', async (route) => route.fulfill({ json: [{
+      id: 'patrol-shift-0001', organization_id: '33333333-3333-4333-8333-333333333333',
+      officer_user_id: '22222222-2222-4222-8222-222222222222', service_type: 'patrol',
+      scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', status: 'published',
+      zone_id: 'zone-0001', patrol_route_id: 'route-0001', location_id: null,
+      service_agreement_location_id: null, service_agreement_module: null, shift_stops: [],
+      created_at: '2026-08-30T08:00:00.000Z', updated_at: '2026-08-30T08:00:00.000Z',
+      zone_name: null, route_name: null, route_code: null, context_status: 'available',
+    }] }));
+    await page.route('**/rest/v1/rpc/get_assigned_patrol_session', async (route) => {
+      expect(route.request().postDataJSON().p_shift_id).toBe('patrol-shift-0001');
+      await route.fulfill({ json: {
+        shift_id: 'patrol-shift-0001',
+        session: patrolStatus === 'not_started' ? null : {
+          id: 'patrol-session-0001', status: patrolStatus, started_at: '2026-08-30T09:30:00.000Z',
+          ended_at: patrolStatus === 'completed' ? '2026-08-30T09:40:00Z' : null,
+        },
+        visits: visited ? [{ id: 'visit-0001', checkpoint_id: null, route_checkpoint_id: 'checkpoint-0001',
+          visited_at: '2026-08-30T09:35:00Z', scan_method: 'gps', notes: null,
+          within_radius: true, checkpoint_verification_at_visit: null }] : [],
+      } });
     });
-    await page.route('**/rest/v1/patrol_route_checkpoints**', async (route) => {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'checkpoint-0001', name: 'North loading entrance', description: 'Verify gate and alarm panel.', qr_code_data: 'FCM-NORTH-001', gps_lat: -41.274, gps_lng: 173.283, geofence_radius_meters: 50, sequence_order: 1 }]) });
+    await page.route('**/rest/v1/rpc/get_officer_patrol_journey', async (route) => route.fulfill({ json: {
+      shift_id: 'patrol-shift-0001', patrol_id: patrolStatus === 'in_progress' ? 'patrol-session-0001' : null, checkpoint_requirement: 'route', route_geometry: null,
+      route_geometry_status: 'unavailable', stops: [], checkpoints: [{ id: 'checkpoint-0001', kind: 'route',
+        name: 'North loading entrance', required: true, visited, sequence_order: 1, site_id: null, zone_id: null, stop_ids: [], auto_geofence_status: 'unavailable_route' }],
+    } }));
+    await page.route('**/rest/v1/rpc/get_officer_patrol_stops_sanitized', async (route) => route.fulfill({ json: {
+      shift: { id: 'patrol-shift-0001', status: 'published', scheduled_start: '2026-08-30T08:00:00Z', scheduled_end: '2026-08-30T16:00:00Z', route_name: null }, stops: [],
+    } }));
+    await page.route('**/rest/v1/rpc/start_patrol_session', async (route) => {
+      patrolStatus = 'in_progress';
+      await route.fulfill({ json: { id: 'patrol-session-0001', status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z', notes: null } });
     });
-    await page.route('**/rest/v1/patrol_checkpoints**', async (route) => {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'checkpoint-0001', name: 'North loading entrance', description: 'Verify gate and alarm panel.', qr_code: 'FCM-NORTH-001', gps_lat: -41.274, gps_lng: 173.283, radius_meters: 50, active: true }]) });
+    await page.route('**/rest/v1/rpc/record_patrol_checkpoint_visit', async (route) => {
+      expect(route.request().postDataJSON().p_notes).toBe('Gate secure; alarm panel normal.');
+      visited = true;
+      await route.fulfill({ json: [{ visit_id: 'visit-0001', created: true, visited_at: '2026-08-30T09:35:00Z', scan_method: 'gps', notes: null }] });
     });
-    await page.route('**/rest/v1/patrol_checkpoint_visits**', async (route) => {
-      if (route.request().method() === 'POST') {
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'visit-0001', checkpoint_id: 'checkpoint-0001', visited_at: '2026-08-30T09:35:00.000Z', scan_method: 'manual', notes: 'Gate secure; alarm panel normal.' }) });
-        return;
-      }
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([]) });
+    await page.route('**/rest/v1/rpc/complete_patrol_session', async (route) => {
+      expect(visited).toBe(true);
+      patrolStatus = 'completed';
+      await route.fulfill({ json: { id: 'patrol-session-0001', status: 'completed', ended_at: '2026-08-30T09:40:00Z', notes: null } });
     });
 
     await signInAsOfficer(page, '/officer/patrol');
     const patrolPage = page.locator('.patrol-page');
-    await expect(patrolPage.getByRole('heading', { name: 'Field Patrol & Checkpoints' })).toBeVisible({ timeout: 30_000 });
+    await expect(patrolPage.getByRole('heading', { name: 'Patrol shifts and stops' })).toBeVisible({ timeout: 30_000 });
     const shift = patrolPage.getByRole('button', { name: /North District Patrol|PATROL/i }).first();
     await expect(shift).toBeVisible();
     await shift.click();
     await expect(patrolPage.getByRole('button', { name: /Start Patrol Session/ })).toBeVisible();
     await patrolPage.getByRole('button', { name: /Start Patrol Session/ }).click();
-    await expect(patrolPage.getByText('Route Checkpoints (1)', { exact: true })).toBeVisible();
+    await expect(patrolPage.getByText('Other patrol checkpoints (1)', { exact: true })).toBeVisible();
     await patrolPage.getByRole('button', { name: 'Record Visit' }).click();
     await patrolPage.getByPlaceholder(/Site secure/).fill('Gate secure; alarm panel normal.');
     await patrolPage.getByRole('button', { name: '✓ Confirm & Record Visit' }).click();
     await expect(patrolPage.getByText(/Visited/)).toBeVisible();
     await expect(patrolPage.getByRole('button', { name: 'Complete Patrol Session' })).toBeVisible();
     await patrolPage.getByRole('button', { name: 'Complete Patrol Session' }).click();
+    await patrolPage.getByRole('button', { name: 'Confirm & Complete' }).click();
     await expect(patrolPage.getByText('Patrol Completed', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(browserErrors, browserErrors.join('\n')).toEqual([]);

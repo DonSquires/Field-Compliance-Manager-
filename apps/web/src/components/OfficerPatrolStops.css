@@ -1,10 +1,14 @@
 /* Officer contracted stops: one current stop, one action, plain words. */
-.patrol-stops { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid var(--color-border, #334155); border-radius: 10px; background: var(--color-bg-secondary, #0f172a); }
+.patrol-stops { display: grid; gap: 12px; min-width: 0; margin-top: 16px; padding: 14px; border: 1px solid var(--color-border, #334155); border-radius: 10px; background: var(--color-bg-secondary, #0f172a); }
 .patrol-stops-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .patrol-stops-header h3 { margin: 2px 0 0; font-size: 16px; }
 .patrol-stops-kicker { color: var(--color-text-secondary, #94a3b8); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.patrol-stops-refresh { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: transparent; cursor: pointer; }
+.patrol-stops-refresh { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: transparent; cursor: pointer; }
 .patrol-stops-subtle { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 13px; }
+.patrol-stops-client { margin: 4px 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.patrol-stop-detail { padding: 8px; border: 1px solid var(--color-border); border-radius: 6px; }
+.patrol-stop-detail summary { cursor: pointer; min-height: 44px; }
+.patrol-stop-detail p { margin: 6px 0; overflow-wrap: anywhere; }
 
 .patrol-stops-message { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; border-radius: 6px; font-size: 13px; }
 .patrol-stops-message > svg { flex: 0 0 auto; margin-top: 1px; }
@@ -21,7 +25,7 @@
 .patrol-stop.is-done .patrol-stop-number { border-color: var(--color-success, #22c55e); color: var(--color-success, #22c55e); }
 .patrol-stop.is-current .patrol-stop-number { border-color: #f2bf3a; color: #ffe1a1; }
 .patrol-stop-body { display: grid; gap: 6px; min-width: 0; }
-.patrol-stop-title { display: grid; gap: 2px; }
+.patrol-stop-title { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .patrol-stop-title strong { font-size: 14px; }
 .patrol-stop-title span { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
 .patrol-stop-title .patrol-stop-toolset { color: var(--color-accent, #5eead4); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/PatrolPage.tsx'), 'utf8');
+const journeySource = readFileSync(resolve(process.cwd(), 'src/lib/officerPatrolJourney.ts'), 'utf8');
 
 describe('patrol workspace', () => {
   it('fails closed when officer organisation context is unavailable', () => {
@@ -24,8 +25,8 @@ describe('patrol workspace', () => {
 
   it('sends the checkpoint kind so route and site checkpoints resolve to the right column', () => {
     expect(source).toContain('p_checkpoint_kind: checkpoint.kind');
-    expect(source).toContain("kind: 'route' as const");
-    expect(source).toContain("kind: 'site' as const");
+    expect(source).toContain("supabase.rpc('get_officer_patrol_journey'");
+    expect(journeySource).toContain("value.kind === 'site' || value.kind === 'route'");
     expect(source).toContain('route_checkpoint_id');
   });
 
