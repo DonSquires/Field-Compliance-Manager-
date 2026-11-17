@@ -104,6 +104,33 @@ test('loading chat history cannot take focus from another control', async ({ pag
   await expect(refresh).toBeFocused();
 });
 
+test('loading chat history respects focus moved away and back to the toggle', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'The header toggle is a desktop interaction.');
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: 'thread-1' }] }));
+  let releaseHistory!: () => void;
+  const historyReady = new Promise<void>(resolve => { releaseHistory = resolve; });
+  await page.route('**/rest/v1/builder_chat_messages*', async route => {
+    await historyReady;
+    await route.fulfill({ json: [] });
+  });
+  await page.route('**/functions/v1/bob-builder-control-room', route => route.fulfill({ json: { projects: [], jobs: [], context: null } }));
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide Builder chat' }).click();
+  await page.getByRole('button', { name: 'Builder chat' }).click();
+  const toggle = page.getByRole('button', { name: 'Hide Builder chat' });
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(toggle).not.toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(toggle).toBeFocused();
+  releaseHistory();
+  await expect(page.getByLabel('Message Bob Builder')).toBeEnabled();
+  await expect(toggle).toBeFocused();
+});
+
 test('incomplete acceptance stays a same-job correction gate after reload, never finished-code approval', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });

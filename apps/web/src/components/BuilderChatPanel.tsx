@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Lock, MessageSquarePlus, Wrench, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './BuilderChatPanel.css';
@@ -222,13 +222,20 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
   const historyReady = !loading && threadId !== null && loadedThreadId === threadId;
   const items = useMemo(() => groupChat(messages), [messages]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!focusComposer) {
       composerFocusHandled.current = false;
       composerFocusOrigin.current = undefined;
-      return;
+      return undefined;
     }
     if (composerFocusOrigin.current === undefined) composerFocusOrigin.current = document.activeElement;
+    const cancelPendingFocus = () => { composerFocusHandled.current = true; };
+    document.addEventListener('focusin', cancelPendingFocus);
+    return () => document.removeEventListener('focusin', cancelPendingFocus);
+  }, [focusComposer]);
+
+  useEffect(() => {
+    if (!focusComposer) return;
     if (composerFocusHandled.current || access !== 'allowed' || !historyReady || busy) return;
 
     const composer = composerRef.current;
