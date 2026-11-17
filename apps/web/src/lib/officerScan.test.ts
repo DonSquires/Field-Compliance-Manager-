@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, getOfficerScanRecoveryContext, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
+import { buildOfficerScanPayload, canSubmitOfficerScan, describeOfficerScanError, getOfficerScanFailureDetails, getOfficerScanRecoveryContext, getRecoveryServiceAgreementId, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
 
 describe('officer scan contract', () => {
   it('requires manual plate confirmation only for a saved-capture recovery', () => {
@@ -18,12 +18,39 @@ describe('officer scan contract', () => {
     expect(resumed.recovery_original_context?.zone_id).toBe('original-zone');
     expect(resumed.recovery_original_context?.captured_at).toBe(saved.captured_at);
   });
+  it('does not carry a recovery agreement into a different Zone', () => {
+    const original = getOfficerScanRecoveryContext(buildOfficerScanPayload({
+      clientRequestId: 'original-request',
+      imageBase64: 'original-photo',
+      zoneId: 'original-zone',
+      operatingOrganizationId: 'original-organization',
+      serviceAgreementId: 'original-agreement',
+    }));
+    expect(getRecoveryServiceAgreementId(original, 'original-zone', 'original-organization')).toBe('original-agreement');
+    expect(getRecoveryServiceAgreementId(original, 'corrected-zone')).toBeUndefined();
+    expect(getRecoveryServiceAgreementId(original, 'original-zone', 'corrected-organization')).toBeUndefined();
+  });
   it('surfaces the edge response without replacing it with the generic SDK error', async () => {
     const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
       context: Response.json({ code: 'plate_confirmation_required', error: 'Keep this photo and confirm the plate manually.' }, { status: 400 }),
     });
     expect(await describeOfficerScanError(error)).toBe('Keep this photo and confirm the plate manually.');
+    expect(await getOfficerScanFailureDetails(error)).toMatchObject({
+      message: 'Keep this photo and confirm the plate manually.',
+      code: 'plate_confirmation_required',
+      captureSaved: null,
+    });
     expect(await error.context.json()).toMatchObject({ code: 'plate_confirmation_required' });
+  });
+  it('reports whether the server saved evidence before a branch correction', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      context: Response.json({ code: 'scan_agreement_context_mismatch', error: 'Select the authorized branch.', capture_saved: false }, { status: 409 }),
+    });
+    expect(await getOfficerScanFailureDetails(error)).toEqual({
+      message: 'Select the authorized branch.',
+      code: 'scan_agreement_context_mismatch',
+      captureSaved: false,
+    });
   });
   it('normalizes a manual plate and builds the edge-function payload', () => {
     expect(normalizePlate(' abc-123 ')).toBe('ABC123');

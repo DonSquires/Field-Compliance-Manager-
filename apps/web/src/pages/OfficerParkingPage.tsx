@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
-import { buildOfficerScanPayload, describeOfficerScanError, getOfficerScanRecoveryContext, imageFileToBase64, isNetworkFailure, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
+import { buildOfficerScanPayload, getOfficerScanFailureDetails, getOfficerScanRecoveryContext, getRecoveryServiceAgreementId, imageFileToBase64, isNetworkFailure, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
@@ -49,7 +49,7 @@ interface ParkingScanResult {
 }
 
 const OfficerParkingPage: React.FC = () => {
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizations, loading: authLoading } = useAuth();
   const { zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('parking_enforcement');
   const [records, setRecords] = useState<ChalkRecord[]>([]);
@@ -69,6 +69,8 @@ const OfficerParkingPage: React.FC = () => {
   const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
   const [capturedAt, setCapturedAt] = useState<string>();
   const [recoveryOriginalContext, setRecoveryOriginalContext] = useState<ReturnType<typeof getOfficerScanRecoveryContext>>();
+  const [scanOperatingOrganizationId, setScanOperatingOrganizationId] = useState('');
+  const [recoveryBranchLocked, setRecoveryBranchLocked] = useState(false);
   const [retryPayload, setRetryPayload] = useState<ReturnType<typeof buildOfficerScanPayload>>();
   const [savedCaptures, setSavedCaptures] = useState<QueuedOfficerScan[]>([]);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -76,6 +78,14 @@ const OfficerParkingPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [scanWarnings, setScanWarnings] = useState<ScanSafetyWarningSummary[]>([]);
+  const scanOrganizationOptions = operatingOrganizations.filter((context) => context.authorityBasis !== 'corporate_oversight'
+    && (context.authorityBasis !== 'branch_authorisation' || context.moduleAccess.includes('parking_enforcement')));
+  const savedOperatingOrganizationId = recoveryOriginalContext?.operating_organization_id ?? '';
+  const requestedScanOrganizationId = scanOperatingOrganizationId || savedOperatingOrganizationId;
+  const selectedScanOrganizationId = recoveryBranchLocked
+    ? savedOperatingOrganizationId
+    : scanOrganizationOptions.some((context) => context.organizationId === requestedScanOrganizationId) ? requestedScanOrganizationId : '';
+  const selectedScanOrganizationAvailable = scanOrganizationOptions.some((context) => context.organizationId === selectedScanOrganizationId);
 
   const refreshSavedCaptures = useCallback(async () => {
     if (!profile?.id) return;
@@ -141,6 +151,8 @@ const OfficerParkingPage: React.FC = () => {
       setCapturedAt(new Date().toISOString());
       setClientRequestId(crypto.randomUUID());
       setRecoveryOriginalContext(undefined);
+      setScanOperatingOrganizationId('');
+      setRecoveryBranchLocked(false);
       setRetryPayload(undefined);
       setPlateNumber('');
     } catch (captureError) {
@@ -159,6 +171,8 @@ const OfficerParkingPage: React.FC = () => {
     setCapturedAt(undefined);
     setClientRequestId(crypto.randomUUID());
     setRecoveryOriginalContext(undefined);
+    setScanOperatingOrganizationId('');
+    setRecoveryBranchLocked(false);
     setRetryPayload(undefined);
     setPlateNumber('');
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -184,6 +198,12 @@ const OfficerParkingPage: React.FC = () => {
   const handleChalk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.id || !profile?.organizationId) return;
+    if (!selectedScanOrganizationAvailable) {
+      setError(recoveryOriginalContext && recoveryBranchLocked
+        ? 'The saved capture organization is no longer available to this account. Evidence cannot be transferred; contact an administrator.'
+        : 'Select an authorized operating organization for this capture.');
+      return;
+    }
 
     let stagedCapture: QueuedOfficerScan | null = null;
     let submittedPayload: ReturnType<typeof buildOfficerScanPayload> | null = null;
@@ -197,10 +217,10 @@ const OfficerParkingPage: React.FC = () => {
       const siteId = locationId && selectedSite?.location_id === locationId ? selectedSite.id : null;
       const payload = retryPayload ?? buildOfficerScanPayload({
         imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt,
-        operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? profile.organizationId,
+        operatingOrganizationId: selectedScanOrganizationId,
         locationId,
         clientSiteId: workingZone ? siteId : recoveryOriginalContext?.client_site_id,
-        serviceAgreementId: recoveryOriginalContext?.service_agreement_id,
+        serviceAgreementId: getRecoveryServiceAgreementId(recoveryOriginalContext, form.zone_id, selectedScanOrganizationId),
         locationSource: recoveryOriginalContext ? form.zone_id ? 'manual_zone' : 'unavailable' : addressPoint ? 'address_candidate' : form.zone_id ? 'manual_zone' : 'unavailable',
         recoveryOriginalContext,
         zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null,
@@ -237,14 +257,16 @@ const OfficerParkingPage: React.FC = () => {
       if (data.breach_write_error) setError(data.breach_write_error);
       await loadRecords();
     } catch (err) {
-      const message = await describeOfficerScanError(err);
+      const failure = await getOfficerScanFailureDetails(err);
+      const message = failure.message;
       if (stagedCapture) {
         const transportFailure = isNetworkFailure(err);
-        await markQueuedOfficerScanAttempt(stagedCapture, message, !transportFailure);
+        await markQueuedOfficerScanAttempt(stagedCapture, message, !transportFailure, failure.captureSaved);
         if (transportFailure && submittedPayload) setRetryPayload(submittedPayload);
         else {
           setRetryPayload(undefined);
           setRecoveryOriginalContext(getOfficerScanRecoveryContext(stagedCapture.body));
+          setRecoveryBranchLocked(failure.captureSaved !== false);
         }
         await refreshSavedCaptures();
       }
@@ -308,6 +330,8 @@ const OfficerParkingPage: React.FC = () => {
           setCapturedAt(original.captured_at);
           setClientRequestId(scan.body.client_request_id ?? scan.id);
           setRecoveryOriginalContext(scan.status === 'needs_review' ? original : undefined);
+          setScanOperatingOrganizationId(scan.body.operating_organization_id ?? original.operating_organization_id ?? '');
+          setRecoveryBranchLocked(scan.status === 'needs_review' && scan.captureSaved !== false);
           setRetryPayload(scan.status === 'needs_review' ? undefined : scan.body);
           setForm({ zone_id: scan.body.zone_id ?? '' });
           setAddressPoint(original.gps_lat != null && original.gps_lng != null ? { label: 'Saved capture coordinates', lat: original.gps_lat, lng: original.gps_lng, source: 'linz_address' } : null);
@@ -339,6 +363,34 @@ const OfficerParkingPage: React.FC = () => {
             {zones.length === 0 && <small className="form-hint">No verified parking Zones are available. Contact your administrator.</small>}
           </div>
           <div className="form-group">
+            <label htmlFor="parking-operating-organization">{recoveryOriginalContext ? 'Operating organization for saved capture' : 'Operating organization for this scan'}</label>
+            <select
+              id="parking-operating-organization"
+              value={selectedScanOrganizationId}
+              disabled={Boolean(retryPayload || recoveryOriginalContext && recoveryBranchLocked)}
+              onChange={(event) => { setScanOperatingOrganizationId(event.target.value); setError(null); }}
+              aria-describedby="parking-operating-organization-help"
+            >
+              <option value="" disabled>{authLoading ? 'Loading authorized organizations…' : 'Select an authorized organization'}</option>
+              {recoveryBranchLocked && selectedScanOrganizationId && !selectedScanOrganizationAvailable
+                && <option value={selectedScanOrganizationId}>Original organization (not currently available)</option>}
+              {scanOrganizationOptions.map((context) => <option key={context.organizationId} value={context.organizationId}>{context.organizationName}</option>)}
+            </select>
+            <small id="parking-operating-organization-help" className="form-hint">
+              {recoveryOriginalContext
+                ? recoveryBranchLocked
+                  ? selectedScanOrganizationAvailable ? 'Saved evidence stays in its original organization and cannot be transferred.' : 'Saved evidence is held under an organization you cannot currently access. Contact an administrator; do not transfer it.'
+                  : 'No server-side photo was saved. You may correct the organization; the original capture context remains attached.'
+                : retryPayload && !selectedScanOrganizationAvailable
+                  ? 'This saved request belongs to an organization you cannot currently access. It cannot be transferred; contact an administrator.'
+                  : authLoading
+                    ? 'Loading your authorized operating organizations…'
+                    : scanOrganizationOptions.length
+                      ? 'The session default is not assumed. Choose the authorized organization responsible for this capture.'
+                      : 'No authorized organization is available for Parking. Reload this page or contact an administrator if this is unexpected.'}
+            </small>
+          </div>
+          <div className="form-group">
             <label htmlFor="parking-address">Address</label>
             <div className="form-row">
               <input id="parking-address" value={addressQuery} onChange={(event) => { setAddressQuery(event.target.value); setAddressPoint(null); }} placeholder="Street address or place" />
@@ -348,7 +400,7 @@ const OfficerParkingPage: React.FC = () => {
             {addressError && <small className="form-hint">{addressError}</small>}
             {addressCandidates.length > 1 && <div className="form-row">{addressCandidates.map((candidate) => <button type="button" className="btn btn-secondary btn-sm" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => setAddressPoint(candidate)}>{candidate.label}</button>)}</div>}
           </div>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || !form.zone_id || Boolean(recoveryOriginalContext && !plateNumber.trim())}>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || !form.zone_id || !selectedScanOrganizationAvailable || Boolean(recoveryOriginalContext && !plateNumber.trim())}>
             {submitting ? 'Saving chalk record' : retryPayload ? 'Retry saved request' : recoveryOriginalContext ? 'Recover saved capture' : 'Chalk Vehicle'}
           </button>
         </form>

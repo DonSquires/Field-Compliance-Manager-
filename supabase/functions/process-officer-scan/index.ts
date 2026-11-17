@@ -795,6 +795,7 @@ serve(async (req)=>{
       location_source: locationSource, module_key: moduleKey, captured_at: capturedAt ?? null
     })));
     const requestFingerprint = Array.from(new Uint8Array(fingerprintBytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    let receiptFingerprint = requestFingerprint;
     const completeReceipt = async (response) => {
       if (clientRequestId) {
         const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response: { ...response, request_fingerprint: requestFingerprint, recovery_from_fingerprint: recoveryFromFingerprint } }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
@@ -805,6 +806,7 @@ serve(async (req)=>{
     if (clientRequestId) {
       const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_type, command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
       if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
+      receiptFingerprint = existingReceipt?.response?.request_fingerprint ?? requestFingerprint;
       captureEvidence = existingReceipt?.response?.capture_evidence ?? null;
       if (captureEvidence && existingReceipt.command_status !== 'completed') {
         const { data: custody, error: custodyError } = await supabase.from('evidence_items').select('organization_id, module_key, storage_path, metadata').eq('id', captureEvidence.evidence_id).maybeSingle();
@@ -850,7 +852,7 @@ serve(async (req)=>{
         if (existingReceipt.command_status !== 'failed' || existingReceipt.response?.retryable !== true) {
           return json({ error: 'This scan needs recovery before it can be processed again. Keep the saved capture.', code: 'scan_recovery_required', request_id: clientRequestId }, 409);
         }
-        const { data: claimed, error: claimError } = await supabase.from('officer_command_requests').update({ command_status: 'processing', response: { ...existingReceipt.response, request_fingerprint: requestFingerprint, recovery_from_fingerprint: recoveryFromFingerprint } })
+        const { data: claimed, error: claimError } = await supabase.from('officer_command_requests').update({ command_status: 'processing', response: { ...existingReceipt.response, request_fingerprint: receiptFingerprint, recovery_from_fingerprint: recoveryFromFingerprint } })
           .eq('request_id', clientRequestId).eq('actor_user_id', officerId).eq('command_status', 'failed')
           .eq('response->>request_fingerprint', existingReceipt.response.request_fingerprint).select('id').maybeSingle();
         if (claimError || !claimed) return json({ error: 'This scan request is already being processed' }, 409);
@@ -866,7 +868,7 @@ serve(async (req)=>{
       if (receiptInsertError?.code === '23505') return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
       if (receiptInsertError) return json({ error: 'Scan request receipt could not be created' }, 503);
       }
-      requestReceipt = { client: supabase, id: clientRequestId, actorId: officerId, fingerprint: requestFingerprint, owned: true };
+      requestReceipt = { client: supabase, id: clientRequestId, actorId: officerId, fingerprint: receiptFingerprint, owned: true };
       if (recoveryFromFingerprint) {
         const { error: recoveryAuditError } = await supabase.from('audit_log').insert({
           organization_id: orgId, actor_user_id: officerId, action: 'officer_scan_capture_recovered',
@@ -890,6 +892,10 @@ serve(async (req)=>{
     const locationContextNeedsReview = !manualZoneId && (!hasLatitude || !hasLongitude);
     if (hasSubmittedLatitude !== hasSubmittedLongitude || hasSubmittedLatitude && (!Number.isFinite(Number(submittedGpsLat)) || !Number.isFinite(Number(submittedGpsLng)) || Number(submittedGpsLat) < -90 || Number(submittedGpsLat) > 90 || Number(submittedGpsLng) < -180 || Number(submittedGpsLng) > 180)) return json({
       error: 'gps_lat and gps_lng must be a complete valid coordinate pair'
+    }, 400);
+    if (locationContextNeedsReview || locationSource === 'address_candidate' && !hasSubmittedLatitude) return json({
+      error: 'A manual Zone or complete GPS coordinates are required with confirmed location source.',
+      code: 'location_confirmation_required'
     }, 400);
     const gpsLat = hasLatitude ? submittedGpsLat : null;
     const gpsLng = hasLongitude ? submittedGpsLng : null;
@@ -921,72 +927,6 @@ serve(async (req)=>{
       const { data: canAccessPlace, error: placeAccessError } = await callerClient.rpc('has_location_access', { p_site_id: null, p_zone_id: manualZoneId });
       if (placeAccessError || canAccessPlace !== true) return json({ error: 'Active authority for this Zone could not be confirmed', code: 'scan_place_access_denied' }, 403);
     }
-    if (!captureEvidence) {
-      const captureBytes = base64ToBytes(imageBase64);
-      if (!captureBytes.length || captureBytes.length > 20 * 1024 * 1024) return json({ error: 'Scan photo must be between 1 byte and 20 MB' }, 400);
-      const captureBase = `org/${orgId}/scan-captures/${clientRequestId || crypto.randomUUID()}/${crypto.randomUUID()}`;
-      const originalPath = `${captureBase}-original.jpg`;
-      const watermarkedPath = `${captureBase}-watermarked.jpg`;
-      const watermarkText = [
-        'Plate pending confirmation',
-        `Time ${capturedDate.toISOString()}`,
-        expectedWorkingZoneId ? `Working Zone ${expectedWorkingZoneId}` : null,
-        `Officer ${officerId}`,
-        clientRequestId ? `Request ${clientRequestId}` : null
-      ].filter(Boolean).join(' | ');
-      const watermarked = await renderWatermarkedEvidence(captureBytes, watermarkText);
-      const rawSha256 = await sha256Hex(captureBytes);
-      const watermarkedSha256 = await sha256Hex(watermarked);
-      const { error: originalUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(originalPath, new Blob([captureBytes], { type: 'image/jpeg' }), { upsert: false, contentType: 'image/jpeg' });
-      if (originalUploadError) return json({ error: 'The original scan photo could not be saved. Keep the capture on this device and retry.', code: 'capture_storage_failed' }, 503);
-      const { error: watermarkedUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(watermarkedPath, watermarked, { upsert: false, contentType: 'image/jpeg' });
-      if (watermarkedUploadError) return json({ error: 'The watermarked scan photo could not be saved. Keep the capture on this device and retry.', code: 'capture_storage_failed' }, 503);
-      const { data: captureId, error: captureRegistrationError } = await supabase.rpc('register_edge_court_photo', {
-        p_organization_id: orgId, p_module_key: moduleKey, p_storage_path: watermarkedPath,
-        p_captured_at: capturedDate.toISOString(),
-        p_metadata: {
-          original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256,
-          watermark_text: watermarkText, watermark_service: 'inference', request_id: clientRequestId || null,
-          captured_by_user_id: officerId, capture_state: 'awaiting_plate_confirmation', source: 'submitted_scan_image',
-          operating_organization_id: orgId, location_id: requestedLocationId, client_site_id: requestedSiteId,
-          service_agreement_id: serviceAgreementId, working_zone_id: expectedWorkingZoneId ?? null,
-          location_source: locationSource, processed_observation_created: false
-        }
-      });
-      if (captureRegistrationError || !captureId) return json({ error: 'The photo upload completed but its evidence registration was not confirmed. Keep the capture for review.', code: 'capture_registration_failed' }, 503);
-      captureEvidence = { evidence_id: captureId, storage_path: watermarkedPath, original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256, watermark_text: watermarkText };
-    }
-    if (locationContextNeedsReview || locationSource === 'address_candidate' && !hasSubmittedLatitude) return json({
-      error: 'Photo saved. A manual Zone or complete GPS coordinates are required with confirmed location source.',
-      code: 'location_confirmation_required'
-    }, 400);
-    // Steps 3 & 4: ALPR + full inference in parallel (same photo, two calls).
-    // An officer-entered plate is the governed fallback when ALPR cannot read the image.
-    let alprResult = null;
-    let inferResult = null;
-    let alprUsed = false;
-    if (imageBase64) {
-      [alprResult, inferResult] = await Promise.all([
-        manualPlateNumber ? Promise.resolve(null) : runAlpr(imageBase64),
-        runInference(imageBase64)
-      ]);
-      if (!manualPlateNumber && (!alprResult?.plate || alprResult.confidence < MIN_ALPR_CONFIDENCE)) {
-        const fallbackResult = await runPlateRecognizerAlpr(imageBase64);
-        if (fallbackResult?.plate && fallbackResult.confidence >= MIN_ALPR_CONFIDENCE) {
-          alprResult = fallbackResult;
-        }
-      }
-      alprUsed = alprResult !== null;
-    }
-    const plateNumber = manualPlateNumber || (alprResult?.confidence >= MIN_ALPR_CONFIDENCE ? normalizePlateNumber(alprResult?.plate ?? '') : '');
-    if (!plateNumber) return json({
-      error: 'Photo saved. A plate could not be confirmed. Confirm the plate manually, or capture a clearer image.',
-      code: 'plate_confirmation_required'
-    }, 400);
-    const plateConfidence = manualPlateNumber ? null : alprResult?.confidence ?? null;
-    const plateSource = manualPlateNumber ? 'manual' : 'alpr';
-    const alprProvider = manualPlateNumber ? null : alprResult?.provider ?? null;
-    console.log(`[scan] plate=${plateNumber} source=${plateSource} org=${orgId}`);
     // Step 5: Geofence resolution from GPS via resolve_operational_context().
     // It preserves direct-org resolution and adds accepted contracted places.
     // operating bounds -> governing jurisdiction -> site geofence + zone).
@@ -1052,38 +992,6 @@ serve(async (req)=>{
       if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
       if (!zoneData || zoneData.boundary_verification !== 'verified') return json({ error: 'An active verified Zone in this organization is required' }, 409);
       if (moduleKey && zoneData.module_key && zoneData.module_key !== moduleKey) return json({ error: 'Selected Zone does not support this scan module' }, 409);
-      if (!serviceAgreementId && manualZoneId && zoneData.organization_id !== orgId) {
-        const { data: candidates, error: candidatesError } = await supabase.from('service_agreements')
-          .select('id, starts_on, ends_on').eq('provider_organization_id', orgId).eq('agreement_type', 'operational');
-        if (candidatesError) return json({ error: 'Working Zone agreements could not be checked' }, 503);
-        const captureDay = capturedDate.toISOString().slice(0, 10);
-        const eligibleIds = (candidates ?? []).filter((agreement) => (!agreement.starts_on || agreement.starts_on <= captureDay) && (!agreement.ends_on || agreement.ends_on >= captureDay)).map((agreement) => agreement.id);
-        if (!eligibleIds.length) return json({ error: 'No active agreement covers this operating organization and Working Zone', code: 'scan_agreement_context_mismatch' }, 403);
-        const [placeScopes, moduleScopes] = await Promise.all([
-          supabase.from('service_agreement_locations').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('zone_id', zoneId).eq('status', 'active'),
-          supabase.from('service_agreement_modules').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('module_key', moduleKey).eq('enabled', true)
-        ]);
-        if (placeScopes.error || moduleScopes.error) return json({ error: 'Working Zone agreement scope could not be checked' }, 503);
-        const matches = eligibleIds.filter((id) => (placeScopes.data ?? []).some((scope) => scope.service_agreement_id === id) && (moduleScopes.data ?? []).some((scope) => scope.service_agreement_id === id));
-        if (matches.length !== 1) return json({ error: matches.length ? 'Multiple active agreements cover this Working Zone. Keep the capture for operations to confirm its agreement.' : 'No active module agreement covers this Working Zone', code: 'scan_agreement_context_mismatch' }, 409);
-        serviceAgreementId = matches[0];
-      }
-      if (serviceAgreementId) {
-        const [agreementResult, agreementPlaceResult, agreementModuleResult] = await Promise.all([
-          supabase.from('service_agreements').select('provider_organization_id, agreement_type, starts_on, ends_on').eq('id', serviceAgreementId).maybeSingle(),
-          supabase.from('service_agreement_locations').select('id').eq('service_agreement_id', serviceAgreementId).eq('zone_id', zoneId).eq('status', 'active').maybeSingle(),
-          supabase.from('service_agreement_modules').select('id').eq('service_agreement_id', serviceAgreementId).eq('module_key', moduleKey).eq('enabled', true).maybeSingle()
-        ]);
-        if (agreementResult.error || agreementPlaceResult.error || agreementModuleResult.error) return json({ error: 'Service agreement scope could not be verified' }, 503);
-        const agreement = agreementResult.data;
-        const captureDay = capturedDate.toISOString().slice(0, 10);
-        if (!agreement || agreement.provider_organization_id !== orgId || agreement.agreement_type !== 'operational' || agreement.starts_on && agreement.starts_on > captureDay || agreement.ends_on && agreement.ends_on < captureDay || !agreementPlaceResult.data || !agreementModuleResult.data) return json({ error: 'The selected agreement is not active for this operating organization, module and Working Zone', code: 'scan_agreement_context_mismatch' }, 403);
-      }
-      if (manualZoneId) {
-        const { data: scheduleActive, error: scheduleError } = await supabase.rpc('_geofence_active_at', { p_schedule: zoneData.active_schedule, p_at: capturedDate.toISOString() });
-        if (scheduleError) return json({ error: 'Zone schedule could not be resolved', detail: scheduleError.message }, 503);
-        if (scheduleActive !== true) return json({ error: 'Selected Zone is not active at the capture time' }, 409);
-      }
       zoneName = zoneData.name;
       locationId = zoneData.location_id;
       if (requestedLocationId && requestedLocationId !== locationId) return json({ error: 'Selected Working Zone does not belong to the requested House location', code: 'scan_place_context_mismatch' }, 409);
@@ -1093,15 +1001,46 @@ serve(async (req)=>{
         if (!selectedSite) return json({ error: 'Selected Site and Working Zone do not share the requested House location', code: 'scan_place_context_mismatch' }, 409);
         siteId = selectedSite.id;
       }
+      if (!siteId && locationId) {
+        const { data: siblingSites, error: siblingSiteError } = await supabase.from('client_sites').select('id').eq('location_id', locationId).eq('active', true).order('created_at').limit(2);
+        if (siblingSiteError) return json({ error: 'Site context could not be verified' }, 503);
+        if (siblingSites?.length === 1) siteId = siblingSites[0].id;
+      }
       if (!clientOrgId && locationId) {
         const { data: house, error: houseError } = await supabase.from('locations').select('organization_id').eq('id', locationId).single();
         if (houseError || !house) return json({ error: 'Place ownership could not be confirmed' }, 503);
         clientOrgId = house.organization_id;
       }
-      if (!siteId && locationId) {
-        // Manual zone selection skipped the resolver: the site is the zone's sibling on the same house.
-        const { data: siblingSite } = await supabase.from('client_sites').select('id').eq('location_id', locationId).eq('active', true).order('created_at').limit(1).maybeSingle();
-        siteId = siblingSite?.id ?? null;
+      if (zoneData.organization_id !== orgId || serviceAgreementId) {
+        const { data: candidates, error: candidatesError } = await supabase.from('service_agreements')
+          .select('id, starts_on, ends_on').eq('provider_organization_id', orgId).eq('agreement_type', 'operational');
+        if (candidatesError) return json({ error: 'Working Zone agreements could not be checked' }, 503);
+        const captureDay = capturedDate.toISOString().slice(0, 10);
+        const eligibleIds = (candidates ?? []).filter((agreement) => (!agreement.starts_on || agreement.starts_on <= captureDay) && (!agreement.ends_on || agreement.ends_on >= captureDay)).map((agreement) => agreement.id);
+        if (!eligibleIds.length) return json({ error: 'No active agreement covers this operating organization and Working Zone', code: 'scan_agreement_context_mismatch' }, 403);
+        const [zoneScopes, siteScopes, moduleScopes] = await Promise.all([
+          supabase.from('service_agreement_locations').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('zone_id', zoneId).eq('status', 'active'),
+          siteId
+            ? supabase.from('service_agreement_locations').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('site_id', siteId).eq('status', 'active')
+            : Promise.resolve({ data: [], error: null }),
+          supabase.from('service_agreement_modules').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('module_key', moduleKey).eq('enabled', true)
+        ]);
+        if (zoneScopes.error || siteScopes.error || moduleScopes.error) return json({ error: 'Working Zone agreement scope could not be checked' }, 503);
+        const placeIds = new Set([...(zoneScopes.data ?? []), ...(siteScopes.data ?? [])].map((scope) => scope.service_agreement_id));
+        const moduleIds = new Set((moduleScopes.data ?? []).map((scope) => scope.service_agreement_id));
+        const matches = eligibleIds.filter((id) => placeIds.has(id) && moduleIds.has(id));
+        if (zoneData.organization_id !== orgId) {
+          if (matches.length !== 1) return json({ error: matches.length ? 'Multiple active agreements cover this Working Zone. Keep the capture for operations to confirm its agreement.' : 'No active module agreement covers this Working Zone', code: 'scan_agreement_context_mismatch' }, 409);
+          if (serviceAgreementId && serviceAgreementId !== matches[0]) return json({ error: 'The selected agreement does not uniquely cover this Working Zone', code: 'scan_agreement_context_mismatch' }, 409);
+          serviceAgreementId = matches[0];
+        } else if (serviceAgreementId && !matches.includes(serviceAgreementId)) {
+          return json({ error: 'The selected agreement is not active for this operating organization, module and Working Zone', code: 'scan_agreement_context_mismatch' }, 403);
+        }
+      }
+      if (manualZoneId) {
+        const { data: scheduleActive, error: scheduleError } = await supabase.rpc('_geofence_active_at', { p_schedule: zoneData.active_schedule, p_at: capturedDate.toISOString() });
+        if (scheduleError) return json({ error: 'Zone schedule could not be resolved', detail: scheduleError.message }, 503);
+        if (scheduleActive !== true) return json({ error: 'Selected Zone is not active at the capture time' }, 409);
       }
       const { data: closureData, error: closureError } = await supabase.rpc('is_zone_closed', {
         p_zone_id: zoneId,
@@ -1113,6 +1052,7 @@ serve(async (req)=>{
       }, 503);
       zoneClosure = closureData ?? null;
     }
+    if (requestReceipt?.owned) requestReceipt.fingerprint = requestFingerprint;
     const geofenceContext = {
       resolved_at: capturedDate.toISOString(),
       resolution_source: locationSource === 'device_gps' ? 'resolve_operational_context_authorized' : locationSource,
@@ -1133,6 +1073,67 @@ serve(async (req)=>{
       effective_rules: effectiveRules,
       closure: zoneClosure ?? { closed: false }
     };
+    if (!captureEvidence) {
+      const captureBytes = base64ToBytes(imageBase64);
+      if (!captureBytes.length || captureBytes.length > 20 * 1024 * 1024) return json({ error: 'Scan photo must be between 1 byte and 20 MB' }, 400);
+      const captureBase = `org/${orgId}/scan-captures/${clientRequestId || crypto.randomUUID()}/${crypto.randomUUID()}`;
+      const originalPath = `${captureBase}-original.jpg`;
+      const watermarkedPath = `${captureBase}-watermarked.jpg`;
+      const watermarkText = [
+        'Plate pending confirmation',
+        `Time ${capturedDate.toISOString()}`,
+        zoneName ? `Working Zone ${zoneName}` : expectedWorkingZoneId ? `Working Zone ${expectedWorkingZoneId}` : null,
+        `Officer ${officerId}`,
+        clientRequestId ? `Request ${clientRequestId}` : null
+      ].filter(Boolean).join(' | ');
+      const watermarked = await renderWatermarkedEvidence(captureBytes, watermarkText);
+      const rawSha256 = await sha256Hex(captureBytes);
+      const watermarkedSha256 = await sha256Hex(watermarked);
+      const { error: originalUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(originalPath, new Blob([captureBytes], { type: 'image/jpeg' }), { upsert: false, contentType: 'image/jpeg' });
+      if (originalUploadError) return json({ error: 'The original scan photo could not be saved. Keep the capture on this device and retry.', code: 'capture_storage_failed' }, 503);
+      const { error: watermarkedUploadError } = await supabase.storage.from(SCAN_BUCKET).upload(watermarkedPath, watermarked, { upsert: false, contentType: 'image/jpeg' });
+      if (watermarkedUploadError) return json({ error: 'The watermarked scan photo could not be saved. Keep the capture on this device and retry.', code: 'capture_storage_failed' }, 503);
+      const { data: captureId, error: captureRegistrationError } = await supabase.rpc('register_edge_court_photo', {
+        p_organization_id: orgId, p_module_key: moduleKey, p_storage_path: watermarkedPath,
+        p_captured_at: capturedDate.toISOString(),
+        p_metadata: {
+          original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256,
+          watermark_text: watermarkText, watermark_service: 'inference', request_id: clientRequestId || null,
+          captured_by_user_id: officerId, capture_state: 'awaiting_plate_confirmation', source: 'submitted_scan_image',
+          operating_organization_id: orgId, location_id: locationId ?? requestedLocationId, client_site_id: siteId ?? requestedSiteId,
+          service_agreement_id: serviceAgreementId, working_zone_id: zoneId ?? expectedWorkingZoneId ?? null,
+          location_source: locationSource, processed_observation_created: false
+        }
+      });
+      if (captureRegistrationError || !captureId) return json({ error: 'The photo upload completed but its evidence registration was not confirmed. Keep the capture for review.', code: 'capture_registration_failed' }, 503);
+      captureEvidence = { evidence_id: captureId, storage_path: watermarkedPath, original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256, watermark_text: watermarkText };
+    }
+    // The branch, place and agreement have been confirmed before image bytes leave the device.
+    let alprResult = null;
+    let inferResult = null;
+    let alprUsed = false;
+    if (imageBase64) {
+      [alprResult, inferResult] = await Promise.all([
+        manualPlateNumber ? Promise.resolve(null) : runAlpr(imageBase64),
+        runInference(imageBase64)
+      ]);
+      if (!manualPlateNumber && (!alprResult?.plate || alprResult.confidence < MIN_ALPR_CONFIDENCE)) {
+        const fallbackResult = await runPlateRecognizerAlpr(imageBase64);
+        if (fallbackResult?.plate && fallbackResult.confidence >= MIN_ALPR_CONFIDENCE) {
+          alprResult = fallbackResult;
+        }
+      }
+      alprUsed = alprResult !== null;
+    }
+    const plateNumber = manualPlateNumber || (alprResult?.confidence >= MIN_ALPR_CONFIDENCE ? normalizePlateNumber(alprResult?.plate ?? '') : '');
+    if (!plateNumber) return json({
+      error: 'Photo saved. A plate could not be confirmed. Confirm the plate manually, or capture a clearer image.',
+      code: 'plate_confirmation_required'
+    }, 400);
+    const plateConfidence = manualPlateNumber ? null : alprResult?.confidence ?? null;
+    const plateSource = manualPlateNumber ? 'manual' : 'alpr';
+    const alprProvider = manualPlateNumber ? null : alprResult?.provider ?? null;
+    console.log(`[scan] plate=${plateNumber} source=${plateSource} org=${orgId}`);
     // ── PARKING ENFORCEMENT BRANCH ──────────────────────────────────────────
     // When module_key === 'parking_enforcement', run the parking-specific
     // pipeline (steps 6P–12P) and early-return. The FC-specific steps 6–12

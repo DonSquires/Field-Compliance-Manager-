@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/pr
   .replace(/import \{ serve \} from '[^']+';/, '')
   .replace(/import \{ createClient as _createClient \} from '[^']+';/, '');
 
-function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'parking_enforcement', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true, recoveryAuditFailsOnce = false, foreignZone = false, agreementCandidates = [] } = {}) {
+function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'freedom_camping', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true, recoveryAuditFailsOnce = false, foreignZone = false, resolvedSiteId = null, agreementCandidates = [] } = {}) {
   let handler;
   let receipt = null;
   let registeredEvidence = null;
@@ -24,7 +24,7 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
     is() { return this; }
     order() { return this; }
     limit() { return this; }
-    in() { return this; }
+    in(key, value) { this.filters[key] = value; return this; }
     or() { return this; }
     single() { this.scalar = true; return this; }
     maybeSingle() { this.scalar = true; return this; }
@@ -52,7 +52,16 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
         result.data = this.scalar ? agreements[0] ?? null : agreements;
       }
       if (['service_agreement_modules', 'service_agreement_locations'].includes(this.table)) {
-        const scopes = agreementCandidates.filter((agreement) => this.table === 'service_agreement_modules' ? agreement.module_enabled !== false : agreement.place_active !== false).map((agreement) => ({ id: agreement.id, service_agreement_id: agreement.id }));
+        const scopes = agreementCandidates.filter((agreement) => {
+          if (!this.filters.service_agreement_id?.includes(agreement.id)) return false;
+          if (this.table === 'service_agreement_modules') {
+            return agreement.module_enabled !== false && (agreement.module_key ?? moduleKey) === this.filters.module_key;
+          }
+          if (agreement.place_active === false || (agreement.place_status ?? 'active') !== this.filters.status) return false;
+          if (this.filters.zone_id) return (Object.hasOwn(agreement, 'zone_id') ? agreement.zone_id : '55555555-5555-4555-8555-555555555555') === this.filters.zone_id;
+          if (this.filters.site_id) return agreement.site_id === this.filters.site_id;
+          return false;
+        }).map((agreement) => ({ id: agreement.id, service_agreement_id: agreement.id }));
         result.data = this.scalar ? scopes.find((scope) => scope.service_agreement_id === this.filters.service_agreement_id) ?? null : scopes;
       }
       if (this.table === 'canonical_vehicles') result.data = { rego_status: 'current', wof_status: 'current', cof_status: 'current', compliance_checked_at: new Date().toISOString() };
@@ -93,7 +102,7 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
         return { data: registeredEvidence.id, error: null };
       }
       if (name === 'has_location_access') return { data: true, error: null };
-      if (name === 'resolve_operational_context_authorized') return { data: [{ resolution_status: 'resolved', matched_zone_id: '55555555-5555-4555-8555-555555555555', site_id: null }], error: null };
+      if (name === 'resolve_operational_context_authorized') return { data: [{ resolution_status: 'resolved', matched_zone_id: '55555555-5555-4555-8555-555555555555', site_id: resolvedSiteId }], error: null };
       if (name === '_geofence_active_at') return { data: true, error: null };
       if (name === 'is_zone_closed') return { data: { closed: false }, error: null };
       if (name === 'classify_fc_overnight_window') return { data: [{ overnight_date: '2026-11-10', scan_window: 'evening' }], error: null };
@@ -220,6 +229,50 @@ test('ambiguous contracted Zone coverage never chooses an arbitrary first agreem
   assert.equal(result.status, 409);
   assert.equal(result.body.code, 'scan_agreement_context_mismatch');
   assert.equal(fixture.writes.length, 0);
+  assert.equal(fixture.uploads.length, 0);
+  assert.equal(fixture.rpcCalls.filter((call) => call.name === 'register_edge_court_photo').length, 0);
+});
+
+test('GPS-resolved foreign Zones require one matching active agreement before photo upload', async () => {
+  const base = { provider_organization_id: '22222222-2222-4222-8222-222222222222', agreement_type: 'operational', starts_on: null, ends_on: null };
+  const fixture = scanFixture({ moduleKey: 'freedom_camping', foreignZone: true, agreementCandidates: [{ ...base, id: 'one' }, { ...base, id: 'two' }] });
+  const result = await fixture.request({ plate_number: 'SYN123' });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'scan_agreement_context_mismatch');
+  assert.equal(result.body.capture_saved, false);
+  assert.equal(fixture.uploads.length, 0);
+  assert.equal(fixture.rpcCalls.filter((call) => call.name === 'register_edge_court_photo').length, 0);
+});
+
+test('Site-scoped agreement coverage authorizes its resolved Zone', async () => {
+  const base = { provider_organization_id: '22222222-2222-4222-8222-222222222222', agreement_type: 'operational', starts_on: null, ends_on: null };
+  const fixture = scanFixture({
+    moduleKey: 'freedom_camping',
+    foreignZone: true,
+    resolvedSiteId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    agreementCandidates: [{ ...base, id: 'site-agreement', zone_id: null, site_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }],
+  });
+  const result = await fixture.request({ plate_number: 'SYN123' });
+  assert.equal(result.status, 200);
+  assert.equal(fixture.writes.find((write) => write.table === 'observations' && write.action === 'insert').value.geofence_context.service_agreement_id, 'site-agreement');
+});
+
+test('stale agreement from a different Zone is rejected before upload', async () => {
+  const base = { provider_organization_id: '22222222-2222-4222-8222-222222222222', agreement_type: 'operational', starts_on: null, ends_on: null };
+  const fixture = scanFixture({
+    moduleKey: 'freedom_camping',
+    agreementCandidates: [{ ...base, id: 'stale-agreement', zone_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }],
+  });
+  const result = await fixture.request({
+    plate_number: 'SYN123',
+    zone_id: '55555555-5555-4555-8555-555555555555',
+    location_source: 'manual_zone',
+    service_agreement_id: 'stale-agreement',
+  });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.code, 'scan_agreement_context_mismatch');
+  assert.equal(result.body.capture_saved, false);
+  assert.equal(fixture.uploads.length, 0);
 });
 
 test('a failed recovery audit is required again on the next retry', async () => {
@@ -232,6 +285,40 @@ test('a failed recovery audit is required again on the next retry', async () => 
   assert.equal(fixture.writes.length, 0);
   assert.equal((await fixture.request(changes)).status, 200);
   assert.ok(fixture.receipt().response.recovery_from_fingerprint);
+});
+
+test('a failed Zone correction preserves the original fingerprint for a later valid recovery', async () => {
+  const originalZoneId = '55555555-5555-4555-8555-555555555555';
+  const fixture = scanFixture({
+    moduleKey: 'freedom_camping',
+    foreignZone: true,
+    agreementCandidates: [{
+      id: 'valid-agreement', provider_organization_id: '22222222-2222-4222-8222-222222222222',
+      agreement_type: 'operational', starts_on: null, ends_on: null, zone_id: originalZoneId,
+    }],
+  });
+  const first = await fixture.request();
+  assert.equal(first.status, 400);
+  const originalFingerprint = fixture.receipt().response.request_fingerprint;
+  const originalContext = fixture.originalContext();
+  const rejectedCorrection = await fixture.request({
+    plate_number: 'SYN123',
+    zone_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    location_source: 'manual_zone',
+    recovery_original_context: originalContext,
+  });
+  assert.equal(rejectedCorrection.status, 409);
+  assert.equal(rejectedCorrection.body.code, 'scan_agreement_context_mismatch');
+  assert.equal(fixture.receipt().response.request_fingerprint, originalFingerprint);
+  const validCorrection = await fixture.request({
+    plate_number: 'SYN123',
+    zone_id: originalZoneId,
+    location_source: 'manual_zone',
+    recovery_original_context: originalContext,
+  });
+  assert.equal(validCorrection.status, 200);
+  assert.equal(fixture.receipt().response.recovery_from_fingerprint, originalFingerprint);
+  assert.equal(fixture.uploads.length, 2);
 });
 
 test('legacy recovery cannot claim device GPS provenance from its old fingerprint', async () => {
@@ -296,7 +383,12 @@ test('a branch cannot use a scan module absent from its operating authorization'
 });
 
 test('a caller without an explicit organization uses its authorized default operating branch', async () => {
-  const fixture = scanFixture({ moduleKey: 'freedom_camping', includeHomeContext: false });
+  const fixture = scanFixture({
+    moduleKey: 'freedom_camping',
+    includeHomeContext: false,
+    foreignZone: true,
+    agreementCandidates: [{ id: 'default-branch-agreement', provider_organization_id: '33333333-3333-4333-8333-333333333333', agreement_type: 'operational', starts_on: null, ends_on: null }],
+  });
   const result = await fixture.request({ plate_number: 'SYN123' });
   assert.equal(result.status, 200);
   assert.equal(fixture.rpcCalls.find((call) => call.name === 'resolve_operational_context_authorized').args.p_org_id, '33333333-3333-4333-8333-333333333333');
@@ -307,12 +399,13 @@ test('coordinates without a declared source are not treated as device GPS', asyn
   const result = await fixture.request({ location_source: null });
   assert.equal(result.status, 400);
   assert.equal(result.body.code, 'location_confirmation_required');
-  assert.equal(result.body.capture_saved, true);
+  assert.equal(result.body.capture_saved, false);
+  assert.equal(fixture.uploads.length, 0);
   assert.equal(fixture.rpcCalls.some((call) => call.name === 'resolve_operational_context_authorized'), false);
 });
 
 test('Parking without a source-backed rule keeps the photo but never invents a chalk time', async () => {
-  const fixture = scanFixture({ parkingRule: false });
+  const fixture = scanFixture({ moduleKey: 'parking_enforcement', parkingRule: false });
   const result = await fixture.request({ module_key: 'parking_enforcement', plate_number: 'SYN123' });
   assert.equal(result.status, 422);
   assert.equal(result.body.code, 'parking_rule_review_required');
@@ -321,7 +414,7 @@ test('Parking without a source-backed rule keeps the photo but never invents a c
 });
 
 test('Parking evaluator errors keep the photo without a false clear verdict', async () => {
-  const fixture = scanFixture({ policyFails: true });
+  const fixture = scanFixture({ moduleKey: 'parking_enforcement', policyFails: true });
   const result = await fixture.request({ module_key: 'parking_enforcement', plate_number: 'SYN123' });
   assert.equal(result.status, 503);
   assert.equal(result.body.code, 'parking_policy_unavailable');
@@ -329,7 +422,7 @@ test('Parking evaluator errors keep the photo without a false clear verdict', as
 });
 
 test('Parking return evidence reuses the first chalk and withholds an unconfirmed overstay', async () => {
-  const fixture = scanFixture({ priorChalk: { id: '66666666-6666-4666-8666-666666666666', photo_url: 'first-photo.jpg', photo_urls: [], chalked_at: '2026-11-10T05:00:00Z' } });
+  const fixture = scanFixture({ moduleKey: 'parking_enforcement', priorChalk: { id: '66666666-6666-4666-8666-666666666666', photo_url: 'first-photo.jpg', photo_urls: [], chalked_at: '2026-11-10T05:00:00Z' } });
   const result = await fixture.request({ module_key: 'parking_enforcement', plate_number: 'SYN123' });
   assert.equal(result.status, 200);
   assert.equal(result.body.success, true);
@@ -360,7 +453,11 @@ test('Camping persists real observation evidence before one session write and po
 });
 
 test('device GPS resolves the module Working Zone within the selected operating organization', async () => {
-  const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+  const fixture = scanFixture({
+    moduleKey: 'freedom_camping',
+    foreignZone: true,
+    agreementCandidates: [{ id: 'branch-agreement', provider_organization_id: '33333333-3333-4333-8333-333333333333', agreement_type: 'operational', starts_on: null, ends_on: null }],
+  });
   const result = await fixture.request({
     plate_number: 'SYN123',
     operating_organization_id: '33333333-3333-4333-8333-333333333333',
