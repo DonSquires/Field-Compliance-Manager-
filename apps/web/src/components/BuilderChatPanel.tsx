@@ -212,7 +212,8 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const composerFocusHandled = useRef(false);
-  const threadEnd = useRef<HTMLDivElement | null>(null);
+  const composerFocusOrigin = useRef<Element | null | undefined>(undefined);
+  const threadRef = useRef<HTMLDivElement | null>(null);
   // Per-tab reservation tokens, so this tab can retry its own create but another tab cannot duplicate it.
   const reservations = useRef(new Map<string, string>());
   const reconcileRef = useRef<(() => Promise<void>) | null>(null);
@@ -224,13 +225,19 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
   useEffect(() => {
     if (!focusComposer) {
       composerFocusHandled.current = false;
+      composerFocusOrigin.current = undefined;
       return;
     }
+    if (composerFocusOrigin.current === undefined) composerFocusOrigin.current = document.activeElement;
     if (composerFocusHandled.current || access !== 'allowed' || !historyReady || busy) return;
 
     const composer = composerRef.current;
     if (!composer || composer.disabled) return;
 
+    if (document.activeElement !== composerFocusOrigin.current) {
+      composerFocusHandled.current = true;
+      return;
+    }
     composer.focus();
     composerFocusHandled.current = true;
   }, [access, busy, focusComposer, historyReady]);
@@ -309,7 +316,10 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
     return () => window.clearInterval(timer);
   }, [working]);
 
-  useEffect(() => { threadEnd.current?.scrollIntoView?.({ block: 'end' }); }, [messages.length]);
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (thread) thread.scrollTop = thread.scrollHeight;
+  }, [messages.length]);
 
   const newChat = async () => {
     if (busy) return;
@@ -400,7 +410,7 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
         <div className="bchat__state" role="status"><Lock size={18} /><p>Bob Builder chat is limited to the platform owner (grand master).</p></div>
       ) : (
         <>
-          <div className="bchat__thread" aria-live="polite" aria-busy={loading || working}>
+          <div ref={threadRef} className="bchat__thread" aria-live="polite" aria-busy={loading || working}>
             {(access === 'checking' || loading) && <div className="bchat__state" role="status"><Loader2 size={16} className="bchat-spin" /> Loading Builder chat…</div>}
             {!loading && access === 'allowed' && items.length === 0 && (
               <div className="bchat__empty">
@@ -425,7 +435,6 @@ export function BuilderChatPanel({ context, focusComposer = false, onClose, onCr
                     {item.message.role === 'owner' && item.message.status === 'failed' && <span className="bchat-msg__meta">Not answered</span>}
                   </div>)}
             {working && <div className="bchat__state" role="status"><Loader2 size={15} className="bchat-spin" /> Bob Builder is working…</div>}
-            <div ref={threadEnd} />
           </div>
           {error && <p className="bchat__error" role="alert">{error}</p>}
           <p className="bchat__context">{typeof context.job_title === 'string' && context.job_title ? <>Selected job (not transferred): <strong>{context.job_title}</strong></> : 'No job selected · cloud PM receives only your approved packet'}</p>

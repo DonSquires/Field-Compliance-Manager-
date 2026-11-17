@@ -32,6 +32,78 @@ test('Builder chat dock focuses its visible composer when opened', async ({ page
   await expect(composer).toBeInViewport();
 });
 
+test('opening a chat with history keeps the composer visible in the stacked layout', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Stacked layout is between mobile and wide desktop.');
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: 'thread-1' }] }));
+  await page.route('**/rest/v1/builder_chat_messages*', route => route.fulfill({ json: Array.from({ length: 10 }, (_, index) => ({
+    id: `message-${index}`, thread_id: 'thread-1', seq: index, role: 'bob', kind: 'message',
+    content: `History message ${index}`, payload: {}, status: 'done', created_at: '2026-10-26T12:00:00Z',
+  })) }));
+  await page.route('**/functions/v1/bob-builder-control-room', route => route.fulfill({ json: { projects: [], jobs: [], context: null } }));
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide Builder chat' }).click();
+  await page.getByRole('button', { name: 'Builder chat' }).click();
+
+  const composer = page.getByLabel('Message Bob Builder');
+  await expect(page.getByText('History message 9')).toBeVisible();
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeInViewport({ ratio: 1 });
+});
+
+test('loading chat history cannot take focus from the create-job dialog', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'The header toggle is a desktop interaction.');
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: 'thread-1' }] }));
+  let releaseHistory!: () => void;
+  const historyReady = new Promise<void>(resolve => { releaseHistory = resolve; });
+  await page.route('**/rest/v1/builder_chat_messages*', async route => {
+    await historyReady;
+    await route.fulfill({ json: [] });
+  });
+  await page.route('**/functions/v1/bob-builder-control-room', route => route.fulfill({ json: { projects: [], jobs: [], context: null } }));
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide Builder chat' }).click();
+  await page.getByRole('button', { name: 'Builder chat' }).click();
+  await page.getByRole('button', { name: 'New job', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Builder job' });
+  const title = dialog.getByLabel('Title', { exact: true });
+  await title.focus();
+  releaseHistory();
+  await expect(page.getByLabel('Message Bob Builder')).toBeEnabled();
+  await expect(title).toBeFocused();
+  await dialog.getByRole('button', { name: 'Close create job dialog' }).click();
+  await expect(page.getByRole('button', { name: 'New job', exact: true })).toBeFocused();
+});
+
+test('loading chat history cannot take focus from another control', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'The header toggle is a desktop interaction.');
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/rest/v1/builder_chat_threads*', route => route.fulfill({ json: [{ id: 'thread-1' }] }));
+  let releaseHistory!: () => void;
+  const historyReady = new Promise<void>(resolve => { releaseHistory = resolve; });
+  await page.route('**/rest/v1/builder_chat_messages*', async route => {
+    await historyReady;
+    await route.fulfill({ json: [] });
+  });
+  await page.route('**/functions/v1/bob-builder-control-room', route => route.fulfill({ json: { projects: [], jobs: [], context: null } }));
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide Builder chat' }).click();
+  await page.getByRole('button', { name: 'Builder chat' }).click();
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  await refresh.focus();
+  releaseHistory();
+  await expect(page.getByLabel('Message Bob Builder')).toBeEnabled();
+  await expect(refresh).toBeFocused();
+});
+
 test('incomplete acceptance stays a same-job correction gate after reload, never finished-code approval', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });
