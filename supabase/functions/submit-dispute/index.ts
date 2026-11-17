@@ -12,8 +12,9 @@
  * INSERT on the disputes table (which would let anyone set an arbitrary
  * organization_id), this function runs with the service role and resolves
  * organization_id + notice_id from the entered notice_number via
- * infringement_notices. Both are nullable when unresolved (the dispute is
- * still captured for admin triage).
+ * infringement_notices. The database currently requires both IDs and links
+ * notice_id to notices, so unresolved or differently identified notices may
+ * not be accepted until the notice-routing contract is reconciled.
  *
  * No JWT required (verify_jwt disabled for this function in config).
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -28,7 +29,7 @@ serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
   });
-  const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+  const json = (body: unknown, status = 200)=>new Response(JSON.stringify(body), {
       status,
       headers: {
         ...CORS,
@@ -47,7 +48,13 @@ serve(async (req)=>{
     let organizationId = null;
     let noticeId = null;
     if (b.notice_number) {
-      const { data: notice } = await admin.from('infringement_notices').select('id, organization_id').eq('notice_number', b.notice_number.trim()).maybeSingle();
+      const { data: notice, error: lookupErr } = await admin.from('infringement_notices').select('id, organization_id').eq('notice_number', b.notice_number.trim()).maybeSingle();
+      if (lookupErr) {
+        console.error('[submit-dispute] notice lookup error:', lookupErr.code ?? 'unknown');
+        return json({
+          error: 'Could not submit dispute'
+        }, 500);
+      }
       if (notice) {
         noticeId = notice.id;
         organizationId = notice.organization_id;
@@ -70,10 +77,9 @@ serve(async (req)=>{
       submitted_at: new Date().toISOString()
     });
     if (insErr) {
-      console.error('[submit-dispute] insert error:', insErr);
+      console.error('[submit-dispute] insert error:', insErr.code ?? 'unknown');
       return json({
-        error: 'Could not submit dispute',
-        details: insErr.message
+        error: 'Could not submit dispute'
       }, 500);
     }
     return json({
@@ -81,10 +87,9 @@ serve(async (req)=>{
       matched_notice: noticeId !== null
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Internal error';
+    console.error('[submit-dispute] unexpected error:', err instanceof Error ? err.name : 'unknown');
     return json({
-      error: 'Server error',
-      details: msg
+      error: 'Server error'
     }, 500);
   }
 });
