@@ -35,7 +35,7 @@ const { runBrowserSpecs, runVibeHumanTest } = require('./builder-vibe-human-test
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
-const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, closeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, worstPreflight } = require('./builder-production-human-test');
@@ -658,6 +658,7 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     backendFiles: boundedStringArray(body.backendFiles, 40),
     constraints: boundedStringArray(body.constraints, 100),
     requestedFromUsers: boundedStringArray(body.requestedFromUsers, 100),
+    startAfterProvider: typeof body.startAfterProvider === 'string' && /^[a-z0-9_-]{1,60}$/i.test(body.startAfterProvider) ? body.startAfterProvider : null,
     liveContext,
     repositoryContext: {
       ...(body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {}),
@@ -1547,8 +1548,10 @@ async function autopilotOnce() {
           const { error } = await builderSupabase.rpc('builder_autopilot_decide_approval_guarded', { _approval_id: approvalId, _comment: comment });
           if (error) throw new Error(`gate could not be cleared: ${error.message}`);
         },
-        run: async (jobId) => {
-          const started = await runBuilderJobBounded(jobId, { maxActions: 8 });
+        run: async (jobId, jobRoute) => {
+          const routeText = `${jobRoute?.description || ''}\n${jobRoute?.task_description || ''}`;
+          const startAfterProvider = routeText.match(/\[\[start_after_provider:([a-z0-9_-]{1,60})\]\]/i)?.[1] || null;
+          const started = await runBuilderJobBounded(jobId, { maxActions: 8, startAfterProvider });
           return started.skipped ? started : await started.execution;
         },
         publish: async ({ job, validatedPatchId, bodyFor, automerge }) => {
@@ -1557,14 +1560,23 @@ async function autopilotOnce() {
           if (fresh?.workspace_head_sha === fresh?.target_sha) await commitBuilderPatch(job.id, validatedPatchId);
           await publishBuilderBranch(job.id);
           const pullRequest = await openBuilderPullRequest(job.id, bodyFor, { draft: automerge?.ok !== true });
-          if (automerge?.ok && builderGitHost === 'github') {
-            const merge = await mergeGitHubPullRequest({ number: pullRequest.number, expectedHeadSha: pullRequest.head, githubToken, owner: githubOwner, repo: githubRepo });
-            return { pullRequestUrl: pullRequest.url, merged: true, mergeSha: merge.sha };
-          }
           return { pullRequestUrl: pullRequest.url, merged: false };
         },
+        ...(builderGitHost === 'github' ? { mergePullRequest: async (job, expectedHeadSha) => {
+          const number = Number(job.workspace_pull_request_url?.match(/\/pull\/(\d+)$/)?.[1] || 0);
+          if (number < 1) throw new Error('Builder pull request URL is invalid');
+          const merge = await mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, owner: githubOwner, repo: githubRepo });
+          return { merged: true, sha: merge.sha, merged_at: merge.merged_at };
+        } } : {}),
         verifyRelease: async (job) => verifyGitHubProductionRelease(job.autopilot_report?.merge_sha),
         ...(builderGitHost === 'github' ? { pullRequestState: async (job) => readGitHubPullRequestState({ url: job.workspace_pull_request_url, githubToken, owner: githubOwner, repo: githubRepo }) } : {}),
+        ...(builderGitHost === 'github' ? {
+          pullRequestEvidence: async (job) => {
+            const snapshot = await loadBuilderRuntimeSnapshot(builderSupabase, job.id);
+            return collectEvidence({ supabase: builderSupabase, snapshot });
+          },
+          closePullRequest: async (job, expectedHeadSha) => closeGitHubPullRequest({ url: job.workspace_pull_request_url, expectedHeadSha, githubToken, owner: githubOwner, repo: githubRepo }),
+        } : {}),
         closeDeclinedJob: async (job, details = {}) => {
           const { error } = await builderSupabase.rpc('builder_record_pull_request_closed', { _job_id: job.id, _pull_request_url: job.workspace_pull_request_url, _details: details });
           if (error) throw new Error(`declined Builder job ${job.id} could not be closed: ${error.message}`);
@@ -1663,6 +1675,30 @@ async function autopilotOnce() {
         // same requester, and is re-opened on current main once the repair has landed.
         createJob: async (input) => {
           const { sha } = builderRepositoryHead('main');
+          let taskDescription = String(input.taskDescription || '').slice(0, 12000);
+          let description = input.description ? String(input.description).slice(0, 500) : null;
+          if (input.rotateAuthor === true) {
+            const { data: steps, error: stepsError } = await builderSupabase.from('builder_job_steps')
+              .select('id').eq('job_id', input.parentJobId).in('step_id', ['frontend_implementation', 'backend_implementation']);
+            if (stepsError || !steps?.length) throw new Error('the previous author run could not be identified for provider rotation');
+            const { data: authors, error: authorsError } = await builderSupabase.from('builder_model_runs')
+              .select('provider').eq('job_id', input.parentJobId).in('step_id', steps.map((step) => step.id))
+              .order('created_at', { ascending: false }).limit(1);
+            const provider = authors?.[0]?.provider;
+            if (authorsError || typeof provider !== 'string' || !/^[a-z0-9_-]{1,60}$/i.test(provider)) {
+              throw new Error('the previous author provider is unavailable for safe rotation');
+            }
+            const marker = `[[start_after_provider:${provider}]]`;
+            description = description ? `${description.slice(0, Math.max(0, 500 - marker.length - 1))} ${marker}` : marker;
+            taskDescription = `${taskDescription.slice(0, 11400)}\nAuthor rotation is required: route this implementation after ${provider} to the next configured eligible provider/model.\n${marker}`;
+          }
+          if (input.parentJobId && String(input.description || '').includes('after GitHub CI/review feedback')) {
+            const { data: related, error: relatedError } = await builderSupabase.from('builder_jobs')
+              .select('id,description,task_description').eq('parent_job_id', input.parentJobId).limit(20);
+            if (relatedError) throw new Error('an existing CI correction could not be checked');
+            const existing = (related || []).find((candidate) => candidate.description === description || candidate.task_description === taskDescription);
+            if (existing) return existing;
+          }
           if (input.autopilotSource === 'main_monitor') {
             if (!input.sourceMainHealthSha || !Array.isArray(input.sourceMainHealthFiles) || !input.sourceMainHealthFiles.length) {
               throw new Error('main-health follow-up is missing its source SHA or failed-test allowlist');
@@ -1673,7 +1709,7 @@ async function autopilotOnce() {
               _health_sha: input.sourceMainHealthSha,
               _target_sha: sha,
               _title: String(input.title).slice(0, 200),
-              _task_description: String(input.taskDescription).slice(0, 12000),
+              _task_description: taskDescription,
               _failed_files: input.sourceMainHealthFiles,
               _parent_job_id: input.parentJobId ?? null,
             });
@@ -1684,9 +1720,9 @@ async function autopilotOnce() {
           const { data: created, error } = await builderSupabase.rpc('builder_create_autopilot_child', {
             _parent_job_id: input.parentJobId,
             _title: String(input.title).slice(0, 200),
-            _task_description: String(input.taskDescription).slice(0, 12000),
+            _task_description: taskDescription,
             _target_sha: sha,
-            _description: input.description ? String(input.description).slice(0, 500) : null,
+            _description: description,
             _frontend_required: input.frontendRequired === true,
             _backend_required: input.backendRequired === true,
             _code_review_mode: input.codeReviewMode || 'independent_ai',

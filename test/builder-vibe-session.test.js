@@ -1124,8 +1124,23 @@ test('Vibe opening packet grounds natural screen labels in tracked source and ou
   assert.match(packet, /export function OverviewApprovals/);
   assert.match(packet, /no Atlas client/);
   const startingPacket = JSON.parse(packet.match(/VERIFIED STARTING FILES[^\n]*\n([^\n]+)/)[1]);
+  assert.equal(startingPacket.build_map.target_sha, repo.sha);
+  assert.ok(startingPacket.build_map.tracked_files.includes('apps/web/src/OverviewApprovals.tsx'));
   assert.equal(startingPacket.outlines[0].entries.length, 16);
   assert.equal(startingPacket.outlines[0].truncated, true);
+
+  const mergedFile = 'apps/web/src/AfterMerge.tsx';
+  fs.writeFileSync(path.join(repo.dir, mergedFile), 'export const afterMerge = true;\n');
+  git(repo.dir, ['add', mergedFile]);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'post-merge main update']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+  const previousCalls = model.calls.length;
+  const secondOutcome = await vibe.processVibeMessage({ store, message: ownerMessage('inspect the new post-merge component'), deps });
+  assert.equal(store.state.session.base_sha, repo.sha, JSON.stringify({ secondOutcome, sync: store.state.rows.filter(row => row.payload?.stage === 'sync_main').map(row => row.content) }));
+  const nextPacket = model.calls[previousCalls].request.messages[1].content;
+  const nextStartingPacket = JSON.parse(nextPacket.match(/VERIFIED STARTING FILES[^\n]*\n([^\n]+)/)[1]);
+  assert.equal(nextStartingPacket.build_map.target_sha, repo.sha);
+  assert.ok(nextStartingPacket.build_map.tracked_files.includes(mergedFile));
 });
 
 test('repeated unchanged reads reuse results and a distinct local model can recover once', async () => {

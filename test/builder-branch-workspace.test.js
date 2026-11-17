@@ -413,14 +413,19 @@ test('Bob merges only the exact open, non-draft GitHub PR targeting main', async
   const requests = [];
   const fetchImpl = async (url, init) => {
     requests.push({ url, init });
-    if (init.method === 'GET') return { ok: true, json: async () => ({ state: 'open', draft: false, head: { sha }, base: { ref: 'main' } }) };
+    if (url.endsWith(`/commits/${sha}/check-runs?per_page=100`)) return { ok: true, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'success' }] }) };
+    if (url.endsWith(`/commits/${sha}/status?per_page=100`)) return { ok: true, json: async () => ({ state: 'success', statuses: [] }) };
+    if (url.endsWith('/reviews?per_page=100') || url.endsWith('/comments?per_page=100')) return { ok: true, json: async () => [] };
+    if (url.endsWith('/graphql')) return { ok: true, json: async () => ({ data: { node: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }) };
+    if (init.method === 'GET') return { ok: true, json: async () => ({ node_id: 'PR_test', state: 'open', draft: false, head: { sha }, base: { ref: 'main' } }) };
     return { ok: true, json: async () => ({ merged: true, sha: 'b'.repeat(40), merged_at: '2026-10-12T05:00:00Z' }) };
   };
   const merged = await mergeGitHubPullRequest({ number: 17, expectedHeadSha: sha, githubToken: 'token', owner: 'owner', repo: 'repo', fetchImpl });
   assert.deepEqual(merged, { number: 17, sha: 'b'.repeat(40), merged_at: '2026-10-12T05:00:00Z' });
   assert.equal(requests[0].url, 'https://api.github.com/repos/owner/repo/pulls/17');
-  assert.equal(requests[1].url, 'https://api.github.com/repos/owner/repo/pulls/17/merge');
-  assert.deepEqual(JSON.parse(requests[1].init.body), { sha, merge_method: 'squash' });
+  const mergeRequest = requests.find(request => request.url.endsWith('/pulls/17/merge'));
+  assert.ok(mergeRequest);
+  assert.deepEqual(JSON.parse(mergeRequest.init.body), { sha, merge_method: 'rebase' });
 });
 
 test('Bob refuses a changed-head, closed, or non-main GitHub pull request', async () => {
@@ -449,23 +454,30 @@ test('readGitHubPullRequestState reports merged, closed and open PRs only for th
   const pulls = {
     1: { merged: true, merged_at: '2026-10-25T02:40:00Z', merge_commit_sha: 'c'.repeat(40), merged_by: { login: 'DonSquires' }, head: { sha: 'd'.repeat(40) }, base: { ref: 'main' }, state: 'closed' },
     2: { merged: false, merged_at: null, state: 'closed', closed_at: '2026-10-24T00:00:00Z', head: { sha: 'e'.repeat(40) } },
-    3: { merged: false, state: 'open', draft: true, head: { sha: 'f'.repeat(40) } },
+    3: { node_id: 'PR_test', merged: false, state: 'open', draft: true, head: { sha: 'f'.repeat(40) }, base: { ref: 'main' } },
   };
   const requested = [];
   const fetchImpl = async (url) => {
     requested.push(url);
+    if (url.endsWith('/check-runs?per_page=100')) return { ok: true, status: 200, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'success' }] }) };
+    if (url.endsWith('/status?per_page=100')) return { ok: true, status: 200, json: async () => ({ state: 'success', statuses: [] }) };
+    if (url.endsWith('/reviews?per_page=100') || url.endsWith('/comments?per_page=100')) return { ok: true, status: 200, json: async () => [] };
+    if (url.endsWith('/graphql')) return { ok: true, status: 200, json: async () => ({ data: { node: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }) };
     const number = Number(url.split('/').pop());
     return { ok: Boolean(pulls[number]), status: pulls[number] ? 200 : 404, json: async () => pulls[number] || {} };
   };
   const read = (url) => readGitHubPullRequestState({ url, githubToken: 'token', owner: 'Owner', repo: 'repo', fetchImpl });
   assert.deepEqual(await read('https://github.com/owner/repo/pull/1'), { state: 'merged', mergeSha: 'c'.repeat(40), mergedAt: '2026-10-25T02:40:00Z', mergedBy: 'DonSquires', headSha: 'd'.repeat(40), baseRef: 'main' });
   assert.deepEqual(await read('https://github.com/owner/repo/pull/2'), { state: 'closed', closedAt: '2026-10-24T00:00:00Z', headSha: 'e'.repeat(40) });
-  assert.deepEqual(await read('https://github.com/owner/repo/pull/3'), { state: 'open', draft: true, headSha: 'f'.repeat(40) });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/3'), {
+    state: 'open', draft: true, headSha: 'f'.repeat(40), baseRef: 'main', checks: 'success',
+    checkRuns: [{ name: 'CI', status: 'completed', conclusion: 'success' }], feedback: [], feedbackComplete: true, error: null,
+  });
   assert.equal((await read('https://github.com/owner/repo/pull/4')).state, 'unknown');
   assert.equal((await read('https://github.com/someone/else/pull/1')).state, 'unknown');
   assert.equal((await readGitHubPullRequestState({ url: 'https://github.com/owner/repo/pull/1', githubToken: '', owner: 'owner', repo: 'repo', fetchImpl })).state, 'unknown');
-  assert.equal(requested.length, 4, 'foreign or unconfigured PRs are never fetched');
-  assert.ok(requested.every(url => url.startsWith('https://api.github.com/repos/Owner/repo/pulls/')));
+  assert.equal(requested.filter(url => /\/pulls\/[1-4]$/.test(url)).length, 4, 'foreign or unconfigured PRs are never fetched');
+  assert.ok(requested.every(url => url.startsWith('https://api.github.com/')));
 });
 
 test('publication may replace only remote branch tips this workspace produced itself', () => {

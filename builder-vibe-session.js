@@ -14,6 +14,7 @@ const { lookup } = require('node:dns/promises');
 const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
+const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
@@ -103,6 +104,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Routine command syntax does not need human approval. The full configured web unit suite is npm test --prefix apps/web; a targeted suite adds -- src/<path>.test.tsx. Do not change protected package scripts as a command workaround. If a rejected edit is genuinely unnecessary, use abandon_failed_edit {path, reason}; this records the decision without editing that file or waiving any verification failure. Never claim an abandoned edit was applied.',
     ATLAS_RESEARCH_GUIDANCE,
     SUPABASE_SKILL_GUIDANCE,
+    '- The commit-pinned whole-build map (build_map) is a navigation index of tracked files, packages, Edge Functions and schema entity names. Use it with Atlas to find owners and callers; it is not behavioral evidence. Confirm behavior in source/schema and use tests or authorized observations for execution claims.',
     '- Read before you write: search / outline / read_file the code you will change; check the live Atlas (atlas, live_count) before touching a shared table, RPC or edge function. Never invent tables, columns or behaviour; verify against supabase/schema.sql.',
     '- Diagnose navigation before/during/after: find the clicked control, its URL, the router, and the destination data/permission path. Routes live in apps/web/src/App.tsx, routing/RoleRouter.tsx and shells/AdminShell.tsx; do not guess a routes.tsx file. Vibe preview uses /vibe/<session-id>/, unlike production at /. Check basename and native links/popouts that might escape it.',
     '- Discover exact Atlas entity names with capability_map before querying terrain_edges; UI files are components such as pages/StaffProfilePage, not a guessed page named staff_profile. Empty Atlas results are not proof a feature is missing. Narrow broad/truncated searches to the relevant file or symbol; repeating the same search returns the same results.',
@@ -1002,6 +1004,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const discover = async task => {
     const startingFiles = resolveStartingFiles({ workspacePath, lane: 'fullstack', job: { task_description: task } });
     const atlas = await atlasMapForFiles({ supabase, workspacePath, lane: 'fullstack', startingFiles });
+    let repositoryBuildMap = { available: false, target_sha: baseSha, reason: 'the pinned repository checkout is unavailable' };
+    try {
+      if (baseSha && typeof deps.sourceDirFor === 'function') {
+        const sourceDir = deps.sourceDirFor(baseSha);
+        repositoryBuildMap = fitRepositoryContext({ build_map: collectRepositoryContext({ sourceDir, targetSha: baseSha, taskDescription: task }) }, task, 12000).build_map;
+      }
+    } catch (error) {
+      repositoryBuildMap = { available: false, target_sha: baseSha, reason: clip(error instanceof Error ? error.message : error, 240) };
+    }
     const sourceCandidates = [...startingFiles.confirmed, ...startingFiles.discovered.map(entry => entry.file), ...(atlas.suggested_files || [])];
     const outlines = sourceCandidates.filter(file => !/\.(?:css|json|md)$/.test(file)).slice(0, 3)
       .map(file => {
@@ -1013,7 +1024,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
           truncated: entries.length > 16 || entries.some(entry => String(entry).length > 200),
         };
       });
-    return { startingFiles, atlas, sourceCandidates, outlines };
+    return { startingFiles, atlas, repositoryBuildMap, sourceCandidates, outlines };
   };
   const discovery = await discover([message.content, ...history.filter(entry => entry.role === 'owner').slice(-3).map(entry => entry.content)].join('\n'));
   // Search terms from earlier owner messages would leak the withheld conversation, so the cloud map uses this message only.
@@ -1049,7 +1060,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const buildTask = (transcript, includeCurrentAttachmentContext = true, includeExecution = true, map = discovery, withheld = false) => [
     sessionHeading(withheld),
     branchSummary(withheld),
-    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...map.startingFiles, atlas: map.atlas, outlines: map.outlines })}`,
+    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...map.startingFiles, atlas: map.atlas, build_map: map.repositoryBuildMap, outlines: map.outlines })}`,
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (this is the first message)',
     executionSummary && includeExecution ? `RECENT EXECUTION LOGS (avoid repeating failed/refused steps):\n${executionSummary}` : null,
     `OWNER NOW SAYS:\n${message.content}`,
