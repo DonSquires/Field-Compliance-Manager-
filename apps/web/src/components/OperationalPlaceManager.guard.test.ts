@@ -24,7 +24,7 @@ describe('human operational controls', () => {
   });
 
   it('uses plain-language steps and explains temporary restrictions', () => {
-    for (const label of ['1. Site briefing', '2. Work areas', '3. Map boundaries', '4. Checkpoints', '5. Temporary restrictions', 'Save site briefing', 'Add work area', 'Schedule restriction', 'End restriction now']) {
+    for (const label of ['1. Briefing', '2. Work areas', '3. Map boundaries', '4. Checkpoints', '5. Temporary restrictions', 'Save briefing', 'Add work area', 'Schedule restriction', 'End restriction now']) {
       expect(manager).toContain(label);
     }
     expect(manager).toContain("supabase.rpc('get_location_patrol_checkpoints'");
@@ -35,6 +35,16 @@ describe('human operational controls', () => {
     expect(manager).toContain('storm, fire risk, event, maintenance, or temporary client instruction');
     expect(manager).toContain('Officers see the restriction when GPS matches this area.');
     expect(manager).not.toContain('Create closure');
+  });
+
+  it('briefs a zone exactly like a site, so no place needs a Site', () => {
+    expect(manager).not.toContain('No Site is linked to this place');
+    expect(manager).toContain('>1. Briefing<');
+    expect(manager).toContain("supabase.rpc('manage_crm_zone_briefing'");
+    expect(manager).toContain("supabase.rpc('manage_crm_site_profile'");
+    expect(manager).toContain('`Site · ${item.name}`');
+    expect(manager).toContain('`Area · ${item.name}`');
+    expect(manager).toContain('Add an area or a site to this place first.');
   });
 
   it('uses the visual house map rather than asking a person for GeoJSON', () => {

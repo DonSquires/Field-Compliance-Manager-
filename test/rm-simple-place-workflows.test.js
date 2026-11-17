@@ -35,7 +35,7 @@ const tableDDL = name => {
   const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS "public"."${name}" (`);
   assert.ok(start >= 0, name);
   return schema.slice(start, schema.indexOf('\n);', start) + 3)
-    .replace(/,\n    "is_verification_point" boolean[^\n]*/, '');
+    .replace(/\n    "is_verification_point" boolean[^\n]*/, '').replace(/,\n\);$/, '\n);');
 };
 const constraints = [...schema.matchAll(/ALTER TABLE ONLY "public"\."([^"]+)"\s+ADD CONSTRAINT[\s\S]*?;/g)]
   .filter(([sql, name]) => tables.includes(name) && !sql.includes('"verification_point_has_geometry"')

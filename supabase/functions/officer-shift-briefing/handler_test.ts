@@ -6,7 +6,7 @@ const otherStopId = '00000000-0000-4000-8000-000000000004';
 const assert = (condition: unknown, label: string) => { if (!condition) throw new Error(label); };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 
-async function exercise(options: { inactive?: boolean; unassigned?: boolean; unavailable?: boolean; wrongHash?: boolean; externalProvider?: boolean; vpsProvider?: boolean; missingAuth?: boolean; requestedStop?: string; wrongSafetyStop?: boolean; mismatchedContract?: boolean; missingRoster?: boolean; wrongRosterOfficer?: boolean; matchingStaffIdDifferentUser?: boolean; legacyStaff?: boolean; noContact?: boolean; contactNameOnly?: boolean; contactPhoneOnly?: boolean; withheldRequirement?: boolean; warning?: boolean } = {}) {
+async function exercise(options: { inactive?: boolean; unassigned?: boolean; unavailable?: boolean; wrongHash?: boolean; externalProvider?: boolean; vpsProvider?: boolean; missingAuth?: boolean; requestedStop?: string; wrongSafetyStop?: boolean; mismatchedContract?: boolean; missingRoster?: boolean; wrongRosterOfficer?: boolean; matchingStaffIdDifferentUser?: boolean; legacyStaff?: boolean; noContact?: boolean; contactNameOnly?: boolean; contactPhoneOnly?: boolean; withheldRequirement?: boolean; warning?: boolean; zonePost?: boolean; zoneVerification?: string } = {}) {
   const keys = { SUPABASE_URL: 'https://synthetic.supabase.invalid', SUPABASE_ANON_KEY: 'synthetic-public', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service', BOB_CONTROL_PLANE_URL: 'https://private-control.invalid', BOB_ADMIN_TOKEN: 'synthetic-control' };
   const previous = Object.fromEntries(Object.keys(keys).map((key) => [key, Deno.env.get(key)]));
   for (const [key, value] of Object.entries(keys)) Deno.env.set(key, value);
@@ -22,7 +22,9 @@ async function exercise(options: { inactive?: boolean; unassigned?: boolean; una
       shift: { id: shiftId, status: 'accepted', scheduled_start: '2026-11-06T00:00:00Z', scheduled_end: '2026-11-06T12:00:00Z', notes: 'Inspect the exit.', unexpected_private_field: 'Never disclose' },
       stop: { id: stopId, status: 'pending', sla_arrive_by: '2026-11-06T00:00:00Z', actual_arrived_at: null, actual_departed_at: null, officer_notes: null },
       module: { id: 'module', status: 'pending', started_at: null, completed_at: null },
-      place: { id: 'site', name: 'Synthetic Hospital', address: '1 Test Street', risk_level: 'high', site_brief: 'Ask Alex Example to check the exit.', access_instructions: 'Use reception.', hs_notes: null },
+      place: options.zonePost
+        ? { id: 'zone', name: 'Mudflat track', address: null, risk_level: 'high', site_brief: 'Gate at north end.', access_instructions: 'Use the north gate.', hs_notes: 'Tidal flats.' }
+        : { id: 'site', name: 'Synthetic Hospital', address: '1 Test Street', risk_level: 'high', site_brief: 'Ask Alex Example to check the exit.', access_instructions: 'Use reception.', hs_notes: null },
       attendance_evidence: { arrival: { reference: 'SG-12345678', action: 'arrive', occurred_at: '2026-11-06T00:00:00Z', unexpected_private_field: 'Never disclose' }, departure: null }, unexpected_private_field: 'Never disclose',
     });
     if (url.pathname.endsWith('/rpc/get_shift_safety_briefing')) return json({
@@ -31,9 +33,10 @@ async function exercise(options: { inactive?: boolean; unassigned?: boolean; una
       briefing_hash: 'briefing-version', acknowledgement_required: false, acknowledged: false, acknowledged_at: null, changed_since_acknowledgement: false, is_assigned_officer: true,
     });
     if (url.pathname.endsWith('/shift_stop_modules')) return json({ service_agreement_location_id: 'agreement-location', service_agreement_module_id: 'agreement-module' });
-    if (url.pathname.endsWith('/service_agreement_locations')) return json({ service_agreement_id: 'agreement', site_id: 'site', zone_id: null });
+    if (url.pathname.endsWith('/service_agreement_locations')) return json(options.zonePost ? { service_agreement_id: 'agreement', site_id: null, zone_id: 'zone' } : { service_agreement_id: 'agreement', site_id: 'site', zone_id: null });
     if (url.pathname.endsWith('/service_agreement_modules')) return json({ service_agreement_id: options.mismatchedContract ? 'other-agreement' : 'agreement' });
-    if (url.pathname.endsWith('/client_sites')) return json({ gps_lat: -41, gps_lng: 173, client_organization_id: 'different-place-owner', boundary_verification: 'unverified' });
+    if (url.pathname.endsWith('/location_zones')) return json({ center_point: { type: 'Point', coordinates: [174.78, -41.29] }, boundary_verification: options.zoneVerification ?? 'verified' });
+    if (url.pathname.endsWith('/client_sites')) return options.zonePost ? json({ code: 'PGRST116', message: 'No site row' }, 406) : json({ gps_lat: -41, gps_lng: 173, client_organization_id: 'different-place-owner', boundary_verification: 'unverified' });
     if (url.pathname.endsWith('/roster_slots')) return json(options.missingRoster ? null : { id: 'slot', work_unit_id: 'unit', staff_id: options.matchingStaffIdDifferentUser || options.legacyStaff ? '00000000-0000-4000-8000-000000000002' : 'staff', status: 'accepted', notes: 'Ask Alex Example to check reception.' });
     if (url.pathname.endsWith('/staff_profiles')) return json({ id: options.matchingStaffIdDifferentUser || options.legacyStaff ? '00000000-0000-4000-8000-000000000002' : 'staff', user_id: options.legacyStaff ? null : options.wrongRosterOfficer || options.matchingStaffIdDifferentUser ? 'different-officer' : '00000000-0000-4000-8000-000000000002' });
     if (url.pathname.endsWith('/roster_slot_contacts')) return json(options.noContact ? null : { contact_name: options.contactPhoneOnly ? null : 'Authorised Contact', contact_phone: options.contactNameOnly ? null : '+64000000000' });
@@ -167,4 +170,22 @@ Deno.test('stop safety is scoped to the selected assignment and reviewed private
   const wrongContext = await exercise({ requestedStop: stopId, wrongSafetyStop: true });
   assert(wrongContext.response.status === 502, 'A mismatched safety context must be refused');
   assert(!wrongContext.calls.some((call) => call.path.endsWith('/client_sites')), 'No privileged site read after a mismatched briefing');
+});
+
+Deno.test('zone post returns briefing without a site', async () => {
+  const result = await exercise({ zonePost: true });
+  assert(result.response.status === 200, 'A zone post must load without a Site');
+  assert(result.data.post.place.hs_notes === 'Tidal flats.', 'The zone health and safety notes reach the officer');
+  assert(result.data.post.place.access_instructions === 'Use the north gate.', 'The zone access instructions reach the officer');
+  assert(!result.calls.some((call) => call.path.endsWith('/client_sites')), 'No Site is read for a zone post');
+  const zoneRead = result.calls.find((call) => call.path.endsWith('/location_zones'));
+  assert(zoneRead?.query.includes('id=eq.zone'), 'The zone itself supplies position and verification');
+  assert(result.data.post.place.gps_lat === -41.29 && result.data.post.place.gps_lng === 174.78, 'A zone post carries the zone centre point');
+  assert(result.data.post.place.boundary_verified === true, 'A verified zone boundary is reported as verified');
+});
+
+Deno.test('an unverified zone boundary is not called verified', async () => {
+  const result = await exercise({ zonePost: true, zoneVerification: 'unverified' });
+  assert(result.response.status === 200, 'An unverified zone post still loads');
+  assert(result.data.post.place.gps_lat === -41.29 && result.data.post.place.boundary_verified === false, 'Mapped but unverified zone boundaries are not called verified');
 });

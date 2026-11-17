@@ -43,6 +43,13 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('required rows={4}');
   });
 
+  it('routes place service changes to their own decision RPC, never the generic approver', () => {
+    expect(source).toContain('<PlaceServiceChangeReview action={selected}');
+    expect(source).toContain('selected.action_type !== PLACE_SERVICE_CHANGE && (');
+    const approver = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-proposal-approver/index.ts'), 'utf8');
+    expect(approver).toContain("action.action_type === 'place_service_change'");
+  });
+
   it('opens Bob deep links on the exact governed action without widening authority', () => {
     expect(source).toContain('useSearchParams');
     expect(source).toContain("searchParams.get('actionId')");

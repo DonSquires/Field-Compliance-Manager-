@@ -28,6 +28,16 @@ beforeEach(() => {
     : { data: mocked.saveError ? null : { distance_km: 12.5, reference: 'travel-receipt' }, error: mocked.saveError ? { message: 'Travel changed; refresh before retrying.' } : null });
 });
 
+describe('loading contracted stops', () => {
+  it('shows a first-load failure with a way to retry instead of nothing', async () => {
+    mocked.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Network unavailable' } });
+    render(<OfficerPatrolStops shiftId="shift" />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Network unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh contracted stops' }));
+    expect(await screen.findByText('Record travel from First place')).toBeTruthy();
+  });
+});
+
 describe('actual between-place patrol travel', () => {
   it('saves measured kilometres against the actual previous departure and shows its receipt', async () => {
     render(<OfficerPatrolStops shiftId="shift" />);

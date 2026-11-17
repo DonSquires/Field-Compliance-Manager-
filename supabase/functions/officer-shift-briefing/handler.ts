@@ -76,9 +76,23 @@ export async function handleOfficerShiftBriefing(req: Request): Promise<Response
       || (location.site_id !== place.id && location.zone_id !== place.id)) {
       return reply({ error: 'Assigned contract and place could not be confirmed' }, 502);
     }
-    const { data: site, error: siteError } = await admin.from('client_sites')
-      .select('gps_lat,gps_lng,boundary_verification').eq('id', place.id).maybeSingle();
+    // A zone post has no Site row, so the zone supplies its own position and verification.
+    // PostgREST serialises the PostGIS center_point as GeoJSON. The governed boundary step writes it as the
+    // boundary centroid; a raw column read cannot compute a centroid fallback when it is null.
+    const zonePost = location.zone_id === place.id;
+    const { data: site, error: siteError } = zonePost
+      ? { data: null, error: null }
+      : await admin.from('client_sites').select('gps_lat,gps_lng,boundary_verification').eq('id', place.id).maybeSingle();
     if (siteError) return reply({ error: 'Assigned site details could not be confirmed' }, 502);
+    const { data: zone, error: zoneError } = zonePost
+      ? await admin.from('location_zones').select('center_point,boundary_verification').eq('id', place.id).maybeSingle()
+      : { data: null, error: null };
+    if (zoneError) return reply({ error: 'Assigned area details could not be confirmed' }, 502);
+    const centre = zone?.center_point?.coordinates;
+    const zoneCentre = Array.isArray(centre) && typeof centre[0] === 'number' && typeof centre[1] === 'number' ? centre : null;
+    const gpsLat = zonePost ? zoneCentre?.[1] ?? null : site?.gps_lat ?? null;
+    const gpsLng = zonePost ? zoneCentre?.[0] ?? null : site?.gps_lng ?? null;
+    const boundaryVerified = (zonePost ? zone?.boundary_verification : site?.boundary_verification) === 'verified';
     const { data: slot, error: slotError } = await admin.from('roster_slots')
       .select('id,work_unit_id,staff_id,status,notes').eq('linked_shift_id', shift.id).maybeSingle();
     if (slotError) return reply({ error: 'Shift requirements could not be confirmed' }, 502);
@@ -157,7 +171,7 @@ export async function handleOfficerShiftBriefing(req: Request): Promise<Response
         attendance_evidence: { arrival: safeReceipt(attendance.arrival), departure: safeReceipt(attendance.departure) },
         shift: { ...pick(shift, ['id', 'status', 'scheduled_start', 'scheduled_end']), notes: read('shift_notes') },
         stop: { ...pick(stop, ['id', 'status', 'sla_arrive_by', 'actual_arrived_at', 'actual_departed_at']), officer_notes: read('officer_notes') },
-        place: { ...pick(place, ['id', 'name', 'address', 'risk_level']), site_brief: read('site_brief'), access_instructions: read('access_instructions'), hs_notes: read('hs_notes'), gps_lat: site?.gps_lat ?? null, gps_lng: site?.gps_lng ?? null, boundary_verified: site?.boundary_verification === 'verified' },
+        place: { ...pick(place, ['id', 'name', 'address', 'risk_level']), site_brief: read('site_brief'), access_instructions: read('access_instructions'), hs_notes: read('hs_notes'), gps_lat: gpsLat, gps_lng: gpsLng, boundary_verified: boundaryVerified },
       },
       safety: safeSafety, privacy,
       requirements: privacy.status === 'checked' && requirements !== null ? requirements.map((_, i) => checked[`requirement_${i}`]) : null,

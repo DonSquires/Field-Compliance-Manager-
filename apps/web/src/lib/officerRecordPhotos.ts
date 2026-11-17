@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 export const OFFICER_PHOTO_BUCKET = 'officer-record-photos';
 export const OFFICER_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 export interface OfficerPhotoTarget {
-  kind: 'field_report' | 'incident';
+  kind: 'field_report' | 'incident' | 'patrol_stop';
   id: string;
   organizationId: string;
 }
