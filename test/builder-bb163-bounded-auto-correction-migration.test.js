@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
-const migrationPath = path.join(__dirname, '../supabase/migrations/20261113100000_builder_bb163_bounded_auto_correction.sql');
+const migrationPath = path.join(__dirname, '../supabase/migrations/20261117044704_builder_bb163_bounded_auto_correction.sql');
 
 function readMigration() {
   return fs.readFileSync(migrationPath, 'utf8');
