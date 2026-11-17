@@ -108,6 +108,9 @@ function syncReviewHold(sync, label, conflictHold) {
     'unresolved_source_place', 'one_resolved_place_required']) {
     if (reasons[reason] > 0) return { ...label, status: 'held', reason };
   }
+  if (['corrections', 'supersedes', 'dart_updates'].some(operation => sync?.requested?.[operation] > 0)) {
+    return { ...label, status: 'held', reason: 'source_correction_path_requires_review' };
+  }
   if (sync?.status === 'source_rows_held' || sync?.plan_summary?.hold > 0
     || Object.values(reasons).some(count => count > 0)
     || Object.values(sync?.summary?.hold_reasons ?? {}).some(count => count > 0)) {
