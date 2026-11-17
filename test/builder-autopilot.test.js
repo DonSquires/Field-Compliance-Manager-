@@ -118,6 +118,17 @@ test('routine monitor clears a bounded basic fix but holds redesign or broad pat
   assert.match(release.reasons[0], /more than eight files/);
 });
 
+test('routine monitors retain the dependency-manifest stop line', () => {
+  const job = { id: 'routine-job', autopilot_source: 'routine_monitor', repair_risk: 'routine', title: 'Fix a renderer error', task_description: 'Make the smallest repair.' };
+  const approval = { approval_type: 'release_approval' };
+  for (const file of ['apps/web/package.json', 'package.json', 'package-lock.json', 'requirements.txt', 'Cargo.toml']) {
+    const held = routineRepairHold({ job, approval, evidence: { changedFiles: [file] } });
+    assert.deepEqual(held.files, [file]);
+    assert.match(held.reasons[0], /dependency manifests/);
+  }
+  assert.equal(routineRepairHold({ job, approval, evidence: { changedFiles: ['apps/web/src/ReportPage.tsx'] } }), null);
+});
+
 test('routine monitor is not held by its own guardrail boilerplate, only by the proposed change', () => {
   const { routineRepairBrief } = require('../builder-routine-intake');
   const packet = {
@@ -189,7 +200,7 @@ test('main-monitor repairs may fix the web app but hold protected or out-of-app 
   }), null, 'an application-source fix without touching the guard is a valid self-heal');
   for (const outside of ['supabase/migrations/20261019000000_fix.sql', 'apps/web/package.json', 'apps/web/src/routing/AppRoutes.tsx', 'services/fcm-api/src/index.js']) {
     const hold = routineRepairHold({ job, approval, evidence: { changedFiles: ['apps/web/src/lib/example.ts', outside] } });
-    assert.match(hold.reasons[0], /outside the web app it may repair unattended/, outside);
+    assert.match(hold.reasons[0], outside.endsWith('package.json') ? /dependency manifests/ : /outside the web app it may repair unattended/, outside);
     assert.deepEqual(hold.files, [outside]);
   }
   assert.match(routineRepairHold({

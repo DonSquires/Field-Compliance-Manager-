@@ -6,6 +6,7 @@ const {
 } = require('./builder-model-adapter');
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 const { isAllowedBackendPath } = require('./builder-backend-engineer');
+const { isDependencyPath } = require('../../../builder-path-policy');
 
 const RELEASE_ENGINEER_PROMPT_VERSION = 'release-engineer-v2';
 
@@ -21,7 +22,7 @@ function deriveReleaseImpact(changedFiles) {
     schema,
     authentication: changedFiles.some(file => file.includes('/context/AuthContext.') || file.includes('/lib/supabase.') || /(?:auth|identity)/i.test(file)),
     authorization: changedFiles.some(file => file.includes('/routing/') || file.includes('/components/access/') || file.endsWith('/SafetyGate.tsx') || /(?:policy|rls|permission|role)/i.test(file)),
-    dependencies: changedFiles.some(file => /(?:package\.json|lock\.yaml|package-lock\.json|yarn\.lock)$/.test(file)),
+    dependencies: changedFiles.some(isDependencyPath),
     environment: changedFiles.some(file => /(?:^|\/)\.env(?:\.|$)/.test(file)),
     infrastructure: false
   };

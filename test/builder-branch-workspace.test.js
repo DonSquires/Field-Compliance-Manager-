@@ -237,8 +237,12 @@ test('a verified backend patch commits (the commit step enforces protected paths
     const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: backendPatch, message: 'Bob Builder: backend change' });
     assert.deepEqual(committed.changedFiles, ['services/api/verify.js']);
     assert.equal(git(repo.root, ['show', `${committed.commitSha}:services/api/verify.js`]), 'const RE = /^(yes|ok|go for it)$/i;');
-    const protectedPatch = ['diff --git a/package.json b/package.json', '--- a/package.json', '+++ b/package.json', '@@ -1 +1 @@', '-{"name":"fixture"}', '+{"name":"fixture","dependencies":{"left-pad":"*"}}', ''].join('\n');
-    assert.throws(() => commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: protectedPatch, message: 'x' }), /protected changes require separate approval: package.json/);
+    const dependencyPatch = ['diff --git a/package.json b/package.json', '--- a/package.json', '+++ b/package.json', '@@ -1 +1 @@', '-{"name":"fixture"}', '+{"name":"fixture","dependencies":{"left-pad":"*"}}', ''].join('\n');
+    const dependencyCommit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: dependencyPatch, message: 'Bob Builder: verified dependency change' });
+    assert.deepEqual(dependencyCommit.changedFiles, ['package.json']);
+    assert.deepEqual(JSON.parse(git(repo.root, ['show', `${dependencyCommit.commitSha}:package.json`])).dependencies, { 'left-pad': '*' });
+    const protectedPatch = ['diff --git a/vercel.json b/vercel.json', 'new file mode 100644', '--- /dev/null', '+++ b/vercel.json', '@@ -0,0 +1 @@', '+{}', ''].join('\n');
+    assert.throws(() => commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: protectedPatch, message: 'x' }), /protected changes require separate approval: vercel.json/);
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 

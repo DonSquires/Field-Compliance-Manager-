@@ -99,7 +99,7 @@ function reviewPatch({ patchText, manifest }) {
   if (frontendFiles.length > 0) {
     const frontendPatch = filterPatchByScope(patchText, file => file.startsWith('apps/web/'));
     try {
-      validatePatchText(frontendPatch);
+      validatePatchText(frontendPatch, { allowAgenticDependencies: true });
     } catch (error) {
       if (!String(error.message).includes('protected frontend changes require separate approval')) throw error;
     }

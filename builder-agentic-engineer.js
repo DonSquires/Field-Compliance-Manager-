@@ -8,8 +8,7 @@
  * hand a verified unified diff to the independent worker + reviewers. It runs
  * at maximum reasoning effort on the control plane (no edge timeout).
  *
- * Cage that stays: protected paths are refused (builder-path-policy), migrations
- * may only be added, no arbitrary binary or dependency changes, every tool call is logged
+ * Migrations may only be added, dependencies are installed inside isolated worktrees, every tool call is logged
  * into a build_logs artifact, and nothing here merges, deploys, or writes live
  * data — the output is a draft PR for a human.
  */
@@ -30,9 +29,10 @@ const { crossLaneNoChange, reopenedRequiredLane } = require('./builder-generatio
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 const { TEST_SOURCE, droppedPinnedTests, droppedTestsMessage, patchTouchedPaths } = require('./builder-test-preservation');
 const { createBrowserGate } = require('./builder-browser-gate');
+const { hostPath: workerHostPath } = require('./worker-executor');
 const { createKnowledgeTool } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'agentic-engineer-v22';
+const PROMPT_VERSION = 'agentic-engineer-v24';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 // Turns granted once per run when the pre-handoff compile gate refuses a finish near the end of the budget.
@@ -61,13 +61,56 @@ const RUN_ALLOWLIST = [
   /^node -e "require\('\.\/[A-Za-z0-9_./-]+'\)"$/,
   /^npm run (?:lint|build) --prefix apps\/web$/,
   /^npm (?:run )?test --prefix apps\/web(?: -- [A-Za-z0-9_./*=\- ]+)?$/,
+  /^(?:npm|npx|pnpm|yarn|bun|pip|pip3|uv|cargo|go|gem|bundle|composer|dotnet)\s+[A-Za-z0-9_@./:=*+,\[\]<>^~-]+(?:\s+[A-Za-z0-9_@./:=*+,\[\]<>^~-]+)*$/,
+  /^deno\s+[A-Za-z0-9_@./:=*+,\[\]<>^~-]+(?:\s+[A-Za-z0-9_@./:=*+,\[\]<>^~-]+)*$/,
+  /^npm run test:e2e --prefix apps\/web(?: -- [A-Za-z0-9_.\/*=\- ]+)?$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
-const RUN_FORMS = 'node --test test/<file>.test.js … | node --check <file> | npm test --prefix apps/web -- src/<path>.test.tsx (Vitest; paths relative to apps/web) | npm test --prefix apps/web (full configured Vitest suite) | npm run lint --prefix apps/web | npm run build --prefix apps/web | git status|diff|log|show|blame [args]';
-const RUN_REFUSED = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs.`;
-const RUN_REFUSED_BROWSER = `command not allowed; use exactly one of: ${RUN_FORMS}. No cd, npx, pipes or redirects; chain allowed commands with &&. apps/web/e2e/*.spec.ts are Playwright specs: run them with the browser_test tool, never through run.`;
+const RUN_FORMS = 'node --test test/<file>.test.js … | npm test/lint/build/e2e --prefix apps/web | npx playwright test|install <args> | isolated user-space package-manager commands | deno task | git status/diff/log/show/blame';
+const RUN_REFUSED = `command not allowed; use exactly one of: ${RUN_FORMS}. Commands run in the isolated worktree with credentials removed. No shell operators, redirects, sudo, host/global installs, or package publishing; chain allowed commands with &&.`;
+const RUN_REFUSED_BROWSER = `command not allowed; use exactly one of: ${RUN_FORMS}. Commands run in the isolated worktree with credentials removed. No shell operators, redirects, sudo, host/global installs, or package publishing; use npm run test:e2e or npx playwright for Playwright specs.`;
 const WEB_TEST_ARG = /^[A-Za-z0-9_./*=-]+$/;
 const WEB_TEST_COMMAND = /^npm (?:run )?test --prefix apps\/web(?: -- |$)/;
+const AGENTIC_PATH_OPTIONS = Object.freeze({ allowAgenticDependencies: true });
+const TOOLING_IMAGE = process.env.BOB_BUILDER_TOOLING_IMAGE || 'mcr.microsoft.com/playwright:v1.62.1-noble';
+const TOOL_COMMAND = /^(?:node|npm|npx|pnpm|yarn|bun|deno|python3?|pip3?|uv|cargo|go|gem|bundle|composer|dotnet|playwright)\b/i;
+
+function toolingContainerArgs({ workspacePath, toolHome, commandArgs, env = process.env, image = TOOLING_IMAGE }) {
+  const workspace = fs.realpathSync(workspacePath);
+  const workspaceStat = fs.statSync(workspace);
+  const gitMarker = path.join(workspace, '.git');
+  const gitCommonDir = path.resolve(workspace, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: workspace, encoding: 'utf8' }).trim());
+  const hostWorkspace = workerHostPath(workspace, env);
+  const hostGitCommonDir = workerHostPath(gitCommonDir, env);
+  const mounts = ['--mount', `type=bind,src=${hostWorkspace},dst=/workspace`];
+  if (fs.existsSync(gitMarker) && fs.statSync(gitMarker).isFile()) {
+    mounts.push('--mount', `type=bind,src=${workerHostPath(gitMarker, env)},dst=/workspace/.git,readonly`);
+    mounts.push('--mount', `type=bind,src=${hostGitCommonDir},dst=${gitCommonDir},readonly`);
+  } else {
+    mounts.push('--mount', `type=bind,src=${hostGitCommonDir},dst=/workspace/.git,readonly`);
+  }
+  const toolHomeRelative = path.relative(workspace, path.resolve(toolHome));
+  if (!toolHomeRelative || toolHomeRelative.startsWith('..') || path.isAbsolute(toolHomeRelative)) throw new Error('tool HOME must be inside the isolated worktree');
+  const home = path.posix.join('/workspace', toolHomeRelative.split(path.sep).join('/'));
+  const safeEnv = {
+    HOME: home, USERPROFILE: home,
+    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/workspace/node_modules/.bin:/workspace/apps/web/node_modules/.bin',
+    CI: '1', FORCE_COLOR: '0', NODE_ENV: 'test', NODE_OPTIONS: '--max-old-space-size=2048',
+    PLAYWRIGHT_BROWSERS_PATH: path.posix.join(home, '.cache/ms-playwright'),
+    VITE_SUPABASE_URL: 'http://127.0.0.1:54321', VITE_SUPABASE_ANON_KEY: 'playwright-anon-key', E2E_OFFLINE: '1',
+    NPM_CONFIG_USERCONFIG: '/dev/null', NPM_CONFIG_CACHE: path.posix.join(home, '.cache/npm'),
+    PIP_CONFIG_FILE: '/dev/null', PYTHONUSERBASE: path.posix.join(home, '.local'),
+    CARGO_HOME: path.posix.join(home, '.cargo'), GOPATH: path.posix.join(home, 'go'), GEM_HOME: path.posix.join(home, '.gem'),
+  };
+  return [
+    'run', '--rm', '--init', '--network=bridge', '--read-only', '--cap-drop=ALL',
+    '--security-opt=no-new-privileges:true', `--user=${workspaceStat.uid}:${workspaceStat.gid}`,
+    '--memory=4g', '--cpus=2', '--pids-limit=256', '--tmpfs=/tmp:rw,exec,nosuid,size=1024m,mode=1777',
+    ...mounts, '--workdir=/workspace', '--entrypoint=/usr/bin/env',
+    ...Object.entries(safeEnv).flatMap(([name, value]) => ['--env', `${name}=${value}`]),
+    image, ...commandArgs,
+  ];
+}
 
 function isWebTestPath(workspacePath, arg) {
   if (/^(?:\.\/)?apps\/web\//.test(arg)) return true;
@@ -76,7 +119,10 @@ function isWebTestPath(workspacePath, arg) {
 }
 
 function normalizeRunPart(part, inWeb, workspacePath) {
-  if (RUN_ALLOWLIST.some((pattern) => pattern.test(part))) return part;
+  const alreadyCanonicalWebTest = /^npm (?:run )?test --prefix apps\/web(?: -- [A-Za-z0-9_.\/*=\- ]+)?$/.test(part);
+  const needsCanonicalRunner = /^(?:npm (?:run )?(?:test|lint|build)(?:\s|$)|npx (?:vitest|tsc)\b|node --test\b)/.test(part);
+  if (RUN_ALLOWLIST.some((pattern) => pattern.test(part)
+    && (!needsCanonicalRunner || alreadyCanonicalWebTest))) return part;
   // node cannot syntax-check TypeScript; the web type check is the equivalent (job 34382d60 handed off a duplicate identifier).
   if (/^node --check (?:\.\/)?(?:apps\/web\/)?[A-Za-z0-9_./-]+\.(?:ts|tsx|mts|cts)$/.test(part)
     && (inWeb || /^node --check (?:\.\/)?apps\/web\//.test(part))) return 'npm run lint --prefix apps/web';
@@ -307,7 +353,7 @@ const ATLAS_RESEARCH_GUIDANCE = [
 
 const SUPABASE_SKILL_GUIDANCE = [
   'SUPABASE SKILLS: For any Supabase task, read .agents/skills/supabase/SKILL.md before investigating or editing. Before changing or diagnosing Postgres tables, columns, SQL, migrations, RLS, indexes, functions, triggers, or queries, also read .agents/skills/supabase-postgres-best-practices/SKILL.md and the relevant referenced rules.',
-  'These skills are technical references, not authority. AGENTS.md, the repository canon, credential boundaries, live schema and Atlas govern this product and override conflicting generic examples. Never expose secrets, make live database changes, bypass the managed release lane, widen access, or promote data based only on skill guidance; use the approved migration and verification paths.',
+  'These skills are technical references, not authority. AGENTS.md, the repository canon, credential boundaries, live schema and Atlas govern this product and override conflicting generic examples; managed-release rules take precedence. Never expose secrets, make live database changes, bypass the managed release lane, widen access, or promote data based only on skill guidance; use the approved migration and verification paths.',
 ].join('\n');
 
 function systemPrompt({ lane, limits, firewall = false, browser = false }) {
@@ -316,10 +362,10 @@ function systemPrompt({ lane, limits, firewall = false, browser = false }) {
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
-    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; full configured web unit suite "npm test --prefix apps/web"; web lint/types "npm run lint --prefix apps/web". A command-policy refusal is not a request for human approval: use a supported command, never edit protected package scripts to work around command syntax. Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit.',
+    '4. VERIFY: run the relevant tests with these exact commands: backend/root "node --test test/<file>.test.js"; web unit (Vitest) "npm test --prefix apps/web -- src/<path>.test.tsx"; full configured web unit suite "npm test --prefix apps/web"; web lint/types "npm run lint --prefix apps/web"; targeted Playwright "npm run test:e2e --prefix apps/web -- e2e/<spec>.spec.ts" or "npx playwright test <spec>". You may install missing dependencies/tools in this isolated worktree, then run a thorough unit, lint, build and relevant Playwright pass before handoff. A command-policy refusal is not a request for human approval: use a supported command, never edit test scripts merely to work around command syntax. Then node --check on changed JS files and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer. finish runs a compile gate on the final tree (npm run lint --prefix apps/web for apps/web TypeScript, node --check for changed JS) unless that exact check already passed after your last edit; its errors refuse the finish, so re-run the check after your last edit. CI is triggered by the reviewed PR; production deploy/migrations remain exclusively in the managed release lane after successful checks and merge.',
     '4a. TESTS ARE EVIDENCE: never delete, rename, weaken or replace an existing test, and never rewrite a whole test file with write_file — add new tests next to the existing ones with replace_in_file (the tools refuse edits that drop a pinned test). ' + (browser
-      ? 'apps/web/e2e/*.spec.ts are Playwright specs: run the ones your change targets with browser_test (offline fixtures, desktop Chromium, a few minutes) — never through run. finish runs the same browser gate and refuses failures your patch introduced; failures that also happen at the pinned commit are reported as pre-existing, not charged to you. Prefer a Vitest test under apps/web/src for logic you can test there. '
-      : 'apps/web/e2e/*.spec.ts are Playwright specs that only the independent verifier runs; prefer a Vitest test under apps/web/src that you can run yourself. ')
+      ? 'apps/web/e2e/*.spec.ts are Playwright specs, not Vitest: run targeted offline specs with browser_test, or install Playwright/Chromium in this isolated workspace and run npm run test:e2e --prefix apps/web -- e2e/<spec>.spec.ts. finish also runs the targeted browser gate and refuses failures your patch introduced; failures that also happen at the pinned commit are reported as pre-existing, not charged to you. Prefer a Vitest test under apps/web/src for pure logic and Playwright for browser behavior. '
+      : 'apps/web/e2e/*.spec.ts are Playwright specs, not Vitest; install Playwright/Chromium in the isolated workspace and run npm run test:e2e --prefix apps/web -- e2e/<spec>.spec.ts, or use the independent offline browser verifier. Prefer a Vitest test under apps/web/src for pure logic. ')
       + 'Before adding a Playwright spec, inspect apps/web/e2e/fixtures.ts and a passing authenticated spec, reuse their setup/navigation, and use only selectors (roles, labels, text, data-testid) that exist in the component source you read — never invent a data-testid or use a bare unauthenticated page for a protected route.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen in this run. After the pull request merges, the release lane applies new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas; report those only from their receipts.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
@@ -330,8 +376,8 @@ function systemPrompt({ lane, limits, firewall = false, browser = false }) {
     SUPABASE_SKILL_GUIDANCE,
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
-    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. If the sibling lane already delivered the change and your lane has no remaining work, set no_change_file to the exact unprotected sibling-lane source file that proves this; no path means no lane skip. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
-    'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
+  'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it. If an ordinary unprotected file belongs to the sibling implementation lane, also set no_change_lane:"frontend" or "backend" and no_change_file to its exact repository path to route there. If the sibling lane already delivered the change and your lane has no remaining work, set no_change_file to the exact unprotected sibling-lane source file that proves this; no path means no lane skip. Do not set no_change_lane for protected paths, unsafe tasks, missing evidence or exhausted budgets. Do not make cosmetic edits to satisfy this lane. Never edit builder-path-policy.js or any guard to get around it.',
+    'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles, Compose files and .dockerignore, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Dependency manifests are editable only in owner-requested chat authoring, never routine/main monitors. Package managers run in a no-socket isolated container with a read-only root and only the worktree mounted writable. Docker and local Supabase stack commands are disabled until per-worktree daemons/projects are available. Never use sudo, host/global installs, registry login/token commands, package publishing, container run/exec, image push, or direct production deploy. CI runs through PR checks; migrations and production deployment only run in the managed lane after successful checks/merge. Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
     '- list_dir {path}                        list a directory (node_modules/.git skipped)',
@@ -346,7 +392,7 @@ function systemPrompt({ lane, limits, firewall = false, browser = false }) {
     '- apply_patch {diff}                     apply a git unified diff or a "*** Begin Patch"/"*** Update File: <path>" envelope; use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
-    `- run {command}                          allowed exactly: node --test test/<file>.test.js, node --check <file>, npm test --prefix apps/web (full configured unit suite) or npm test --prefix apps/web -- src/<path>.test.tsx, npm run lint --prefix apps/web, npm run build --prefix apps/web, git status/diff/log/show/blame (no cd/npx/pipes) (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
+    `- run {command}                          allowed: node tests/checks; npm test/lint/build/e2e; npx playwright; isolated user-space package installs; deno task; git read-only commands (timeout ${Math.round(limits.runTimeoutMs / 60000)} min). Tool/package processes run in a no-socket container; Docker and local Supabase stack commands are refused. Installs receive no credentials. sudo, host/global installs, registry login, publish, direct workflow dispatch and direct production deploy are refused. CI runs on the PR; migrations/production deploy remain in the managed lane after checks and merge.`,
     ...(browser ? ['- browser_test {reason}                  run the Playwright specs your current change targets (the verifier\'s targeted set: specs you changed plus specs naming the changed pages/components) in the offline browser worker; returns failures introduced by your patch, failures that also fail at the pinned commit, or "unavailable" when the worker gave no verdict. Takes minutes and is limited per run: edit first, then run it once the change is complete.'] : []),
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
@@ -673,7 +719,8 @@ function applyEnvelopeUpdate(content, lines, file) {
   return { content: source.join('\n') };
 }
 
-function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true, browserTest = null, remainingMs = () => Infinity }) {
+function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines, includeUntracked = true, browserTest = null, allowAgenticDependencies = false, remainingMs = () => Infinity }) {
+  const pathPolicyOptions = allowAgenticDependencies ? AGENTIC_PATH_OPTIONS : undefined;
   const generatedBaselines = new Map();
   const readFiles = new Set();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
@@ -692,28 +739,91 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   };
   const run = (command) => {
     const text = String(command ?? '').trim();
+    const stackWrapper = /^(?:npm\s+(?:exec|x)|pnpm\s+(?:exec|dlx)|yarn\s+dlx)\b/i.test(text)
+      || /^(?:npx|bunx)\b/i.test(text);
+    if (/^(?:docker|supabase)\b/i.test(text) || (stackWrapper && /(?:^|\s)(?:docker|supabase)(?=\s|$)/i.test(text))) {
+      return { error: 'Docker and local Supabase stack commands are disabled until per-worktree daemons/projects are available; use offline fixture tests or the managed worker instead' };
+    }
     if (/^npm (?:run test|test) --prefix apps\/web -- /.test(text) && /(?:^|[\s/])e2e\//.test(text)) {
       return { error: `Wrong test runner: e2e/ specs use Playwright, not Vitest. ${browserTest && lane === 'frontend' ? 'Use the browser_test tool.' : 'Use human_test in Vibe or the browser verification worker.'} Do not rewrite Playwright imports or assertions to make Vitest load them.` };
     }
-    if (/^npm (?:i|install)\b/.test(text)) {
-      return { error: 'command not allowed in this lane: dependency installation is blocked; use the allowlisted npm run/npm test commands and report missing tooling as a workspace issue' };
+    if (/^(?:npm|pnpm|yarn|bun)\s+(?:publish|login|logout|unpublish|token|owner|access)\b/i.test(text)
+      || /^(?:npm|pnpm|yarn|bun)\s+run\s+[^ ]*(?:publish|deploy|release)[^ ]*/i.test(text)) return { error: 'package publishing, registry credential management and direct deployment are reserved for the protected release lane' };
+    if (/^(?:npx\s+)?vercel\s+deploy\b/i.test(text)
+      || /^(?:npx\s+)?supabase\s+(?:db\s+push|functions\s+deploy|secrets\s+set|link|migration\s+repair)\b/i.test(text)
+      || /^(?:npx\s+)?supabase\s+(?:db\s+reset|migration\s+up)\b/i.test(text) && !/\s--local(?:\s|$)/.test(text)
+      || /^gh\s+workflow\s+run\b/i.test(text)) return { error: 'direct deployment, remote database operations, and manual CI dispatch are reserved for the protected PR/release workflows; local Supabase operations may use --local' };
+    if (/^(?:npx\s+)?playwright\s+install(?:-deps)?\b/i.test(text) && /--with-deps|install-deps/i.test(text)) return { error: 'Playwright browser binaries may be installed in the isolated cache, but operating-system browser dependencies must come from the managed worker image' };
+    if (/^docker\b/i.test(text) && (/\b(?:run|exec|push|pull|rm|prune|system)\b/i.test(text)
+      || /(?:--push|--secret|--ssh|--privileged|--network(?:=|\s+)host|--volume|\s-v\s|docker\.sock)/i.test(text))) {
+      return { error: 'only local Docker image builds and quiet Compose validation are available; container execution, host mounts, secrets, registry push and daemon management stay protected' };
     }
+    if (/^docker\s+compose\b/i.test(text) && /\bup\b/i.test(text)
+      && (!/(?:--abort-on-container-exit|--exit-code-from\s+[A-Za-z0-9_.-]+)/.test(text) || /(?:^|\s)(?:-d|--detach)(?:\s|$)/.test(text))) {
+      return { error: 'Compose smoke runs must be attached and terminate on a test service exit; detached/long-running stacks are unavailable to Builder' };
+    }
+    if (/^docker\s+compose\b/i.test(text) && /(?:^|\s)(?:-p|--project-name|--env-file)(?:\s|=)/.test(text)) return { error: 'Compose project/environment overrides are managed by the isolated runner' };
+    if (/^(?:npm|pnpm|yarn|bun|pip|pip3|uv|cargo|gem|bundle)\s+.*(?:^|\s)(?:-g|--global|--with-deps|--system|--break-system-packages)(?:\s|$)/i.test(text)
+      || /^(?:npm|pnpm|yarn|bun)\s+.*--location=global(?:\s|$)/i.test(text)
+      || /^(?:npm|pnpm|yarn|bun)\s+.*--prefix(?:=|\s+)(?:\/usr|\/opt|\/root|\/home)(?:\/|\s|$)/i.test(text)) return { error: 'host/global package installs are not available; install tools in the isolated workspace' };
     if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: browserTest && lane === 'frontend' ? RUN_REFUSED_BROWSER : RUN_REFUSED };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     const fingerprint = worktreeFingerprint();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
     // The child never sees the control plane's own secrets or port.
-    const { NODE_TEST_CONTEXT: _testContext, NODE_OPTIONS: _nodeOptions, PORT: _port, BOB_ADMIN_TOKEN: _admin, BOB_RUNNER_TOKEN: _runner, BOB_MODEL_GATEWAY_TOKEN: _gw, SUPABASE_SERVICE_ROLE_KEY: _srk, OPENAI_API_KEY: _oai, GITEA_TOKEN: _gitea, GITHUB_TOKEN: _gh, ...childEnv } = process.env;
+    const safeEnvironmentNames = new Set(['PATH', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'WINDIR']);
+    const childEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => safeEnvironmentNames.has(name)));
+    const webTest = WEB_TEST_COMMAND.test(text);
+    const webTypecheck = /^npm run (?:lint|build) --prefix apps\/web$/.test(text);
+    const toolHome = path.join(os.tmpdir(), 'bob-builder-tool-home', crypto.createHash('sha256').update(workspacePath).digest('hex').slice(0, 20));
+    const toolBinPaths = [path.join(toolHome, '.local', 'bin'), path.join(toolHome, '.cargo', 'bin'), path.join(toolHome, 'go', 'bin'), path.join(toolHome, '.gem', 'bin'), path.join(toolHome, '.dotnet')];
+    fs.mkdirSync(path.join(toolHome, '.cache', 'ms-playwright'), { recursive: true, mode: 0o700 });
+    for (const directory of toolBinPaths) fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.join(toolHome, '.docker'), { recursive: true, mode: 0o700 });
+    fs.chmodSync(toolHome, 0o700);
+    const isolatedEnvironment = {
+      ...childEnv,
+      PATH: [...toolBinPaths, childEnv.PATH].filter(Boolean).join(path.delimiter),
+      HOME: toolHome,
+      USERPROFILE: toolHome,
+      DOTNET_ROOT: path.join(toolHome, '.dotnet'),
+      PLAYWRIGHT_BROWSERS_PATH: path.join(toolHome, '.cache', 'ms-playwright'),
+      DOCKER_CONFIG: path.join(toolHome, '.docker'),
+      COMPOSE_DISABLE_ENV_FILE: '1',
+      COMPOSE_PROJECT_NAME: `bob-${crypto.createHash('sha256').update(workspacePath).digest('hex').slice(0, 16)}`,
+      npm_config_userconfig: '/dev/null',
+      NPM_CONFIG_USERCONFIG: '/dev/null',
+      npm_config_cache: path.join(toolHome, '.cache', 'npm'),
+      NPM_CONFIG_CACHE: path.join(toolHome, '.cache', 'npm'),
+      PIP_CONFIG_FILE: '/dev/null',
+      PIP_USER: '1',
+      PYTHONUSERBASE: path.join(toolHome, '.local'),
+      CARGO_HOME: path.join(toolHome, '.cargo'),
+      GOPATH: path.join(toolHome, 'go'),
+      GEM_HOME: path.join(toolHome, '.gem'),
+      ...(webTest ? { NODE_ENV: 'test' } : {}),
+      ...(webTypecheck ? { NODE_OPTIONS: '--max-old-space-size=2048' } : {}),
+      CI: '1',
+      FORCE_COLOR: '0',
+    };
+    let childArgv = argv;
+    const isolatedToolCommand = TOOL_COMMAND.test(text);
+    if (isolatedToolCommand) {
+      const toolHome = path.join(workspacePath, 'node_modules', '.cache', 'bob-tooling');
+      fs.mkdirSync(toolHome, { recursive: true, mode: 0o700 });
+      try {
+        childArgv = ['docker', ...toolingContainerArgs({ workspacePath, toolHome, commandArgs: argv, env: process.env })];
+      } catch (error) {
+        return { error: `isolated tool runner unavailable: ${clip(redactGitError(error.message), 500)}` };
+      }
+    }
     // Asynchronous: a full test suite can run for a minute, and a blocked event loop would stall
     // the control plane's own HTTP server (health, model gateway) for that long.
     return new Promise((resolve) => {
-      const webTest = WEB_TEST_COMMAND.test(text);
-      // `tsc --noEmit` on apps/web needs more than V8's ~1 GB container default (frontend-worker NODE_OPTIONS).
-      const webTypecheck = /^npm run (?:lint|build) --prefix apps\/web$/.test(text);
-      const child = spawn(argv[0], argv.slice(1), {
+      const child = spawn(childArgv[0], childArgv.slice(1), {
         cwd: workspacePath,
-        env: { ...childEnv, ...(webTest ? { NODE_ENV: 'test' } : {}), ...(webTypecheck ? { NODE_OPTIONS: '--max-old-space-size=2048' } : {}), CI: '1', FORCE_COLOR: '0' },
+        env: isolatedEnvironment,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
@@ -748,8 +858,8 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   };
 
   const policyCheck = (file) => {
-    if (isProtectedPath(file)) return `${file}: ${protectedReason(file)}`;
-    if (!laneAllows(lane, file)) return `${file}: outside the ${lane} lane`;
+    if (isProtectedPath(file, pathPolicyOptions)) return `${file}: ${protectedReason(file)}`;
+    if (!laneAllows(lane, file, pathPolicyOptions)) return `${file}: outside the ${lane} lane`;
     if (baselineInfo(file)) {
       const receipt = generatedBaselines.get(file);
       let evidence;
@@ -1244,7 +1354,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
 function requiredChangedFilesFromTask(taskDescription, lane) {
   const line = String(taskDescription ?? '').match(/required source scope:\s*([^\n]+)/i)?.[1] ?? '';
   const paths = [...new Set(line.match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [])];
-  return paths.filter((file) => laneAllows(lane, file)).sort();
+  return paths.filter((file) => laneAllows(lane, file, AGENTIC_PATH_OPTIONS)).sort();
 }
 
 const STARTING_FILE_LIMIT = 8;
@@ -1278,7 +1388,7 @@ function resolveStartingFiles({ workspacePath, lane, hints = [], specification =
     ...(Array.isArray(specification?.delivery_requirements) ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope : []) : []),
   ].map((file) => String(file).trim()).filter(Boolean);
   const tracked = filesAtPin(workspacePath, named);
-  const confirmed = [...new Set(named.filter((file) => tracked.has(file) && laneAllows(lane, file)))].slice(0, STARTING_FILE_LIMIT);
+  const confirmed = [...new Set(named.filter((file) => tracked.has(file) && laneAllows(lane, file, AGENTIC_PATH_OPTIONS)))].slice(0, STARTING_FILE_LIMIT);
   const namedButMissing = [...new Set(named.filter((file) => !tracked.has(file)))].slice(0, STARTING_FILE_LIMIT);
   let discovered = [];
   const terms = searchTermsFromTask(job);
@@ -1289,7 +1399,7 @@ function resolveStartingFiles({ workspacePath, lane, hints = [], specification =
       try { matches = git(workspacePath, ['grep', '-l', '-i', '-F', '-e', term, '--', 'apps/web/src', 'supabase/functions', 'services', '*.js']).split('\n').filter(Boolean); } catch { matches = []; }
       if (matches.length > 60) continue;
       for (const file of matches) {
-        if (!laneAllows(lane, file) || confirmed.includes(file)) continue;
+        if (!laneAllows(lane, file, AGENTIC_PATH_OPTIONS) || confirmed.includes(file)) continue;
         const entry = scores.get(file) ?? { file, terms: [] };
         entry.terms.push(term);
         scores.set(file, entry);
@@ -1329,7 +1439,7 @@ async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }
       if (result.error) throw new Error(result.error.message);
       byTerm.push(...(result.data ?? []));
     }
-    const candidateFiles = [...new Set(byTerm.map((edge) => edge.source_file).filter((file) => file && !known.includes(file) && laneAllows(lane, file)))];
+    const candidateFiles = [...new Set(byTerm.map((edge) => edge.source_file).filter((file) => file && !known.includes(file) && laneAllows(lane, file, AGENTIC_PATH_OPTIONS)))];
     const tracked = filesAtPin(workspacePath, candidateFiles);
     const suggested = candidateFiles.filter((file) => tracked.has(file)).slice(0, 6);
     const edge = (row) => `${row.source_name} ${row.edge_kind} ${row.target_type}:${row.target_name}`;
@@ -1349,16 +1459,16 @@ async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }
 // the shared map component). An evidence-backed amendment lets the author fix it there instead of making
 // unrelated page edits to satisfy the gate. Protected and cross-lane files never qualify, and every
 // amendment travels in the proposal for code review, acceptance reconciliation and the release report.
-function scopeAmendmentsFor(entry, { files, sourceScope, lane, proof }) {
+function scopeAmendmentsFor(entry, { files, sourceScope, lane, proof, allowAgenticDependencies = false }) {
   const raw = Array.isArray(entry?.scope_amendment) ? entry.scope_amendment : entry?.scope_amendment ? [entry.scope_amendment] : [];
   return raw.slice(0, 5)
     .map((item) => ({ file: normalizeRepoPath(String(item?.file || '').trim()) || '', reason: String(item?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 600) }))
     .filter((item) => item.file && files.includes(item.file) && !sourceScope.includes(item.file)
-      && (!lane || laneFor(item.file) === lane) && !isProtectedPath(item.file)
+      && (!lane || laneFor(item.file) === lane) && !isProtectedPath(item.file, { allowAgenticDependencies })
       && item.reason.length >= 30 && proof.includes(item.file));
 }
 
-function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null, lane = null, amendments = null }) {
+function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null, lane = null, amendments = null, allowAgenticDependencies = false }) {
   const requirements = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements
     : [];
@@ -1387,7 +1497,7 @@ function validateAcceptanceEvidence({ args, specification, files, trackedAtPin =
     }
     const implementedFiles = files.filter(file => sourceScope.includes(file));
     if (!implementedFiles.length) {
-      const amended = scopeAmendmentsFor(entry, { files, sourceScope, lane, proof });
+      const amended = scopeAmendmentsFor(entry, { files, sourceScope, lane, proof, allowAgenticDependencies });
       if (!amended.length) {
         return `finish refused: delivery requirement ${id} did not change any approved source_scope file (${sourceScope.join(', ')}). Implement the outcome in its approved scope before handoff. If evidence shows the root cause is in another file you changed in this lane (for example a shared component), add scope_amendment {file: "<full changed path>", reason: "<the evidence that places the root cause there>"} to this requirement's acceptance_evidence entry and name that path in its evidence; never edit unrelated scope files just to pass this check.`;
       }
@@ -1429,7 +1539,7 @@ async function gateProposal(tools, proposal) {
   return { proposal: { ...proposal, verified_runs: verifiedRuns(runsNow), compile_gate: { ran: gate.ran, unavailable: gate.unavailable }, ...(browser ? { browser_gate: browser } : {}) } };
 }
 
-function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], specification = null }) {
+function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], specification = null, allowAgenticDependencies = false }) {
   git(workspacePath, ['add', '-A', '--', '.']);
   const files = git(workspacePath, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean).sort();
   if (!files.length) return { error: 'finish refused: no changes in the worktree. Implement the change first, or finish with an explanation only by setting args.no_change_reason.' };
@@ -1467,7 +1577,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
     ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope.map(String) : [])
     : [];
   const scopeAmendments = [];
-  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, lane, trackedAtPin: filesAtPin(workspacePath, scopeFiles), amendments: scopeAmendments });
+  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, lane, trackedAtPin: filesAtPin(workspacePath, scopeFiles), amendments: scopeAmendments, allowAgenticDependencies });
   if (acceptanceError) return { error: acceptanceError };
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
@@ -1513,7 +1623,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
       parseBackendProposal(JSON.stringify(proposal));
     } else {
       const { validatePatchText } = require('./frontend-worker');
-      validatePatchText(patch);
+      validatePatchText(patch, { lane: lane === 'frontend' ? 'frontend' : 'verified', allowAgenticDependencies });
     }
   } catch (error) {
     return { error: `finish refused by the ${lane} lane validator: ${clip(redactGitError(error && error.message), 800)}. Fix the change (or drop the offending text) and finish again.` };
@@ -1633,6 +1743,7 @@ async function runAgenticEngineer({
   prepareWorkspace = null,
   // Runs named Playwright specs in the offline browser worker (builder-vibe-human-test runBrowserSpecs).
   browserTest = null,
+  allowAgenticDependencies = false,
   now = Date.now,
   logger = console,
 }) {
@@ -1674,7 +1785,7 @@ async function runAgenticEngineer({
   // Extended once when the browser gate refuses a finish late in the run.
   let wallLimit = limits.wallBudgetMs;
   const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log,
-    browserTest: lane === 'frontend' ? browserTest : null, remainingMs: () => started + wallLimit - now() });
+    browserTest: lane === 'frontend' ? browserTest : null, allowAgenticDependencies, remainingMs: () => started + wallLimit - now() });
   if (firewall) {
     const purposeOf = args => `job ${String(job.id).slice(0, 8)}: ${String(args.purpose || '').slice(0, 250)}`;
     tools.firewall_status = () => firewall.status();
@@ -1692,8 +1803,8 @@ async function runAgenticEngineer({
     const seedFile = path.join(os.tmpdir(), `bob-seed-${job.id.slice(0, 8)}-${process.pid}.patch`);
     try {
       const text = saved ? saved.patch : seedPatch.text;
-      const files = validatePatchText(text, { lane: lane === 'frontend' ? 'frontend' : 'verified' });
-      if (files.some(file => !laneAllows(lane, file))) throw new Error('Continuation patch is outside the implementation lane');
+      const files = validatePatchText(text, { lane: lane === 'frontend' ? 'frontend' : 'verified', allowAgenticDependencies });
+      if (files.some(file => !laneAllows(lane, file, allowAgenticDependencies ? AGENTIC_PATH_OPTIONS : undefined))) throw new Error('Continuation patch is outside the implementation lane');
       fs.writeFileSync(seedFile, text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600 });
       git(workspacePath, ['apply', '--whitespace=nowarn', seedFile]);
       seeded = { from_job: seedPatch?.from_job ?? job.id, files: tools.__changedFiles(), checkpoint: Boolean(saved) };
@@ -1894,7 +2005,7 @@ async function runAgenticEngineer({
         if (currentDiff === seedDiff && tools.__readFiles().includes(args.no_change_file)
           && JSON.stringify(tools.__changedFiles().sort()) === JSON.stringify([...seeded.files].sort())
             && crossLaneNoChange(routing, `${lane}_engineer`)) {
-          const files = validatePatchText(seedDiff, { lane: lane === 'frontend' ? 'frontend' : 'verified' });
+          const files = validatePatchText(seedDiff, { lane: lane === 'frontend' ? 'frontend' : 'verified', allowAgenticDependencies });
           outcome = { ok: true, model: response.data?.model, proposal: {
             summary: 'Retain the reviewed lane seed unchanged for fresh verification; the reported repair belongs to the sibling lane.',
             patch: seedDiff, changed_files: files, tests: [], acceptance_evidence: [], verified_runs: [],
@@ -1924,7 +2035,8 @@ async function runAgenticEngineer({
         tools,
         args,
         requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
-        specification
+        specification,
+        allowAgenticDependencies
       });
       const gated = built.error ? built : await gateProposal(tools, built.proposal);
       if (gated.error) {
@@ -2012,7 +2124,8 @@ async function runAgenticEngineer({
         tools,
         args,
         requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
-        specification
+        specification,
+        allowAgenticDependencies
       });
       const gated = built.error ? built : await gateProposal(tools, built.proposal);
       if (gated.error) log({ turn: turns + 1, finish_refused: gated.error.slice(0, 2000) });
@@ -2076,4 +2189,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, gateProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, TOOLING_IMAGE, toolingContainerArgs, buildOpeningPacket, droppedPinnedTests, normalizeRunCommand, buildProposal, gateProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };

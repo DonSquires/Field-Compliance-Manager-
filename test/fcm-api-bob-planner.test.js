@@ -96,10 +96,10 @@ test('planner keeps Builder explicit and points code changes to the Vibe Builder
     message: 'Build me an app for patrol handovers',
     tools: [{ tool: 'repo_search', purpose: 'inspect source' }, { tool: 'create_builder_job', purpose: 'open a governed Builder job' }],
   });
-  assert.match(prompt, /BUILDER LANE/);
-  assert.match(prompt, /explicitly asks Bob to implement\/fix\/change code/);
-  assert.match(prompt, /Vibe Builder \(Platform & Settings → Builder\)/);
-  assert.match(prompt, /never merges, deploys, or applies migrations/);
+    assert.match(prompt, /BUILDER LANE/);
+    assert.match(prompt, /explicitly asks Bob to implement\/fix\/change code/);
+    assert.match(prompt, /Vibe Builder \(Platform & Settings → Builder\)/);
+    assert.match(prompt, /never merges, deploys, or applies migrations/);
 });
 
 test('natural-language Builder work advances from web research to source inspection to a job proposal', () => {
@@ -108,7 +108,7 @@ test('natural-language Builder work advances from web research to source inspect
     { tool: 'repo_search' },
     { tool: 'create_builder_job' },
   ];
-  const message = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
+    const message = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
   const repeatedResearch = { action: 'use_tool', tool: 'web_research', args: {}, reply: 'researching', route_selected: 'web_research' };
   const afterResearch = enforceBuilderProgression(repeatedResearch, {
     message,
@@ -459,8 +459,8 @@ test('the laptop provider accepts its URL with or without /v1 and health names w
 test('planTurn works in-house first and escalates to OpenAI only when the local author is stuck', async () => {
   const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
   const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
-  assert.deepEqual(real.config.chains.planner, ['gpu_workstation', 'openai']);
-  assert.deepEqual(real.chainAfter('planner', 'gpu_workstation'), ['openai']);
+  assert.deepEqual(real.config.chains.planner, ['gpu_workstation', 'vps_ollama', 'openai']);
+  assert.deepEqual(real.chainAfter('planner', 'gpu_workstation'), ['vps_ollama', 'openai']);
   assert.equal(real.chainAfter('planner', 'openai'), null, 'OpenAI is the last resort');
   assert.equal(real.providerKind('gpu_workstation'), 'ollama');
 
@@ -481,7 +481,7 @@ test('planTurn works in-house first and escalates to OpenAI only when the local 
   assert.equal(result.body.provider, 'openai');
   assert.equal(result.body.verification.escalated, true);
   assert.deepEqual(result.body.passes.map((p) => [p.pass, p.provider]), [['author', 'gpu_workstation'], ['local_format_repair', 'gpu_workstation'], ['escalate', 'openai']]);
-  assert.deepEqual(calls.map((c) => c.chain), [null, ['gpu_workstation'], ['openai']]);
+  assert.deepEqual(calls.map((c) => c.chain), [null, ['gpu_workstation'], ['vps_ollama', 'openai']]);
 
   // 2) The local correction remains blocked -> only then does repair go to OpenAI.
   const calls2 = [];
@@ -503,7 +503,7 @@ test('planTurn works in-house first and escalates to OpenAI only when the local 
   const repairPass = repaired.body.passes.find((p) => p.pass === 'repair');
   assert.equal(repairPass.provider, 'openai');
   assert.equal(repairPass.escalated_from, 'gpu_workstation');
-  assert.deepEqual(calls2.filter((c) => c.role === 'planner').map((c) => c.chain), [null, ['gpu_workstation'], ['openai']]);
+  assert.deepEqual(calls2.filter((c) => c.role === 'planner').map((c) => c.chain), [null, ['gpu_workstation'], ['vps_ollama', 'openai']]);
 });
 
 test('a corrected in-house plan stays in-house instead of immediately buying a repair', async () => {
@@ -688,7 +688,7 @@ test('a tight deadline skips the in-house planner and shortens the turn; the pro
   const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
   const { readBody } = require('../services/fcm-api/src/bob/plan');
   const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
-  assert.deepEqual(real.fastChain('planner'), ['openai', 'gpu_workstation'], 'strong tier first, in-house kept as the fallback for an empty OpenAI balance');
+  assert.deepEqual(real.fastChain('planner'), ['openai', 'gpu_workstation', 'vps_ollama'], 'strong tier first, then laptop and VPS private fallbacks');
   assert.equal(createModelGateway({ env: { OPENAI_API_KEY: 'k', BOB_ROUTE_PLANNER: 'openai' } }).fastChain('planner'), null, 'no in-house tier to skip');
   assert.equal(readBody({ deadline_ms: '30000' }).deadlineMs, 30000);
   assert.equal(readBody({ deadline_ms: -5 }).deadlineMs, null);
@@ -706,7 +706,7 @@ test('a tight deadline skips the in-house planner and shortens the turn; the pro
   };
   const result = await planTurn({ message: 'fix scripts/ghost.mjs', tools: TOOLS, verify: false, deadline_ms: 30000, task_state: { goal: 'fix scripts/ghost.mjs', steps_taken: [{ tool: 'repo_search', outcome: 'ok', result_summary: 'status: not_found' }], time_left_s: 30 } }, { gateway, env: {} });
   assert.equal(result.body.action, 'answer');
-  assert.deepEqual(calls[0].chain, ['openai', 'gpu_workstation'], 'no time for the laptop model: straight to the fast tier (laptop only as fallback)');
+  assert.deepEqual(calls[0].chain, ['openai', 'gpu_workstation', 'vps_ollama'], 'no time for the laptop model: straight to the fast tier, then private fallbacks');
   assert.ok(calls[0].timeoutMs <= 25000, `turn budget shrank to the deadline (got ${calls[0].timeoutMs})`);
 
   // A comfortable deadline keeps in-house first.
@@ -793,7 +793,7 @@ test('a bug report that names code identifiers is a code request, and a prose pr
   const gateway = { chainAfter: real.chainAfter, providerKind: real.providerKind, fastChain: real.fastChain, async chatJson(role, messages, options = {}) { chains.push(options.chain ?? null); return { content: JSON.stringify({ action: 'answer', reply: 'ok' }), provider: 'openai', model: 'm' }; } };
   await planTurn({ message: report, tools: [...TOOLS, ...tools], verify: false }, { gateway, env: {} });
   await planTurn({ message: report, tools: [...TOOLS, ...tools], verify: false }, { gateway, env: { BOB_PLAN_CODE_REQUESTS_FAST: 'true' } });
-  assert.deepEqual(chains, [null, ['openai', 'gpu_workstation']]);
+  assert.deepEqual(chains, [null, ['openai', 'gpu_workstation', 'vps_ollama']]);
 });
 
 test('code requests start in-house like every other turn (owner ruling 2026-10-16); BOB_PLAN_CODE_REQUESTS_FAST opts back into strong-first', async () => {
@@ -809,7 +809,7 @@ test('code requests start in-house like every other turn (owner ruling 2026-10-1
   await planTurn({ message: 'Bob, apps/mobile/src/components/OfficerVehicleLookup.tsx shows raw errors', tools: TOOLS, verify: false }, { gateway, env: {} });
   await planTurn({ message: 'who is rostered at Nelson tonight?', tools: ownerTools, verify: false }, { gateway, env: {} });
   await planTurn({ message: 'fix scripts/x.mjs crash', tools: ownerTools, verify: false }, { gateway, env: { BOB_PLAN_CODE_REQUESTS_FAST: 'true' } });
-  assert.deepEqual(chains, [null, null, null, ['openai', 'gpu_workstation']], 'only the explicit opt-in sends a code request strong-tier first');
+  assert.deepEqual(chains, [null, null, null, ['openai', 'gpu_workstation', 'vps_ollama']], 'only the explicit opt-in sends a code request strong-tier first');
   // A "we should…" restatement of a code request with no lookup is blocked too.
   const issues = runDeterministicChecks({ action: 'answer', reply: 'The catch block shows the raw message. To improve security, we should display a plain message and log the cause. If the app has a test runner, we should add a unit test.' }, { message: 'Bob, in apps/mobile/src/components/OfficerVehicleLookup.tsx the catch shows cause.message to officers; fix it and add a test', tools: ownerTools });
   assert.ok(issues.some((i) => i.code === 'code_answer_without_evidence'));
@@ -817,16 +817,16 @@ test('code requests start in-house like every other turn (owner ruling 2026-10-1
 
 test('in-app Bob adds Claude as the last resort only when its key is set, and OmniRoute only by explicit route', () => {
   const { createGatewayConfig } = require('../services/fcm-api/src/bob/modelGateway');
-  assert.deepEqual(createGatewayConfig({}).chains.planner, ['gpu_workstation', 'openai']);
+  assert.deepEqual(createGatewayConfig({}).chains.planner, ['gpu_workstation', 'vps_ollama', 'openai']);
   const withClaude = createGatewayConfig({ ANTHROPIC_API_KEY: 'k', ANTHROPIC_PLAN_MODEL: 'claude-opus-5-5' });
-  assert.deepEqual(withClaude.chains.synthesis, ['gpu_workstation', 'openai', 'anthropic']);
+  assert.deepEqual(withClaude.chains.synthesis, ['gpu_workstation', 'vps_ollama', 'openai', 'anthropic']);
   assert.equal(withClaude.providers.anthropic.kind, 'openai');
   assert.equal(withClaude.providers.anthropic.models.planner, 'claude-opus-5-5');
   assert.equal(withClaude.providers.anthropic.baseUrl, 'https://api.anthropic.com/v1');
   assert.equal(withClaude.providers.anthropic.jsonMode, false, 'Anthropic rejects response_format json_object');
   assert.equal(withClaude.providers.anthropic.temperature, false, 'current Claude models reject temperature (live 2026-11-12)');
   const routed = createGatewayConfig({ OMNIROUTE_BASE_URL: 'http://omniroute.example/v1/', BOB_ROUTE_PLANNER: 'omniroute,gpu_workstation' });
-  assert.deepEqual(routed.chains.planner, ['omniroute', 'gpu_workstation']);
+  assert.deepEqual(routed.chains.planner, ['omniroute', 'gpu_workstation', 'vps_ollama']);
   assert.equal(routed.providers.omniroute.baseUrl, 'http://omniroute.example/v1');
   assert.ok(!routed.chains.verifier.includes('omniroute'));
 });

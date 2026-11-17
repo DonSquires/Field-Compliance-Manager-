@@ -6,7 +6,7 @@ const otherStopId = '00000000-0000-4000-8000-000000000004';
 const assert = (condition: unknown, label: string) => { if (!condition) throw new Error(label); };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 
-async function exercise(options: { inactive?: boolean; unassigned?: boolean; unavailable?: boolean; wrongHash?: boolean; unqualifiedProvider?: boolean; missingAuth?: boolean; requestedStop?: string; wrongSafetyStop?: boolean; mismatchedContract?: boolean; missingRoster?: boolean; wrongRosterOfficer?: boolean; matchingStaffIdDifferentUser?: boolean; legacyStaff?: boolean; noContact?: boolean; contactNameOnly?: boolean; contactPhoneOnly?: boolean; withheldRequirement?: boolean; warning?: boolean } = {}) {
+async function exercise(options: { inactive?: boolean; unassigned?: boolean; unavailable?: boolean; wrongHash?: boolean; externalProvider?: boolean; vpsProvider?: boolean; missingAuth?: boolean; requestedStop?: string; wrongSafetyStop?: boolean; mismatchedContract?: boolean; missingRoster?: boolean; wrongRosterOfficer?: boolean; matchingStaffIdDifferentUser?: boolean; legacyStaff?: boolean; noContact?: boolean; contactNameOnly?: boolean; contactPhoneOnly?: boolean; withheldRequirement?: boolean; warning?: boolean } = {}) {
   const keys = { SUPABASE_URL: 'https://synthetic.supabase.invalid', SUPABASE_ANON_KEY: 'synthetic-public', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service', BOB_CONTROL_PLANE_URL: 'https://private-control.invalid', BOB_ADMIN_TOKEN: 'synthetic-control' };
   const previous = Object.fromEntries(Object.keys(keys).map((key) => [key, Deno.env.get(key)]));
   for (const [key, value] of Object.entries(keys)) Deno.env.set(key, value);
@@ -46,7 +46,7 @@ async function exercise(options: { inactive?: boolean; unassigned?: boolean; una
       assert(init?.redirect === 'error', 'Sensitive control-plane requests must not follow redirects');
       const reviewed: Record<string, string | null> = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.replaceAll('Alex Example', '[name withheld]')]));
       if (options.withheldRequirement) reviewed.requirement_0 = null;
-      return json({ fields: reviewed, privacy: { status: options.withheldRequirement ? 'partly_withheld' : 'checked', provider: options.unqualifiedProvider ? 'ollama' : 'gpu_workstation', model: 'synthetic-private', source_hash: options.wrongHash ? 'wrong-source' : source_hash } });
+      return json({ fields: reviewed, privacy: { status: options.withheldRequirement ? 'partly_withheld' : 'checked', provider: options.externalProvider ? 'ollama_cloud' : options.vpsProvider ? 'ollama' : 'gpu_workstation', model: 'synthetic-private', source_hash: options.wrongHash ? 'wrong-source' : source_hash } });
     }
     throw new Error(`Unexpected synthetic endpoint: ${url.pathname}`);
   };
@@ -122,14 +122,22 @@ Deno.test('unauthenticated, inactive and unassigned callers receive no site or c
   }
 });
 
-Deno.test('private outages and unqualified or mismatched receipts withhold narrative and safety, not legitimate contact names', async () => {
-  for (const options of [{ unavailable: true }, { wrongHash: true }, { unqualifiedProvider: true }]) {
+Deno.test('private outages and external or mismatched receipts withhold narrative and safety, not legitimate contact names', async () => {
+  for (const options of [{ unavailable: true }, { wrongHash: true }, { externalProvider: true }]) {
     const result = await exercise(options);
     assert(result.data.privacy.status === 'unavailable', 'Private review failure cannot look clean');
     assert(result.data.post.place.site_brief === null && result.data.post.shift.notes === null && result.data.roster_notes === null && result.data.safety === null && result.data.requirements === null, 'Narrative, requirements and safety stay withheld');
     assert(result.data.contacts[0].name === 'Authorised Contact', 'Separately authorised operational contacts remain visible');
     assert(!JSON.stringify(result.data).includes('Alex Example'), 'Private source text cannot escape');
   }
+});
+
+Deno.test('the qualified VPS Ollama receipt can disclose only the reviewed briefing projection', async () => {
+  const result = await exercise({ vpsProvider: true });
+  assert(result.response.status === 200, 'A checked private VPS receipt is accepted');
+  assert(result.data.privacy.provider === 'ollama', 'The receipt identifies the private fallback');
+  assert(result.data.post.place.site_brief === 'Ask [name withheld] to check the exit.', 'Only reviewed narrative leaves the edge function');
+  assert(!JSON.stringify(result.data).includes('Never disclose'), 'Unknown source fields remain excluded');
 });
 
 Deno.test('a partially withheld requirement cannot be presented as complete', async () => {

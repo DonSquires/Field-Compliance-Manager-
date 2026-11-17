@@ -133,7 +133,7 @@ function parseFrontendProposal(content) {
   }
   if (typeof proposal.summary !== 'string' || !proposal.summary.trim()) throw new Error('frontend proposal summary is required');
   if (!Array.isArray(proposal.changed_files) || !Array.isArray(proposal.tests)) throw new Error('changed_files and tests must be arrays');
-  const actualFiles = validatePatchText(proposal.patch);
+  const actualFiles = validatePatchText(proposal.patch, { allowAgenticDependencies: true });
   const declaredFiles = [...new Set(proposal.changed_files)].sort();
   if (JSON.stringify(actualFiles) !== JSON.stringify(declaredFiles)) throw new Error('changed_files do not match patch');
   return { ...proposal, changed_files: declaredFiles };

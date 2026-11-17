@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
+const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
 const { dockerArguments, workerCommand, workerNetwork } = require('../worker-executor');
 
 const attachment = findings => ({ name: 'human-test-report.json', contentType: 'application/json', body: Buffer.from(JSON.stringify({ findings })).toString('base64') });
@@ -86,6 +86,18 @@ function workspace() {
 test('specs always include Dr Bob\'s walk and only existing, well-formed spec paths', () => {
   const ws = workspace();
   assert.deepEqual(humanTestSpecs(ws, []), [HUMAN_SPEC]);
+});
+
+test('browser paths normalize both supported prefixes and reject unsafe paths', t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  assert.equal(normalizeBrowserSpecPath(`apps/web/${HUMAN_SPEC}`), HUMAN_SPEC);
+  assert.equal(normalizeBrowserSpecPath(HUMAN_SPEC), HUMAN_SPEC);
+  assert.deepEqual(validateBrowserSpecs(ws, [HUMAN_SPEC, `apps/web/${HUMAN_SPEC}`]), [HUMAN_SPEC]);
+  for (const invalid of [null, '../e2e/a.spec.ts', 'apps/web/../e2e/a.spec.ts', '/e2e/a.spec.ts', 'e2e/a.spec.ts;echo']) {
+    assert.equal(normalizeBrowserSpecPath(invalid), null);
+    assert.throws(() => validateBrowserSpecs(ws, [invalid]), /Invalid browser spec path/);
+  }
 });
 
 test('browser evidence is invalidated by harness/config changes and runs directly edited specs', t => {

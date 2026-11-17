@@ -138,5 +138,5 @@ test('Gemini and OpenAI Vibe escalation stays opt-in and never enters restricted
     workloadKind: 'backend_implementation', containsRestrictedData: true,
     env: { BOB_BUILDER_ROUTE_RESTRICTED: 'gemini,openai,anthropic,ollama_cloud,gpu_workstation' },
   });
-  assert.deepEqual(restricted.chain, ['gpu_workstation']);
+  assert.deepEqual(restricted.chain, ['gpu_workstation', 'ollama']);
 });

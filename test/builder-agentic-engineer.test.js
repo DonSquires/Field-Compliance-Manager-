@@ -5,14 +5,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, gateProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, toolingContainerArgs, buildProposal, gateProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
-  for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
+  for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'compose.override.yaml', '.dockerignore', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
     assert.equal(policy.isProtectedPath(file), true, `${file} should be protected`);
     assert.equal(policy.laneAllows('backend', file), false, `${file} must not be editable`);
     assert.equal(policy.laneAllows('frontend', file), false, `${file} must not be editable`);
@@ -23,7 +23,23 @@ test('path policy: protected paths are refused on every lane, lanes split at app
   assert.equal(policy.laneAllows('backend', 'apps/web/src/components/BobPanel.tsx'), false);
   assert.equal(policy.laneAllows('frontend', 'apps/web/src/components/BobPanel.tsx'), true);
   assert.equal(policy.laneAllows('frontend', 'services/fcm-api/server.js'), false);
-  assert.match(policy.protectedReason('package.json'), /dependency/);
+  assert.equal(policy.isProtectedPath('Dockerfile'), true);
+  assert.equal(policy.isProtectedPath('services/fcm-api/Dockerfile'), true);
+  assert.equal(policy.isProtectedPath('docker-compose.full.yml'), true);
+  assert.equal(policy.isProtectedPath('deploy/Dockerfile'), true);
+  assert.equal(policy.laneAllows('backend', 'Dockerfile'), false);
+  assert.equal(policy.isProtectedPath('package.json'), true);
+  assert.equal(policy.isProtectedPath('apps/web/package.json'), true);
+  assert.equal(policy.isProtectedPath('apps/web/package-lock.json'), true);
+  assert.equal(policy.laneAllows('frontend', 'apps/web/package.json'), false);
+  assert.equal(policy.laneAllows('frontend', 'apps/web/package.json', { allowAgenticDependencies: true }), true);
+  assert.equal(policy.laneAllows('backend', 'package.json', { allowAgenticDependencies: true }), true);
+  assert.equal(policy.isProtectedPath('apps/web/package.json', { allowAgenticDependencies: true }), false);
+  assert.equal(policy.isProtectedPath('apps/web/node_modules/playwright/index.js', { allowAgenticDependencies: true }), true);
+  assert.equal(policy.isProtectedPath('apps/web/node_modules/playwright/index.js'), true);
+  assert.equal(policy.isProtectedPath('Dockerfile'), true);
+  assert.equal(policy.isProtectedPath('docker-compose.full.yml'), true);
+  assert.equal(policy.isProtectedPath('deploy/Dockerfile'), true);
   assert.match(policy.protectedReason('.github/workflows/x.yml'), /CI workflow/);
 });
 
@@ -90,8 +106,44 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('git diff --stat'), true);
   assert.equal(allowed('rm -rf /'), false);
   assert.equal(allowed('node -e "process.exit(1)"'), false);
-  assert.equal(allowed('npm install left-pad'), false);
+  assert.equal(allowed('npm install @playwright/test --save-dev --prefix apps/web'), true);
+  assert.equal(allowed('npm install playwright@^1.62.1 --save-dev --prefix apps/web'), true);
+  assert.equal(allowed('npm run test:e2e --prefix apps/web -- e2e/FieldReportsPage.spec.ts'), true);
+  assert.equal(allowed('npx playwright install chromium'), true);
+  assert.equal(allowed('npm exec --prefix apps/web -- playwright install chromium'), true);
+  assert.equal(allowed('npx playwright test e2e/FieldReportsPage.spec.ts'), true);
+  assert.equal(allowed('docker build -t fcm:fixture .'), false);
+  assert.equal(allowed('docker compose -f docker-compose.yml build'), false);
+  assert.equal(allowed('docker compose -f docker-compose.yml up --abort-on-container-exit --exit-code-from web'), false);
+  assert.equal(allowed('docker compose -f docker-compose.yml config --quiet'), false);
+  assert.equal(allowed('supabase start'), false);
+  assert.equal(allowed('supabase db reset --local'), false);
+  assert.equal(allowed('supabase functions serve'), false);
+  assert.equal(allowed('deno task test'), true);
+  assert.equal(allowed('docker run fcm:fixture'), false);
+  assert.equal(allowed('docker buildx build --push -t fcm:latest .'), false);
   assert.equal(allowed('git push origin main'), false);
+});
+
+test('tooling commands run in a non-root container with only the worktree and read-only Git metadata', () => {
+  const repo = makeRepo();
+  try {
+    const args = toolingContainerArgs({
+      workspacePath: repo.source,
+      toolHome: path.join(repo.source, 'node_modules/.cache/bob-tooling'),
+      commandArgs: ['npm', 'install', 'playwright'],
+      env: {},
+    });
+    assert.ok(args.includes('--read-only'));
+    assert.ok(args.includes('--cap-drop=ALL'));
+    assert.ok(args.includes('--security-opt=no-new-privileges:true'));
+    assert.ok(args.includes(`--user=${process.getuid()}:${process.getgid()}`));
+    assert.ok(args.includes('--network=bridge'));
+    assert.ok(args.some(value => value.includes(`src=${repo.source},dst=/workspace`)));
+    assert.ok(args.some(value => value.includes(`src=${path.join(repo.source, '.git')}`) && value.endsWith(',readonly')));
+    assert.ok(!args.some(value => /docker\.sock|SUPABASE_SERVICE_ROLE_KEY|BOB_ADMIN_TOKEN/.test(value)));
+    assert.ok(args.some(value => value.includes('PLAYWRIGHT_BROWSERS_PATH=/workspace/node_modules/.cache/bob-tooling/.cache/ms-playwright')));
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 
 test('a rejected heartbeat is reported with the database reason instead of crashing the author (BB-186)', async () => {
@@ -104,6 +156,44 @@ test('a rejected heartbeat is reported with the database reason instead of crash
   assert.equal(result.ok, false);
   assert.match(result.error, /builder_model_runs_provider_check/);
   assert.match(result.error, /anthropic/);
+});
+
+test('authorized frontend dependency edits install, finish and reach independent worker installation', async t => {
+  const repo = makeRepo();
+  t.after(() => fs.rmSync(repo.root, { recursive: true, force: true }));
+  const webDir = path.join(repo.source, 'apps/web');
+  fs.mkdirSync(path.join(webDir, 'tool-fixture'));
+  fs.writeFileSync(path.join(webDir, 'tool-fixture/package.json'), JSON.stringify({ name: 'fixture-helper', version: '1.0.0' }));
+  fs.writeFileSync(path.join(webDir, 'tool-fixture/index.js'), 'module.exports = true;\n');
+  fs.writeFileSync(path.join(webDir, 'package.json'), '{"name":"web-fixture","version":"1.0.0","devDependencies":{}}\n');
+  execFileSync('npm', ['install', '--package-lock-only', '--offline', '--ignore-scripts', '--prefix', 'apps/web'], { cwd: repo.source, stdio: 'pipe' });
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'dependency fixture']);
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const workspace = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'dependencyfinish0001', targetSha: repo.git(['rev-parse', 'HEAD']) });
+  const tools = createTools({ workspacePath: workspace.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {}, allowAgenticDependencies: true });
+  const edit = tools.replace_in_file({ path: 'apps/web/package.json', old_text: '"devDependencies":{}', new_text: '"devDependencies":{"fixture-helper":"file:./tool-fixture"}' });
+  assert.equal(edit.replaced, 1);
+  const install = await tools.run({ command: 'npm install --offline --ignore-scripts --prefix apps/web' });
+  assert.equal(install.exit_code, 0, JSON.stringify(install));
+  const finished = buildProposal({ workspacePath: workspace.workspacePath, lane: 'frontend', tools, allowAgenticDependencies: true, args: { summary: 'Added the local fixture dependency and verified its installation.', tests: [install.command] } });
+  assert.equal(finished.error, undefined);
+  assert.deepEqual(finished.proposal.changed_files, ['apps/web/package-lock.json', 'apps/web/package.json']);
+  const artifactDir = path.join(repo.root, 'artifacts');
+  fs.mkdirSync(artifactDir);
+  const patchPath = path.join(artifactDir, 'input.patch');
+  fs.writeFileSync(patchPath, finished.proposal.patch);
+  const { executeFrontendPatch } = require('../frontend-worker');
+  const workDir = path.join(repo.root, 'independent-worker');
+  const verified = executeFrontendPatch({ sourceDir: repo.source, patchPath, artifactDir, workDir, runCommand(command, args, options) {
+    if (command === 'git' || (command === 'npm' && args[0] === 'ci')) {
+      return { command: [command, ...args].join(' '), ...spawnSync(command, args, { ...options, encoding: 'utf8' }) };
+    }
+    return { command: [command, ...args].join(' '), status: 0, stdout: '', stderr: '' };
+  } });
+  assert.equal(verified.succeeded, true, JSON.stringify(verified.commands));
+  assert.match(verified.commands[2].command, /^npm ci --prefix apps\/web --include=dev --ignore-scripts/);
+  assert.equal(fs.existsSync(path.join(workDir, 'apps/web/node_modules/fixture-helper/index.js')), true);
 });
 
 test('agentic author records a durable session and per-turn heartbeat before final provenance', async () => {
@@ -263,6 +353,7 @@ function makeRepo() {
   fs.writeFileSync(path.join(source, 'test', 'sum.test.js'), "const test = require('node:test');\nconst assert = require('node:assert/strict');\nconst { sum } = require('../lib/sum');\ntest('sum adds', () => assert.equal(sum(2, 3), 5));\n");
   fs.writeFileSync(path.join(source, 'apps', 'web', 'src', 'app.tsx'), 'export const a = 1;\n');
   fs.writeFileSync(path.join(source, 'package.json'), '{"name":"fixture"}\n');
+  fs.writeFileSync(path.join(source, '.gitignore'), 'node_modules/\n');
   fs.writeFileSync(path.join(source, 'AGENTS.md'), '# Agents\nRead the canon.\n');
   git(['add', '-A']);
   git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'fixture']);
@@ -286,7 +377,7 @@ function fakeModel(turns) {
 const LAPTOP_OFF = Object.freeze({
   gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
   ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
-  // Owner direction 2026-10-21: the VPS CPU left the unrestricted chains; Ollama Cloud is the next tier.
+  // Owner direction 2026-11-11: the private VPS is the fallback after the laptop GPU and before hosted tiers.
   ollama_cloud: { configured: true, healthy: true, models: ['gpt-oss:120b', 'deepseek-v4-pro:0813'], ready_model: 'gpt-oss:120b' },
   openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] },
 });
@@ -507,9 +598,9 @@ test('the browser gate refuses a patch-only Playwright failure, extends the run 
       browserTest, callModel: model.callModel,
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(result.routing.prompt_version, 'agentic-engineer-v22');
+    assert.equal(result.routing.prompt_version, 'agentic-engineer-v24');
     assert.match(model.seen[0].request.messages[0].content, /browser_test \{reason\}/);
-    assert.match(model.seen[0].request.messages[0].content, /finish runs the same browser gate/);
+    assert.match(model.seen[0].request.messages[0].content, /finish also runs the targeted browser gate/);
     const refusal = JSON.stringify(model.seen[2].request.messages.at(-1));
     assert.match(refusal, /the browser gate ran the Playwright specs your change targets/);
     assert.match(refusal, /UserManagement recovers/);
@@ -680,7 +771,7 @@ test('a provider that runs out of turns mid-change hands off to the next provide
   }
 });
 
-test('an operator can explicitly select GPU-first authoring and it escalates directly to OpenAI', async () => {
+test('GPU-first authoring escalates to private VPS Ollama before hosted providers', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const job = { id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7e', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
@@ -688,18 +779,18 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
   const seen = [];
   const callModel = async ({ modelRequest }) => {
     seen.push({ provider: modelRequest.provider, model: modelRequest.model_name, effort: modelRequest.request.reasoning_effort ?? null });
-    // The laptop answers the first turn, then its window overflows (413) -> escalate; OpenAI finishes the job.
+    // The laptop answers the first turn, then its window overflows (413); private VPS Ollama finishes the job.
     if (modelRequest.provider === 'gpu_workstation') {
       if (seen.filter(s => s.provider === 'gpu_workstation').length === 1) return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js' } }), model: 'qwen2.5-coder:7b' } };
       return { ok: false, status: 413, error: 'prompt exceeds the gpu_workstation context window (32768 tokens)' };
     }
-    const openaiTurn = seen.filter(s => s.provider !== 'gpu_workstation').length;
+    const privateTurn = seen.filter(s => s.provider === 'ollama').length;
     const script = [
       { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
       { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
       { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
     ];
-    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(openaiTurn - 1, script.length - 1)]), model: 'gpt-5.4' } };
+    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(privateTurn - 1, script.length - 1)]), model: 'llama3.1:8b' } };
   };
   const previousAuthorRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
   process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,openai';
@@ -711,14 +802,13 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
     else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
   }
   assert.equal(result.ok, true, JSON.stringify(result.error));
-  // A window overflow compacts the transcript hard and retries the laptop once; the second overflow
-  // escalates directly to the strong provider instead of waiting on the VPS CPU.
-  assert.deepEqual(seen.slice(0, 4).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'gpu_workstation', 'openai']);
+  // A window overflow retries the GPU, then escalates to the private VPS tier before hosted providers.
+  assert.deepEqual(seen.slice(0, 4).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'gpu_workstation', 'ollama']);
   assert.equal(seen[0].model, 'qwen2.5-coder:7b');
   assert.equal(seen[0].effort, null, 'local models get no OpenAI reasoning params');
-  assert.equal(seen[3].effort, 'high');
-  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'openai']);
-  assert.equal(result.routing.provider, 'openai');
+  assert.equal(seen[3].effort, null, 'private VPS models get no OpenAI reasoning params');
+  assert.deepEqual(result.routing.chain.slice(0, 3), ['gpu_workstation', 'ollama', 'openai']);
+  assert.equal(result.routing.provider, 'ollama');
   assert.equal(result.routing.escalated, true);
   // Resuming past the failed local provider skips it entirely on the next attempt.
   const seen2 = [];
@@ -730,7 +820,7 @@ test('an operator can explicitly select GPU-first authoring and it escalates dir
     if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
     else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
   }
-  assert.deepEqual(seen2, ['openai']);
+  assert.deepEqual(seen2, ['ollama']);
   assert.equal(result2.no_change, true);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
@@ -745,7 +835,7 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
     { thought: 'find the function', tool: 'search', args: { query: 'sum', path: 'lib' } },
     { thought: 'read it', tool: 'read_file', args: { path: 'lib/sum.js' } },
     { thought: 'run the failing test', tool: 'run', args: { command: 'node --test test/sum.test.js' } },
-    { thought: 'try a protected path (should be refused)', tool: 'write_file', args: { path: 'package.json', content: '{}' } },
+    { thought: 'try a protected path (should be refused)', tool: 'write_file', args: { path: '.env', content: 'SECRET=x' } },
     { thought: 'fix it', tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
     { thought: 'verify', tool: 'run', args: { command: 'node --test test/sum.test.js' } },
     { thought: 'done', tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition. Verified with node --test test/sum.test.js (1 pass).', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert the PR'] } },
@@ -765,11 +855,11 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   // Every turn went to the gateway as a strong multi-turn request with the conversation attached.
   // Laptop off: authoring falls to Ollama Cloud, the first outsourced tier before OpenAI (owner direction
   // 2026-10-21 removed the VPS CPU from unrestricted chains).
-  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama_cloud' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to Ollama Cloud');
+  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to private VPS Ollama');
   const firstTest = JSON.parse(seen[4].request.messages.at(-1).content).tool_result;
   assert.equal(firstTest.exit_code, 1, 'the failing test ran inside the worktree');
   const refused = JSON.parse(seen[5].request.messages.at(-1).content).tool_result;
-  assert.match(refused.error, /dependency change \(protected path\)/);
+  assert.match(refused.error, /environment or secret material \(protected path\)/);
   const secondTest = JSON.parse(seen[7].request.messages.at(-1).content).tool_result;
   assert.equal(secondTest.exit_code, 0, 'the test passed after the fix');
   // The worktree is left clean at the pinned commit for the handoff.
@@ -978,9 +1068,11 @@ test('a command that cannot spawn returns an explicit failure, not a successful 
   const previous = process.env.PATH;
   t.after(() => { process.env.PATH = previous; fs.rmSync(repo.root, { recursive: true, force: true }); });
   process.env.PATH = '';
-  const result = await tools.run({ command: 'node --check lib/sum.js' });
-  assert.equal(result.exit_code, null);
-  assert.match(result.error, /ENOENT/);
+  for (const command of ['node --check lib/sum.js', 'deno task test']) {
+    const result = await tools.run({ command });
+    assert.notEqual(result.exit_code, 0);
+    assert.match(result.error, /isolated tool runner unavailable: spawnSync git ENOENT/);
+  }
 });
 
 test('web test commands override a production worker environment with NODE_ENV=test', async () => {
@@ -1030,8 +1122,20 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
   assert.equal(normalizeRunCommand('npx vitest run src/a.test.tsx'), 'npx vitest run src/a.test.tsx', 'a bare path is only treated as web when it exists under apps/web');
 
   const repo = makeRepo();
-  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web-fixture', scripts: { test: 'node print-args.cjs' } }));
   fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'print-args.cjs'), "process.stdout.write(`args:${process.argv.slice(2).join(',')}`);\n");
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'print-env.cjs'), "process.stdout.write([process.env.BOB_TEST_RUNNER_SECRET ? 'leaked' : 'clean',process.env.PLAYWRIGHT_BROWSERS_PATH||'',process.env.HOME||''].join('|'));\n");
+  const playwrightPackage = path.join(repo.source, 'apps', 'web', 'playwright-fixture');
+  fs.mkdirSync(playwrightPackage, { recursive: true });
+  fs.writeFileSync(path.join(playwrightPackage, 'package.json'), JSON.stringify({ name: 'playwright', version: '1.0.0', bin: { playwright: 'cli.cjs' } }));
+  fs.writeFileSync(path.join(playwrightPackage, 'cli.cjs'), [
+    '#!/usr/bin/env node',
+    'const fs=require("node:fs"),path=require("node:path");',
+    'const browser=path.join(process.env.PLAYWRIGHT_BROWSERS_PATH||"","chromium-installed");',
+    'if(!process.env.PLAYWRIGHT_BROWSERS_PATH||!process.env.PLAYWRIGHT_BROWSERS_PATH.includes("/workspace/node_modules/.cache/bob-tooling/.cache/ms-playwright"))process.exit(3);',
+    'if(process.argv[2]==="install"&&process.argv[3]==="chromium"){fs.mkdirSync(path.dirname(browser),{recursive:true});fs.writeFileSync(browser,"installed");console.log("chromium installed");}',
+    'else if(process.argv[2]==="test"&&fs.existsSync(browser))console.log(process.argv.slice(3).join(" "));else process.exit(4);',
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web-fixture', devDependencies: { playwright: 'file:./playwright-fixture' }, scripts: { test: 'node print-args.cjs', 'env-check': 'node print-env.cjs', 'test:e2e': 'playwright test' } }));
   fs.writeFileSync(path.join(repo.source, 'apps', 'web', 'src', 'app.test.tsx'), "it('renders', () => {});\n");
   repo.git(['add', '-A']);
   repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'web fixture']);
@@ -1045,12 +1149,51 @@ test('run rewrites unambiguous cd/npx/node --test web forms to the allowlisted c
     assert.equal(ran.command, 'npm test --prefix apps/web -- src/app.test.tsx');
     assert.equal(ran.normalized_from, 'cd apps/web && npm test -- --run src/app.test.tsx');
     assert.match(ran.stdout, /args:src\/app\.test\.tsx/);
-    const refused = await tools.run({ command: 'cd apps/web && npm install' });
-    assert.match(refused.error, /command not allowed; use exactly one of: .*npm test --prefix apps\/web -- src\/<path>\.test\.tsx/);
-    assert.match(refused.error, /Playwright specs that only the independent verifier runs/);
+    const previousSecret = process.env.BOB_TEST_RUNNER_SECRET;
+    process.env.BOB_TEST_RUNNER_SECRET = 'test-secret-must-not-reach-child';
+    try {
+      const install = await tools.run({ command: 'npm install --offline --ignore-scripts --prefix apps/web' });
+      assert.equal(install.exit_code, 0, JSON.stringify(install));
+      assert.equal(fs.existsSync(path.join(ws.workspacePath, 'apps/web/package-lock.json')), true);
+      const envCheck = await tools.run({ command: 'npm run env-check --prefix apps/web' });
+      assert.equal(envCheck.exit_code, 0, JSON.stringify(envCheck));
+      const envValues = envCheck.stdout.split('\n').at(-1).split('|');
+      assert.equal(envValues[0], 'clean');
+      assert.match(envValues[1], /\/workspace\/node_modules\/\.cache\/bob-tooling\/\.cache\/ms-playwright/);
+      assert.match(envValues[2], /\/workspace\/node_modules\/\.cache\/bob-tooling/);
+      assert.doesNotMatch(envCheck.stdout, /test-secret-must-not-reach-child/);
+      const chromiumInstall = await tools.run({ command: 'npm exec --prefix apps/web -- playwright install chromium' });
+      assert.equal(chromiumInstall.exit_code, 0, JSON.stringify(chromiumInstall));
+      const playwrightTest = await tools.run({ command: 'npm run test:e2e --prefix apps/web -- e2e/FieldReportsPage.spec.ts' });
+      assert.equal(playwrightTest.exit_code, 0, JSON.stringify(playwrightTest));
+      assert.match(playwrightTest.stdout, /e2e\/FieldReportsPage\.spec\.ts/);
+    } finally {
+      if (previousSecret === undefined) delete process.env.BOB_TEST_RUNNER_SECRET;
+      else process.env.BOB_TEST_RUNNER_SECRET = previousSecret;
+    }
+    assert.match((await tools.run({ command: 'npm publish' })).error, /publishing/);
+    assert.match((await tools.run({ command: 'npm install left-pad --global' })).error, /host\/global package installs/);
+    assert.match((await tools.run({ command: 'npx vercel deploy --prod' })).error, /direct deployment/);
+    assert.match((await tools.run({ command: 'gh workflow run verify-pr.yml' })).error, /manual CI dispatch/);
+    assert.match((await tools.run({ command: 'supabase db push' })).error, /Docker and local Supabase stack commands are disabled/);
+    assert.match((await tools.run({ command: 'supabase db reset' })).error, /Docker and local Supabase stack commands are disabled/);
     const withBrowser = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
-    assert.match((await withBrowser.run({ command: 'cd apps/web && npm install' })).error, /run them with the browser_test tool, never through run/);
     assert.match((await withBrowser.run({ command: 'npm test --prefix apps/web -- e2e/user-identity.spec.ts' })).error, /Wrong test runner[^]*Use the browser_test tool/);
+    const playwright = await withBrowser.run({ command: 'npm run test:e2e --prefix apps/web -- e2e/FieldReportsPage.spec.ts' });
+    assert.equal(playwright.exit_code, 0, JSON.stringify(playwright));
+    assert.match(playwright.stdout, /e2e\/FieldReportsPage\.spec\.ts/);
+    assert.equal(RUN_ALLOWLIST.some(pattern => pattern.test('npx playwright install chromium')), true);
+    for (const command of [
+      'docker build -t fcm:fixture .',
+      'docker build --build-context outside=/data .',
+      'docker build --file=/outside/Dockerfile .',
+      'docker compose -f docker-compose.yml build',
+      'docker compose -f docker-compose.yml up --abort-on-container-exit --exit-code-from web',
+      'docker compose -f docker-compose.yml config --quiet',
+      'npm exec -- docker run --privileged -v /:/host alpine id',
+      'npm exec -- supabase db push',
+      'npx --yes supabase db reset --local',
+    ]) assert.match((await tools.run({ command })).error, /disabled until per-worktree/);
     const backend = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {}, browserTest: async () => ({}) });
     assert.equal(backend.__browserGate, null, 'the browser gate belongs to the frontend lane');
     assert.match((await backend.browser_test({ reason: 'x' })).error, /frontend lane/);
@@ -1577,7 +1720,10 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const x = 1;\nconst x = 1;\n');
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;' }).error, /occurs 2 times/);
   assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);
-  assert.match(tools.replace_in_file({ path: 'package.json', old_text: '{', new_text: '[' }).error, /refused/);
+  const dependencyTools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {}, allowAgenticDependencies: true });
+  const packageEdit = dependencyTools.replace_in_file({ path: 'package.json', old_text: '"name":"fixture"', new_text: '"name":"fixture-updated"' });
+  assert.equal(packageEdit.replaced, 1, 'dependency manifest edits are permitted in the isolated worktree');
+  assert.match(tools.replace_in_file({ path: '.env', old_text: 'TOKEN=placeholder', new_text: 'TOKEN=changed' }).error, /refused/);
   assert.match(tools.replace_in_file({ path: 'lib/missing.js', old_text: 'a', new_text: 'b' }).error, /not found: lib\/missing\.js/);
   fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const tone = "red";\n');
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'tone = "red"', new_text: 'tone = "red"' }).error, /no-op edit refused/);
@@ -1663,7 +1809,7 @@ test('a dropped gateway connection mid-run is retried on the same turn; three in
   const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { seen2.push(1); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
   assert.equal(result2.ok, false);
   assert.match(result2.error, /model unavailable/);
-  assert.equal(seen2.length, 6, 'with the GPU offline: three VPS CPU failures escalate to OpenAI, and three more there end the run');
+  assert.equal(seen2.length, 9, 'with the GPU offline, three VPS failures escalate to Ollama Cloud, then three Cloud failures escalate to OpenAI, and three OpenAI failures end the run');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
@@ -1739,7 +1885,11 @@ test('the opening packet is fitted to a local model window: the build map keeps 
   assert.ok(opening.liveContext.truncated_live_context, 'oversized live context is trimmed');
   // Reserve the real local output budget and tokenizer headroom instead of assuming
   // the entire context window is available for the opening prompt.
-  const total = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS }).length + opening.packet.length;
+  const prompt = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS });
+  assert.match(prompt, /\.agents\/skills\/supabase\/SKILL\.md/);
+  assert.match(prompt, /\.agents\/skills\/supabase-postgres-best-practices\/SKILL\.md/);
+  assert.match(prompt, /managed-release rules take precedence/);
+  const total = prompt.length + opening.packet.length;
   const promptBudgetChars = (24576 - 8192 - 512) * 3;
   assert.ok(total <= promptBudgetChars * 0.8, `system+packet ${total} chars`);
 });
@@ -1824,7 +1974,8 @@ test('distinct unedited exploration hands off early enough for the next allowed 
       },
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(providers.filter(provider => provider === 'ollama_cloud').length, 13);
+    assert.equal(providers.filter(provider => provider === 'ollama').length, 10);
+    assert.equal(providers.filter(provider => provider === 'ollama_cloud').length, 10);
     assert.equal(paidTurn, 4, 'the next model can read, edit, test and finish within the original total budget');
     assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
     assert.equal(result.proposal.verified_runs[0].exit_code, 0);
@@ -1980,6 +2131,6 @@ for (const [shape, timedOutResponse] of TIMEOUT_SHAPES) {
       else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
     }
     assert.equal(result.ok, true, JSON.stringify(result.error));
-    assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'openai']);
+    assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'ollama']);
   });
 }

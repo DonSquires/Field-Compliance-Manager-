@@ -4,7 +4,7 @@ const { describeOfficerPrivacy, discloseOfficerPrivacy, reviewOfficerPrivacy } =
 const { createModelGatewayConfig, validateModelRequest, invokeBuilderModel } = require('../builder-model-gateway');
 
 const finding = (key, status = 'clear', names = [], details = []) => ({ key, status, names, details });
-const describe = (fields, findings) => describeOfficerPrivacy(fields, JSON.stringify({ fields: findings }), 'gpu_workstation', 'synthetic-private');
+const describe = (fields, findings, provider = 'gpu_workstation') => describeOfficerPrivacy(fields, JSON.stringify({ fields: findings }), provider, 'synthetic-private');
 
 test('Conductor removes exact names without rewriting operational instructions', async () => {
   const fields = { site_brief: 'Ask Alex Example to inspect the west exit.' };
@@ -54,15 +54,17 @@ test('private provider outages never fall back to a cloud model or disclose sour
       return { status: 503 };
     },
   }), /remains withheld/);
-  assert.deepEqual(providers, ['gpu_workstation']);
+  assert.deepEqual(providers, ['gpu_workstation', 'ollama']);
 });
 
-test('only the qualified GPU receipt can produce an officer disclosure', async () => {
+test('only qualified GPU or VPS Ollama receipts can produce an officer disclosure', async () => {
   const fields = { site_brief: 'Keep the exit clear.' };
   const body = { provider: 'gpu_workstation', model: 'synthetic-private', content: JSON.stringify({ fields: [finding('site_brief')] }) };
   const result = await reviewOfficerPrivacy({ fields, config: {}, invoke: async () => ({ status: 200, body }) });
   assert.equal(result.fields.site_brief, fields.site_brief);
-  await assert.rejects(reviewOfficerPrivacy({ fields, config: {}, invoke: async () => ({ status: 200, body: { ...body, provider: 'ollama' } }) }), /remains withheld/);
+  const vps = await reviewOfficerPrivacy({ fields, config: {}, invoke: async () => ({ status: 200, body: { ...body, provider: 'ollama' } }) });
+  assert.equal(vps.privacy.provider, 'ollama');
+  await assert.rejects(reviewOfficerPrivacy({ fields, config: {}, invoke: async () => ({ status: 200, body: { ...body, provider: 'ollama_cloud' } }) }), /remains withheld/);
 });
 
 test('all fields across bounded batches are reviewed and bound to the complete source', async () => {
@@ -86,23 +88,27 @@ test('all fields across bounded batches are reviewed and bound to the complete s
   assert.equal(result.privacy.source_hash, require('node:crypto').createHash('sha256').update(JSON.stringify(Object.entries(fields))).digest('hex'));
 });
 
-test('an incomplete later batch or model change withholds the entire briefing', async () => {
+test('GPU failure in a later batch restarts the entire briefing on VPS Ollama', async () => {
   const fields = Object.fromEntries(Array.from({ length: 41 }, (_, index) => [`field_${index}`, `Value ${index}`]));
   for (const problem of ['incomplete', 'model-change', 'outage']) {
     let calls = 0;
-    await assert.rejects(reviewOfficerPrivacy({
+    const providers = [];
+    const result = await reviewOfficerPrivacy({
       fields, config: {},
-      invoke: async ({ input }) => {
+      invoke: async ({ input, input: { provider } }) => {
         calls += 1;
-        if (calls === 2 && problem === 'outage') return { status: 503 };
+        providers.push(provider);
+        if (provider === 'gpu_workstation' && calls === 2 && problem === 'outage') return { status: 503 };
         const keys = Object.keys(JSON.parse(input.user_prompt));
         return { status: 200, body: {
-          provider: 'gpu_workstation', model: calls === 2 && problem === 'model-change' ? 'different-model' : 'synthetic-private',
-          content: JSON.stringify({ fields: calls === 2 && problem === 'incomplete' ? [] : keys.map((key) => finding(key)) }),
+          provider, model: provider === 'gpu_workstation' && calls === 2 && problem === 'model-change' ? 'different-model' : 'synthetic-private',
+          content: JSON.stringify({ fields: provider === 'gpu_workstation' && calls === 2 && problem === 'incomplete' ? [] : keys.map((key) => finding(key)) }),
         } };
       },
-    }));
-    assert.equal(calls, 2);
+    });
+    assert.equal(result.privacy.provider, 'ollama');
+    assert.deepEqual(providers, ['gpu_workstation', 'gpu_workstation', 'ollama', 'ollama']);
+    assert.equal(calls, 4);
   }
 });
 

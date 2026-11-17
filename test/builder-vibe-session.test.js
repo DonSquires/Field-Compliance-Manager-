@@ -1046,10 +1046,38 @@ test('an owner message edits the branch, commits the turn and replies', async ()
   assert.equal(Object.values(store.state.completed)[0], 'done');
   assert.equal(model.calls[0].request.builder_mode, 'vibe_engineer');
   assert.equal(model.calls[0].request.workload_kind, 'vibe_implementation');
+  assert.match(model.calls[0].request.messages[0].content, /\.agents\/skills\/supabase\/SKILL\.md/);
+  assert.match(model.calls[0].request.messages[0].content, /\.agents\/skills\/supabase-postgres-best-practices\/SKILL\.md/);
+  assert.match(model.calls[0].request.messages[0].content, /managed-release rules take precedence/);
   assert.deepEqual(model.calls[0].chain, ['gpu_workstation', 'ollama']);
   assert.equal(model.calls[0].routing_reason, 'private_repository_local_only');
   assert.ok(model.calls[0].request.output_schema.properties.tool.enum.includes('replace_in_file'));
   assert.ok(!model.calls[0].request.output_schema.properties.tool.enum.includes('__policyCheck'));
+});
+
+test('Vibe can edit, verify and commit backend source in its full-stack worktree', async t => {
+  const { store, model, deps, workspaceRoot, repo } = setup([
+    { thought: 'edit backend source', tool: 'replace_in_file', args: { path: 'services/fcm-api/src/bob/plan.js', old_text: '"old"', new_text: '"new"' } },
+    { thought: 'verify backend source', tool: 'run', args: { command: 'node --check services/fcm-api/src/bob/plan.js' } },
+    { thought: 'report result', tool: 'reply', args: { message: 'Updated and checked the backend planner.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const backendFile = 'services/fcm-api/src/bob/plan.js';
+  fs.mkdirSync(path.dirname(path.join(repo.dir, backendFile)), { recursive: true });
+  fs.writeFileSync(path.join(repo.dir, backendFile), 'module.exports = { plan: () => "old" };\n');
+  git(repo.dir, ['add', backendFile]);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add backend fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('update the backend planner'), deps });
+  assert.equal(outcome.error, undefined, outcome.reply);
+  const workspace = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
+  assert.match(fs.readFileSync(path.join(workspace, backendFile), 'utf8'), /"new"/);
+  assert.deepEqual(store.state.session.changed_files, [backendFile]);
+  const run = store.state.rows.find(row => row.payload?.tool === 'run');
+  assert.equal(run.payload.ok, true, run.payload.preview);
+  assert.match(model.calls[0].request.messages[0].content, /Full-stack scope: backend work is supported/);
+  assert.match(git(workspace, ['log', '-1', '--format=%s']), /^vibe: update the backend planner/);
 });
 
 test('Vibe edits and verifies backend source in its full-stack session', async t => {
@@ -1225,7 +1253,7 @@ for (const compact of [false, true]) test(`cloud ${compact ? 'compacted ' : ''}c
     ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud', num_ctx: 24576, max_output_tokens: 8192 },
   });
   await vibe.processVibeMessage({
-    store, message: ownerMessage(compact ? `Continue ${'a'.repeat(36000)}` : 'Continue.'), deps,
+    store, message: ownerMessage(compact ? `Continue ${'a'.repeat(54000 - vibe.vibeSystemPrompt().length)}` : 'Continue.'), deps,
   });
   assert.ok(cloudModel.calls.length);
   assert.doesNotMatch(JSON.stringify(cloudModel.calls), /private-(?:branch|commit|session-title|check|output)-marker/);
@@ -1488,8 +1516,8 @@ test('successful edits invalidate cached source reads', async () => {
   assert.doesNotMatch(lastResult, /"reused":true/);
 });
 
-test('failed commands cannot reset the repetition limit', async () => {
-  const run = { thought: 'install tooling', tool: 'run', args: { command: 'npm install vitest --save-dev' } };
+test('blocked publishing commands cannot reset the repetition limit', async () => {
+  const run = { thought: 'publish tooling', tool: 'run', args: { command: 'npm publish' } };
   const { store, deps, model } = setup(Array.from({ length: 8 }, () => run));
   const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('verify greeting'), deps });
   assert.equal(outcome.error, true);
@@ -1554,13 +1582,13 @@ test('a reply cannot claim a file whose edits failed just because another file c
   assert.doesNotMatch(outcome.reply, /has been removed/);
 });
 
-test('a rejected package workaround can be abandoned after the full web suite actually passes', async t => {
-  const reason = 'The original package script already runs the full suite; the supported command needs no package change.';
+test('an unnecessary secret-file edit can be abandoned after the full web suite actually passes', async t => {
+  const reason = 'No environment file is required; the configured suite runs from the existing package script.';
   const fixture = setup([
-    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'node verify-test.cjs', new_text: 'node unnecessary.cjs' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/.env.test', old_text: 'TOKEN=placeholder', new_text: 'TOKEN=unnecessary' } },
     { tool: 'run', args: { command: 'npm test --prefix apps/web' } },
-    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason } },
-    { tool: 'reply', args: { message: 'The configured web suite passed without changing package scripts.' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/.env.test', reason } },
+    { tool: 'reply', args: { message: 'The configured web suite passed without changing protected environment files.' } },
   ]);
   t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
   installFixtureChecks(fixture.repo);
@@ -1572,10 +1600,10 @@ test('a rejected package workaround can be abandoned after the full web suite ac
   const outcome = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
   assert.equal(outcome.error, undefined, outcome.reply);
   assert.equal(fixture.store.state.completed[message.id], 'done');
-  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/package.json:/);
+  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/\.env\.test:/);
   assert.doesNotMatch(outcome.reply, /Changes are not verified|Not done:|human.*approval/i);
   const receipts = fixture.store.state.rows.filter(row => row.role === 'tool').map(row => row.payload);
-  assert.equal(receipts.find(row => row.tool === 'replace_in_file').ok, false, 'protected package edits remain refused');
+  assert.equal(receipts.find(row => row.tool === 'replace_in_file').ok, false, 'protected environment edits remain refused');
   assert.equal(receipts.find(row => row.tool === 'run').ok, true, 'the full command really ran');
   assert.equal(receipts.find(row => row.tool === 'abandon_failed_edit').ok, true);
   const workspace = vibe.vibeWorkspacePath(fixture.workspaceRoot, SESSION_ID);
@@ -1585,11 +1613,54 @@ test('a rejected package workaround can be abandoned after the full web suite ac
   assert.deepEqual(contract.properties.args.required, ['path', 'reason']);
 });
 
+test('Vibe can edit a dependency manifest, install an offline tool and invoke the Playwright runner', async t => {
+  const fixture = setup([
+    { tool: 'replace_in_file', args: {
+      path: 'apps/web/package.json', old_text: '"scripts":{',
+      new_text: '"devDependencies":{"playwright":"file:./playwright-fixture"},"scripts":{"test:e2e":"playwright test",',
+    } },
+    { tool: 'run', args: { command: 'npm install --offline --ignore-scripts --prefix apps/web' } },
+    { tool: 'run', args: { command: 'npm exec --prefix apps/web -- playwright install chromium' } },
+    { tool: 'run', args: { command: 'npm run test:e2e --prefix apps/web -- e2e/FieldReportsPage.spec.ts' } },
+    { tool: 'reply', args: { message: 'Installed the workspace fixture and ran the Playwright command.' } },
+  ]);
+  t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
+  const localPackage = path.join(fixture.repo.dir, 'apps/web/playwright-fixture');
+  fs.mkdirSync(localPackage, { recursive: true });
+  fs.writeFileSync(path.join(localPackage, 'package.json'), JSON.stringify({ name: 'playwright', version: '1.0.0', bin: { playwright: 'cli.cjs' } }));
+  fs.writeFileSync(path.join(localPackage, 'cli.cjs'), [
+    '#!/usr/bin/env node',
+    'const fs = require("node:fs");',
+    'const path = require("node:path");',
+    'const browser = path.join(process.env.PLAYWRIGHT_BROWSERS_PATH || "", "chromium-installed");',
+    'if (!process.env.PLAYWRIGHT_BROWSERS_PATH || !process.env.PLAYWRIGHT_BROWSERS_PATH.includes("/workspace/node_modules/.cache/bob-tooling/.cache/ms-playwright")) process.exit(3);',
+    'if (process.argv[2] === "install" && process.argv[3] === "chromium") { fs.mkdirSync(path.dirname(browser), {recursive:true}); fs.writeFileSync(browser, "installed"); console.log("chromium installed in isolated cache"); }',
+    'else if (process.argv[2] === "test" && fs.existsSync(browser)) console.log(process.argv.slice(3).join(" "));',
+    'else process.exit(4);',
+  ].join('\n') + '\n');
+  git(fixture.repo.dir, ['add', '.']);
+  git(fixture.repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add local package fixture']);
+  fixture.repo.sha = git(fixture.repo.dir, ['rev-parse', 'HEAD']);
+  const outcome = await vibe.processVibeMessage({ store: fixture.store, message: ownerMessage('install the Playwright tool and run its check'), deps: fixture.deps });
+  assert.equal(outcome.error, undefined, outcome.reply);
+  const receipts = fixture.store.state.rows.filter(row => row.role === 'tool').map(row => row.payload);
+  assert.equal(receipts.find(row => row.tool === 'replace_in_file')?.ok, true);
+  assert.equal(receipts.find(row => row.tool === 'run' && row.args?.command?.startsWith('npm install'))?.ok, true);
+  assert.equal(receipts.find(row => row.tool === 'run' && row.args?.command?.includes('playwright install chromium'))?.ok, true);
+  const playwrightRun = receipts.find(row => row.tool === 'run' && row.args?.command?.includes('test:e2e'));
+  assert.equal(playwrightRun?.ok, true);
+  assert.match(playwrightRun?.preview ?? '', /e2e\/FieldReportsPage\.spec\.ts/);
+  const workspace = vibe.vibeWorkspacePath(fixture.workspaceRoot, SESSION_ID);
+  const packageJson = JSON.parse(fs.readFileSync(path.join(workspace, 'apps/web/package.json'), 'utf8'));
+  assert.equal(packageJson.devDependencies.playwright, 'file:./playwright-fixture');
+  assert.equal(fs.existsSync(path.join(workspace, 'apps/web/node_modules/.bin/playwright')), true);
+});
+
 test('abandoning an unnecessary edit never clears a failing test or permits a green handoff', async t => {
   const fixture = setup([
-    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'node verify-test.cjs', new_text: 'node unnecessary.cjs' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/.env.test', old_text: 'TOKEN=placeholder', new_text: 'TOKEN=unnecessary' } },
     { tool: 'run', args: { command: 'npm test --prefix apps/web' } },
-    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: 'Changing the package script would only hide the real failing application test.' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/.env.test', reason: 'Changing a protected environment file would only hide the real failing application test.' } },
     { tool: 'reply', args: { message: 'All tests passed.' } },
   ]);
   t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
@@ -1611,34 +1682,34 @@ test('abandoning an unnecessary edit never clears a failing test or permits a gr
 
 test('failed-edit abandonment rejects unknown paths and invalid reasons without clearing the real blocker', async t => {
   const fixture = setup([
-    { tool: 'replace_in_file', args: { path: 'apps/web/package.json', old_text: 'lint', new_text: 'other' } },
-    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: ' ' } },
-    { tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason: 'x'.repeat(1001) } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/.env.test', old_text: 'TOKEN=placeholder', new_text: 'TOKEN=other' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/.env.test', reason: ' ' } },
+    { tool: 'abandon_failed_edit', args: { path: 'apps/web/.env.test', reason: 'x'.repeat(1001) } },
     { tool: 'abandon_failed_edit', args: { path: 'apps/web/src/hello.ts', reason: 'This different file is not needed for the current verification task.' } },
-    { tool: 'reply', args: { message: 'The package edit remains blocked.', blocked_reason: 'The failed edit has not been resolved.' } },
+    { tool: 'reply', args: { message: 'The environment edit remains blocked.', blocked_reason: 'The failed edit has not been resolved.' } },
   ]);
   t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
   const outcome = await vibe.processVibeMessage({ store: fixture.store, message: ownerMessage('verify configuration'), deps: fixture.deps });
   assert.equal(outcome.error, true);
-  assert.match(outcome.reply, /Not done: these edits failed.*apps\/web\/package.json/);
+  assert.match(outcome.reply, /Not done: these edits failed.*apps\/web\/\.env\.test/);
   const receipts = fixture.store.state.rows.filter(row => row.payload?.tool === 'abandon_failed_edit');
   assert.equal(receipts.length, 3);
   assert.ok(receipts.every(row => row.payload.ok === false));
 });
 
 test('restarted turns retain a recorded failed-workaround abandonment without replaying the edit', async t => {
-  const reason = 'The existing package configuration is correct; supported test commands require no package edit.';
-  const fixture = setup([{ tool: 'reply', args: { message: 'The earlier test pass remains recorded; package scripts were not changed.' } }]);
+  const reason = 'The existing environment file is protected and was not needed for this test.';
+  const fixture = setup([{ tool: 'reply', args: { message: 'The earlier test pass remains recorded; the protected environment edit was not applied.' } }]);
   t.after(() => { fs.rmSync(fixture.repo.dir, { recursive: true, force: true }); fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true }); });
   const message = ownerMessage('verify configuration');
   interruptedWorkspace(fixture, message);
   fixture.store.state.rows.push(
-    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/package.json' }, edit_targets: ['apps/web/package.json'], ok: false, preview: 'protected file refused' } },
-    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'abandon_failed_edit', args: { path: 'apps/web/package.json', reason }, ok: true } },
+    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'replace_in_file', args: { path: 'apps/web/.env.test' }, edit_targets: ['apps/web/.env.test'], ok: false, preview: 'protected file refused' } },
+    { role: 'tool', kind: 'tool', payload: { message_id: message.id, tool: 'abandon_failed_edit', args: { path: 'apps/web/.env.test', reason }, ok: true } },
   );
   const outcome = await vibe.processVibeMessage({ store: fixture.store, message, deps: fixture.deps });
   assert.equal(outcome.error, undefined, outcome.reply);
-  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/package.json:/);
+  assert.match(outcome.reply, /Unneeded edits not applied:\n- apps\/web\/\.env\.test:/);
   assert.doesNotMatch(outcome.reply, /Not done: these edits failed/);
   assert.equal(fixture.store.state.rows.filter(row => row.payload?.tool === 'replace_in_file').length, 1);
 });
@@ -2052,7 +2123,7 @@ test('a compacted cloud continuation retains failed check types without earlier 
     { seq: 1, kind: 'test', payload: { tool: 'run', args: { command: 'node --check private-command-marker.js' }, ok: false, preview: 'private-failure-marker' } },
     { seq: 2, kind: 'test', payload: { tool: 'browser_test', ok: false, preview: 'private-browser-output', browser_test: { revision: 'worktree', specs: ['e2e/private-spec-marker.spec.ts'] } } },
   ];
-  const current = `Continue ${'a'.repeat(36000)}`;
+  const current = `Continue ${'a'.repeat(54000 - vibe.vibeSystemPrompt().length)}`;
   await vibe.processVibeMessage({ store, message: ownerMessage(current), deps });
   const request = model.calls[0].request;
   assert.equal(promptFitsProvider(request, { kind: 'ollama', numCtx: 24576, maxOutputTokens: 8192 }), true);
@@ -2163,14 +2234,14 @@ test('a contradictory legacy success flag cannot clear a failed test or produce 
   assert.doesNotMatch(result.reply, /All tests passed/);
 });
 
-test('protected paths are refused and never committed', async () => {
+test('secret paths are refused and never committed while dependency manifests remain editable', async () => {
   const { store, deps, workspaceRoot } = setup([
-    { thought: 'bump', tool: 'write_file', args: { path: 'package.json', content: '{"name":"evil"}\n' } },
+    { thought: 'edit secret', tool: 'write_file', args: { path: '.env', content: 'SECRET=evil\n' } },
     { thought: 'tell', tool: 'reply', args: { message: 'Tried.' } },
   ]);
   await vibe.processVibeMessage({ store, message: ownerMessage('change the package name'), deps });
   const ws = vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID);
-  assert.equal(fs.readFileSync(path.join(ws, 'package.json'), 'utf8'), '{"name":"x"}\n');
+  assert.equal(fs.existsSync(path.join(ws, '.env')), false);
   assert.equal(store.state.rows.find(row => row.payload?.tool === 'write_file').payload.ok, false);
   assert.equal(store.state.rows.some(row => row.kind === 'diff'), false);
 });
@@ -2542,6 +2613,8 @@ test('preview dependency install always includes devDependencies', async () => {
   fs.mkdirSync(path.join(staleCache, 'node_modules'), { recursive: true });
   fs.writeFileSync(path.join(staleCache, '.complete'), 'stale cache entry without Vite');
   const calls = [];
+  const previousCredential = process.env.BOB_ADMIN_TOKEN;
+  process.env.BOB_ADMIN_TOKEN = 'fixture-control-plane-secret';
   const spawnImpl = (cmd, args, options) => {
     calls.push({ cmd, args, options });
     const child = new EventEmitter();
@@ -2558,14 +2631,22 @@ test('preview dependency install always includes devDependencies', async () => {
     return child;
   };
   const manager = preview.createVibePreviewManager({ workspaceRoot: root, secret: Buffer.from('k'), onStatus: async () => {}, spawnImpl });
-  await manager.ensureWebDependencies(workspacePath);
-  const install = calls.find(call => call.cmd === 'npm');
-  assert.ok(install, 'npm ci was called');
-  assert.ok(install.args.includes('--include=dev'));
-  assert.equal(install.options.env.NODE_ENV, 'development');
-  assert.equal(install.options.env.NPM_CONFIG_PRODUCTION, 'false');
-  assert.equal(install.options.env.npm_config_production, 'false');
-  assert.equal(fs.existsSync(path.join(web, 'node_modules', 'vite', 'package.json')), true);
+  try {
+    await manager.ensureWebDependencies(workspacePath);
+    const install = calls.find(call => call.cmd === 'npm');
+    assert.ok(install, 'npm ci was called');
+    assert.ok(install.args.includes('--include=dev'));
+    assert.equal(install.options.env.NODE_ENV, 'development');
+    assert.equal(install.options.env.NPM_CONFIG_PRODUCTION, 'false');
+    assert.equal(install.options.env.npm_config_production, 'false');
+    assert.equal(install.options.env.BOB_ADMIN_TOKEN, undefined);
+    assert.equal(install.options.env.PLAYWRIGHT_BROWSERS_PATH.includes('tool-homes'), true);
+    assert.equal(install.options.env.PLAYWRIGHT_BROWSERS_PATH.startsWith(root), true);
+    assert.equal(fs.existsSync(path.join(web, 'node_modules', 'vite', 'package.json')), true);
+  } finally {
+    if (previousCredential === undefined) delete process.env.BOB_ADMIN_TOKEN;
+    else process.env.BOB_ADMIN_TOKEN = previousCredential;
+  }
 });
 
 function fakeHumanTest(outcomes) {
@@ -2689,7 +2770,7 @@ test('targeted browser checks compare the pinned base and draft without changing
   };
   const { store, deps, repo, workspaceRoot, model } = setup([
     editHello,
-    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'base', reason: 'reproduce on base' } },
+    { tool: 'browser_test', args: { specs: ['apps/web/e2e/greeting.spec.ts'], revision: 'base', reason: 'reproduce on base' } },
     { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'test the draft' } },
     { tool: 'reply', args: { message: 'Greeting changed and checked.' } },
   ], { humanTest });
@@ -2701,6 +2782,7 @@ test('targeted browser checks compare the pinned base and draft without changing
   assert.ok(model.calls[0].request.output_schema.properties.tool.enum.includes('browser_test'));
   assert.equal(calls.length, 3, 'targeted tests do not replace the full walk');
   assert.equal(calls[0].head, repo.sha);
+  assert.deepEqual(calls[0].specs, ['e2e/greeting.spec.ts'], 'repo-root browser paths are normalized before worker execution');
   assert.match(calls[0].source, /"hi"/);
   assert.match(calls[1].source, /"hello"/);
   assert.notEqual(calls[0].workspacePath, calls[1].workspacePath);

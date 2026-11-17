@@ -155,9 +155,9 @@ the public HTTPS inference endpoint with `INFERENCE_SERVICE_URL` and
 
 - `BOB_BUILDER_ROUTE_AUTHOR` / `_REVIEW` / `_ANALYSIS` / `_LOCAL` /
   `_RESTRICTED` — comma-separated provider chains (`gpu_workstation`,
-  `ollama`, `ollama_cloud`, `openai`). Unrestricted analysis, authoring
-  and review default to `gpu_workstation,ollama_cloud,openai` (2026-10-21:
-  the VPS CPU tier serves restricted-data runs and embeddings only).
+  `ollama`, `ollama_cloud`, `anthropic`, `openai`). Laptop-first chains keep
+  VPS Ollama immediately after the GPU; unrestricted jobs may continue to
+  hosted tiers afterwards.
   Restricted data never includes either external provider.
 - `BOB_GPU_MODELS`, `BOB_OLLAMA_MODELS` — allowlists, best model first.
 - `BOB_GPU_VRAM_MB` / `BOB_GPU_HEADROOM_MB` — default 8192 / 2048 MiB,

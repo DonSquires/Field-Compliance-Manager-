@@ -19,6 +19,7 @@ function repositoryFixture() {
   fs.writeFileSync(path.join(root, 'supabase/functions/example/index.ts'), 'export const value = 1;\n');
   fs.writeFileSync(path.join(root, 'supabase/migrations/20260830000000_example.sql'), 'SELECT 1;\n');
   fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
+  fs.writeFileSync(path.join(root, '.env'), 'TOKEN=fixture\n');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
@@ -78,14 +79,19 @@ test('Backend Engineer source context requires a clean commit-pinned repository'
   }
 });
 
-test('Backend Engineer source context rejects files outside governed backend paths', () => {
+test('Backend Engineer source context allows dependency manifests but rejects protected paths', () => {
   const fixture = repositoryFixture();
   try {
     assert.throws(() => collectBackendSourceContext({
       sourceDir: fixture.root,
       targetSha: fixture.sha,
-      requestedFiles: ['package.json']
+      requestedFiles: ['.env']
     }), /outside approved backend paths/);
+    assert.doesNotThrow(() => collectBackendSourceContext({
+      sourceDir: fixture.root,
+      targetSha: fixture.sha,
+      requestedFiles: ['package.json']
+    }));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -142,7 +148,7 @@ test('Backend Engineer routes approved specification and source through governed
         return { ok: true, validated_output: validated, artifact: { id: 'patch-1' } };
       }
     });
-    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai']);
+    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai']);
     assert.equal(captured.modelRequest.provider, 'gpu_workstation');
     assert.equal(captured.modelRequest.prompt_version, BACKEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['spec-1']);

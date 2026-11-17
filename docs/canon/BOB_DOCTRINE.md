@@ -1,5 +1,18 @@
 # Bob Doctrine — reconciled
 
+## Owner ruling 2026-11-11: VPS is the private laptop fallback
+
+For every laptop-GPU-first Builder job, VPS Ollama is the next private provider.
+Static routes are GPU → VPS Ollama → any permitted hosted tiers. Auto-routing
+may rank models within each provider and preserve its task-specific external
+reviewer, but must not place another provider between laptop GPU candidates and
+VPS Ollama. Restricted work remains local-only. The officer privacy Oracle is
+GPU → VPS Ollama only: no hosted provider may receive briefing or H&S text. A
+complete review must be produced by one private provider and model; provider
+failure, invalid findings or timeout restarts the whole review on the next
+private provider, otherwise the briefing stays withheld. This supersedes the
+2026-10-21 exclusion of VPS Ollama from unrestricted laptop-first chains.
+
 > Canon (reconciled). Sources: GitLab lineage `docs/bob/BOB_CORE_ENGINE_NORTH_STAR.md`
 > (ratified), `docs/BOB_ARCHITECTURE.md`, `docs/bob/BOB_RUNTIME_CONTRACT_V2.md`,
 > `docs/bob/BOB_COCKPIT_NORTH_STAR.md`, `docs/BOB_AGENTIC_CONTRACT.md`,
@@ -490,8 +503,8 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   implementer → 4 Active copilot; stored as data; widens only the LOW lane.
 - **Sensitive floor (read-only to Bob):** auth, identity, governance and audit
   tables. Bob never writes them.
-- **Protected paths are HIGH:** migrations/DDL, auth/RLS, dependency and
-  environment changes, protected-branch merge, deployment, destructive bulk
+- **Protected paths are HIGH:** migrations/DDL, auth/RLS, environment changes,
+  protected-branch merge, deployment, destructive bulk
   ops. Bob may *draft* them (an MR, a proposal artifact) — humans review, merge
   and deploy. Autonomy v1 is locked to "a human turns the key"; no unattended
   poll-and-act.
@@ -702,7 +715,7 @@ to the exact patch and commit.
 
 **What does not move.** The protected paths remain human-approved and are the
 only places a human is required: merge to a protected branch, deployment,
-applying a migration or any DDL, auth/RLS changes, dependency and environment
+applying a migration or any DDL, auth/RLS changes, environment
 changes, destructive bulk operations. Bob drafts these (branch, MR, proposal
 artifact, `release_ready`); a person applies them. The sensitive floor (auth,
 identity, governance, audit tables read-only to Bob) and the two rails are
@@ -803,8 +816,9 @@ request unattended:
   changed in behaviour terms, how it was checked, the review link, what the
   person must do). Marked reported once relayed.
 
-**What does not move.** Merge, deployment, DDL, auth/RLS, dependency and
-environment changes remain human; the pull request is a draft for a person.
+**What does not move.** Merge, deployment, DDL, auth/RLS, and environment
+changes remain human; the pull request is a draft for a person. Dependency
+changes follow the isolated Builder/Vibe owner ruling recorded below.
 Bob never approves on behalf of someone who could not approve themselves
 (`can_approve_action` is checked for the requester), never rejects, and never
 clears a gate on a job nobody asked for (`autopilot_requested_by` is required).
@@ -894,3 +908,43 @@ body); removing that line restores per-change human merging. The release lane
 health checks and rollback, and Bob reports in chat what merged and what went
 live. §4's "a human turns the key" is amended to this: the key is the owner's
 off switch, not a per-change approval.
+
+### 2026-11-11 — Builder/Vibe toolchain and local stack access (Don Squires)
+
+**Ruling.** Bob Builder and Vibe Builder may edit dependency manifests, lockfiles,
+Dockerfiles and Compose files in their isolated worktrees; install and use tools
+needed for their task, including Playwright, Docker and Deno; build local Docker
+images; and run bounded local Compose/Supabase stack checks. This supersedes the previous
+human-only dependency/Docker-file boundary for these two agentic lanes only;
+routine self-heal and other automated lanes retain their existing dependency
+stop-line.
+
+**Implementation status, 2026-11-17.** The permission above is not a claim that
+every local stack capability is safely implemented. Dependency-manifest edits
+are enabled only for owner-requested authoring; routine/main monitors retain
+the dependency stop-line. Package and task children run non-root inside a
+read-only-root container, with only the worktree writable, no host Docker
+socket and no inherited control-plane credentials. Dockerfiles, Compose files
+and `.dockerignore` remain protected, and direct or wrapped Docker/local
+Supabase stack commands are disabled until per-worktree daemons, projects,
+ports and lifecycle cleanup are implemented and verified. Deno task execution
+uses the same isolated runner; this does not enable a shared Supabase stack.
+
+**Safe authoring.** Package processes run with a temporary workspace HOME, cache
+and executable paths, no inherited control-plane credentials, and no host
+npm/pip/Docker credentials. User-space package managers are allowed. Docker
+build contexts and Compose files/bind mounts must remain inside the worktree;
+Compose smoke runs are attached, exit on the test service, expose published
+ports only on loopback, reject host privileges/secrets/external mounts, and are
+cleaned up after completion. Sudo, host/global/system installs, registry
+login/token management, package publishing, Docker run/exec/push, and host
+container-daemon administration remain unavailable.
+
+**Release gates stay put.** Before handoff, the author runs the relevant install,
+unit tests, lint/build, Playwright and local stack checks. A pull request
+triggers the existing CI workflow; merge remains protected. Direct GitHub
+workflow dispatch, direct Vercel/Supabase production deploy, remote database
+push and migration application remain unavailable to the authoring runner.
+Production migration, edge deployment and web release remain in the single
+managed release lane after successful checks and merge. Vibe preview remains
+available for owner review.

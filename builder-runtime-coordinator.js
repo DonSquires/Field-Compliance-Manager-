@@ -245,6 +245,7 @@ function agenticGenerator(lane, context, extra = {}) {
       startAfterProvider: startAfter,
       prepareWorkspace: lane === 'frontend' ? context.prepareWorkspace || null : null,
       browserTest: lane === 'frontend' ? context.browserTest || null : null,
+      allowAgenticDependencies: Boolean(job.autopilot_requested_by) && !['routine_monitor', 'main_monitor'].includes(job.autopilot_source),
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       previousAttempt,
       seedPatch,

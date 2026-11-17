@@ -5,7 +5,7 @@
  *
  * Bob works like a coding agent across the whole repository, but the protected
  * paths from BOB_DOCTRINE §9 stay human-only: workflows/CI, deployment,
- * dependencies and environment, auth/identity code, secrets, and the
+ * environment, auth/identity code, secrets, and the
  * regenerated schema snapshot. Migrations may only be ADDED (checked by the
  * lane validators). Everything else is editable and lands in a draft PR.
  */
@@ -15,20 +15,14 @@ const path = require('node:path');
 const PROTECTED_PATTERNS = [
   /^\.git(\/|$)/,
   /^\.github\/workflows\//,
+  /(^|\/)Dockerfile(?:\.[^/]*)?$/i,
+  /(^|\/)(?:docker-compose|compose)(?:\.[^/]*)?\.ya?ml$/i,
+  /(^|\/)\.dockerignore$/i,
   /(^|\/)\.env(\.|$)/,
   /(^|\/)\.env\.[^/]*$/,
   /\.(pem|key|pfx|p12|crt|keystore)$/i,
-  /^Dockerfile(\.|$)/,
-  /(^|\/)Dockerfile(\.[^/]*)?$/,
-  /(^|\/)docker-compose[^/]*\.ya?ml$/,
   /^deploy\//,
-  /(^|\/)package\.json$/,
-  /(^|\/)package-lock\.json$/,
   /(^|\/)node_modules\//,
-  /(^|\/)pnpm-lock\.yaml$/,
-  /(^|\/)yarn\.lock$/,
-  /(^|\/)Cargo\.(toml|lock)$/,
-  /(^|\/)requirements[^/]*\.txt$/,
   /^supabase\/config\.toml$/,
   /^supabase\/schema\.sql$/,
   /^vercel\.json$/,
@@ -40,6 +34,19 @@ const PROTECTED_PATTERNS = [
   /^supabase\/functions\/_shared\/auth\.ts$/,
 ];
 
+const DEPENDENCY_PATTERNS = [
+  /(^|\/)package\.json$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)Cargo\.(toml|lock)$/,
+  /(^|\/)requirements[^/]*\.txt$/,
+];
+
+function isDependencyPath(normalized) {
+  return DEPENDENCY_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 function normalizeRepoPath(file) {
   const value = String(file ?? '');
   if (!value || value.includes('\0') || value.startsWith('/') || value.startsWith('..')) return null;
@@ -48,10 +55,11 @@ function normalizeRepoPath(file) {
   return normalized;
 }
 
-function isProtectedPath(file) {
+function isProtectedPath(file, { allowAgenticDependencies = false } = {}) {
   const normalized = normalizeRepoPath(file);
   if (!normalized) return true;
-  return PROTECTED_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (PROTECTED_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  return isDependencyPath(normalized) && !allowAgenticDependencies;
 }
 
 function isMigrationPath(file) {
@@ -63,8 +71,8 @@ function laneFor(file) {
   return String(file ?? '').startsWith('apps/web/') ? 'frontend' : 'backend';
 }
 
-function laneAllows(lane, file) {
-  if (isProtectedPath(file)) return false;
+function laneAllows(lane, file, options = {}) {
+  if (isProtectedPath(file, options)) return false;
   if (lane === 'frontend') return laneFor(file) === 'frontend';
   if (lane === 'backend') return laneFor(file) === 'backend';
   // Owner-driven vibe sessions span the web app and the backend; protected paths still refuse above.
@@ -77,8 +85,10 @@ function protectedReason(file) {
   if (!normalized) return 'unsafe path';
   if (/^\.github\/workflows\//.test(normalized)) return 'CI workflow (protected path)';
   if (/(^|\/)\.env/.test(normalized) || /\.(pem|key|pfx|p12|crt|keystore)$/i.test(normalized)) return 'environment or secret material (protected path)';
-  if (/Dockerfile|docker-compose|^deploy\//.test(normalized)) return 'deployment or environment change (protected path)';
-  if (/package(-lock)?\.json$|(^|\/)node_modules\/|pnpm-lock|yarn\.lock|Cargo\.(toml|lock)|requirements/.test(normalized)) return 'dependency change (protected path)';
+  if (/^deploy\//.test(normalized)) return 'deployment or environment change (protected path)';
+  if (/(^|\/)Dockerfile(?:\.[^/]*)?$/i.test(normalized) || /(^|\/)(?:docker-compose|compose)(?:\.[^/]*)?\.ya?ml$/i.test(normalized) || /(^|\/)\.dockerignore$/i.test(normalized)) return 'container build configuration (protected until isolated Docker execution is available)';
+  if (/(^|\/)node_modules\//.test(normalized)) return 'installed dependency tree (managed by the isolated workspace package manager)';
+  if (isDependencyPath(normalized)) return 'dependency change (protected outside the authorized agentic workspace)';
   if (/^supabase\/schema\.sql$/.test(normalized)) return 'regenerated schema snapshot (never hand-edited)';
   if (/AuthContext|lib\/supabase\.ts|routing\/|SafetyGate|components\/access\/|_shared\/auth\.ts/.test(normalized)) return 'auth/identity code (protected path)';
   return 'protected path';
@@ -116,4 +126,4 @@ function evidentialMentions(text) {
   return [...found].sort();
 }
 
-module.exports = { EVIDENTIAL_ROOTS, EVIDENTIAL_TERMS, PROTECTED_PATTERNS, evidentialMentions, evidentialPathsIn, isEvidentialPath, isMigrationPath, isProtectedPath, laneAllows, laneFor, normalizeRepoPath, protectedReason };
+module.exports = { DEPENDENCY_PATTERNS, EVIDENTIAL_ROOTS, EVIDENTIAL_TERMS, PROTECTED_PATTERNS, evidentialMentions, evidentialPathsIn, isDependencyPath, isEvidentialPath, isMigrationPath, isProtectedPath, laneAllows, laneFor, normalizeRepoPath, protectedReason };

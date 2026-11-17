@@ -76,17 +76,19 @@ they are not inferred from narrative, account contacts or the place owner.
 The contact is shown only after the linked slot and its assigned officer are
 confirmed. Repeated drafts do not inherit contacts.
 
-The edge calls `/api/bob/officer/privacy` with the existing server-only
-control-plane credential class. That route constructs a fixed
-`officer_privacy` request on the qualified private `gpu_workstation`, with
-private-host validation and no redirects for sensitive POSTs. There is no
-automatic VPS or cloud fallback: the VPS's synthetic qualification timed out
-at the request budget and is not approved to disclose briefings. An unavailable
-GPU leaves narrative withheld. Oracle findings contain exact spans;
-Conductor performs disclosure and binds its receipt to the source SHA256.
-Unknown source fields and source-document links are excluded. Unavailable,
-incomplete or source-mismatched findings withhold narrative/H&S and prevent
-the officer UI from proceeding through start.
+Owner ruling 2026-11-11: the laptop GPU is first and VPS Ollama is the private
+fallback for all laptop-first Builder jobs, including the officer privacy
+Oracle. The edge calls `/api/bob/officer/privacy` with the existing server-only
+control-plane credential class. That route permits only `gpu_workstation` and
+the private VPS `ollama` endpoint, validates the host and disables redirects
+for sensitive POSTs. It bounds the GPU attempt, reserves time for VPS Ollama,
+and restarts the complete briefing on VPS if the GPU is unavailable or its
+findings fail validation. A single qualified provider and model must cover all
+batches; the receipt is bound to the exact source SHA256. Hosted Ollama Cloud,
+Anthropic, OpenAI and OmniRoute are never safety-Oracle fallbacks. If neither
+private provider returns a complete valid receipt, narrative/H&S stays withheld
+and the officer must contact operations before starting. Unknown source fields
+and source-document links remain excluded.
 
 Requests/responses are not cached; failures log only the credential class
 boundary/outcome, never source text, model output or tokens. This path does

@@ -375,7 +375,7 @@ test('backend implementation resumes the provider chain past an in-house author 
   const coordinatorPath = require.resolve('../builder-runtime-coordinator');
   delete require.cache[coordinatorPath];
   require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => {
-    calls.push({ startAfter: input.startAfterProvider ?? null });
+    calls.push({ startAfter: input.startAfterProvider ?? null, allowAgenticDependencies: input.allowAgenticDependencies });
     const local = !input.startAfterProvider;
     return { ok: true, patch_artifact: { id: local ? 'patch-local' : 'patch-openai' }, routing: { provider: local ? 'gpu_workstation' : 'openai' } };
   } };
@@ -397,11 +397,22 @@ test('backend implementation resumes the provider chain past an in-house author 
       },
       storage: { from: () => ({ download: async file => ({ data: { arrayBuffer: async () => file.endsWith('fail-1') ? Buffer.from('{}') : patch } }) }) },
     };
-    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'j' }, step: { id: 's' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'j', autopilot_requested_by: 'owner' }, step: { id: 's' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
     assert.equal(result.success, true);
     assert.equal(result.attempts, 2);
     assert.equal(result.routing.provider, 'openai');
-    assert.deepEqual(calls, [{ startAfter: null }, { startAfter: 'gpu_workstation' }], 'the repair attempt skips the local provider that just failed verification');
+    assert.deepEqual(calls, [
+      { startAfter: null, allowAgenticDependencies: true },
+      { startAfter: 'gpu_workstation', allowAgenticDependencies: true },
+    ], 'requested Builder jobs may install dependencies and repair attempts retain that authorization');
+
+    calls.length = 0;
+    const routine = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'j-routine', autopilot_source: 'routine_monitor' }, step: { id: 's-routine' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(routine.success, true);
+    assert.deepEqual(calls, [
+      { startAfter: null, allowAgenticDependencies: false },
+      { startAfter: 'gpu_workstation', allowAgenticDependencies: false },
+    ], 'routine self-heal keeps the dependency stop-line across provider retries');
   } finally {
     require.cache[engineerPath].exports = originalEngineer;
     require.cache[handoffPath].exports = originalHandoff;
