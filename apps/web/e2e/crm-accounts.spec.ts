@@ -20,6 +20,8 @@ test('client profile switches between details and locations without losing a dra
   await expect(accountWorkspace.locator('.crm-workspace-toolbar').nth(1)).toContainText('Finance');
   await accountWorkspace.getByRole('button', { name: 'Close client portfolio' }).click();
   await expect(profile.getByLabel('Client name', { exact: true })).toHaveValue('Civic Events draft');
+  await profile.getByRole('button', { name: 'Full account workspace' }).click();
+  await expect(accountWorkspace.locator('.crm-workspace-toolbar').nth(1)).toContainText('Account overview');
 });
 
 test('operating branch selector is visible and switches the session context', async ({ page }) => {
@@ -29,6 +31,8 @@ test('operating branch selector is visible and switches the session context', as
   await expect(selector.locator('option').nth(0)).toContainText('Northern Branch');
   await expect(selector.locator('option').nth(1)).toContainText('Southern Branch');
   await expect(page.locator('.admin-shell-header, .admin-mobile-header')).toHaveScreenshot('operating-branch-selector.png');
+  await page.getByLabel('Account and workspace tools').click();
+  await expect(selector).toBeVisible();
   await selector.selectOption('45454545-4545-4545-8545-454545454545');
   await expect(selector).toHaveValue('45454545-4545-4545-8545-454545454545');
   expect(errors, errors.join('\n')).toEqual([]);
@@ -41,9 +45,10 @@ test('CRM account context and governed quote creation are operational', async ({
   await page.route('**/rest/v1/finance_price_book*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ item_id: 'item-steel', unit_cost: 40, unit_price: 62 }]) }));
   await page.route('**/rest/v1/rpc/add_crm_quote_lines_from_bom_template', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ lines_added: 2, lines_needing_price: 1, total_cost: 380, subtotal_charge: 549, total_charge: 631.35 }]) }));
   await signInAsAdmin(page, '/admin/crm');
-  await expect(page.getByRole('heading', { name: 'Client Portfolios', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Client directory', exact: true })).toBeVisible();
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: 'Places 1' }).click();
   await expect(workspace.getByText('Civic Centre', { exact: true })).toBeVisible();
@@ -85,6 +90,7 @@ test('a draft quote line can be corrected without removing its identity', async 
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/crm');
   await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: 'Places 1' }).click();
   await workspace.getByRole('button', { name: 'Create proposal' }).click();
@@ -144,6 +150,7 @@ test('a quote can be raised as a variation of the client\'s existing agreement',
   });
   await signInAsAdmin(page, '/admin/crm');
   await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: 'Places 1' }).click();
   await workspace.getByRole('button', { name: 'Create proposal' }).click();
@@ -184,6 +191,7 @@ test('a saved workshop build adds its priced lines to a draft quote at the selec
 
   await signInAsAdmin(page, '/admin/crm');
   await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: 'Places 1' }).click();
   await workspace.getByRole('button', { name: 'Create proposal' }).click();
@@ -211,9 +219,15 @@ test('a saved workshop build adds its priced lines to a draft quote at the selec
 });
 
 test('account team manages contacts, follow-up activity, and receivables', async ({ page }) => {
+  let paymentPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/record_payment_receipt', async (route) => {
+    paymentPayload = route.request().postDataJSON();
+    await route.fulfill({ json: { id: 'synthetic-payment-receipt' } });
+  });
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
+  await page.getByRole('button', { name: 'Full account workspace' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await workspace.getByRole('button', { name: /Contacts/ }).click();
   await expect(workspace.getByText('Mere Wilson')).toBeVisible();
@@ -240,10 +254,12 @@ test('account team manages contacts, follow-up activity, and receivables', async
   await expect(workspace).toHaveScreenshot('crm-account-workspace.png');
   await workspace.getByRole('button', { name: 'Close client portfolio' }).click();
 
+  await page.getByRole('button', { name: 'Receivables / commercial detail' }).click();
   const invoice = page.getByText('INV-2026-0042').locator('..');
-  await expect(invoice.getByText('NZD 2484.50')).toBeVisible(); await invoice.getByRole('button', { name: 'Mark paid' }).click();
-  const payment = page.getByRole('dialog', { name: 'Confirm payment' }); await payment.getByRole('button', { name: 'Confirm action' }).click();
-  await expect(page.getByText('INV-2026-0042 marked paid.')).toBeVisible();
+  await expect(invoice.getByText('NZD 2484.50')).toBeVisible(); await invoice.getByRole('button', { name: 'Record payment' }).click();
+  const payment = page.getByRole('dialog', { name: 'Record payment receipt' }); await payment.getByRole('button', { name: 'Record payment', exact: true }).click();
+  await expect(page.getByText('INV-2026-0042 payment of NZD 2484.50 recorded with an audit receipt.')).toBeVisible();
+  expect(paymentPayload).toMatchObject({ p_payment_amount: 2484.5, p_payment_method: 'bank_transfer' });
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
