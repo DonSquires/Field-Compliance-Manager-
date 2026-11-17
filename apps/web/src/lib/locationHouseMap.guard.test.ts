@@ -72,6 +72,9 @@ describe('location house map', () => {
     expect(source).toContain('L.circleMarker([checkpoint.gps_lat, checkpoint.gps_lng]');
     expect(source).toContain('L.circle([checkpoint.gps_lat, checkpoint.gps_lng]');
     expect(source).toContain(' · part of ${parent.name}');
+    // Every ancestor draws before its descendants, so a grandchild stays on top with its own tooltip.
+    expect(source).toContain('orderZonesByParent(zones).map(({ zone }) => zone)');
+    expect(source).not.toContain('Number(Boolean(a.parent_zone_id))');
     expect(source).toContain('house-map-legend');
     expect(source).toContain('<span className="house-map-legend-area" />Work area');
     expect(source).toContain('<span className="house-map-legend-part" />Part of an area');

@@ -80,10 +80,44 @@ describe('human operational controls', () => {
     expect(manager).toContain('orderZonesByParent(data.zones)');
   });
 
-  it('keeps unsaved Area settings when the parent is saved, and reports Saved only after the reload succeeds', () => {
-    // Saving the parent reloads the zone with a new object and version; the settings form must reset only for a different area.
-    expect(manager).toMatch(/\}, \[creatingZone, zone\?\.id\]\);/);
+  it('never pairs an old Area settings draft with a newer version', () => {
+    expect(manager).toContain('areaDraftSync(zoneDraft, zone)');
+    expect(manager).toMatch(/\}, \[creatingZone, zone\?\.id, zone\?\.configuration_version\]\);/);
     expect(manager).not.toMatch(/\}, \[creatingZone, zone\]\);/);
+    expect(manager).toContain('p_expected_version: creatingZone ? 0 : zoneDraft.zoneId === zone?.id ? zoneDraft.version : zone?.configuration_version ?? 0');
+    expect(manager).toContain('This area changed since you started editing — reload to see the latest');
+    expect(manager).toContain('Discard my changes and load the latest');
+  });
+
+  it('blocks "Save part of" while area or policy changes are unsaved', () => {
+    expect(manager).toContain('onDirtyChange={setPolicyDirty}');
+    expect(manager).toContain('const unsavedAreaChanges = zoneDirty || policyDirty;');
+    expect(manager).toContain("disabled={unsavedAreaChanges || partOfState === 'saving' || partOf === (zone.parent_zone_id ?? '')}");
+    expect(manager).toContain('Save or discard your area changes first');
+    expect(policy).toContain('onDirtyChange?: (dirty: boolean) => void');
+    expect(policy).toContain('Discard policy changes');
+  });
+
+  it('keeps area settings and rule saves from overwriting each other through the shared version', () => {
+    expect(manager).toContain("disabled={busy || !zoneForm.name.trim() || (!creatingZone && policyDirty)}");
+    expect(manager).toContain('if (!data || !zoneForm.name.trim() || (!creatingZone && policyDirty)) return;');
+    expect(manager).toContain('Save or discard your rule changes first');
+    expect(manager).toContain('saveBlockedReason={zoneDirty ? \'Save or discard your area settings first\' : null}');
+    expect(policy).toContain('saveBlockedReason?: string | null');
+    expect(policy).toContain('disabled={saving || !confirmed || !draft.source.trim() || Boolean(saveBlockedReason)}');
+    expect(policy).toContain('if (!receipt || saving || saveBlockedReason) return;');
+  });
+
+  it('rebases the draft on the saved version when the reload after an area save fails', () => {
+    expect(manager).toContain('if (!(await load(savedZone.id))) {');
+    expect(manager).toContain("version: typeof savedZone.configuration_version === 'number' ? savedZone.configuration_version : current.version");
+  });
+
+  it('takes "Part of" from the place editor read, which lists every work area on the place', () => {
+    expect(manager).toContain('parent_zone_id: item.parent_zone_id ?? null');
+  });
+
+  it('reports Saved only after the reload succeeds', () => {
     expect(manager).toContain('if (!(await load(zone.id))) {');
     expect(manager).toMatch(/const load = useCallback\(async \(preferredZoneId\?: string\): Promise<boolean> =>/);
   });

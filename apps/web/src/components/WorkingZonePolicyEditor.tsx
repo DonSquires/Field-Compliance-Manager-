@@ -26,13 +26,18 @@ interface PolicyReceipt {
 
 const emptyDraft = { minutes: '', multiplier: '1', grace: '0', consecutive: '', monthly: '', scv: false, source: '', url: '', notes: '' };
 
-export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersion, onSaved }: {
+export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersion, onSaved, onDirtyChange, saveBlockedReason }: {
   zoneId: string; moduleKey: string; configurationVersion: number; onSaved: () => void;
+  /** Lets the parent hold back commands that bump the zone version, which would reload and replace this draft. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Set while another draft on the same zone is unsaved: saving would bump the shared version under it. */
+  saveBlockedReason?: string | null;
 }) {
   const { operatingOrganizationId, profile } = useAuth();
   const providerId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const [receipt, setReceipt] = useState<PolicyReceipt | null>(null);
   const [draft, setDraft] = useState(emptyDraft);
+  const [baseline, setBaseline] = useState(emptyDraft);
   const [confirmed, setConfirmed] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploadedPath, setUploadedPath] = useState<string | null>(null);
@@ -53,9 +58,10 @@ export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersio
       else {
         const next = data as PolicyReceipt;
         setReceipt(next);
-        setDraft({ minutes: next.policy.time_limit_minutes?.toString() ?? '', multiplier: next.policy.disabled_multiplier?.toString() ?? '1', grace: next.policy.grace_period_minutes?.toString() ?? '0',
+        const loaded = { minutes: next.policy.time_limit_minutes?.toString() ?? '', multiplier: next.policy.disabled_multiplier?.toString() ?? '1', grace: next.policy.grace_period_minutes?.toString() ?? '0',
           consecutive: next.policy.max_consecutive_nights?.toString() ?? '', monthly: next.policy.max_nights_per_month?.toString() ?? '',
-          scv: next.policy.scv_required ?? false, source: next.policy.source_ref ?? '', url: next.policy.source_url ?? '', notes: next.policy.notes ?? '' });
+          scv: next.policy.scv_required ?? false, source: next.policy.source_ref ?? '', url: next.policy.source_url ?? '', notes: next.policy.notes ?? '' };
+        setDraft(loaded); setBaseline(loaded);
         setRequestId(crypto.randomUUID());
       }
       setLoading(false);
@@ -63,13 +69,17 @@ export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersio
     return () => { active = false; };
   }, [zoneId, moduleKey, configurationVersion, providerId, revision]);
 
+  const dirty = file !== null || (Object.keys(emptyDraft) as Array<keyof typeof emptyDraft>).some((key) => draft[key] !== baseline[key]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
   const change = (values: Partial<typeof emptyDraft>) => {
     setDraft((current) => ({ ...current, ...values }));
     setConfirmed(false); setNotice(null); setRequestId(crypto.randomUUID());
   };
 
   const save = async () => {
-    if (!receipt || saving) return;
+    if (!receipt || saving || saveBlockedReason) return;
     setError(null); setNotice(null);
     if (!draft.source.trim() || !confirmed) { setError('Record the policy source and confirm that the entered rules match it.'); return; }
     if (parking && (!Number.isInteger(Number(draft.minutes)) || Number(draft.minutes) < 1 || Number(draft.minutes) > 1440 || !Number.isFinite(Number(draft.multiplier)) || Number(draft.multiplier) < 1 || Number(draft.multiplier) > 4)) {
@@ -102,7 +112,7 @@ export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersio
       });
       if (saveError || !data) throw saveError ?? new Error('The saved policy receipt was not confirmed.');
       const saved = data as PolicyReceipt;
-      setReceipt(saved); setFile(null); setUploadedPath(null); setConfirmed(false); setRequestId(crypto.randomUUID());
+      setReceipt(saved); setBaseline(draft); setFile(null); setUploadedPath(null); setConfirmed(false); setRequestId(crypto.randomUUID());
       setNotice(`${parking ? 'Parking' : 'Freedom Camping'} policy saved. Version ${saved.policy_version}.`);
       onSaved();
     } catch (saveError) {
@@ -132,7 +142,9 @@ export function WorkingZonePolicyEditor({ zoneId, moduleKey, configurationVersio
         </div>
         {!parking && <label><span>Policy wording / notes</span><textarea rows={3} maxLength={12000} value={draft.notes} onChange={(event) => change({ notes: event.target.value })} /></label>}
         <label className="place-manager-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />{parking ? 'I checked these rules against the photographed sign.' : 'I checked these rules against the Freedom Camping policy source.'}</label>
-        <button type="button" className="is-primary" onClick={() => void save()} disabled={saving || !confirmed || !draft.source.trim()}><Save size={15} />{saving ? 'Saving policy' : 'Save working-zone policy'}</button>
+        {dirty && <button type="button" onClick={() => setRevision((value) => value + 1)}>Discard policy changes</button>}
+        {saveBlockedReason && <span className="place-manager-save-hint">{saveBlockedReason}</span>}
+        <button type="button" className="is-primary" onClick={() => void save()} disabled={saving || !confirmed || !draft.source.trim() || Boolean(saveBlockedReason)}><Save size={15} />{saving ? 'Saving policy' : 'Save working-zone policy'}</button>
       </>}
       {notice && <div className="place-manager-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
     </>}

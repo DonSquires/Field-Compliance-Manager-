@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap, type EditableEntity, type HouseMapCheckpoint, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
 import { WorkingZonePolicyEditor } from './WorkingZonePolicyEditor';
 import { orderZonesByParent, partOfOptions } from '../lib/placeLayers';
+import { areaDraftSync, isStaleAreaDraft, type AreaDraftBase } from '../lib/areaDraft';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
 import './OperationalPlaceManagerHuman.css';
@@ -141,6 +142,8 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const [partOf, setPartOf] = useState('');
   const [partOfState, setPartOfState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [partOfError, setPartOfError] = useState<string | null>(null);
+  const [zoneDraft, setZoneDraft] = useState<AreaDraftBase>({ zoneId: null, version: 0, dirty: false });
+  const [policyDirty, setPolicyDirty] = useState(false);
 
   const site = data?.sites.find((item) => item.id === siteId) ?? null;
   const zone = data?.zones.find((item) => item.id === zoneId) ?? null;
@@ -167,7 +170,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     const editor = editorResponse.data as Omit<EditorData, 'location' | 'sites' | 'zones'> & {
       location: Omit<EditorData['location'], 'address'>;
       sites: Array<Omit<Site, keyof HouseMapSite> & { id: string; name: string }>;
-      zones: Array<Omit<Zone, keyof HouseMapZone> & { id: string; name: string }>;
+      zones: Array<Omit<Zone, keyof HouseMapZone> & { id: string; name: string; parent_zone_id?: string | null }>;
     };
     const geography = geographyResponse.data as GeographyData;
     const siteGeometry = new Map(geography.sites.map((item) => [item.id, item]));
@@ -176,7 +179,8 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
       ...editor,
       location: { ...editor.location, address: geography.locations.find((item) => item.id === locationId)?.address ?? null },
       sites: editor.sites.map((item) => ({ ...item, ...siteGeometry.get(item.id) })) as Site[],
-      zones: editor.zones.map((item) => ({ ...item, ...zoneGeometry.get(item.id) })) as Zone[],
+      // The editor lists every work area on the place; the geography read covers only those in reach, so the parent comes from the editor.
+      zones: editor.zones.map((item) => ({ ...item, ...zoneGeometry.get(item.id), parent_zone_id: item.parent_zone_id ?? null })) as Zone[],
     };
     const checkpointResponse = profile?.organizationId
       ? await supabase.rpc('get_location_patrol_checkpoints', { p_location_id: locationId })
@@ -206,21 +210,32 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   useEffect(() => {
     if (site) setSiteForm({ risk: site.risk_level ?? '', brief: site.site_brief ?? '', access: site.access_instructions ?? '', safety: site.hs_notes ?? '', active: site.active });
   }, [site]);
-  useEffect(() => {
-    if (zone && !creatingZone) setZoneForm({
-      name: zone.name,
-      zoneType: zone.zone_type,
-      moduleKey: zone.module_key,
-      ruleType: zone.rule_type,
-      active: zone.is_active,
-      nightConsecutive: zone.nightly_limit_consecutive?.toString() ?? '',
-      nightMonthly: zone.nightly_limit_monthly?.toString() ?? '',
-      scv: zone.scv_required,
-      workflow: zone.enforcement_workflow_override ?? '',
+  const loadZoneForm = useCallback((item: Zone) => {
+    setZoneForm({
+      name: item.name,
+      zoneType: item.zone_type,
+      moduleKey: item.module_key,
+      ruleType: item.rule_type,
+      active: item.is_active,
+      nightConsecutive: item.nightly_limit_consecutive?.toString() ?? '',
+      nightMonthly: item.nightly_limit_monthly?.toString() ?? '',
+      scv: item.scv_required,
+      workflow: item.enforcement_workflow_override ?? '',
     });
-    // Keyed on identity, not the object: a reload after saving the parent must not discard unsaved settings edits.
+    setZoneDraft({ zoneId: item.id, version: item.configuration_version, dirty: false });
+  }, []);
+  useEffect(() => {
+    // A clean form follows the server; an edited one keeps its base version so a stale save conflicts rather than overwrites.
+    if (zone && !creatingZone && areaDraftSync(zoneDraft, zone) === 'reset') loadZoneForm(zone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [creatingZone, zone?.id]);
+  }, [creatingZone, zone?.id, zone?.configuration_version]);
+  const editZoneForm = (values: Partial<ZoneForm>) => {
+    setZoneForm((current) => ({ ...current, ...values }));
+    setZoneDraft((current) => ({ ...current, dirty: true }));
+  };
+  const zoneDirty = !creatingZone && zoneDraft.dirty && zoneDraft.zoneId === zone?.id;
+  const zoneDraftStale = !creatingZone && isStaleAreaDraft(zoneDraft, zone);
+  const unsavedAreaChanges = zoneDirty || policyDirty;
   useEffect(() => {
     setPartOf(zone?.parent_zone_id ?? '');
   }, [zone?.id, zone?.parent_zone_id]);
@@ -230,7 +245,7 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   }, [zone?.id]);
 
   const savePartOf = async () => {
-    if (!zone) return;
+    if (!zone || unsavedAreaChanges) return;
     setPartOfState('saving'); setPartOfError(null);
     const { error: parentError } = await supabase.rpc('set_location_zone_parent', { p_zone_id: zone.id, p_parent_zone_id: partOf || null, p_expected_version: zone.configuration_version });
     if (parentError) {
@@ -272,19 +287,18 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   };
 
   const changeModule = (moduleKey: string) => {
-    const defaults = defaultsForModule(moduleKey);
-    setZoneForm((current) => ({ ...current, moduleKey, ...defaults, nightConsecutive: '', nightMonthly: '', scv: false }));
+    editZoneForm({ moduleKey, ...defaultsForModule(moduleKey), nightConsecutive: '', nightMonthly: '', scv: false });
   };
 
   const saveZone = async (event: FormEvent) => {
     event.preventDefault();
-    if (!data || !zoneForm.name.trim()) return;
+    if (!data || !zoneForm.name.trim() || (!creatingZone && policyDirty)) return;
     setBusy(true); setError(null); setNotice(null);
     const { data: saved, error: saveError } = await supabase.rpc('manage_crm_zone', {
       p_action: creatingZone ? 'create' : 'update',
       p_zone_id: creatingZone ? null : zone?.id ?? null,
       p_location_id: data.location.id,
-      p_expected_version: creatingZone ? 0 : zone?.configuration_version ?? 0,
+      p_expected_version: creatingZone ? 0 : zoneDraft.zoneId === zone?.id ? zoneDraft.version : zone?.configuration_version ?? 0,
       p_name: zoneForm.name.trim(),
       p_zone_type: zoneForm.zoneType,
       p_module_key: zoneForm.moduleKey,
@@ -298,12 +312,18 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     if (saveError) setError(saveError.message);
     else {
       const savedZone = saved as Zone;
+      // Saved, so the form is clean and follows the reloaded version.
+      setZoneDraft((current) => ({ ...current, dirty: false }));
       setCreatingZone(false);
       setZoneId(savedZone.id);
       setBoundaryTarget(`zone:${savedZone.id}`);
       setView('boundary');
       setNotice(creatingZone ? 'Work area saved. Draw or confirm its boundary next.' : 'Work area settings saved. Check its boundary next.');
-      await load(savedZone.id);
+      if (!(await load(savedZone.id))) {
+        // The save stood but the reload failed (load keeps its error visible): base the draft on the saved version so
+        // the next save is not refused as stale against the person's own change.
+        setZoneDraft((current) => ({ zoneId: savedZone.id, version: typeof savedZone.configuration_version === 'number' ? savedZone.configuration_version : current.version, dirty: false }));
+      }
       onSaved();
     }
     setBusy(false);
@@ -436,6 +456,8 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const startNewZone = () => {
     const moduleKey = data?.modules.find((item) => item.module_key === 'patrol')?.module_key ?? data?.modules[0]?.module_key ?? 'patrol';
     setZoneForm(emptyZone(moduleKey));
+    // Cancelling the new area reloads the selected one rather than keeping the new-area draft.
+    setZoneDraft({ zoneId: null, version: 0, dirty: false });
     setCreatingZone(true);
     setNotice(null);
     setError(null);
@@ -495,14 +517,15 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
             {(zone || creatingZone) ? <>
               <div className="place-manager-help"><MapPinned size={17} /><div><strong>{creatingZone ? 'Name the area officers will recognise.' : 'These settings tell officers what applies after GPS selects this area.'}</strong><span>The boundary itself is drawn and confirmed in the next step.</span></div></div>
               <div className="place-manager-grid is-three">
-                <label><span>Area name</span><input required value={zoneForm.name} onChange={(event) => setZoneForm({ ...zoneForm, name: event.target.value })} placeholder="North gate, river reserve, patrol sector..." /></label>
+                <label><span>Area name</span><input required value={zoneForm.name} onChange={(event) => editZoneForm({ name: event.target.value })} placeholder="North gate, river reserve, patrol sector..." /></label>
                 <label><span>Service</span><select value={zoneForm.moduleKey} onChange={(event) => changeModule(event.target.value)}>{data.modules.map((item) => <option value={item.module_key} key={item.module_key}>{item.display_name}</option>)}</select></label>
-                <label><span>Area purpose</span><select value={zoneForm.zoneType} onChange={(event) => setZoneForm({ ...zoneForm, zoneType: event.target.value })}>{zoneTypeOptions.map((value) => <option value={value} key={value}>{ZONE_TYPE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
-                <label><span>What may officers or visitors do here?</span><select value={zoneForm.ruleType} onChange={(event) => setZoneForm({ ...zoneForm, ruleType: event.target.value })}>{ruleOptions.map((value) => <option value={value} key={value}>{RULE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
-                <label><span>If an issue is found</span><select value={zoneForm.workflow} onChange={(event) => setZoneForm({ ...zoneForm, workflow: event.target.value })}>{Object.entries(WORKFLOW_LABELS).map(([value, label]) => <option value={value} key={value || 'default'}>{label}</option>)}</select></label>
-                <label className="place-manager-check"><input type="checkbox" checked={zoneForm.active} onChange={(event) => setZoneForm({ ...zoneForm, active: event.target.checked })} />Area is available for operations</label>
+                <label><span>Area purpose</span><select value={zoneForm.zoneType} onChange={(event) => editZoneForm({ zoneType: event.target.value })}>{zoneTypeOptions.map((value) => <option value={value} key={value}>{ZONE_TYPE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
+                <label><span>What may officers or visitors do here?</span><select value={zoneForm.ruleType} onChange={(event) => editZoneForm({ ruleType: event.target.value })}>{ruleOptions.map((value) => <option value={value} key={value}>{RULE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
+                <label><span>If an issue is found</span><select value={zoneForm.workflow} onChange={(event) => editZoneForm({ workflow: event.target.value })}>{Object.entries(WORKFLOW_LABELS).map(([value, label]) => <option value={value} key={value || 'default'}>{label}</option>)}</select></label>
+                <label className="place-manager-check"><input type="checkbox" checked={zoneForm.active} onChange={(event) => editZoneForm({ active: event.target.checked })} />Area is available for operations</label>
               </div>
-              <footer><span>{creatingZone ? 'Saving creates the area, then opens its map boundary.' : `Saved version ${zone?.configuration_version ?? 0}`}</span><button type="submit" className="is-primary" disabled={busy || !zoneForm.name.trim()}>{creatingZone ? 'Save and draw boundary' : 'Save area settings'}</button></footer>
+              {zoneDraftStale && zone && <div className="place-manager-message is-warning" role="alert"><AlertTriangle size={15} /><span>This area changed since you started editing — reload to see the latest</span><button type="button" onClick={() => loadZoneForm(zone)}>Discard my changes and load the latest</button></div>}
+              <footer><span>{creatingZone ? 'Saving creates the area, then opens its map boundary.' : `Saved version ${zone?.configuration_version ?? 0}`}</span>{zoneDirty && !zoneDraftStale && zone && <button type="button" onClick={() => loadZoneForm(zone)}>Discard changes</button>}{!creatingZone && policyDirty && <span className="place-manager-save-hint">Save or discard your rule changes first</span>}<button type="submit" className="is-primary" disabled={busy || !zoneForm.name.trim() || (!creatingZone && policyDirty)}>{creatingZone ? 'Save and draw boundary' : 'Save area settings'}</button></footer>
             </> : <div className="place-manager-empty">No work area exists yet. Add one to describe where a service applies.</div>}
           </form>
           {zone && !creatingZone && <section className="place-manager-part-of" aria-label="Part of another work area">
@@ -511,10 +534,11 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
             <div>
               {partOfState === 'saved' && <span className="is-success" role="status"><CheckCircle2 size={14} />Saved</span>}
               {partOfState === 'error' && partOfError && <span className="is-error" role="alert"><AlertTriangle size={14} />{partOfError}</span>}
-              <button type="button" onClick={() => void savePartOf()} disabled={partOfState === 'saving' || partOf === (zone.parent_zone_id ?? '')}>{partOfState === 'saving' ? 'Saving' : 'Save part of'}</button>
+              {unsavedAreaChanges && <span className="is-hint">Save or discard your area changes first</span>}
+              <button type="button" onClick={() => void savePartOf()} disabled={unsavedAreaChanges || partOfState === 'saving' || partOf === (zone.parent_zone_id ?? '')}>{partOfState === 'saving' ? 'Saving' : 'Save part of'}</button>
             </div>
           </section>}
-          {zone && !creatingZone && zone.module_key === zoneForm.moduleKey && ['parking_enforcement', 'freedom_camping'].includes(zone.module_key) && <WorkingZonePolicyEditor key={zone.id} zoneId={zone.id} moduleKey={zone.module_key} configurationVersion={zone.configuration_version} onSaved={() => { void load(zone.id); onSaved(); }} />}
+          {zone && !creatingZone && zone.module_key === zoneForm.moduleKey && ['parking_enforcement', 'freedom_camping'].includes(zone.module_key) && <WorkingZonePolicyEditor key={zone.id} zoneId={zone.id} moduleKey={zone.module_key} configurationVersion={zone.configuration_version} onDirtyChange={setPolicyDirty} saveBlockedReason={zoneDirty ? 'Save or discard your area settings first' : null} onSaved={() => { void load(zone.id); onSaved(); }} />}
           </>
         ) : view === 'boundary' ? (
           <div className="place-manager-boundary">

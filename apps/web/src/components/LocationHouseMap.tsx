@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, Building2, CheckCircle2, Crosshair, LandPlot, Layers, LoaderCircle, MapPin, PenTool, ShieldCheck, Undo2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
-import { placeAdvisories, placeLayerGates, type ParentContainment } from '../lib/placeLayers';
+import { orderZonesByParent, placeAdvisories, placeLayerGates, type ParentContainment } from '../lib/placeLayers';
 import './LocationHouseMap.css';
 import './LocationHouseMapSpine.css';
 import './LocationHouseMapEditing.css';
@@ -225,8 +225,8 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         bounds.extend(point.getLatLng());
       }
     });
-    // Larger areas first so a part drawn inside its area stays on top and clickable.
-    const zoneOrder = [...zones].sort((a, b) => Number(Boolean(a.parent_zone_id)) - Number(Boolean(b.parent_zone_id)));
+    // Every ancestor draws before its descendants, so each part stays on top of the area it is part of and keeps its tooltip.
+    const zoneOrder = orderZonesByParent(zones).map(({ zone }) => zone);
     zoneOrder.forEach((zone) => {
       const parent = zone.parent_zone_id ? zones.find((item) => item.id === zone.parent_zone_id) : undefined;
       const label = `Zone: ${zone.name}${parent ? ` · part of ${parent.name}` : ''}`;
