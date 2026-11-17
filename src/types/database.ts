@@ -47031,6 +47031,10 @@ export type Database = {
         Args: { p_event_type: string; p_payload: Json }
         Returns: string
       }
+      location_zone_parent_containment: {
+        Args: { p_checkpoint_organization_id?: string; p_zone_id: string }
+        Returns: Json
+      }
       lock_cctv_evidence: {
         Args: { p_evidence_id: string; p_reason: string }
         Returns: Json
@@ -54384,6 +54388,14 @@ export type Database = {
           place_created: boolean
           protected_party_recorded: boolean
         }[]
+      }
+      set_location_zone_parent: {
+        Args: {
+          p_expected_version?: number
+          p_parent_zone_id: string
+          p_zone_id: string
+        }
+        Returns: Json
       }
       set_nzta_register_lookup_outcome: {
         Args: {
