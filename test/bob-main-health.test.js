@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { createMainHealthMonitor, summarizeFailure, verifyToolingSandbox } = require('../bob-main-health');
+const { createMainHealthMonitor, summarizeFailure, verifyToolingSandbox, rootMountIsReadOnly } = require('../bob-main-health');
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -159,11 +159,14 @@ test('timeouts and worker launch failures retry without classifying main as brok
 
 test('socket-free worker reports Docker-dependent checks as inconclusive without hiding other failures', async () => {
   const dockerFailure = [
+    'BOB_HEALTH_STEP root-tests START',
     'not ok 1 - nested runner failed',
     "  location: '/workspace/test/builder-agentic-engineer.test.js:161:1'",
     '  error: spawn docker ENOENT',
     'not ok 2 - Vibe runner failed',
     "  location: '/workspace/test/builder-vibe-session.test.js:1060:1'",
+    '  error: spawn docker ENOENT',
+    'BOB_HEALTH_STEP root-tests FAIL exit=1',
     'BOB_HEALTH_CAPABILITY nested-docker unavailable',
   ].join('\n');
   const isolated = harness({ result: { status: 'failed', exitCode: 1, stdout: dockerFailure } });
@@ -171,12 +174,30 @@ test('socket-free worker reports Docker-dependent checks as inconclusive without
   assert.equal(isolated.calls.repairs, 0);
   assert.equal(isolated.states.get(SHA_A).status, 'retry');
 
-  const mixed = harness({ result: { status: 'failed', exitCode: 1, stdout: `${dockerFailure}\nnot ok 3 - real regression\n  location: '/workspace/test/other.test.js:5:1'` } });
+  const mixed = harness({ result: { status: 'failed', exitCode: 1, stdout: `${dockerFailure}\nnot ok 3 - real regression\n  location: '/workspace/test/other.test.js:5:1'\n  error: AssertionError` } });
   assert.equal((await mixed.monitor.tick()).outcome, 'repair_opened');
   assert.equal(mixed.calls.repairs, 1);
 
+  const otherStep = harness({ result: { status: 'failed', exitCode: 1, stdout: `${dockerFailure}\nBOB_HEALTH_STEP lint FAIL exit=1` } });
+  assert.equal((await otherStep.monitor.tick()).outcome, 'repair_opened');
+  assert.equal(otherStep.calls.repairs, 1);
+
+  const mixedCause = harness({ result: { status: 'failed', exitCode: 1, stdout: dockerFailure.replace('  error: spawn docker ENOENT\nBOB_HEALTH_STEP root-tests FAIL', '  error: AssertionError\nBOB_HEALTH_STEP root-tests FAIL') } });
+  assert.equal((await mixedCause.monitor.tick()).outcome, 'repair_opened');
+  assert.equal(mixedCause.calls.repairs, 1);
+
   const withoutMarker = harness({ result: { status: 'failed', exitCode: 1, stdout: dockerFailure.replace('BOB_HEALTH_CAPABILITY nested-docker unavailable', '') } });
   assert.equal((await withoutMarker.monitor.tick()).outcome, 'repair_opened');
+});
+
+test('real sandbox verification requires a read-only root mount', () => {
+  const mountInfo = [
+    '24 1 0:20 / / rw,nosuid,nodev - overlay overlay rw',
+    '25 24 0:21 / /workspace ro,nosuid - ext4 /dev/vda rw',
+  ].join('\n');
+  assert.equal(rootMountIsReadOnly(mountInfo), false);
+  assert.equal(rootMountIsReadOnly(mountInfo.replace('0:20 / / rw,', '0:20 / / ro,')), true);
+  assert.equal(rootMountIsReadOnly('24 1 0:20 / /workspace ro - overlay overlay ro'), false);
 });
 
 test('a rejected repair intake persists only bounded parsed test paths for diagnosis', async () => {

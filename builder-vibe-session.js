@@ -48,6 +48,10 @@ const STREAM_PREVIEW_CHARS = 1500;
 const HUMAN_TEST_PREVIEW_CHARS = 4000;
 const MAX_VIBE_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIBE_ATTACHMENT_CONTEXT_CHARS = 24_000;
+const stripUnverifiedBaselineComparison = preview => String(preview || '')
+  .replace(/^[ \t]*Pinned base reproduced\b[^\r\n]*\r?\n?/gm, '')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
 const VIBE_VISION_TIMEOUT_MS = 90_000;
 
 const id8 = sessionId => String(sessionId).replace(/-/g, '').slice(0, 8).toLowerCase();
@@ -1168,7 +1172,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (payload.tool === 'browser_test' && trackedBrowserVerification(payload.browser_test)) {
       const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
       if (payload.ok === false) {
-        failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
+        failedVerifications.set(key, { command: key, failed: true, preview: clip(stripUnverifiedBaselineComparison(payload.preview), 3000), historical: true });
         historicalBrowserFailures.set(key, payload.browser_test);
       } else if (payload.ok === true) {
         failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); historicalBrowserFailures.delete(key);

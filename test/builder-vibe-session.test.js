@@ -2861,23 +2861,34 @@ test('resumed Vibe reports retained baseline matches only for the latest unchang
   };
   const base = makeReport('base');
   const draft = makeReport('worktree');
+  const previousComparison = 'Pinned base reproduced 1 screenshot failure(s) with identical actual and diff images. These checks remain failed; baseline review and fresh verification are required.';
   store.verificationHistory = async () => [
     { payload: { tool: 'browser_test', ok: false, browser_test: base } },
-    { payload: { tool: 'browser_test', ok: false, preview: 'screenshot failed', browser_test: draft } },
+    { payload: { tool: 'browser_test', ok: false, preview: `screenshot failed\n${previousComparison}`, browser_test: draft } },
   ];
   const result = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
   assert.equal(result.error, true);
   assert.match(result.reply, /identical actual and diff images/);
   assert.match(result.reply, /checks remain failed/);
+  assert.equal((result.reply.match(/Pinned base reproduced/g) || []).length, 1);
 
   store.verificationHistory = async () => [
     { payload: { tool: 'browser_test', ok: false, browser_test: base } },
-    { payload: { tool: 'browser_test', ok: false, preview: 'older screenshot failed', browser_test: draft } },
-    { payload: { tool: 'browser_test', ok: false, preview: 'newer screenshot failed', browser_test: { ...draft, source_fingerprint: 'c'.repeat(64) } } },
+    { payload: { tool: 'browser_test', ok: false, preview: `older screenshot failed\n${previousComparison}`, browser_test: draft } },
+    { payload: { tool: 'browser_test', ok: false, preview: `newer screenshot failed\n${previousComparison}`, browser_test: { ...draft, source_fingerprint: 'c'.repeat(64) } } },
   ];
   const stale = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status now?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
   assert.equal(stale.error, true);
   assert.doesNotMatch(stale.reply, /identical actual and diff images/);
+
+  fs.rmSync(draft.failures[0].evidence[0]);
+  store.verificationHistory = async () => [
+    { payload: { tool: 'browser_test', ok: false, browser_test: base } },
+    { payload: { tool: 'browser_test', ok: false, preview: `saved comparison\n${previousComparison}`, browser_test: draft } },
+  ];
+  const missingArtifact = await vibe.processVibeMessage({ store, message: ownerMessage('What is the artifact status?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
+  assert.equal(missingArtifact.error, true);
+  assert.doesNotMatch(missingArtifact.reply, /Pinned base reproduced/);
 });
 
 test('external Vibe does not disclose historical baseline comparisons after attachments', async t => {

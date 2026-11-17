@@ -6,6 +6,15 @@ const { execFileSync } = require('node:child_process');
 const { failedTestPaths } = require('./supabase/functions/_shared/builder-repository-context');
 const TOOLING_RUNTIME_FILES = ['bob-control-plane-server.js', 'bob-main-health.js', 'builder-agentic-engineer.js', 'builder-branch-workspace.js', 'builder-path-policy.js', 'worker-executor.js'];
 
+function rootMountIsReadOnly(mountInfo) {
+  const rootMount = String(mountInfo || '').split(/\r?\n/)
+    .map(line => line.split(' '))
+    .find(fields => fields[4] === '/');
+  if (!rootMount) return false;
+  const options = new Set((rootMount[5] || '').split(','));
+  return options.has('ro') && !options.has('rw');
+}
+
 async function verifyToolingSandbox({ workspaceRoot, sourceDir, expectedSha, createToolsImpl } = {}) {
   if (!workspaceRoot) throw new Error('tooling verification workspace root is required');
   if (!sourceDir || !SHA_RE.test(String(expectedSha || ''))) throw new Error('pinned tooling source and SHA are required');
@@ -27,6 +36,10 @@ async function verifyToolingSandbox({ workspaceRoot, sourceDir, expectedSha, cre
       "  assert.equal(fs.existsSync('/var/run/docker.sock'), false);",
       "  assert.equal(process.env.SUPABASE_SERVICE_ROLE_KEY, undefined);",
       "  assert.equal(process.env.BOB_ADMIN_TOKEN, undefined);",
+      "  const rootMount = fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\\n').map(line => line.split(' ')).find(fields => fields[4] === '/');",
+      "  assert.ok(rootMount, 'root mount must be present in mountinfo');",
+      "  const rootOptions = rootMount[5].split(',');",
+      "  assert.ok(rootOptions.includes('ro') && !rootOptions.includes('rw'), 'root mount must be read-only');",
       "  assert.throws(() => fs.writeFileSync('/etc/fcm-main-health-probe', 'fixture'), error => ['EROFS', 'EACCES'].includes(error.code));",
       "  assert.throws(() => fs.appendFileSync('/workspace/.git/config', '\\n# fixture'), error => ['EROFS', 'EACCES'].includes(error.code));",
       "  fs.writeFileSync('/workspace/fixture-output', 'ok');",
@@ -45,6 +58,40 @@ async function verifyToolingSandbox({ workspaceRoot, sourceDir, expectedSha, cre
   }
 }
 
+function failedHealthSteps(output) {
+  return [...String(output || '').matchAll(/^BOB_HEALTH_STEP ([a-z0-9-]+) FAIL exit=(\d+)\s*$/gm)]
+    .map(([, name, exitCode]) => ({ name, exit_code: Number(exitCode) }));
+}
+
+function dockerOnlyTapFailures(output, failureEvidence) {
+  const dockerDependentTests = new Set(['test/builder-agentic-engineer.test.js', 'test/builder-vibe-session.test.js']);
+  if (!failureEvidence.failed_health_steps.length
+    || failureEvidence.failed_health_steps.some(step => step.name !== 'root-tests')) return false;
+
+  const blocks = [];
+  let current = null;
+  for (const line of String(output || '').split(/\r?\n/)) {
+    if (/^\s*not ok \d+\b/.test(line)) {
+      if (current) blocks.push(current.join('\n'));
+      current = [line];
+    } else if (current && (/^\s*ok \d+\b/.test(line) || /^BOB_HEALTH_STEP /.test(line))) {
+      blocks.push(current.join('\n'));
+      current = null;
+    } else if (current) current.push(line);
+  }
+  if (current) blocks.push(current.join('\n'));
+  if (!blocks.length) return false;
+
+  const coveredTests = new Set();
+  for (const block of blocks) {
+    const paths = failedTestPaths(block);
+    if (paths.length !== 1 || !dockerDependentTests.has(paths[0]) || !/spawn docker ENOENT/.test(block)) return false;
+    coveredTests.add(paths[0]);
+  }
+  return failureEvidence.failing_tests.length > 0
+    && failureEvidence.failing_tests.every(file => dockerDependentTests.has(file) && coveredTests.has(file));
+}
+
 function summarizeFailure(result) {
   const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
@@ -55,10 +102,12 @@ function summarizeFailure(result) {
   const allLines = fullOutput.split(/\r?\n/);
   const assertions = allLines.filter((line) => /AssertionError|Test Files\s|\bfailed\b/i.test(line)).slice(-20);
   const diagnostics = allLines.filter((line) => /\b(error|enoent|eacces|not found|timed out|timeout|cannot|failed)\b/i.test(line)).slice(-30);
+  const failedSteps = failedHealthSteps(fullOutput);
   return {
     profile: result?.profile || 'main-health',
     exit_code: Number.isInteger(result?.exitCode) ? result.exitCode : null,
     failing_tests: failingTests,
+    failed_health_steps: failedSteps,
     summary: (failingTests.length ? failingTests : assertions.length ? assertions : diagnostics).join('\n').slice(-3000),
     stdout,
     stderr,
@@ -123,10 +172,9 @@ function createMainHealthMonitor({ getMainSha, runChecks, verifyTooling, openRep
       }
 
       failureEvidence = summarizeFailure(result);
-      const nestedDockerUnavailable = /(?:^|\n)BOB_HEALTH_CAPABILITY nested-docker unavailable(?:\r?\n|$)/.test(`${result.stdout || ''}\n${result.stderr || ''}`);
-      const dockerDependentTests = new Set(['test/builder-agentic-engineer.test.js', 'test/builder-vibe-session.test.js']);
-      if (nestedDockerUnavailable && /spawn docker ENOENT/.test(`${result.stdout || ''}\n${result.stderr || ''}`) && failureEvidence.failing_tests.length > 0
-        && failureEvidence.failing_tests.every(file => dockerDependentTests.has(file))) {
+      const fullOutput = `${result.stdout || ''}\n${result.stderr || ''}`;
+      const nestedDockerUnavailable = /(?:^|\n)BOB_HEALTH_CAPABILITY nested-docker unavailable(?:\r?\n|$)/.test(fullOutput);
+      if (nestedDockerUnavailable && dockerOnlyTapFailures(fullOutput, failureEvidence)) {
         state = { sha, status: 'retry', checked_at: new Date(now()).toISOString(), error: 'main-health cannot verify Docker-dependent Builder tests inside its socket-free worker', failing_tests: failureEvidence.failing_tests };
         await writeState(state);
         log({ sha, outcome: 'retry', reason: 'nested_docker_unavailable', failing_tests: failureEvidence.failing_tests });
@@ -158,4 +206,4 @@ function createMainHealthMonitor({ getMainSha, runChecks, verifyTooling, openRep
   return { tick };
 }
 
-module.exports = { createMainHealthMonitor, summarizeFailure, verifyToolingSandbox, RUNNING_TIMEOUT_MS };
+module.exports = { createMainHealthMonitor, summarizeFailure, verifyToolingSandbox, rootMountIsReadOnly, RUNNING_TIMEOUT_MS };
