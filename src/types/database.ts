@@ -2175,6 +2175,110 @@ export type Database = {
           },
         ]
       }
+      bob_document_auto_review_receipts: {
+        Row: {
+          applied_target_id: string | null
+          bob_model: string | null
+          bob_provider: string | null
+          created_at: string
+          decision_reason: string
+          decision_report: Json
+          document_id: string
+          document_version_id: string
+          id: string
+          lease_expires_at: string | null
+          lease_token: string
+          oracle_model: string | null
+          oracle_provider: string | null
+          organization_id: string
+          proposal_id: string | null
+          proposal_snapshot: Json | null
+          review_kind: string
+          source_file_sha256: string | null
+          source_text_sha256: string
+          source_updated_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          applied_target_id?: string | null
+          bob_model?: string | null
+          bob_provider?: string | null
+          created_at?: string
+          decision_reason?: string
+          decision_report?: Json
+          document_id: string
+          document_version_id: string
+          id?: string
+          lease_expires_at?: string | null
+          lease_token?: string
+          oracle_model?: string | null
+          oracle_provider?: string | null
+          organization_id: string
+          proposal_id?: string | null
+          proposal_snapshot?: Json | null
+          review_kind: string
+          source_file_sha256?: string | null
+          source_text_sha256: string
+          source_updated_at: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          applied_target_id?: string | null
+          bob_model?: string | null
+          bob_provider?: string | null
+          created_at?: string
+          decision_reason?: string
+          decision_report?: Json
+          document_id?: string
+          document_version_id?: string
+          id?: string
+          lease_expires_at?: string | null
+          lease_token?: string
+          oracle_model?: string | null
+          oracle_provider?: string | null
+          organization_id?: string
+          proposal_id?: string | null
+          proposal_snapshot?: Json | null
+          review_kind?: string
+          source_file_sha256?: string | null
+          source_text_sha256?: string
+          source_updated_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_document_auto_review_receipts_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_document_auto_review_receipts_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_document_auto_review_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_document_auto_review_receipts_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "document_promotion_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bob_event_log: {
         Row: {
           conversation_id: string
@@ -19059,6 +19163,7 @@ export type Database = {
       }
       location_zones: {
         Row: {
+          access_instructions: string | null
           active_schedule: Json | null
           boundary: unknown
           boundary_status: string
@@ -19073,6 +19178,7 @@ export type Database = {
           despatch_zone_code: string | null
           enforcement_workflow_override: string | null
           external_ref: string | null
+          hs_notes: string | null
           id: string
           internal_client_ref: string | null
           is_active: boolean
@@ -19097,13 +19203,16 @@ export type Database = {
           radius_meters: number | null
           repeat_stay_radius_m: number | null
           repeat_stay_window_nights: number | null
+          risk_level: string | null
           rule_overrides: Json | null
           rule_type: string
           scv_exempts_restriction: boolean
           scv_required: boolean
+          site_brief: string | null
           zone_type: string
         }
         Insert: {
+          access_instructions?: string | null
           active_schedule?: Json | null
           boundary?: unknown
           boundary_status?: string
@@ -19118,6 +19227,7 @@ export type Database = {
           despatch_zone_code?: string | null
           enforcement_workflow_override?: string | null
           external_ref?: string | null
+          hs_notes?: string | null
           id?: string
           internal_client_ref?: string | null
           is_active?: boolean
@@ -19142,13 +19252,16 @@ export type Database = {
           radius_meters?: number | null
           repeat_stay_radius_m?: number | null
           repeat_stay_window_nights?: number | null
+          risk_level?: string | null
           rule_overrides?: Json | null
           rule_type?: string
           scv_exempts_restriction?: boolean
           scv_required?: boolean
+          site_brief?: string | null
           zone_type?: string
         }
         Update: {
+          access_instructions?: string | null
           active_schedule?: Json | null
           boundary?: unknown
           boundary_status?: string
@@ -19163,6 +19276,7 @@ export type Database = {
           despatch_zone_code?: string | null
           enforcement_workflow_override?: string | null
           external_ref?: string | null
+          hs_notes?: string | null
           id?: string
           internal_client_ref?: string | null
           is_active?: boolean
@@ -19187,10 +19301,12 @@ export type Database = {
           radius_meters?: number | null
           repeat_stay_radius_m?: number | null
           repeat_stay_window_nights?: number | null
+          risk_level?: string | null
           rule_overrides?: Json | null
           rule_type?: string
           scv_exempts_restriction?: boolean
           scv_required?: boolean
+          site_brief?: string | null
           zone_type?: string
         }
         Relationships: [
@@ -22127,6 +22243,7 @@ export type Database = {
           selected_at: string
           sha256_hash: string
           shift_id: string | null
+          shift_stop_id: string | null
           storage_path: string
         }
         Insert: {
@@ -22141,6 +22258,7 @@ export type Database = {
           selected_at: string
           sha256_hash: string
           shift_id?: string | null
+          shift_stop_id?: string | null
           storage_path: string
         }
         Update: {
@@ -22155,6 +22273,7 @@ export type Database = {
           selected_at?: string
           sha256_hash?: string
           shift_id?: string | null
+          shift_stop_id?: string | null
           storage_path?: string
         }
         Relationships: [
@@ -22198,6 +22317,13 @@ export type Database = {
             columns: ["shift_id"]
             isOneToOne: false
             referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_record_photos_shift_stop_id_fkey"
+            columns: ["shift_stop_id"]
+            isOneToOne: false
+            referencedRelation: "shift_stops"
             referencedColumns: ["id"]
           },
         ]
@@ -23326,6 +23452,38 @@ export type Database = {
           },
         ]
       }
+      organization_operating_settings: {
+        Row: {
+          branches_may_set_up_static_posts: boolean
+          organization_id: string
+          place_changes_need_second_approver: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          branches_may_set_up_static_posts?: boolean
+          organization_id: string
+          place_changes_need_second_approver?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          branches_may_set_up_static_posts?: boolean
+          organization_id?: string
+          place_changes_need_second_approver?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_operating_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_workplaces: {
         Row: {
           active: boolean
@@ -24265,6 +24423,53 @@ export type Database = {
         }
         Relationships: []
       }
+      patrol_check_types: {
+        Row: {
+          active: boolean
+          check_key: string
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+          needs_note: boolean
+          needs_photo: boolean
+          organization_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          check_key: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label: string
+          needs_note?: boolean
+          needs_photo?: boolean
+          organization_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          check_key?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string
+          needs_note?: boolean
+          needs_photo?: boolean
+          organization_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patrol_check_types_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       patrol_checkpoint_visits: {
         Row: {
           checkpoint_id: string | null
@@ -25027,6 +25232,32 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      patrol_schedule_draw_seeds: {
+        Row: {
+          created_at: string
+          delivery_schedule_id: string
+          seed: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_schedule_id: string
+          seed?: string
+        }
+        Update: {
+          created_at?: string
+          delivery_schedule_id?: string
+          seed?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patrol_schedule_draw_seeds_delivery_schedule_id_fkey"
+            columns: ["delivery_schedule_id"]
+            isOneToOne: true
+            referencedRelation: "service_agreement_delivery_schedules"
             referencedColumns: ["id"]
           },
         ]
@@ -26965,6 +27196,166 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "module_rule_index_view"
             referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      place_service_module_profiles: {
+        Row: {
+          capability_key: string
+          config_module_key: string
+          delivered_as_visits: boolean
+          module_key: string
+          toolset_key: string
+        }
+        Insert: {
+          capability_key: string
+          config_module_key: string
+          delivered_as_visits?: boolean
+          module_key: string
+          toolset_key: string
+        }
+        Update: {
+          capability_key?: string
+          config_module_key?: string
+          delivered_as_visits?: boolean
+          module_key?: string
+          toolset_key?: string
+        }
+        Relationships: []
+      }
+      place_service_seasons: {
+        Row: {
+          label: string
+          months: number[]
+          season_key: string
+          sort_order: number
+        }
+        Insert: {
+          label: string
+          months: number[]
+          season_key: string
+          sort_order: number
+        }
+        Update: {
+          label?: string
+          months?: number[]
+          season_key?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      place_service_term_versions: {
+        Row: {
+          applied_effective_from: string | null
+          approval_action_id: string | null
+          change_kind: string
+          client_request_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_reason: string | null
+          delivery_schedule_id: string | null
+          effective_from: string
+          id: string
+          location_id: string
+          organization_id: string
+          reason: string | null
+          request_fingerprint: string
+          requested_at: string
+          requested_by: string
+          service_agreement_id: string
+          service_kind: string
+          status: string
+          terms: Json
+          work_unit_id: string | null
+        }
+        Insert: {
+          applied_effective_from?: string | null
+          approval_action_id?: string | null
+          change_kind: string
+          client_request_id: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          delivery_schedule_id?: string | null
+          effective_from: string
+          id?: string
+          location_id: string
+          organization_id: string
+          reason?: string | null
+          request_fingerprint: string
+          requested_at?: string
+          requested_by: string
+          service_agreement_id: string
+          service_kind: string
+          status?: string
+          terms: Json
+          work_unit_id?: string | null
+        }
+        Update: {
+          applied_effective_from?: string | null
+          approval_action_id?: string | null
+          change_kind?: string
+          client_request_id?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          delivery_schedule_id?: string | null
+          effective_from?: string
+          id?: string
+          location_id?: string
+          organization_id?: string
+          reason?: string | null
+          request_fingerprint?: string
+          requested_at?: string
+          requested_by?: string
+          service_agreement_id?: string
+          service_kind?: string
+          status?: string
+          terms?: Json
+          work_unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "place_service_term_versions_approval_action_id_fkey"
+            columns: ["approval_action_id"]
+            isOneToOne: false
+            referencedRelation: "bob_agentic_actions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_service_term_versions_delivery_schedule_id_fkey"
+            columns: ["delivery_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_delivery_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_service_term_versions_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_service_term_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_service_term_versions_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_service_term_versions_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -31148,6 +31539,7 @@ export type Database = {
           organization_id: string
           patrol_config_id: string | null
           place_role: string
+          required_checks: string[]
           required_dwell_minutes: number
           shift_id: string
           site_id: string | null
@@ -31196,6 +31588,7 @@ export type Database = {
           organization_id: string
           patrol_config_id?: string | null
           place_role?: string
+          required_checks?: string[]
           required_dwell_minutes?: number
           shift_id: string
           site_id?: string | null
@@ -31244,6 +31637,7 @@ export type Database = {
           organization_id?: string
           patrol_config_id?: string | null
           place_role?: string
+          required_checks?: string[]
           required_dwell_minutes?: number
           shift_id?: string
           site_id?: string | null
@@ -37333,6 +37727,10 @@ export type Database = {
         }
         Returns: Json
       }
+      active_check_keys_for: {
+        Args: { p_organization_id: string }
+        Returns: string[]
+      }
       add_crm_invoice_line: {
         Args: {
           p_client_request_id: string
@@ -37454,6 +37852,20 @@ export type Database = {
           p_alias_kind?: string
           p_notes?: string
           p_person_record_id: string
+        }
+        Returns: Json
+      }
+      add_place_static_post: {
+        Args: {
+          p_agreement_id: string
+          p_client_request_id: string
+          p_location_id: string
+          p_operating_organization_id: string
+          p_post_name: string
+          p_reason: string
+          p_required_skill_ids: string[]
+          p_site_id: string
+          p_zone_id: string
         }
         Returns: Json
       }
@@ -37649,6 +38061,10 @@ export type Database = {
         Args: { p_action_id: string }
         Returns: string
       }
+      apply_bob_document_auto_proposal: {
+        Args: { p_receipt_id: string }
+        Returns: Json
+      }
       apply_bob_place_hazard_proposal: {
         Args: { p_action_id: string }
         Returns: string
@@ -37826,6 +38242,14 @@ export type Database = {
       apply_person_interaction_details: {
         Args: { p_interaction_id: string; p_reason: string }
         Returns: undefined
+      }
+      apply_place_service_version: {
+        Args: { p_version_id: string }
+        Returns: Json
+      }
+      apply_place_static_post_version: {
+        Args: { p_version_id: string }
+        Returns: string
       }
       apply_site_brief_promotion_proposal: {
         Args: {
@@ -41906,6 +42330,13 @@ export type Database = {
         Args: { p_organization_id?: string }
         Returns: boolean
       }
+      can_set_up_static_post: {
+        Args: {
+          p_operating_organization_id: string
+          p_provider_organization_id: string
+        }
+        Returns: boolean
+      }
       can_view_rnm_identity_for_organization: {
         Args: { p_organization_id: string }
         Returns: boolean
@@ -42052,6 +42483,20 @@ export type Database = {
       check_invite_rate_limit: {
         Args: { p_caller_id: string; p_target_org_id: string }
         Returns: boolean
+      }
+      claim_bob_document_auto_review: {
+        Args: {
+          p_document_version_id: string
+          p_proposal_id?: string
+          p_review_kind: string
+          p_source_text_sha256?: string
+        }
+        Returns: {
+          attempt_token: string
+          claimed: boolean
+          receipt_id: string
+          state: string
+        }[]
       }
       claim_cctv_inference_job: {
         Args: {
@@ -43860,6 +44305,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_static_roster_work_unit_internal: {
+        Args: {
+          p_actor_user_id: string
+          p_name: string
+          p_operating_organization_id: string
+          p_service_agreement_location_id: string
+          p_service_agreement_module_id: string
+          p_service_type: string
+        }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          external_refs: Json
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+          workshop_work_order_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_workshop_work_order:
         | {
             Args: {
@@ -44341,6 +44823,15 @@ export type Database = {
         Returns: Json
       }
       daitch_mokotoff: { Args: { "": string }; Returns: string[] }
+      decide_place_service_change: {
+        Args: {
+          p_client_request_id: string
+          p_decision: string
+          p_reason: string
+          p_version_id: string
+        }
+        Returns: Json
+      }
       defer_cctv_inference_job: {
         Args: {
           p_job_id: string
@@ -44428,6 +44919,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      end_place_static_post: {
+        Args: {
+          p_client_request_id: string
+          p_reason: string
+          p_work_unit_id: string
+        }
+        Returns: Json
       }
       end_service_agreement: {
         Args: { p_agreement_id: string; p_ends_on: string; p_reason: string }
@@ -44962,6 +45461,49 @@ export type Database = {
           sighting_count: number
           strength: string
         }[]
+      }
+      finish_bob_document_auto_review: {
+        Args: {
+          p_attempt_token?: string
+          p_classification?: Json
+          p_decision: string
+          p_decision_reason: string
+          p_promotion_metadata?: Json
+          p_receipt_id: string
+          p_reviewers?: Json
+          p_scope?: string
+          p_source_claims?: Json
+        }
+        Returns: {
+          applied_target_id: string | null
+          bob_model: string | null
+          bob_provider: string | null
+          created_at: string
+          decision_reason: string
+          decision_report: Json
+          document_id: string
+          document_version_id: string
+          id: string
+          lease_expires_at: string | null
+          lease_token: string
+          oracle_model: string | null
+          oracle_provider: string | null
+          organization_id: string
+          proposal_id: string | null
+          proposal_snapshot: Json | null
+          review_kind: string
+          source_file_sha256: string | null
+          source_text_sha256: string
+          source_updated_at: string
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bob_document_auto_review_receipts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       generate_crm_invoice_from_agreement: {
         Args: {
@@ -46000,6 +46542,10 @@ export type Database = {
         }
         Returns: number
       }
+      get_organization_operating_settings: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
       get_orgs_by_jurisdiction_point: {
         Args: { p_lat: number; p_lng: number; p_module_key?: string }
         Returns: {
@@ -46049,6 +46595,11 @@ export type Database = {
         Returns: Json
       }
       get_place_hazard_source: { Args: { p_hazard_id: string }; Returns: Json }
+      get_place_services: { Args: { p_location_id: string }; Returns: Json }
+      get_place_services_patrol_base: {
+        Args: { p_location_id: string }
+        Returns: Json
+      }
       get_recorded_officer_timesheet_work: {
         Args: { p_period_end: string; p_period_start: string }
         Returns: {
@@ -48062,6 +48613,7 @@ export type Database = {
           p_zone_type: string
         }
         Returns: {
+          access_instructions: string | null
           active_schedule: Json | null
           boundary: unknown
           boundary_status: string
@@ -48076,6 +48628,7 @@ export type Database = {
           despatch_zone_code: string | null
           enforcement_workflow_override: string | null
           external_ref: string | null
+          hs_notes: string | null
           id: string
           internal_client_ref: string | null
           is_active: boolean
@@ -48100,10 +48653,12 @@ export type Database = {
           radius_meters: number | null
           repeat_stay_radius_m: number | null
           repeat_stay_window_nights: number | null
+          risk_level: string | null
           rule_overrides: Json | null
           rule_type: string
           scv_exempts_restriction: boolean
           scv_required: boolean
+          site_brief: string | null
           zone_type: string
         }
         SetofOptions: {
@@ -48112,6 +48667,17 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      manage_crm_zone_briefing: {
+        Args: {
+          p_access_instructions: string
+          p_expected_version: number
+          p_hs_notes: string
+          p_risk_level: string
+          p_site_brief: string
+          p_zone_id: string
+        }
+        Returns: Json
       }
       manage_crm_zone_closure: {
         Args: {
@@ -48661,6 +49227,7 @@ export type Database = {
           p_zone_id: string
         }
         Returns: {
+          access_instructions: string | null
           active_schedule: Json | null
           boundary: unknown
           boundary_status: string
@@ -48675,6 +49242,7 @@ export type Database = {
           despatch_zone_code: string | null
           enforcement_workflow_override: string | null
           external_ref: string | null
+          hs_notes: string | null
           id: string
           internal_client_ref: string | null
           is_active: boolean
@@ -48699,10 +49267,12 @@ export type Database = {
           radius_meters: number | null
           repeat_stay_radius_m: number | null
           repeat_stay_window_nights: number | null
+          risk_level: string | null
           rule_overrides: Json | null
           rule_type: string
           scv_exempts_restriction: boolean
           scv_required: boolean
+          site_brief: string | null
           zone_type: string
         }
         SetofOptions: {
@@ -48719,6 +49289,18 @@ export type Database = {
           p_effective_from: string
           p_expected_policy_id: string
           p_max_gap_seconds: number
+          p_organization_id: string
+        }
+        Returns: Json
+      }
+      manage_patrol_check_type: {
+        Args: {
+          p_action: string
+          p_check_type_id: string
+          p_client_request_id: string
+          p_label: string
+          p_needs_note: boolean
+          p_needs_photo: boolean
           p_organization_id: string
         }
         Returns: Json
@@ -49642,6 +50224,7 @@ export type Database = {
           p_zone_id: string
         }
         Returns: {
+          access_instructions: string | null
           active_schedule: Json | null
           boundary: unknown
           boundary_status: string
@@ -49656,6 +50239,7 @@ export type Database = {
           despatch_zone_code: string | null
           enforcement_workflow_override: string | null
           external_ref: string | null
+          hs_notes: string | null
           id: string
           internal_client_ref: string | null
           is_active: boolean
@@ -49680,10 +50264,12 @@ export type Database = {
           radius_meters: number | null
           repeat_stay_radius_m: number | null
           repeat_stay_window_nights: number | null
+          risk_level: string | null
           rule_overrides: Json | null
           rule_type: string
           scv_exempts_restriction: boolean
           scv_required: boolean
+          site_brief: string | null
           zone_type: string
         }
         SetofOptions: {
@@ -49805,6 +50391,10 @@ export type Database = {
       next_staff_employee_number: {
         Args: { p_organization_id: string }
         Returns: string
+      }
+      normalise_place_service_terms: {
+        Args: { p_agreement_id: string; p_location_id: string; p_terms: Json }
+        Returns: Json
       }
       normalize_person_name: { Args: { p_name: string }; Returns: string }
       normalize_plate_number: { Args: { p_plate: string }; Returns: string }
@@ -50031,6 +50621,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      patrol_stop_check_details_internal: {
+        Args: { p_stop_id: string }
+        Returns: {
+          check_key: string
+          known_type: boolean
+          label: string
+          needs_note: boolean
+          needs_photo: boolean
+          notes: string
+          outcome: string
+          performed_at: string
+        }[]
+      }
       patrol_window_bounds: {
         Args: {
           p_shift_date: string
@@ -50089,6 +50692,112 @@ export type Database = {
       person_record_admin_allowed: {
         Args: { p_organization_id: string; p_person_id: string }
         Returns: boolean
+      }
+      place_anchor_point: {
+        Args: { p_site_id: string; p_zone_id: string }
+        Returns: unknown
+      }
+      place_service_create_schedule: {
+        Args: { p_agreement_id: string; p_terms: Json }
+        Returns: string
+      }
+      place_service_drawn_days: {
+        Args: {
+          p_allowed: number[]
+          p_date: string
+          p_delivery_schedule_id: string
+          p_per_week: number
+        }
+        Returns: number[]
+      }
+      place_service_json_int: { Args: { p_value: Json }; Returns: number }
+      place_service_json_int_array: {
+        Args: { p_value: Json }
+        Returns: number[]
+      }
+      place_service_json_time: { Args: { p_value: Json }; Returns: string }
+      place_service_live_terms: {
+        Args: { p_delivery_schedule_id: string }
+        Returns: Json
+      }
+      place_service_module_mapping: {
+        Args: { p_module_key: string }
+        Returns: {
+          capability_key: string
+          config_module_key: string
+          delivered_as_visits: boolean
+          toolset_key: string
+        }[]
+      }
+      place_service_normalise_endpoint: {
+        Args: { p_endpoint: Json }
+        Returns: Json
+      }
+      place_service_project_schedule: {
+        Args: { p_delivery_schedule_id: string }
+        Returns: boolean
+      }
+      place_service_regenerate_stops: {
+        Args: { p_config_id: string; p_from: string }
+        Returns: number
+      }
+      place_service_runs_on: {
+        Args: { p_date: string; p_delivery_schedule_id: string; p_terms: Json }
+        Returns: boolean
+      }
+      place_service_terms_at: {
+        Args: { p_date: string; p_delivery_schedule_id: string }
+        Returns: Json
+      }
+      place_service_today: { Args: never; Returns: string }
+      place_service_version_at: {
+        Args: { p_date: string; p_delivery_schedule_id: string }
+        Returns: {
+          applied_effective_from: string | null
+          approval_action_id: string | null
+          change_kind: string
+          client_request_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_reason: string | null
+          delivery_schedule_id: string | null
+          effective_from: string
+          id: string
+          location_id: string
+          organization_id: string
+          reason: string | null
+          request_fingerprint: string
+          requested_at: string
+          requested_by: string
+          service_agreement_id: string
+          service_kind: string
+          status: string
+          terms: Json
+          work_unit_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "place_service_term_versions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      place_service_window_at: {
+        Args: {
+          p_date: string
+          p_point: unknown
+          p_shift_end: string
+          p_shift_start: string
+          p_terms: Json
+        }
+        Returns: {
+          window_close: string
+          window_open: string
+        }[]
+      }
+      place_service_window_endpoint: {
+        Args: { p_date: string; p_endpoint: Json; p_point: unknown }
+        Returns: string
       }
       platform_list_subscribers: {
         Args: never
@@ -50325,6 +51034,17 @@ export type Database = {
       }
       preview_location_patrol_setup: {
         Args: { p_changes: Json; p_location_id: string }
+        Returns: Json
+      }
+      preview_place_service_change: {
+        Args: {
+          p_agreement_id: string
+          p_change_kind: string
+          p_delivery_schedule_id: string
+          p_effective_from: string
+          p_location_id: string
+          p_terms: Json
+        }
         Returns: Json
       }
       preview_roster_assignment: {
@@ -51501,6 +52221,20 @@ export type Database = {
           visit_id: string
           visited_at: string
         }[]
+      }
+      record_patrol_stop_check: {
+        Args: {
+          p_check_key: string
+          p_gps_accuracy_metres: number
+          p_gps_lat: number
+          p_gps_lng: number
+          p_notes: string
+          p_outcome: string
+          p_photo_path: string
+          p_request_id: string
+          p_stop_id: string
+        }
+        Returns: Json
       }
       record_patrol_travel_distance: {
         Args: {
@@ -53812,6 +54546,7 @@ export type Database = {
         }
         Returns: Json
       }
+      roll_place_service_terms: { Args: never; Returns: number }
       rollback_bob_roster_fill_plan: {
         Args: { p_action_id: string }
         Returns: {
@@ -54021,6 +54756,20 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      save_place_service_change: {
+        Args: {
+          p_agreement_id: string
+          p_change_kind: string
+          p_client_request_id: string
+          p_delivery_schedule_id: string
+          p_effective_from: string
+          p_location_id: string
+          p_preview_fingerprint: string
+          p_reason: string
+          p_terms: Json
+        }
+        Returns: Json
       }
       save_service_client: {
         Args: {
@@ -54472,6 +55221,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_organization_operating_setting: {
+        Args: {
+          p_client_request_id: string
+          p_organization_id: string
+          p_setting: string
+          p_value: boolean
+        }
+        Returns: Json
+      }
       set_patrol_route_primary_officer: {
         Args: { p_reason: string; p_route_id: string; p_staff_id: string }
         Returns: Json
@@ -54737,6 +55495,10 @@ export type Database = {
           place_kind: string
           place_name: string
         }[]
+      }
+      solar_event_at: {
+        Args: { p_date: string; p_event: string; p_lat: number; p_lng: number }
+        Returns: string
       }
       soundex: { Args: { "": string }; Returns: string }
       st_3dclosestpoint: {
