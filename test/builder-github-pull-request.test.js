@@ -91,13 +91,20 @@ test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft 
       return { ok: true, status: 201, json: async () => ({ html_url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/43', number: 43 }) };
     }
     if (url.endsWith('/pulls/43') && init.method === 'GET') return { ok: true, status: 200, json: async () => pull };
+    if (url.endsWith(`/commits/${head}/check-runs?per_page=100`)) return { ok: true, status: 200, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'success' }] }) };
+    if (url.endsWith(`/commits/${head}/status?per_page=100`)) return { ok: true, status: 200, json: async () => ({ state: 'success', statuses: [] }) };
+    if (url.endsWith('/pulls/43/reviews?per_page=100') || url.endsWith('/issues/43/comments?per_page=100')) return { ok: true, status: 200, json: async () => [] };
     if (url.endsWith('/graphql')) {
       const body = JSON.parse(init.body);
+      if (!body.query.includes('markPullRequestReadyForReview')) return { ok: true, status: 200, json: async () => ({ data: { node: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }) };
       assert.equal(body.variables.pullRequestId, pull.node_id);
       assert.match(body.query, /markPullRequestReadyForReview/);
       return { ok: true, status: 200, json: async () => ({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false, headRefOid: head, baseRefName: 'main', state: 'OPEN' } } } }) };
     }
-    if (url.endsWith('/pulls/43/merge')) return { ok: true, status: 200, json: async () => ({ merged: true, sha: 'f'.repeat(40) }) };
+    if (url.endsWith('/pulls/43/merge')) {
+      assert.deepEqual(JSON.parse(init.body), { sha: head, merge_method: 'rebase' });
+      return { ok: true, status: 200, json: async () => ({ merged: true, sha: 'f'.repeat(40) }) };
+    }
     throw new Error(`unexpected ${init.method} ${url}`);
   };
   const created = await workspace.createGitHubPullRequest({ workspacePath: repo, branchName: 'bob/job-automerge1', expectedHeadSha: head, title: 'Bob Builder: fix', body: 'review', githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', draft: false, fetchImpl });
@@ -106,6 +113,74 @@ test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft 
   assert.equal(merged.sha, 'f'.repeat(40));
   assert.ok(calls.some(({ url }) => url.endsWith('/graphql')));
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('GitHub PR state is green only for complete checks on the current head and includes review feedback', async () => {
+  const head = 'a'.repeat(40);
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/pulls/44')) return { ok: true, status: 200, json: async () => ({ node_id: 'PR_test', state: 'open', head: { sha: head }, base: { ref: 'main' } }) };
+    if (url.endsWith(`/commits/${head}/check-runs?per_page=100`)) return { ok: true, status: 200, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'success' }] }) };
+    if (url.endsWith(`/commits/${head}/status?per_page=100`)) return { ok: true, status: 200, json: async () => ({ state: 'success', statuses: [] }) };
+    if (url.endsWith('/pulls/44/reviews?per_page=100')) return { ok: true, status: 200, json: async () => [] };
+    if (url.endsWith('/issues/44/comments?per_page=100')) return { ok: true, status: 200, json: async () => [] };
+    if (url.endsWith('/graphql')) return { ok: true, status: 200, json: async () => ({ data: { node: { reviewThreads: { nodes: [{ isResolved: false, path: 'src/example.js', line: 12, comments: { nodes: [{ id: 'comment-1', body: 'Please handle this edge case.', author: { login: 'reviewer' } }], pageInfo: { hasNextPage: false } } }], pageInfo: { hasNextPage: false } } } } }) };
+    throw new Error(`unexpected ${url}`);
+  };
+  const result = await workspace.readGitHubPullRequestState({ url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/44', githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', fetchImpl });
+  assert.equal(result.checks, 'success');
+  assert.equal(result.feedbackComplete, true);
+  assert.deepEqual(result.feedback, [{ source: 'inline', file: 'src/example.js', line: 12, author: 'reviewer', body: 'Please handle this edge case.' }]);
+  assert.ok(calls.every(({ init }) => init.headers.Authorization === 'Bearer ghp_test'));
+
+  const failed = await workspace.readGitHubPullRequestState({
+    url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/44', githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-',
+    fetchImpl: async (url) => {
+      if (url.endsWith('/pulls/44')) return { ok: true, status: 200, json: async () => ({ node_id: 'PR_test', state: 'open', head: { sha: head }, base: { ref: 'main' } }) };
+      if (url.endsWith(`/commits/${head}/check-runs?per_page=100`)) return { ok: true, status: 200, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'failure' }] }) };
+      if (url.endsWith(`/commits/${head}/status?per_page=100`)) return { ok: true, status: 200, json: async () => ({ state: 'success', statuses: [] }) };
+      if (url.endsWith('/pulls/44/reviews?per_page=100') || url.endsWith('/issues/44/comments?per_page=100')) return { ok: true, status: 200, json: async () => [] };
+      if (url.endsWith('/graphql')) return { ok: true, status: 200, json: async () => ({ data: { node: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }) };
+      throw new Error(`unexpected ${url}`);
+    },
+  });
+  assert.equal(failed.checks, 'failure');
+});
+
+test('superseded Builder PR closure requires the exact open main-targeted head', async () => {
+  const head = 'c'.repeat(40);
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (init.method === 'GET') return { ok: true, status: 200, json: async () => ({ state: 'open', head: { sha: head }, base: { ref: 'main' } }) };
+    assert.equal(init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(init.body), { state: 'closed' });
+    return { ok: true, status: 200, json: async () => ({ state: 'closed', head: { sha: head } }) };
+  };
+  const result = await workspace.closeGitHubPullRequest({ url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/45', expectedHeadSha: head, githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', fetchImpl });
+  assert.deepEqual(result, { number: 45, head, closed: true });
+  assert.equal(calls.length, 2);
+  await assert.rejects(workspace.closeGitHubPullRequest({
+    url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/45', expectedHeadSha: 'd'.repeat(40), githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-',
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ state: 'open', head: { sha: head }, base: { ref: 'main' } }) }),
+  }), /changed before correction handoff/);
+});
+
+test('the merge adapter refuses failed CI even when called outside autopilot', async () => {
+  const head = 'b'.repeat(40);
+  let mergeRequested = false;
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/pulls/46')) return { ok: true, status: 200, json: async () => ({ node_id: 'PR_failed', state: 'open', head: { sha: head }, base: { ref: 'main' } }) };
+    if (url.endsWith(`/commits/${head}/check-runs?per_page=100`)) return { ok: true, status: 200, json: async () => ({ total_count: 1, check_runs: [{ name: 'CI', status: 'completed', conclusion: 'failure' }] }) };
+    if (url.endsWith(`/commits/${head}/status?per_page=100`)) return { ok: true, status: 200, json: async () => ({ state: 'success', statuses: [] }) };
+    if (url.endsWith('/pulls/46/reviews?per_page=100') || url.endsWith('/issues/46/comments?per_page=100')) return { ok: true, status: 200, json: async () => [] };
+    if (url.endsWith('/graphql')) return { ok: true, status: 200, json: async () => ({ data: { node: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }) };
+    if (url.endsWith('/pulls/46/merge')) mergeRequested = true;
+    throw new Error(`unexpected ${url}`);
+  };
+  await assert.rejects(workspace.mergeGitHubPullRequest({ number: 46, expectedHeadSha: head, githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', fetchImpl }), /CI and review evidence is not green/);
+  assert.equal(mergeRequested, false);
 });
 
 test('GitHub credentials travel as a per-invocation header, never inside a remote URL', () => {
@@ -148,7 +223,9 @@ test('control plane routes publication and pull requests by git host and keeps g
   // Git transport uses the deployed SSH identity; PR operations require a separate durable API token.
   assert.match(controlPlane, /publishWorkspaceBranch\(\{[\s\S]*pushUrl: target\.repoUrl[\s\S]*sshCommand: target\.sshCommand/);
   assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*await createGitHubPullRequest/);
-  assert.match(controlPlane, /mergeGitHubPullRequest\(\{ number: pullRequest\.number/);
+  assert.match(controlPlane, /mergePullRequest: async \(job, expectedHeadSha\)/);
+  assert.match(controlPlane, /mergeGitHubPullRequest\(\{ number, expectedHeadSha/);
+  assert.doesNotMatch(controlPlane, /const pullRequest = await openBuilderPullRequest\(job\.id, bodyFor, \{ draft: automerge\?\.ok !== true \}\);[\s\S]{0,250}mergeGitHubPullRequest/);
   assert.match(controlPlane, /mainHealthEnabled/);
   assert.match(controlPlane, /\/api\/bob\/builder\/repository\/head/);
   assert.match(controlPlane, /const sourceDir = selectBuilderSourceDir\(target\.repoUrl\)/);

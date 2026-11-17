@@ -12,7 +12,7 @@ const { loadCodeReviewSeed } = require('./builder-artifact-read');
 const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
-const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
+const { EXTERNAL_PROVIDERS, PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 const { laneAllows, laneFor, normalizeRepoPath } = require('./builder-path-policy');
 const { checkImplementationAcceptance } = require('./builder-implementation-acceptance');
@@ -329,7 +329,7 @@ async function recoverExpiredWorkerRuns(supabase, logger = console, { includeAct
 async function runBackendImplementation(input) {
   const agentic = AGENTIC_ENABLED && input.context?.workspaceRoot;
   const generate = agentic ? agenticGenerator('backend', input.context, input.priorFailure) : runBackendEngineer;
-  let generation = input.resumePatchArtifact ? { ok: true, patch_artifact: input.resumePatchArtifact, routing: { provider: 'resumed' } } : await generate(input);
+  let generation = input.resumePatchArtifact ? { ok: true, patch_artifact: input.resumePatchArtifact, routing: { provider: 'resumed' } } : await generate({ ...input, startAfterProvider: input.context?.startAfterProvider });
   if (agentic && (!generation.ok || !generation.patch_artifact?.id) && escalationPoint(generation)) {
     generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
   }
@@ -359,7 +359,7 @@ async function runBackendImplementation(input) {
     if (!failureArtifact?.id) return { success: false, phase: 'evidence', attempts: attempt, patch_artifact: patchArtifact, error: 'verification failure artifact is missing' };
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
     // that failed verification hands the repair to the next provider in the chain.
-    generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) });
+    generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) || input.context?.startAfterProvider });
     if (!generation.ok || !generation.patch_artifact?.id) {
       await recordGenerationFailure(input, generation, 'repair');
       return { success: false, phase: 'repair', attempts: attempt, result: generation };
@@ -444,7 +444,9 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   }
   if (action.type === 'run_frontend') {
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
-    const generator = agentic ? agenticGenerator('frontend', context, failedImplementationEvidence(snapshot, action.step)) : undefined;
+    const authorProvider = Object.values(PROVIDERS).includes(context.startAfterProvider) ? context.startAfterProvider : null;
+    const baseGenerator = agentic ? agenticGenerator('frontend', context, failedImplementationEvidence(snapshot, action.step)) : null;
+    const generator = baseGenerator ? (input) => baseGenerator({ ...input, startAfterProvider: input.startAfterProvider || authorProvider }) : undefined;
     const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
     const siblingCompleted = byStep(snapshot, 'backend_implementation')?.status === 'completed';
     return run.frontend({ ...common, siblingCompleted, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });

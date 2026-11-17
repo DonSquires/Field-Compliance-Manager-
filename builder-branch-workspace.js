@@ -362,7 +362,65 @@ async function readGitHubPullRequestState({ url, githubToken, owner, repo, fetch
     return { state: 'merged', mergeSha: data.merge_commit_sha ?? null, mergedAt: data.merged_at ?? null, mergedBy: data.merged_by?.login ?? null, headSha: data.head?.sha ?? null, baseRef: data.base?.ref ?? null };
   }
   if (data.state === 'closed') return { state: 'closed', closedAt: data.closed_at ?? null, headSha: data.head?.sha ?? null };
-  return { state: 'open', draft: data.draft === true, headSha: data.head?.sha ?? null };
+  const headSha = data.head?.sha ?? null;
+  if (!/^[a-f0-9]{40}$/i.test(String(headSha || '')) || !data.node_id) {
+    return { state: 'open', draft: data.draft === true, headSha, checks: 'unknown', feedbackComplete: false, error: 'pull request head evidence is unavailable' };
+  }
+  const number = Number(match[3]);
+  const commitPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}`;
+  const [checkRuns, commitStatus, reviews, feedback] = await Promise.all([
+    githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${commitPath}/check-runs?per_page=100` }),
+    githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${commitPath}/status?per_page=100` }),
+    githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}/reviews?per_page=100` }),
+    githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}/comments?per_page=100` }),
+  ]);
+  const threads = await githubGraphql({
+    fetchImpl,
+    githubToken,
+    query: 'query BuilderPullRequestFeedback($id: ID!) { node(id: $id) { ... on PullRequest { reviewThreads(first: 100) { nodes { isResolved path line comments(first: 10) { nodes { id body author { login } createdAt } pageInfo { hasNextPage } } } pageInfo { hasNextPage } } } } }',
+    variables: { id: data.node_id },
+  });
+  const runs = checkRuns.data?.check_runs;
+  const statuses = commitStatus.data?.statuses;
+  const reviewList = reviews.data;
+  const issueComments = feedback.data;
+  const reviewThreads = threads.data?.data?.node?.reviewThreads;
+  const readsComplete = checkRuns.ok && commitStatus.ok && reviews.ok && feedback.ok && threads.ok
+    && Array.isArray(runs) && Array.isArray(statuses) && Array.isArray(reviewList) && Array.isArray(issueComments)
+    && Number(checkRuns.data.total_count ?? runs.length) <= runs.length
+    && statuses.length < 100 && reviewList.length < 100 && issueComments.length < 100
+    && Array.isArray(reviewThreads?.nodes) && reviewThreads.pageInfo?.hasNextPage !== true
+    && reviewThreads.nodes.every((thread) => thread.comments?.pageInfo?.hasNextPage !== true);
+  const normalizedRuns = (Array.isArray(runs) ? runs : []).map((run) => ({
+    name: String(run.name || 'unnamed check').slice(0, 120),
+    status: run.status,
+    conclusion: run.conclusion ?? null,
+  }));
+  const checkConclusions = normalizedRuns.map((run) => run.status === 'completed' ? run.conclusion : 'pending');
+  const statusStates = (Array.isArray(statuses) ? statuses : []).map((status) => status.state);
+  if (!statusStates.length && ['success', 'failure', 'error', 'pending'].includes(commitStatus.data?.state)) statusStates.push(commitStatus.data.state);
+  const hasFailedCheck = checkConclusions.some((conclusion) => !['success', 'skipped', 'neutral', 'pending'].includes(conclusion))
+    || statusStates.some((state) => ['failure', 'error'].includes(state));
+  const hasPendingCheck = checkConclusions.some((conclusion) => conclusion === 'pending')
+    || statusStates.some((state) => state === 'pending');
+  const hasCheckEvidence = normalizedRuns.length > 0 || statusStates.length > 0;
+  const checksState = !readsComplete || !hasCheckEvidence ? 'unknown'
+    : hasFailedCheck ? 'failure'
+      : hasPendingCheck ? 'pending'
+        : checkConclusions.every((conclusion) => ['success', 'skipped', 'neutral'].includes(conclusion))
+          && statusStates.every((state) => state === 'success') ? 'success' : 'unknown';
+  const unresolvedThreads = (reviewThreads?.nodes || []).filter((thread) => thread.isResolved !== true);
+  const reviewNotes = [
+    ...(Array.isArray(reviewList) ? reviewList.filter((review) => review.state === 'CHANGES_REQUESTED').map((review) => ({ source: 'review', author: review.user?.login || 'reviewer', body: String(review.body || 'Changes requested without a written summary.').slice(0, 2000) })) : []),
+    ...unresolvedThreads.flatMap((thread) => (thread.comments?.nodes || []).filter((comment) => String(comment.body || '').trim()).map((comment) => ({ source: 'inline', file: String(thread.path || '').slice(0, 240), line: Number.isInteger(thread.line) ? thread.line : null, author: comment.author?.login || 'reviewer', body: String(comment.body).slice(0, 2000) }))),
+    ...(Array.isArray(issueComments) ? issueComments.filter((comment) => String(comment.body || '').trim()).map((comment) => ({ source: 'discussion', author: comment.user?.login || 'reviewer', body: String(comment.body).slice(0, 2000) })) : []),
+  ].slice(0, 40);
+  return {
+    state: 'open', draft: data.draft === true, headSha, baseRef: data.base?.ref ?? null,
+    checks: checksState, checkRuns: normalizedRuns.slice(0, 100),
+    feedback: reviewNotes, feedbackComplete: readsComplete,
+    error: readsComplete ? null : 'GitHub CI or review evidence is incomplete',
+  };
 }
 
 async function githubGraphql({ fetchImpl, githubToken, query, variables }) {
@@ -423,9 +481,36 @@ async function mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, ow
       throw new Error('GitHub pull request could not be marked ready for verified merge');
     }
   }
-  const merged = await githubApi({ fetchImpl, githubToken, method: 'PUT', urlPath: `${repoPath}/pulls/${Number(number)}/merge`, body: { sha: expectedHeadSha, merge_method: 'squash' } });
+  const gate = await readGitHubPullRequestState({
+    url: `https://github.com/${owner}/${repo}/pull/${Number(number)}`,
+    githubToken, owner, repo, fetchImpl,
+  });
+  if (gate?.state !== 'open' || gate.headSha !== expectedHeadSha || gate.baseRef !== 'main'
+      || gate.checks !== 'success' || gate.feedbackComplete !== true || (gate.feedback || []).length) {
+    throw new Error('GitHub pull request CI and review evidence is not green at the verified head');
+  }
+  const merged = await githubApi({ fetchImpl, githubToken, method: 'PUT', urlPath: `${repoPath}/pulls/${Number(number)}/merge`, body: { sha: expectedHeadSha, merge_method: 'rebase' } });
   if (!merged.ok || merged.data?.merged !== true) throw new Error('GitHub did not merge the verified pull request');
   return { number: Number(number), sha: merged.data.sha ?? expectedHeadSha, merged_at: merged.data.merged_at ?? null };
+}
+
+async function closeGitHubPullRequest({ url, expectedHeadSha, githubToken, owner, repo, fetchImpl = globalThis.fetch }) {
+  if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder GitHub integration is not configured');
+  githubRepoUrl(owner, repo);
+  const match = String(url || '').match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
+  if (!match || match[1].toLowerCase() !== String(owner).toLowerCase() || match[2].toLowerCase() !== String(repo).toLowerCase()) {
+    throw new Error('pull request is not in the configured GitHub repository');
+  }
+  const pullPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${Number(match[3])}`;
+  const current = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: pullPath });
+  if (!current.ok || current.data?.state !== 'open' || current.data?.head?.sha !== expectedHeadSha || current.data?.base?.ref !== 'main') {
+    throw new Error('GitHub pull request changed before correction handoff');
+  }
+  const closed = await githubApi({ fetchImpl, githubToken, method: 'PATCH', urlPath: pullPath, body: { state: 'closed' } });
+  if (!closed.ok || closed.data?.state !== 'closed' || closed.data?.head?.sha !== expectedHeadSha) {
+    throw new Error('GitHub pull request could not be closed at the verified head');
+  }
+  return { number: Number(match[3]), head: expectedHeadSha, closed: true };
 }
 
 function giteaRepositoryPath(remote) {
@@ -466,4 +551,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, redactGitError, gitSpawnFault };
+module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, closeGitHubPullRequest, readGitHubPullRequestState, redactGitError, gitSpawnFault };

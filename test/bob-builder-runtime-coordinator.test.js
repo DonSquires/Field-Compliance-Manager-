@@ -775,3 +775,36 @@ test('two in-house budgets with no edit escalate once to the outsourced tier, se
     delete require.cache[coordinatorPath];
   }
 });
+
+test('a CI correction can start the next implementation after the previous author provider', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  const handoffPath = require.resolve('../builder-backend-handoff');
+  const originalHandoff = require.cache[handoffPath].exports;
+  const calls = [];
+  const chain = ['gpu_workstation', 'ollama', 'openai'];
+  const rpcs = [];
+  const supabase = { rpc: async (name) => { rpcs.push(name); return { data: null, error: null }; } };
+  try {
+    require.cache[handoffPath].exports = { ...originalHandoff, runBackendHandoff: async () => ({ success: true, artifacts: [{ id: 'verified' }] }) };
+    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => {
+      calls.push(input.startAfterProvider);
+      return input.startAfterProvider === 'ollama'
+        ? { ok: true, patch_artifact: { id: 'patch-rotated' }, routing: { provider: 'openai', chain } }
+        : { ok: false, error: 'the prior author was repeated' };
+    } };
+    delete require.cache[coordinatorPath];
+    const result = await require('../builder-runtime-coordinator').runBackendImplementation({
+      supabase, gateway: {}, job: { id: 'job-rotate' }, step: { id: 'step-rotate' },
+      context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo', startAfterProvider: 'ollama' },
+    });
+    assert.equal(result.success, true);
+    assert.deepEqual(calls, ['ollama']);
+    assert.deepEqual(rpcs, []);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    require.cache[handoffPath].exports = originalHandoff;
+    delete require.cache[coordinatorPath];
+  }
+});
