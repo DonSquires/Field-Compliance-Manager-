@@ -6,6 +6,15 @@ const nzParts = (date: Date) => new Intl.DateTimeFormat('en-CA', {
   return parts;
 }, {});
 
+const nzDisplay = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', dateStyle: 'medium', timeStyle: 'short' });
+
+/** A timestamp for people to read, in New Zealand time ("18/11/2026, 8:00 pm"). */
+export const nzDateTimeLabel = (iso: string | null | undefined) => {
+  if (!iso) return '';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '' : nzDisplay.format(date);
+};
+
 export const nzDateInput = (iso: string | null | undefined) => {
   if (!iso) return '';
   const date = new Date(iso);

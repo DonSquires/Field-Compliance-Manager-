@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
 import { briefingNeedsAcknowledgement, fetchShiftSafetyBriefing, type SafetyBriefing } from '../lib/safetyBriefing';
 import { SafetyBriefingDialog } from './ShiftSafetyBriefing';
+import { OfficerStopChecks, checksOutstanding, type StopCheck } from './OfficerStopChecks';
 import './OfficerPatrolStops.css';
 
 interface StopPlace { kind: 'site' | 'zone' | 'unknown'; name: string; address: string | null; access_instructions: string | null; hs_notes: string | null }
@@ -19,7 +20,7 @@ export interface PatrolStop {
   required_dwell_minutes: number; officer_instructions: string | null;
   actual_arrived_at: string | null; actual_departed_at: string | null;
   arrival_verification: string | null; arrival_distance_m: number | null; officer_notes: string | null;
-  module_key: string; modules?: StopModule[]; place: StopPlace;
+  module_key: string; modules?: StopModule[]; checks?: StopCheck[]; place: StopPlace;
   actual_travel_distance_km?: number | null; travel_from_stop_id?: string | null;
   travel_distance_method?: 'recorded_km' | 'odometer_difference' | null; travel_distance_version?: number;
 }
@@ -145,7 +146,12 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
   };
 
   if (loading && !bundle) return <section className="patrol-stops" aria-label="Contracted stops"><p className="patrol-stops-subtle"><RefreshCw size={14} className="is-spinning" /> Loading your contracted stops…</p></section>;
-  if (!bundle) return null;
+  if (!bundle) return error
+    ? <section className="patrol-stops" aria-label="Contracted stops">
+      <div className="patrol-stops-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>
+      <button type="button" className="patrol-stops-refresh" onClick={() => void load()} disabled={loading} aria-label="Refresh contracted stops"><RefreshCw size={15} className={loading ? 'is-spinning' : ''} /></button>
+    </section>
+    : null;
 
   return (
     <section className="patrol-stops" aria-label="Contracted stops">
@@ -220,11 +226,15 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
                     <button type="button" className="btn btn-primary patrol-stop-action" onClick={() => void act(stop, 'arrive')} disabled={saving}><MapPin size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Arrived at ${stop.place.name}`}</button>
                   )}
                   {isCurrent && stop.status === 'on_scene' && (
+                    <>
+                    <OfficerStopChecks stopId={stop.id} checks={stop.checks ?? []} onRecorded={() => void load()} />
                     <form className="patrol-stop-depart" onSubmit={depart}>
                       <label><span>What you found and did here{stop.sla_status === 'breached' ? '' : ' (needed only if you leave early)'}</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="e.g. Gates locked, lights checked, nothing unusual" /></label>
                       {stop.sla_status === 'breached' && <label><span>Why you arrived after the contracted window</span><input value={delayReason} onChange={(event) => setDelayReason(event.target.value)} placeholder="e.g. Held at previous site by an alarm response" required /></label>}
-                      <button type="submit" className="btn btn-primary patrol-stop-action" disabled={saving}><Signpost size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Leaving ${stop.place.name}`}</button>
+                      {checksOutstanding(stop.checks) && <p className="patrol-stop-hint">Record every check first</p>}
+                      <button type="submit" className="btn btn-primary patrol-stop-action" disabled={saving || checksOutstanding(stop.checks)}><Signpost size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Leaving ${stop.place.name}`}</button>
                     </form>
+                    </>
                   )}
                 </div>
               </li>

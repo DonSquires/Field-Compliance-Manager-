@@ -3,13 +3,14 @@ import { AlertTriangle, CheckCircle2, LandPlot, MapPinned, ShieldCheck, Siren, X
 import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap, type EditableEntity, type HouseMapCheckpoint, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
 import { WorkingZonePolicyEditor } from './WorkingZonePolicyEditor';
+import { PlaceServicesTab } from './placeServices/PlaceServicesTab';
 import { orderZonesByParent, partOfOptions } from '../lib/placeLayers';
 import { areaDraftSync, isStaleAreaDraft, type AreaDraftBase } from '../lib/areaDraft';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
 import './OperationalPlaceManagerHuman.css';
 
-type View = 'site' | 'zones' | 'boundary' | 'checkpoints' | 'closures';
+type View = 'briefing' | 'zones' | 'boundary' | 'checkpoints' | 'closures' | 'services';
 
 interface Site extends HouseMapSite {
   risk_level: string | null;
@@ -29,6 +30,10 @@ interface Zone extends HouseMapZone {
   nightly_limit_monthly: number | null;
   scv_required: boolean;
   enforcement_workflow_override: string | null;
+  risk_level: string | null;
+  site_brief: string | null;
+  access_instructions: string | null;
+  hs_notes: string | null;
   configuration_version: number;
 }
 
@@ -121,14 +126,14 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function OperationalPlaceManager({ locationId, initialZoneId, onClose, onSaved }: { locationId: string; initialZoneId?: string | null; onClose: () => void; onSaved: () => void }) {
   const { profile } = useAuth();
   const [data, setData] = useState<EditorData | null>(null);
-  const [view, setView] = useState<View>(initialZoneId ? 'zones' : 'site');
-  const [siteId, setSiteId] = useState('');
+  const [view, setView] = useState<View>(initialZoneId ? 'zones' : 'briefing');
+  const [briefingAnchor, setBriefingAnchor] = useState(initialZoneId ? `zone:${initialZoneId}` : '');
   const [zoneId, setZoneId] = useState(initialZoneId ?? '');
   const [boundaryTarget, setBoundaryTarget] = useState(initialZoneId ? `zone:${initialZoneId}` : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [siteForm, setSiteForm] = useState({ risk: '', brief: '', access: '', safety: '', active: true });
+  const [briefingForm, setBriefingForm] = useState({ risk: '', brief: '', access: '', safety: '', active: true });
   const [zoneForm, setZoneForm] = useState<ZoneForm>(emptyZone());
   const [creatingZone, setCreatingZone] = useState(false);
   const [restriction, setRestriction] = useState({ type: 'temporary_closure', from: today(), to: '', reason: '' });
@@ -145,7 +150,11 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
   const [zoneDraft, setZoneDraft] = useState<AreaDraftBase>({ zoneId: null, version: 0, dirty: false });
   const [policyDirty, setPolicyDirty] = useState(false);
 
-  const site = data?.sites.find((item) => item.id === siteId) ?? null;
+  const briefingKind = briefingAnchor.split(':')[0];
+  const briefingId = briefingAnchor.split(':')[1] ?? '';
+  const briefingSite = briefingKind === 'site' ? data?.sites.find((item) => item.id === briefingId) ?? null : null;
+  const briefingZone = briefingKind === 'zone' ? data?.zones.find((item) => item.id === briefingId) ?? null : null;
+  const briefingPlace = briefingSite ?? briefingZone;
   const zone = data?.zones.find((item) => item.id === zoneId) ?? null;
   const selectedCheckpoint = checkpoints.find((item) => item.id === checkpointId) ?? null;
   const checkpointFacetKind = checkpointAnchor.split(':')[0];
@@ -188,8 +197,13 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     if (checkpointResponse.error) { setError(checkpointResponse.error.message); return false; }
     setCheckpoints((checkpointResponse.data as Checkpoint[]) ?? []);
     setData(next);
-    setSiteId((current) => next.sites.some((item) => item.id === current) ? current : next.sites[0]?.id ?? '');
     const requestedZoneId = preferredZoneId ?? initialZoneId ?? '';
+    setBriefingAnchor((current) => {
+      if (current.startsWith('site:') && next.sites.some((item) => `site:${item.id}` === current)) return current;
+      if (current.startsWith('zone:') && next.zones.some((item) => `zone:${item.id}` === current)) return current;
+      if (requestedZoneId && next.zones.some((item) => item.id === requestedZoneId)) return `zone:${requestedZoneId}`;
+      return next.sites[0] ? `site:${next.sites[0].id}` : next.zones[0] ? `zone:${next.zones[0].id}` : '';
+    });
     setZoneId((current) => next.zones.some((item) => item.id === requestedZoneId) ? requestedZoneId : next.zones.some((item) => item.id === current) ? current : next.zones[0]?.id ?? '');
     setBoundaryTarget((current) => {
       if (current.startsWith('site:') && next.sites.some((item) => `site:${item.id}` === current)) return current;
@@ -208,8 +222,8 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    if (site) setSiteForm({ risk: site.risk_level ?? '', brief: site.site_brief ?? '', access: site.access_instructions ?? '', safety: site.hs_notes ?? '', active: site.active });
-  }, [site]);
+    if (briefingPlace) setBriefingForm({ risk: briefingPlace.risk_level ?? '', brief: briefingPlace.site_brief ?? '', access: briefingPlace.access_instructions ?? '', safety: briefingPlace.hs_notes ?? '', active: briefingSite?.active ?? true });
+  }, [briefingPlace, briefingSite]);
   const loadZoneForm = useCallback((item: Zone) => {
     setZoneForm({
       name: item.name,
@@ -272,18 +286,28 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
     setBusy(false);
   };
 
-  const saveSite = (event: FormEvent) => {
+  const saveBriefing = (event: FormEvent) => {
     event.preventDefault();
-    if (!site) return;
-    void complete(() => supabase.rpc('manage_crm_site_profile', {
-      p_site_id: site.id,
-      p_expected_version: site.configuration_version,
-      p_risk_level: siteForm.risk || null,
-      p_site_brief: siteForm.brief,
-      p_access_instructions: siteForm.access,
-      p_hs_notes: siteForm.safety,
-      p_active: siteForm.active,
-    }), `${site.name} briefing saved.`);
+    if (briefingSite) {
+      void complete(() => supabase.rpc('manage_crm_site_profile', {
+        p_site_id: briefingSite.id,
+        p_expected_version: briefingSite.configuration_version,
+        p_risk_level: briefingForm.risk || null,
+        p_site_brief: briefingForm.brief,
+        p_access_instructions: briefingForm.access,
+        p_hs_notes: briefingForm.safety,
+        p_active: briefingForm.active,
+      }), `${briefingSite.name} briefing saved.`);
+    } else if (briefingZone) {
+      void complete(() => supabase.rpc('manage_crm_zone_briefing', {
+        p_zone_id: briefingZone.id,
+        p_expected_version: briefingZone.configuration_version,
+        p_risk_level: briefingForm.risk || null,
+        p_site_brief: briefingForm.brief,
+        p_access_instructions: briefingForm.access,
+        p_hs_notes: briefingForm.safety,
+      }), `${briefingZone.name} briefing saved.`);
+    }
   };
 
   const changeModule = (moduleKey: string) => {
@@ -491,25 +515,28 @@ export function OperationalPlaceManager({ locationId, initialZoneId, onClose, on
         <button type="button" onClick={onClose} aria-label="Close operational setup"><X size={18} /></button>
       </header>
       <nav aria-label="Operational setup steps">
-        <button className={view === 'site' ? 'is-active' : ''} onClick={() => setView('site')}><ShieldCheck size={15} />1. Site briefing</button>
+        <button className={view === 'briefing' ? 'is-active' : ''} onClick={() => setView('briefing')}><ShieldCheck size={15} />1. Briefing</button>
         <button className={view === 'zones' ? 'is-active' : ''} onClick={() => setView('zones')}><MapPinned size={15} />2. Work areas</button>
         <button className={view === 'boundary' ? 'is-active' : ''} onClick={() => setView('boundary')}><LandPlot size={15} />3. Map boundaries</button>
         <button className={view === 'checkpoints' ? 'is-active' : ''} onClick={() => setView('checkpoints')}><MapPinned size={15} />4. Checkpoints</button>
         <button className={view === 'closures' ? 'is-active' : ''} onClick={() => setView('closures')}><Siren size={15} />5. Temporary restrictions</button>
+        <button className={view === 'services' ? 'is-active' : ''} onClick={() => setView('services')}>Patrols &amp; services</button>
       </nav>
       {error && <div className="place-manager-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
       {notice && <div className="place-manager-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
       <main>
-        {!data ? <div className="place-manager-empty">Loading operational setup...</div> : view === 'site' ? (
-          <form onSubmit={saveSite}>
-            <div className="place-manager-heading"><div><h3>Site briefing</h3><p>What officers need to know before they arrive.</p></div><select aria-label="Site to edit" value={siteId} onChange={(event) => { setSiteId(event.target.value); setBoundaryTarget(`site:${event.target.value}`); }}>{data.sites.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></div>
-            {site ? <>
-              <div className="place-manager-grid"><label><span>Risk level</span><select value={siteForm.risk} onChange={(event) => setSiteForm({ ...siteForm, risk: event.target.value })}><option value="">Not assessed</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label><label className="place-manager-check"><input type="checkbox" checked={siteForm.active} onChange={(event) => setSiteForm({ ...siteForm, active: event.target.checked })} />Available for operations</label></div>
-              <label><span>What happens at this site?</span><textarea rows={3} value={siteForm.brief} onChange={(event) => setSiteForm({ ...siteForm, brief: event.target.value })} placeholder="Purpose, normal activity, client expectations..." /></label>
-              <label><span>How do officers enter and move around?</span><textarea rows={3} value={siteForm.access} onChange={(event) => setSiteForm({ ...siteForm, access: event.target.value })} placeholder="Gates, keys, access hours, parking, check-in point..." /></label>
-              <label><span>Health and safety information</span><textarea rows={3} value={siteForm.safety} onChange={(event) => setSiteForm({ ...siteForm, safety: event.target.value })} placeholder="Hazards, PPE, emergency contacts, areas to avoid..." /></label>
-              <footer><span>Saved version {site.configuration_version}</span><button type="submit" className="is-primary" disabled={busy}>Save site briefing</button></footer>
-            </> : <div className="place-manager-empty">No Site is linked to this place. Add it in the client portfolio first.</div>}
+        {!data ? <div className="place-manager-empty">Loading operational setup...</div> : view === 'services' ? (
+          <PlaceServicesTab locationId={locationId} moduleLabels={Object.fromEntries(data.modules.map(item => [item.module_key, item.display_name]))} />
+        ) : view === 'briefing' ? (
+          data.sites.length + data.zones.length === 0 ? <div className="place-manager-empty">Add an area or a site to this place first.</div> : <form onSubmit={saveBriefing}>
+            <div className="place-manager-heading"><div><h3>Briefing</h3><p>What officers need to know before they arrive at a site or area.</p></div><select aria-label="Site or area to brief" value={briefingAnchor} onChange={(event) => { setBriefingAnchor(event.target.value); setBoundaryTarget(event.target.value); }}>{data.sites.map((item) => <option value={`site:${item.id}`} key={`site:${item.id}`}>{`Site · ${item.name}`}</option>)}{data.zones.map((item) => <option value={`zone:${item.id}`} key={`zone:${item.id}`}>{`Area · ${item.name}`}</option>)}</select></div>
+            {briefingPlace ? <>
+              <div className="place-manager-grid"><label><span>Risk level</span><select value={briefingForm.risk} onChange={(event) => setBriefingForm({ ...briefingForm, risk: event.target.value })}><option value="">Not assessed</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>{briefingSite && <label className="place-manager-check"><input type="checkbox" checked={briefingForm.active} onChange={(event) => setBriefingForm({ ...briefingForm, active: event.target.checked })} />Available for operations</label>}</div>
+              <label><span>What happens here?</span><textarea rows={3} value={briefingForm.brief} onChange={(event) => setBriefingForm({ ...briefingForm, brief: event.target.value })} placeholder="Purpose, normal activity, client expectations..." /></label>
+              <label><span>How do officers enter and move around?</span><textarea rows={3} value={briefingForm.access} onChange={(event) => setBriefingForm({ ...briefingForm, access: event.target.value })} placeholder="Gates, keys, access hours, parking, check-in point..." /></label>
+              <label><span>Health and safety information</span><textarea rows={3} value={briefingForm.safety} onChange={(event) => setBriefingForm({ ...briefingForm, safety: event.target.value })} placeholder="Hazards, PPE, emergency contacts, areas to avoid..." /></label>
+              <footer><span>Saved version {briefingPlace.configuration_version}</span><button type="submit" className="is-primary" disabled={busy}>Save briefing</button></footer>
+            </> : <div className="place-manager-empty">Choose a site or area to brief.</div>}
           </form>
         ) : view === 'zones' ? (
           <><form onSubmit={(event) => void saveZone(event)}>

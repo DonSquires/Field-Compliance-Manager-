@@ -35,6 +35,17 @@
 .patrol-stop-depart { display: grid; gap: 8px; }
 .patrol-stop-depart label { display: grid; gap: 4px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
 .patrol-stop-depart textarea, .patrol-stop-depart input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: var(--color-bg-secondary, #0f172a); font: inherit; font-size: 13px; }
+.patrol-stop-hint { margin: 0; color: var(--color-warning, #fbbf24); font-size: 12px; }
+.patrol-stop-checks { display: grid; gap: 8px; margin: 0 0 8px; padding: 8px; border: 1px solid var(--color-border, #334155); border-radius: 6px; }
+.patrol-stop-checks legend { padding: 0 4px; font-size: 12px; color: var(--color-text-secondary, #94a3b8); }
+.patrol-stop-checks ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.patrol-stop-check { display: grid; gap: 6px; font-size: 13px; }
+.patrol-stop-check.is-recorded { display: flex; align-items: center; gap: 6px; color: var(--color-text-secondary, #94a3b8); }
+.patrol-stop-check label { display: grid; gap: 4px; font-size: 12px; color: var(--color-text-secondary, #94a3b8); }
+.patrol-stop-check textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: var(--color-bg-secondary, #0f172a); font: inherit; font-size: 13px; }
+.patrol-stop-check-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.patrol-stop-check-choices .btn { min-height: 44px; }
+.patrol-stop-check-error { margin: 0; color: var(--color-danger, #f87171); font-size: 12px; }
 
 @media (min-width: 720px) {
   .patrol-stop-action { width: auto; min-width: 240px; justify-self: start; }

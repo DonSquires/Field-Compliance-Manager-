@@ -27,6 +27,14 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./static-arrival-start-gate-
 if (process.env.BOB_TEST_POSTGRES === '1') require('./static-roster-contact-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./roster-shift-amendment-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./ad-hoc-static-shift-post-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./zone-briefing-parity-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./organization-operating-settings-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-catalogues-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./solar-events-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./place-service-terms-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./generator-reads-terms-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./place-static-posts-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-stop-checks-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./zone-parent-setting-migration.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');

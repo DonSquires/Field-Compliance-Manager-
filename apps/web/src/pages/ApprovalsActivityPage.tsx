@@ -6,9 +6,12 @@ import { formatGovernedPayload } from '../lib/governedPayload';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
+import { PlaceServiceChangeReview } from '../components/placeServices/PlaceServiceChangeReview';
 import './ApprovalsActivityPage.css';
 
 type ActionStatus = 'pending' | 'pending_approval' | 'proposed' | 'approved' | 'rejected' | 'applied' | 'failed';
+// Place changes are decided by decide_place_service_change, which also settles the pending version.
+const PLACE_SERVICE_CHANGE = 'place_service_change';
 type StatusFilter = 'pending' | 'approved' | 'rejected' | 'applied' | 'failed' | 'all';
 
 interface ApprovalRow {
@@ -26,6 +29,8 @@ interface ApprovalRow {
   amended_payload: Record<string, unknown> | null;
   organization_id: string;
   org_name: string | null;
+  triggered_by?: string | null;
+  user_id?: string | null;
   triggered_by_name: string | null;
   user_name: string | null;
   approved_by_name: string | null;
@@ -715,14 +720,15 @@ const ApprovalsActivityPage: React.FC = () => {
               </section>
 
               <section className="approvals-reasoning"><span>Review action</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
-              {selected.action_type === 'create_patrol_route_assignment' ? <HumanPatrolAssignmentSummary payload={selectedPayload(selected)} labels={payloadLabels} /> : <details className="approvals-payload"><summary>Proposal details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>}
-              <details className="approvals-payload"><summary>Edit before apply</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the editable live payload before application.</small>}</details>
+              {selected.action_type === PLACE_SERVICE_CHANGE ? <PlaceServiceChangeReview action={selected} currentUserId={profile?.id ?? null} onDecided={message => { setNotice(message); void loadActivity(); }} />
+                : selected.action_type === 'create_patrol_route_assignment' ? <HumanPatrolAssignmentSummary payload={selectedPayload(selected)} labels={payloadLabels} /> : <details className="approvals-payload"><summary>Proposal details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>}
+              {selected.action_type !== PLACE_SERVICE_CHANGE && <details className="approvals-payload"><summary>Edit before apply</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the editable live payload before application.</small>}</details>}
 
               {selected.rejection_reason && <div className="approvals-outcome is-rejected"><XCircle size={17} /><div><strong>Rejection reason</strong><span>{selected.rejection_reason}</span></div></div>}
               {selected.error_message && <div className="approvals-outcome is-failed"><AlertTriangle size={17} /><div><strong>Application error</strong><span>{selected.error_message}</span></div></div>}
               {selected.result_record_id && <div className="approvals-outcome is-applied"><CheckCircle2 size={17} /><div><strong>Applied result</strong><span>{selected.result_table ?? 'record'} · {selected.result_record_id}</span></div></div>}
 
-              {isPendingAction(selected.status) && (
+              {isPendingAction(selected.status) && selected.action_type !== PLACE_SERVICE_CHANGE && (
                 selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject action</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Approve action</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> {selected.assigned_approver_name ? `${selected.assigned_approver_name} owns this decision. Your current scope is view only.` : 'This decision is routed by role and organisation scope. Your current scope is view only.'}</div>
               )}
             </>

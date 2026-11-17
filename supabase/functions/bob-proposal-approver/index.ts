@@ -104,10 +104,14 @@ serve(async (req)=>{
     if (!reasoning) return json({
       error: 'reasoning is required'
     }, 400);
-    const { data: action, error: loadErr } = await admin.from('bob_agentic_actions').select('id, organization_id, user_id, status, conversation_id').eq('id', actionId).single();
+    const { data: action, error: loadErr } = await admin.from('bob_agentic_actions').select('id, organization_id, user_id, status, conversation_id, action_type').eq('id', actionId).single();
     if (loadErr || !action) return json({
       error: 'Action not found'
     }, 404);
+    // Place changes carry a pending service version that only decide_place_service_change settles.
+    if (action.action_type === 'place_service_change') return json({
+      error: 'Place service changes are decided from the place change review.'
+    }, 409);
     // Org scope: tree-based check (#16/#18). Replaces the flat
     // action.organization_id === callerProfile.organization_id check with
     // can_approve_action RPC that respects org-tree descent + agreement-based
