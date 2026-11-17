@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/pr
   .replace(/import \{ serve \} from '[^']+';/, '')
   .replace(/import \{ createClient as _createClient \} from '[^']+';/, '');
 
-function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'parking_enforcement', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true, recoveryAuditFailsOnce = false } = {}) {
+function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, registrationFails = false, parkingRule = true, policyFails = false, priorChalk = null, moduleKey = 'parking_enforcement', sessionFails = false, branchModules = ['freedom_camping', 'parking_enforcement'], includeHomeContext = true, recoveryAuditFailsOnce = false, foreignZone = false, agreementCandidates = [] } = {}) {
   let handler;
   let receipt = null;
   let registeredEvidence = null;
@@ -18,16 +18,16 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
   const writes = [];
   const rpcCalls = [];
   class Query {
-    constructor(table) { this.table = table; this.action = 'select'; }
+    constructor(table) { this.table = table; this.action = 'select'; this.filters = {}; }
     select() { return this; }
-    eq() { return this; }
+    eq(key, value) { this.filters[key] = value; return this; }
     is() { return this; }
     order() { return this; }
     limit() { return this; }
     in() { return this; }
     or() { return this; }
-    single() { return this; }
-    maybeSingle() { return this; }
+    single() { this.scalar = true; return this; }
+    maybeSingle() { this.scalar = true; return this; }
     insert(value) { this.action = 'insert'; this.value = value; return this; }
     update(value) { this.action = 'update'; this.value = value; return this; }
     delete() { throw new Error('Request receipts must not be deleted to retry a scan'); }
@@ -46,7 +46,15 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
           result.data = { id: registeredEvidence.id };
         }
       }
-      if (this.table === 'location_zones') result.data = { id: '55555555-5555-4555-8555-555555555555', name: 'Synthetic policy Zone', location_id: null, module_key: moduleKey, boundary_verification: 'verified', parking_time_limit_minutes: parkingRule ? 90 : null, parking_signage_photo_url: parkingRule ? 'synthetic-sign.jpg' : null };
+      if (this.table === 'location_zones') result.data = { id: '55555555-5555-4555-8555-555555555555', name: 'Synthetic policy Zone', organization_id: foreignZone ? '99999999-9999-4999-8999-999999999999' : '22222222-2222-4222-8222-222222222222', location_id: null, module_key: moduleKey, boundary_verification: 'verified', parking_time_limit_minutes: parkingRule ? 90 : null, parking_signage_photo_url: parkingRule ? 'synthetic-sign.jpg' : null };
+      if (this.table === 'service_agreements') {
+        const agreements = agreementCandidates.filter((agreement) => Object.entries(this.filters).every(([key, value]) => agreement[key] === value));
+        result.data = this.scalar ? agreements[0] ?? null : agreements;
+      }
+      if (['service_agreement_modules', 'service_agreement_locations'].includes(this.table)) {
+        const scopes = agreementCandidates.filter((agreement) => this.table === 'service_agreement_modules' ? agreement.module_enabled !== false : agreement.place_active !== false).map((agreement) => ({ id: agreement.id, service_agreement_id: agreement.id }));
+        result.data = this.scalar ? scopes.find((scope) => scope.service_agreement_id === this.filters.service_agreement_id) ?? null : scopes;
+      }
       if (this.table === 'canonical_vehicles') result.data = { rego_status: 'current', wof_status: 'current', cof_status: 'current', compliance_checked_at: new Date().toISOString() };
       if (this.table === 'parking_chalk_records') {
         if (this.action === 'select') result.data = priorChalk;
@@ -81,7 +89,7 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
       ], error: null };
       if (name === 'register_edge_court_photo') {
         if (registrationFails) return { data: null, error: { message: 'synthetic evidence failure' } };
-        registeredEvidence = { id: '44444444-4444-4444-8444-444444444444', organization_id: args.p_organization_id, module_key: args.p_module_key, metadata: args.p_metadata };
+        registeredEvidence = { id: '44444444-4444-4444-8444-444444444444', organization_id: args.p_organization_id, module_key: args.p_module_key, storage_path: args.p_storage_path, metadata: args.p_metadata };
         return { data: registeredEvidence.id, error: null };
       }
       if (name === 'has_location_access') return { data: true, error: null };
@@ -111,6 +119,7 @@ function scanFixture({ confidence = 0, role = 'officer', uploadFails = false, re
   const body = { client_request_id: '33333333-3333-4333-8333-333333333333', module_key: 'freedom_camping', gps_lat: 0, gps_lng: 0, location_source: 'device_gps', image_base64: 'YQ==', captured_at: '2026-11-10T07:00:00Z' };
   return {
     receipt: () => receipt,
+    originalContext: () => { const { image_base64, ...original } = body; return original; },
     legacyRecoveryContext: () => {
       const { image_base64: imageBase64, ...original } = body;
       receipt.response.request_fingerprint = require('node:crypto').createHash('sha256').update(JSON.stringify({
@@ -177,6 +186,40 @@ test('legacy recovery never accepts different photo bytes or capture time', asyn
     assert.equal(result.body.code, 'scan_request_mismatch');
     assert.equal(fixture.writes.length, 0);
   }
+});
+
+test('recovery cannot change saved evidence custody before a primary write', async () => {
+  const fixture = scanFixture({ moduleKey: 'freedom_camping' });
+  await fixture.request();
+  const originalFingerprint = fixture.receipt().response.request_fingerprint;
+  const result = await fixture.request({ plate_number: 'SYN123', operating_organization_id: '33333333-3333-4333-8333-333333333333', recovery_original_context: { ...fixture.originalContext(), operating_organization_id: '22222222-2222-4222-8222-222222222222' } });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'scan_custody_mismatch');
+  assert.equal(fixture.writes.length, 0);
+  assert.equal(fixture.receipt().response.request_fingerprint, originalFingerprint);
+});
+
+test('contracted manual Zones resolve current provider agreements without requiring client invitation acceptance', async () => {
+  const base = { provider_organization_id: '22222222-2222-4222-8222-222222222222', agreement_type: 'operational', invitation_status: 'not_invited', starts_on: '2026-01-01', ends_on: null };
+  const fixture = scanFixture({ moduleKey: 'freedom_camping', foreignZone: true, agreementCandidates: [
+    { ...base, id: 'other-provider', provider_organization_id: '99999999-9999-4999-8999-999999999999' },
+    { ...base, id: 'billing-only', agreement_type: 'billing' },
+    { ...base, id: 'expired', ends_on: '2026-01-02' },
+    { ...base, id: 'different-module', module_enabled: false },
+    { ...base, id: 'valid' },
+  ] });
+  const result = await fixture.request({ plate_number: 'SYN123', zone_id: '55555555-5555-4555-8555-555555555555', location_source: 'manual_zone' });
+  assert.equal(result.status, 200);
+  assert.equal(fixture.writes.find((write) => write.table === 'observations' && write.action === 'insert').value.geofence_context.service_agreement_id, 'valid');
+});
+
+test('ambiguous contracted Zone coverage never chooses an arbitrary first agreement', async () => {
+  const base = { provider_organization_id: '22222222-2222-4222-8222-222222222222', agreement_type: 'operational', starts_on: null, ends_on: null };
+  const fixture = scanFixture({ moduleKey: 'freedom_camping', foreignZone: true, agreementCandidates: [{ ...base, id: 'first' }, { ...base, id: 'second' }] });
+  const result = await fixture.request({ plate_number: 'SYN123', zone_id: '55555555-5555-4555-8555-555555555555', location_source: 'manual_zone' });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'scan_agreement_context_mismatch');
+  assert.equal(fixture.writes.length, 0);
 });
 
 test('a failed recovery audit is required again on the next retry', async () => {

@@ -120,7 +120,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const routeLocation = useLocation();
   const requestedBreachId = new URLSearchParams(routeLocation.search).get('breach');
   const { profile, operatingOrganizationId } = useAuth();
-  const { agreements, zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
+  const { zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('freedom_camping');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [observations, setObservations] = useState<ObservationSummary[]>([]);
@@ -342,15 +342,14 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
   const workingZone = zones.find((zone) => zone.id === zoneId)
     ?? relationshipZones.find((zone) => zone.id === zoneId && zone.module_key === 'freedom_camping');
-  const workingAgreement = agreements.find((agreement) => agreement.id === workingZone?.service_agreement_id);
   const scanLocationId = workingZone?.location_id ?? recoveryOriginalContext?.location_id ?? null;
   const scanSiteId = scanLocationId && selectedSite?.location_id === scanLocationId ? selectedSite.id : null;
   const payload = useMemo(() => buildOfficerScanPayload({
     clientRequestId,
-    operatingOrganizationId: workingAgreement?.provider_organization_id ?? recoveryOriginalContext?.operating_organization_id ?? operatingOrganizationId ?? profile?.organizationId,
+    operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? profile?.organizationId,
     locationId: scanLocationId,
     clientSiteId: workingZone ? scanSiteId : recoveryOriginalContext?.client_site_id,
-    serviceAgreementId: workingAgreement?.id ?? (workingZone ? undefined : recoveryOriginalContext?.service_agreement_id),
+    serviceAgreementId: recoveryOriginalContext?.service_agreement_id,
     recoveryOriginalContext,
     locationSource: recoveryOriginalContext && zoneId ? 'manual_zone' : location.source === 'device_gps' || location.source === 'address_candidate' ? location.source : zoneId ? 'manual_zone' : 'unavailable',
     plateNumber,
@@ -359,7 +358,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, workingAgreement, workingZone, scanLocationId, scanSiteId, recoveryOriginalContext]);
+  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, workingZone, scanLocationId, scanSiteId, recoveryOriginalContext]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);

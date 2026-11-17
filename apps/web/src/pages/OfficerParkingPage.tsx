@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
-import { buildOfficerScanPayload, describeOfficerScanError, getOfficerScanRecoveryContext, imageFileToBase64, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
+import { buildOfficerScanPayload, describeOfficerScanError, getOfficerScanRecoveryContext, imageFileToBase64, isNetworkFailure, listQueuedOfficerScans, markQueuedOfficerScanAttempt, queueOfficerScan, removeQueuedOfficerScan, type QueuedOfficerScan, type ScanSafetyWarningSummary } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
@@ -50,7 +50,7 @@ interface ParkingScanResult {
 
 const OfficerParkingPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
-  const { agreements, zones: relationshipZones, selectedAgreementZones, selectedSite, selectedZone } = useServiceRelationships();
+  const { zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('parking_enforcement');
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [zones, setZones] = useState<ParkingZone[]>([]);
@@ -69,6 +69,7 @@ const OfficerParkingPage: React.FC = () => {
   const [clientRequestId, setClientRequestId] = useState<string>(() => crypto.randomUUID());
   const [capturedAt, setCapturedAt] = useState<string>();
   const [recoveryOriginalContext, setRecoveryOriginalContext] = useState<ReturnType<typeof getOfficerScanRecoveryContext>>();
+  const [retryPayload, setRetryPayload] = useState<ReturnType<typeof buildOfficerScanPayload>>();
   const [savedCaptures, setSavedCaptures] = useState<QueuedOfficerScan[]>([]);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [preparingImage, setPreparingImage] = useState(false);
@@ -96,18 +97,10 @@ const OfficerParkingPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [{ data, error: err }, { data: zoneData, error: zoneError }] = await Promise.all([
-        (activeZoneIds && activeZoneIds.length > 0
-          ? supabase
-              .from('parking_chalk_records')
-              .select('id, plate, chalked_at, return_by, status, location_name, notes')
-              .eq('officer_id', profile.id)
-              .in('zone_id', activeZoneIds)
-          : supabase
-              .from('parking_chalk_records')
-              .select('id, plate, chalked_at, return_by, status, location_name, notes')
-              .eq('officer_id', profile.id))
+        supabase.from('parking_chalk_records')
+          .select('id, plate, chalked_at, return_by, status, location_name, notes')
+          .eq('officer_id', profile.id)
           .order('chalked_at', { ascending: false }),
         supabase.from('location_zones').select('id, name, location_id, organization_id, module_key, locations(address)').eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
@@ -122,7 +115,7 @@ const OfficerParkingPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.id, profile?.organizationId, selectedAgreementZones, relationshipZones]);
+  }, [profile?.id, profile?.organizationId, relationshipZones]);
 
   useEffect(() => {
     if (selectedZone?.module_key === 'parking_enforcement' && !form.zone_id && !recoveryOriginalContext) {
@@ -148,6 +141,7 @@ const OfficerParkingPage: React.FC = () => {
       setCapturedAt(new Date().toISOString());
       setClientRequestId(crypto.randomUUID());
       setRecoveryOriginalContext(undefined);
+      setRetryPayload(undefined);
       setPlateNumber('');
     } catch (captureError) {
       setImagePreviewUrl(null);
@@ -165,6 +159,7 @@ const OfficerParkingPage: React.FC = () => {
     setCapturedAt(undefined);
     setClientRequestId(crypto.randomUUID());
     setRecoveryOriginalContext(undefined);
+    setRetryPayload(undefined);
     setPlateNumber('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -191,26 +186,27 @@ const OfficerParkingPage: React.FC = () => {
     if (!profile?.id || !profile?.organizationId) return;
 
     let stagedCapture: QueuedOfficerScan | null = null;
+    let submittedPayload: ReturnType<typeof buildOfficerScanPayload> | null = null;
     try {
       setSubmitting(true);
       setError(null);
       setReceipt(null);
       const workingZone = zones.find((zone) => zone.id === form.zone_id)
         ?? relationshipZones.find((zone) => zone.id === form.zone_id && zone.module_key === 'parking_enforcement');
-      const workingAgreement = agreements.find((agreement) => agreement.id === workingZone?.service_agreement_id);
       const locationId = workingZone?.location_id ?? recoveryOriginalContext?.location_id ?? null;
       const siteId = locationId && selectedSite?.location_id === locationId ? selectedSite.id : null;
-      const payload = buildOfficerScanPayload({
+      const payload = retryPayload ?? buildOfficerScanPayload({
         imageBase64: imageBase64 ?? undefined, plateNumber, clientRequestId, capturedAt,
-        operatingOrganizationId: workingAgreement?.provider_organization_id ?? recoveryOriginalContext?.operating_organization_id ?? operatingOrganizationId ?? profile.organizationId,
+        operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? profile.organizationId,
         locationId,
         clientSiteId: workingZone ? siteId : recoveryOriginalContext?.client_site_id,
-        serviceAgreementId: workingAgreement?.id ?? (workingZone ? undefined : recoveryOriginalContext?.service_agreement_id),
+        serviceAgreementId: recoveryOriginalContext?.service_agreement_id,
         locationSource: recoveryOriginalContext ? form.zone_id ? 'manual_zone' : 'unavailable' : addressPoint ? 'address_candidate' : form.zone_id ? 'manual_zone' : 'unavailable',
         recoveryOriginalContext,
         zoneId: form.zone_id || undefined, latitude: addressPoint?.lat ?? null, longitude: addressPoint?.lng ?? null,
         moduleKey: 'parking_enforcement',
       });
+      submittedPayload = payload;
       stagedCapture = await queueOfficerScan(payload, profile.id);
       await refreshSavedCaptures();
       if (!navigator.onLine) {
@@ -243,8 +239,13 @@ const OfficerParkingPage: React.FC = () => {
     } catch (err) {
       const message = await describeOfficerScanError(err);
       if (stagedCapture) {
-        await markQueuedOfficerScanAttempt(stagedCapture, message, true);
-        setRecoveryOriginalContext(getOfficerScanRecoveryContext(stagedCapture.body));
+        const transportFailure = isNetworkFailure(err);
+        await markQueuedOfficerScanAttempt(stagedCapture, message, !transportFailure);
+        if (transportFailure && submittedPayload) setRetryPayload(submittedPayload);
+        else {
+          setRetryPayload(undefined);
+          setRecoveryOriginalContext(getOfficerScanRecoveryContext(stagedCapture.body));
+        }
         await refreshSavedCaptures();
       }
       setError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
@@ -306,7 +307,8 @@ const OfficerParkingPage: React.FC = () => {
           setPlateNumber(scan.body.plate_number ?? '');
           setCapturedAt(original.captured_at);
           setClientRequestId(scan.body.client_request_id ?? scan.id);
-          setRecoveryOriginalContext(original);
+          setRecoveryOriginalContext(scan.status === 'needs_review' ? original : undefined);
+          setRetryPayload(scan.status === 'needs_review' ? undefined : scan.body);
           setForm({ zone_id: scan.body.zone_id ?? '' });
           setAddressPoint(original.gps_lat != null && original.gps_lng != null ? { label: 'Saved capture coordinates', lat: original.gps_lat, lng: original.gps_lng, source: 'linz_address' } : null);
         }}><Search size={15} />Review saved capture</button>
@@ -347,7 +349,7 @@ const OfficerParkingPage: React.FC = () => {
             {addressCandidates.length > 1 && <div className="form-row">{addressCandidates.map((candidate) => <button type="button" className="btn btn-secondary btn-sm" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => setAddressPoint(candidate)}>{candidate.label}</button>)}</div>}
           </div>
           <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || !form.zone_id || Boolean(recoveryOriginalContext && !plateNumber.trim())}>
-            {submitting ? 'Saving chalk record' : recoveryOriginalContext ? 'Recover saved capture' : 'Chalk Vehicle'}
+            {submitting ? 'Saving chalk record' : retryPayload ? 'Retry saved request' : recoveryOriginalContext ? 'Recover saved capture' : 'Chalk Vehicle'}
           </button>
         </form>
       )}
