@@ -4,6 +4,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+const parityMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261117113416_repeat_subject_admin_officer_parity.sql'), 'utf8');
+
+test('repeat-subject identity permission preserves admin officer parity and existing scope gates', () => {
+  assert.match(parityMigration, /actor\.role IN \('admin', 'admin_officer', 'master', 'grand_master'\)/);
+  assert.match(parityMigration, /actor\.deactivated_at IS NULL/);
+  assert.match(parityMigration, /p_target_organization_id IS NOT NULL/);
+  assert.match(parityMigration, /public\.is_admin_for_org\(p_target_organization_id\)/);
+  assert.match(parityMigration, /SET search_path = ''/);
+  assert.doesNotMatch(parityMigration, /\b(?:GRANT|REVOKE|DROP)\b/i);
+});
+
 test('all-observation summaries and drilldowns preserve subject access boundaries', {
   skip: process.env.BOB_TEST_POSTGRES !== '1',
   timeout: 90000,
@@ -58,10 +69,17 @@ CREATE TABLE audit_log(metadata jsonb, created_at timestamptz, target_table text
 ${migration}
 INSERT INTO user_profiles VALUES
   (md5('root-admin')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'admin',null),
+  (md5('root-admin-officer')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'admin_officer',null),
+  (md5('root-master')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'master',null),
+  (md5('root-grand-master')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'grand_master',null),
   (md5('branch-admin')::uuid,md5('branch')::uuid,null,'admin',null),
+  (md5('branch-admin-officer')::uuid,md5('branch')::uuid,null,'admin_officer',null),
   (md5('officer')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'officer',null),
   (md5('foreign-admin')::uuid,md5('foreign')::uuid,null,'admin',null),
-  (md5('disabled')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'admin',now());
+  (md5('foreign-admin-officer')::uuid,md5('foreign')::uuid,null,'admin_officer',null),
+  (md5('client-admin')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'client_admin',null),
+  (md5('disabled')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'admin',now()),
+  (md5('disabled-admin-officer')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13',null,'admin_officer',now());
 INSERT INTO service_agreements VALUES
   (md5('a')::uuid,'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13','operational','accepted'),
   (md5('b')::uuid,md5('branch')::uuid,'operational','accepted'),
@@ -99,6 +117,16 @@ INSERT INTO location_events(organization_id,occurred_at,payload)
 VALUES(md5('branch')::uuid,now()-interval '1 day','{"comments":"ABC456"}'),
   (md5('foreign')::uuid,now()-interval '1 day','{"comments":"XYZ789"}');
 
+SELECT set_config('request.jwt.claim.sub',md5('root-admin-officer'),false);
+DO $$
+DECLARE denied boolean := false;
+BEGIN
+  BEGIN PERFORM * FROM list_repeat_vehicle_subjects_for_agreement(null,1);
+  EXCEPTION WHEN raise_exception THEN denied := true; END;
+  IF NOT denied THEN RAISE EXCEPTION 'Pre-fix admin officer denial did not reproduce'; END IF;
+END $$;
+${parityMigration}
+
 SELECT set_config('request.jwt.claim.sub',md5('root-admin'),false);
 DO $$
 BEGIN
@@ -120,6 +148,27 @@ BEGIN
   IF (SELECT count(*) FROM list_repeat_vehicle_subjects_for_agreement(null,1,null,null,1,1)) <> 1 THEN RAISE EXCEPTION 'Pagination lost'; END IF;
 END $$;
 
+SET ROLE authenticated;
+DO $$
+DECLARE actor_key text;
+BEGIN
+  FOREACH actor_key IN ARRAY ARRAY['root-admin','root-admin-officer','root-master','root-grand-master'] LOOP
+    PERFORM set_config('request.jwt.claim.sub',md5(actor_key),false);
+    IF (SELECT sightings FROM list_repeat_vehicle_subjects_for_agreement(null,1) WHERE plate='RJ198') IS DISTINCT FROM 5::bigint THEN RAISE EXCEPTION 'Repeat vehicles lack admin parity: %',actor_key; END IF;
+    IF (SELECT sightings FROM list_repeat_person_subjects_for_agreement(null,1)) IS DISTINCT FROM 5::bigint THEN RAISE EXCEPTION 'Repeat people lack admin parity: %',actor_key; END IF;
+    IF (SELECT count(*) FROM list_vehicle_subject_history_for_agreement('RJ198',null)) <> 5 THEN RAISE EXCEPTION 'Vehicle history lacks admin parity: %',actor_key; END IF;
+    IF (SELECT count(*) FROM list_person_subject_history_for_agreement(md5('person')::uuid,null)) <> 5 THEN RAISE EXCEPTION 'Person history lacks admin parity: %',actor_key; END IF;
+    IF (SELECT count(*) FROM get_vehicle_subject_details_for_agreement('RJ198',null)) <> 1 THEN RAISE EXCEPTION 'Vehicle details lack admin parity: %',actor_key; END IF;
+    IF (SELECT count(*) FROM list_vehicle_subject_identifications('RJ198',null)) <> 1 THEN RAISE EXCEPTION 'Identifications lack admin parity: %',actor_key; END IF;
+    IF (SELECT count(*) FROM list_unlinked_plate_mentions_for_agreement(null)) <> 1 THEN RAISE EXCEPTION 'Plate mentions lack admin parity: %',actor_key; END IF;
+    IF (SELECT sightings FROM list_repeat_vehicle_subjects_for_agreement(md5('a')::uuid,1) WHERE plate='RJ198') IS DISTINCT FROM 1::bigint THEN RAISE EXCEPTION 'Selected agreement lacks admin parity: %',actor_key; END IF;
+  END LOOP;
+  PERFORM set_config('request.jwt.claim.sub',md5('branch-admin-officer'),false);
+  IF (SELECT sightings FROM list_repeat_vehicle_subjects_for_agreement(null,1) WHERE plate='RJ198') IS DISTINCT FROM 3::bigint THEN RAISE EXCEPTION 'Branch admin officer scope widened'; END IF;
+  IF (SELECT sightings FROM list_repeat_person_subjects_for_agreement(null,1)) IS DISTINCT FROM 3::bigint THEN RAISE EXCEPTION 'Branch admin officer person scope widened'; END IF;
+END $$;
+RESET ROLE;
+
 SELECT set_config('request.jwt.claim.sub',md5('branch-admin'),false);
 DO $$
 BEGIN
@@ -130,7 +179,7 @@ END $$;
 DO $$
 DECLARE actor text; denied boolean; agreement uuid;
 BEGIN
-  FOREACH actor IN ARRAY ARRAY['officer','foreign-admin','disabled','anonymous'] LOOP
+  FOREACH actor IN ARRAY ARRAY['officer','foreign-admin','foreign-admin-officer','client-admin','disabled','disabled-admin-officer','anonymous'] LOOP
     PERFORM set_config('request.jwt.claim.sub',CASE WHEN actor='anonymous' THEN '' ELSE md5(actor) END,false);
     denied := false;
     BEGIN PERFORM * FROM list_repeat_vehicle_subjects_for_agreement(null);
