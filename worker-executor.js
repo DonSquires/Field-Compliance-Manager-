@@ -11,7 +11,8 @@ const MAIN_HEALTH_COMMAND = [
   'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/',
   'cd /workspace',
   'export BOB_HEALTH_TRACKED_FILES=/artifacts/health-tracked-files.json',
-  'health_step root-tests sh -c \'node --test --test-reporter=tap test/*.test.js\'',
+  'printf "\\nBOB_HEALTH_TOOLING_MODE fixture-emulation (temporary test workspaces only)\\n"',
+  'health_step root-tests sh -c \'NODE_OPTIONS=--require=/workspace/test/fixtures/main-health-tooling-hook.cjs node --test --test-reporter=tap test/*.test.js\'',
   'cd /workspace/apps/web',
   'export PATH=/workspace/apps/web/node_modules/.bin:$PATH',
   'export VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=playwright-anon-key E2E_OFFLINE=1',
@@ -20,6 +21,8 @@ const MAIN_HEALTH_COMMAND = [
   'health_step build vite build --outDir=/tmp/bob-main-health-dist',
   'health_step unit-tests npm test -- --run',
   'health_step browser-smoke npm run test:e2e:ci-smoke',
+  'printf "\\nBOB_HEALTH_TOOLING_MODE fixture-emulation (temporary test workspaces only)\\n"',
+  'if ! command -v docker >/dev/null 2>&1; then printf "\\nBOB_HEALTH_CAPABILITY nested-docker unavailable\\n"; fi',
   'exit "$failed"',
 ].join('; ');
 

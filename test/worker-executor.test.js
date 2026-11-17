@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { execFileSync } = require('node:child_process');
 const { dockerArguments, ensureWorkerNetwork, humanTestDeploymentPreflight, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
@@ -23,6 +24,8 @@ test('worker profiles use fixed commands', () => {
   assert.match(workerCommand('human-qa').at(-1), /dr-bob-human-test\.spec\.ts --workers=4/);
   assert.match(workerCommand('human-qa-live').at(-1), /dr-bob-human-test\.spec\.ts --workers=1/);
   assert.match(workerCommand('main-health').at(-1), /health_step root-tests.*node --test --test-reporter=tap test\/\*\.test\.js/);
+  assert.match(workerCommand('main-health').at(-1), /BOB_HEALTH_TOOLING_MODE fixture-emulation/);
+  assert.match(workerCommand('main-health').at(-1), /NODE_OPTIONS=--require=\/workspace\/test\/fixtures\/main-health-tooling-hook\.cjs/);
   assert.match(workerCommand('main-health').at(-1), /health_step lint npm run lint;.*health_step build vite build.*health_step unit-tests npm test -- --run;.*health_step browser-smoke npm run test:e2e:ci-smoke/);
   assert.deepEqual(workerCommand('full-page-audit').slice(0, 3), ['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']);
   assert.deepEqual(workerCommand('frontend-verify'), [
@@ -132,6 +135,22 @@ test('main health checks run in the isolated read-only browser worker', () => {
   assert.equal(args.some((value) => value.includes('/workspace/apps/web/dist')), false);
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some((value) => value.includes('docker.sock')), false);
+});
+
+test('main-health tooling fixture refuses non-temporary workspaces and incomplete isolation', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'main-health-fixture-guard-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const program = [
+    "const assert=require('node:assert/strict'),fs=require('node:fs'),cp=require('node:child_process');",
+    "const exists=fs.existsSync;fs.existsSync=value=>value==='/var/run/docker.sock'?false:exists(value);",
+    'require(process.argv[1]);',
+    'const workspace=process.argv[2];',
+    "const launch=(mount,cwd,extra=[])=>cp.spawn('docker',['run','--entrypoint=/usr/bin/env',mount,...extra],{cwd});",
+    "assert.throws(()=>launch('type=bind,src=/etc,dst=/workspace','/etc'),/temporary test workspaces/);",
+    "assert.throws(()=>launch(`type=bind,src=${workspace},dst=/workspace`,workspace),/isolated launcher contract/);",
+    "assert.throws(()=>launch(`type=bind,src=${workspace},dst=/workspace`,workspace,['--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--network=bridge',`--user=${process.getuid()}:${process.getgid()}`,'type=bind,src=/var/run/docker.sock,dst=/workspace/.git,readonly']),/isolated launcher contract/);",
+  ].join('\n');
+  execFileSync(process.execPath, ['-e', program, path.join(__dirname, 'fixtures/main-health-tooling-hook.cjs'), root], { stdio: 'pipe' });
 });
 
 test('fresh health checkouts get real directories for nested mounts before Docker runs', t => {

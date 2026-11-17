@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
+const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs, compareSnapshotFailures, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
 const { dockerArguments, workerCommand, workerNetwork } = require('../worker-executor');
 
 const attachment = findings => ({ name: 'human-test-report.json', contentType: 'application/json', body: Buffer.from(JSON.stringify({ findings })).toString('base64') });
@@ -43,6 +43,38 @@ test('summarizes Playwright JSON into counts, failures, screenshot evidence and 
 test('an empty or errored report is never complete', () => {
   assert.equal(summarizeHumanReport({ suites: [] }).complete, false);
   assert.equal(summarizeHumanReport({ ...report(), errors: [{ message: 'webServer timed out' }] }).complete, false);
+});
+
+test('snapshot comparison requires exact pinned evidence and never trusts missing or escaped artifacts', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-snapshot-comparison-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const baseDir = path.join(root, 'base');
+  const draftDir = path.join(root, 'draft');
+  fs.mkdirSync(baseDir); fs.mkdirSync(draftDir);
+  const png = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(1, 16); png.writeUInt32BE(1, 20);
+  for (const dir of [baseDir, draftDir]) {
+    fs.writeFileSync(path.join(dir, 'report-actual.png'), png);
+    fs.writeFileSync(path.join(dir, 'report-diff.png'), png);
+  }
+  const failure = dir => ({ file: 'example.spec.ts', title: 'report', project: 'desktop-chromium', screenshot_mismatch: true,
+    evidence: [path.join(dir, 'report-actual.png'), path.join(dir, 'report-diff.png')] });
+  const baseSha = 'a'.repeat(40);
+  const base = { revision: 'base', base_sha: baseSha, source_fingerprint: baseSha, complete: true, status: 'failed', specs: ['e2e/example.spec.ts'], evidence_directory: baseDir, failures: [failure(baseDir)] };
+  const draft = { ...base, revision: 'worktree', source_fingerprint: 'b'.repeat(64), evidence_directory: draftDir, failures: [failure(draftDir)] };
+  const compare = (left = base, right = draft) => compareSnapshotFailures({ base: left, draft: right, baseSha, evidenceRoot: root });
+  assert.equal(compare().length, 1);
+  assert.deepEqual(compare({ ...base, base_sha: 'c'.repeat(40) }), []);
+  assert.deepEqual(compare({ ...base, source_fingerprint: 'c'.repeat(40) }), []);
+  assert.deepEqual(compare({ ...base, complete: false }), []);
+  assert.deepEqual(compare(base, { ...draft, specs: ['e2e/other.spec.ts'] }), []);
+  assert.deepEqual(compare(base, { ...draft, failures: [failure(baseDir)] }), []);
+  fs.writeFileSync(path.join(draftDir, 'report-diff.png'), Buffer.concat([png, Buffer.from('changed')]));
+  assert.deepEqual(compare(), []);
+  fs.unlinkSync(path.join(draftDir, 'report-diff.png'));
+  fs.symlinkSync(path.join(baseDir, 'report-diff.png'), path.join(draftDir, 'report-diff.png'));
+  assert.deepEqual(compare(), []);
 });
 
 test('a failing test keeps its duration, console output and page snapshot for diagnosis (BB-191)', () => {
