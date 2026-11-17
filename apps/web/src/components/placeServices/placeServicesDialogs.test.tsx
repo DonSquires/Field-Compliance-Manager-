@@ -43,9 +43,12 @@ const setup = {
   billing_workspaces: [{
     provider_id: 'provider',
     agreements: [{ id: 'agreement', name: 'Service agreement', currency: 'NZD', base_rate_per_hour: 48 }],
+    places: [{ id: 'sal', service_agreement_id: 'agreement', client_organization_id: 'client', site_id: 'site', zone_id: null }],
+    modules: [{ id: 'sam', service_agreement_id: 'agreement', module_key: 'patrol', service_type: 'patrol' }],
     selections: [{ id: 'old-selection', service_agreement_location_id: 'sal', service_agreement_module_id: 'sam', rate_type: 'hourly',
       source: 'agreement', rate_rule_id: null, billing_unit_code: 'hourly_officer', effective_from: '2026-11-01', updated_at: '2026-11-01T00:00:00Z' }],
-    rates: [{ id: 'rule', name: 'Per visit rate', rate_type: 'per_visit', amount: 30 }],
+    rates: [{ id: 'rule', name: 'Per visit rate', rate_type: 'per_visit', amount: 30, client_org_id: null, site_id: null,
+      zone_id: null, module_key: null, service_type: 'patrol', effective_from: null, effective_to: null }],
   }],
   billing_units: [
     { code: 'hourly_officer', label: 'Hourly (officer-hours)', rate_type: 'hourly', active: true },

@@ -224,11 +224,42 @@ export interface LocationBillingSelection {
   billing_unit_code: string | null; effective_from: string; updated_at: string;
 }
 
+export interface LocationBillingRate {
+  id: string; name: string; rate_type: string; amount: number;
+  client_org_id: string | null; site_id: string | null; zone_id: string | null;
+  module_key: string | null; service_type: string | null;
+  effective_from: string | null; effective_to: string | null;
+}
+
 export interface LocationBillingWorkspace {
   provider_id: string;
   agreements: Array<{ id: string; name: string; currency: string; base_rate_per_hour: number | null }>;
+  places: Array<{ id: string; service_agreement_id: string; client_organization_id: string;
+    site_id: string | null; zone_id: string | null }>;
+  modules: Array<{ id: string; service_agreement_id: string; module_key: string; service_type: string }>;
   selections: LocationBillingSelection[];
-  rates: Array<{ id: string; name: string; rate_type: string; amount: number }>;
+  rates: LocationBillingRate[];
+}
+
+// The workspace lists every rate usable anywhere at the location; the save only accepts a rate
+// that location_billing_rule_applicable passes for this run's covered place and module.
+export function ratesApplicableToRun(
+  workspace: LocationBillingWorkspace | null,
+  run: { service_agreement_location_id: string; service_agreement_module_id: string | null } | null,
+  rateType: string,
+  onDate: string,
+): LocationBillingRate[] {
+  const place = workspace?.places.find(item => item.id === run?.service_agreement_location_id);
+  if (!workspace || !run || !place) return [];
+  const module = workspace.modules.find(item => item.id === run.service_agreement_module_id) ?? null;
+  return workspace.rates.filter(rate => rate.rate_type === rateType
+    && (rate.client_org_id === null || rate.client_org_id === place.client_organization_id)
+    && (rate.site_id === null || rate.site_id === place.site_id)
+    && (rate.zone_id === null || rate.zone_id === place.zone_id)
+    && (rate.module_key === null || rate.module_key === module?.module_key)
+    && (rate.service_type === null || rate.service_type === module?.service_type)
+    && (rate.effective_from === null || rate.effective_from <= onDate)
+    && (rate.effective_to === null || rate.effective_to >= onDate));
 }
 
 export interface LocationPatrolConfig {

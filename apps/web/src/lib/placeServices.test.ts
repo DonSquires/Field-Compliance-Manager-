@@ -6,8 +6,8 @@ vi.mock('./supabase', () => ({ supabase: { rpc } }));
 import {
   addStaticPost, decidePlaceServiceChange, describeTerms, endStaticPost, fetchPlaceServices,
   localTermsErrors, manageCheckType, monthsForSeasons, previewPlaceServiceChange,
-  savePlaceServiceChange, setOperatingSetting,
-  type PlaceServiceChangeInput, type PlaceServiceTerms,
+  ratesApplicableToRun, savePlaceServiceChange, setOperatingSetting,
+  type LocationBillingWorkspace, type PlaceServiceChangeInput, type PlaceServiceTerms,
 } from './placeServices';
 
 const seasons = [
@@ -38,6 +38,39 @@ describe('place service RPC errors', () => {
   it('replaces a missing-function error with plain words', async () => {
     rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'Could not find the function public.get_place_services(p_location_id) in the schema cache' } });
     await expect(fetchPlaceServices('location')).rejects.toThrow('Place services are not available yet. The database update for this screen has not been released.');
+  });
+});
+
+describe('responsible run charge rates', () => {
+  const rate = (id: string, extra: Partial<LocationBillingWorkspace['rates'][number]> = {}) => ({
+    id, name: id, rate_type: 'hourly', amount: 50, client_org_id: null, site_id: null, zone_id: null,
+    module_key: null, service_type: null, effective_from: null, effective_to: null, ...extra,
+  });
+  const workspace: LocationBillingWorkspace = {
+    provider_id: 'provider',
+    agreements: [{ id: 'agreement', name: 'Agreement', currency: 'NZD', base_rate_per_hour: null }],
+    places: [{ id: 'covered-gate', service_agreement_id: 'agreement', client_organization_id: 'client', site_id: null, zone_id: 'gate' }],
+    modules: [
+      { id: 'patrol-module', service_agreement_id: 'agreement', module_key: 'patrol', service_type: 'patrol' },
+      { id: 'access-module', service_agreement_id: 'agreement', module_key: 'access_control', service_type: 'access_control' },
+    ],
+    selections: [],
+    rates: [
+      rate('any'),
+      rate('patrol-only', { service_type: 'patrol' }),
+      rate('access-only', { service_type: 'access_control' }),
+      rate('other-client', { client_org_id: 'someone-else' }),
+      rate('other-zone', { zone_id: 'elsewhere' }),
+      rate('future', { effective_from: '2027-01-01' }),
+      rate('per-km', { rate_type: 'per_km' }),
+    ],
+  };
+
+  it('offers only rates the save accepts for this run\'s place, service, unit and date', () => {
+    const ids = ratesApplicableToRun(workspace, {
+      service_agreement_location_id: 'covered-gate', service_agreement_module_id: 'access-module',
+    }, 'hourly', '2026-11-17').map(item => item.id);
+    expect(ids).toEqual(['any', 'access-only']);
   });
 });
 

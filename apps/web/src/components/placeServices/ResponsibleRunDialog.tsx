@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  fetchLocationPatrolSetup, previewLocationPatrolSetup, saveLocationPatrolSetup,
+  fetchLocationPatrolSetup, previewLocationPatrolSetup, ratesApplicableToRun, saveLocationPatrolSetup,
   type LocationPatrolSetup, type PatrolSetupChanges, type PatrolSetupPreview, type PlaceService,
 } from '../../lib/placeServices';
 import { nzDateInput, nzDateTimeLabel } from '../../lib/nzDateTime';
@@ -41,7 +41,7 @@ export function ResponsibleRunDialog({ locationId, service, onClose, onSaved }: 
   const billing = setup?.billing_workspaces.find(item => item.provider_id === config?.provider_organization_id) ?? null;
   const agreement = billing?.agreements.find(item => item.id === config?.service_agreement_id) ?? null;
   const agreementAllowed = rateType === 'hourly' && Number(agreement?.base_rate_per_hour ?? 0) > 0;
-  const rates = (billing?.rates ?? []).filter(rate => rate.rate_type === rateType);
+  const rates = ratesApplicableToRun(billing, config, rateType, effectiveFrom);
   const selection = billing?.selections.find(item => item.service_agreement_location_id === config?.service_agreement_location_id
     && item.service_agreement_module_id === config?.service_agreement_module_id && item.rate_type === rateType) ?? null;
   const effectiveSource: Source = source === 'agreement' && !agreementAllowed ? (rates.length ? 'existing' : 'new') : source;
