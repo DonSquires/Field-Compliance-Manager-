@@ -35,6 +35,10 @@ test('the migration adds a governed, reporting-only parent editor and exposes th
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.set_location_zone_parent\(uuid, uuid, integer\) TO authenticated, service_role;/);
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.get_crm_operational_geography\(\)/);
   assert.match(migration, /zone\.parent_zone_id/);
+  // Every zone on the place editor carries its parent, not only those the geography read covers.
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.get_crm_operational_place_editor\(p_location_id uuid\)/);
+  assert.match(migration, /'parent_zone_id',z\.parent_zone_id/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.get_crm_operational_place_editor\(uuid\) TO authenticated, service_role;/);
   // The zone can be deleted between the authorisation read and the locked re-read.
   assert.match(migration, /WHERE id = p_zone_id FOR UPDATE;\s+IF NOT FOUND THEN\s+RAISE EXCEPTION 'Zone not found';/);
   assert.doesNotMatch(migration, /FUNCTION public\.resolve_/);
@@ -108,6 +112,11 @@ test('work-area parent setting, against disposable PostgreSQL', {
       CREATE FUNCTION public.crm_actor_can_manage_location(p_location_id uuid) RETURNS boolean LANGUAGE sql STABLE AS $fn$
         SELECT EXISTS (SELECT 1 FROM public.locations l JOIN public.user_profiles a ON a.id = auth.uid()
           WHERE l.id = p_location_id AND l.organization_id = a.organization_id) $fn$;
+      ALTER TABLE public.client_sites ADD COLUMN risk_level text, ADD COLUMN site_brief text,
+        ADD COLUMN access_instructions text, ADD COLUMN hs_notes text;
+      CREATE TABLE public.module_catalog(module_key text PRIMARY KEY, active boolean);
+      CREATE TABLE public.zone_closures(id uuid PRIMARY KEY, zone_id uuid, closure_type text, status text,
+        effective_from timestamptz, effective_to timestamptz, reason text, resolution_notes text, created_at timestamptz DEFAULT now());
       CREATE FUNCTION public.get_descendant_organizations(uuid) RETURNS uuid[] LANGUAGE sql STABLE AS $fn$ SELECT '{}'::uuid[] $fn$;
       ${definition('trg_location_zones_parent_same_org')}
       ${definition('guard_field_verification_point')}
@@ -176,6 +185,11 @@ test('work-area parent setting, against disposable PostgreSQL', {
     assert.ok(mapped.parent_containment.outside_parent_hectares > 44, JSON.stringify(mapped.parent_containment));
     assert.equal(geography.zones.find(zone => zone.id === estate).parent_zone_id, null);
     assert.equal(geography.zones.find(zone => zone.id === estate).parent_containment, null);
+    const editor = json(admin, `public.get_crm_operational_place_editor(${literal(house)})`);
+    assert.equal(editor.zones.find(zone => zone.id === block).parent_zone_id, estate);
+    assert.equal(editor.zones.find(zone => zone.id === estate).parent_zone_id, null);
+    assert.equal(editor.zones.some(zone => zone.id === point), false);
+    assert.equal(sql(`SELECT has_function_privilege('anon','public.get_crm_operational_place_editor(uuid)','EXECUTE')`), 'f');
 
     // Stale optimistic version is refused and changes nothing.
     fails(admin, setParent(block, null, 1), 'Zone configuration changed since it was opened');

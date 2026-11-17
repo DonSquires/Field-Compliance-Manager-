@@ -340,4 +340,7 @@
 .place-manager-part-of .is-success, .place-manager-part-of .is-error { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
 .place-manager-part-of .is-success { color: #c8f2e7; }
 .place-manager-part-of .is-error { color: #ffd5cf; }
+.place-manager-part-of .is-hint, .place-manager-save-hint { color: #f0c98a; font-size: 12px; }
+.place-manager-message.is-warning { flex-wrap: wrap; border-color: #c39451; color: #f6deb5; background: #2a241a; }
+.place-manager-message.is-warning > span { flex: 1; }
 @media (max-width: 760px) { .place-manager-part-of { grid-template-columns: 1fr; } .place-manager-part-of p { grid-row: auto; } }
