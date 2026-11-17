@@ -22,8 +22,9 @@ import { type AddressCandidate, resolveAddressCandidates } from '../lib/location
 import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
-  describeOfficerScanError,
+  getOfficerScanFailureDetails,
   getOfficerScanRecoveryContext,
+  getRecoveryServiceAgreementId,
   getCurrentPosition,
   imageFileToBase64,
   isNetworkFailure,
@@ -119,7 +120,7 @@ const STATUS_MESSAGE: Record<OfficerScanResult['compliance_status'], string> = {
 const OfficerFreedomCampingPage: React.FC = () => {
   const routeLocation = useLocation();
   const requestedBreachId = new URLSearchParams(routeLocation.search).get('breach');
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizations, loading: authLoading } = useAuth();
   const { zones: relationshipZones, selectedSite, selectedZone } = useServiceRelationships();
   const moduleContext = useActiveModuleContext('freedom_camping');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -135,6 +136,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
   const [recoveryOriginalContext, setRecoveryOriginalContext] = useState<ReturnType<typeof getOfficerScanRecoveryContext>>();
+  const [scanOperatingOrganizationId, setScanOperatingOrganizationId] = useState('');
+  const [recoveryBranchLocked, setRecoveryBranchLocked] = useState(false);
   const [preparingImage, setPreparingImage] = useState(false);
   const [location, setLocation] = useState<LocationState>(INITIAL_LOCATION);
   const [addressQuery, setAddressQuery] = useState('');
@@ -160,6 +163,14 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [noticeArtifactPath, setNoticeArtifactPath] = useState<string | null>(null);
   const [typedAuthorizerName, setTypedAuthorizerName] = useState('');
   const [printRequestId, setPrintRequestId] = useState(() => crypto.randomUUID());
+  const scanOrganizationOptions = operatingOrganizations.filter((context) => context.authorityBasis !== 'corporate_oversight'
+    && (context.authorityBasis !== 'branch_authorisation' || context.moduleAccess.includes('freedom_camping')));
+  const savedOperatingOrganizationId = recoveryOriginalContext?.operating_organization_id ?? '';
+  const requestedScanOrganizationId = scanOperatingOrganizationId || savedOperatingOrganizationId;
+  const selectedScanOrganizationId = recoveryBranchLocked
+    ? savedOperatingOrganizationId
+    : scanOrganizationOptions.some((context) => context.organizationId === requestedScanOrganizationId) ? requestedScanOrganizationId : '';
+  const selectedScanOrganizationAvailable = scanOrganizationOptions.some((context) => context.organizationId === selectedScanOrganizationId);
 
   const loadHistory = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {
@@ -301,7 +312,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
           body: { ...scan.body, synced_at: new Date().toISOString() },
         });
         if (error) {
-          await markQueuedOfficerScanAttempt(scan, await describeOfficerScanError(error), !isNetworkFailure(error));
+          const failure = await getOfficerScanFailureDetails(error);
+          await markQueuedOfficerScanAttempt(scan, failure.message, !isNetworkFailure(error), failure.captureSaved);
           held += 1;
           continue;
         }
@@ -346,10 +358,10 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const scanSiteId = scanLocationId && selectedSite?.location_id === scanLocationId ? selectedSite.id : null;
   const payload = useMemo(() => buildOfficerScanPayload({
     clientRequestId,
-    operatingOrganizationId: recoveryOriginalContext ? recoveryOriginalContext.operating_organization_id : operatingOrganizationId ?? profile?.organizationId,
+    operatingOrganizationId: selectedScanOrganizationId,
     locationId: scanLocationId,
     clientSiteId: workingZone ? scanSiteId : recoveryOriginalContext?.client_site_id,
-    serviceAgreementId: recoveryOriginalContext?.service_agreement_id,
+    serviceAgreementId: getRecoveryServiceAgreementId(recoveryOriginalContext, zoneId, selectedScanOrganizationId),
     recoveryOriginalContext,
     locationSource: recoveryOriginalContext && zoneId ? 'manual_zone' : location.source === 'device_gps' || location.source === 'address_candidate' ? location.source : zoneId ? 'manual_zone' : 'unavailable',
     plateNumber,
@@ -358,7 +370,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, operatingOrganizationId, profile?.organizationId, workingZone, scanLocationId, scanSiteId, recoveryOriginalContext]);
+  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, location.source, zoneId, plateNumber, selectedScanOrganizationId, workingZone, scanLocationId, scanSiteId, recoveryOriginalContext]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
@@ -368,6 +380,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setClientRequestId(crypto.randomUUID());
     setCapturedAt(undefined);
     setRecoveryOriginalContext(undefined);
+    setScanOperatingOrganizationId('');
+    setRecoveryBranchLocked(false);
     setSubmitError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [imagePreviewUrl]);
@@ -381,6 +395,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setPlateNumber('');
     setClientRequestId(crypto.randomUUID());
     setRecoveryOriginalContext(undefined);
+    setScanOperatingOrganizationId('');
+    setRecoveryBranchLocked(false);
     try {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       setImagePreviewUrl(URL.createObjectURL(file));
@@ -405,6 +421,12 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const submitScan = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!canSubmitOfficerScan(payload)) return;
+    if (!selectedScanOrganizationAvailable) {
+      setSubmitError(recoveryOriginalContext && recoveryBranchLocked
+        ? 'The saved capture organization is no longer available to this account. Evidence cannot be transferred; contact an administrator.'
+        : 'Select an authorized operating organization for this capture.');
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     setResult(null);
@@ -432,10 +454,13 @@ const OfficerFreedomCampingPage: React.FC = () => {
           setSubmitError(queueError instanceof Error ? queueError.message : 'The scan could not be queued.');
         }
       } else {
-        const message = await describeOfficerScanError(error);
+        const failure = await getOfficerScanFailureDetails(error);
+        const message = failure.message;
         if (stagedCapture) {
-          await markQueuedOfficerScanAttempt(stagedCapture, message, true);
+          await markQueuedOfficerScanAttempt(stagedCapture, message, true, failure.captureSaved);
           setRecoveryOriginalContext(getOfficerScanRecoveryContext(stagedCapture.body));
+          setScanOperatingOrganizationId(stagedCapture.body.operating_organization_id ?? '');
+          setRecoveryBranchLocked(failure.captureSaved !== false);
           await refreshQueueCount();
         }
         setSubmitError(`${message}${stagedCapture ? ' Photo retained on this device.' : ''}`);
@@ -575,6 +600,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
           setZoneId(scan.body.zone_id ?? '');
           setClientRequestId(scan.body.client_request_id ?? scan.id);
           setRecoveryOriginalContext(original);
+          setScanOperatingOrganizationId(scan.body.operating_organization_id ?? original.operating_organization_id ?? '');
+          setRecoveryBranchLocked(scan.captureSaved !== false);
           if ((original.location_source === 'device_gps' || original.location_source === 'address_candidate') && original.gps_lat != null && original.gps_lng != null) {
             setLocation({ status: 'ready', latitude: original.gps_lat, longitude: original.gps_lng, accuracy: 0, source: original.location_source, message: original.location_source === 'address_candidate' ? 'Saved address candidate' : 'Saved device location' });
           } else if (original.gps_lat != null && original.gps_lng != null) {
@@ -630,6 +657,34 @@ const OfficerFreedomCampingPage: React.FC = () => {
               </div>
             </label>
             <label className="fc-field">
+              <span>Operating organization</span>
+              <div className="fc-select-wrap">
+                <ShieldCheck size={17} aria-hidden="true" />
+                <select
+                  value={selectedScanOrganizationId}
+                  disabled={Boolean(recoveryOriginalContext && recoveryBranchLocked)}
+                  onChange={(event) => { setScanOperatingOrganizationId(event.target.value); setSubmitError(null); }}
+                  aria-describedby="fc-operating-organization-help"
+                >
+                  <option value="" disabled>{authLoading ? 'Loading authorized organizations…' : 'Select an authorized organization'}</option>
+                  {recoveryBranchLocked && selectedScanOrganizationId && !selectedScanOrganizationAvailable
+                    && <option value={selectedScanOrganizationId}>Original organization (not currently available)</option>}
+                  {scanOrganizationOptions.map((context) => <option key={context.organizationId} value={context.organizationId}>{context.organizationName}</option>)}
+                </select>
+              </div>
+              <small id="fc-operating-organization-help">
+                {recoveryOriginalContext
+                  ? recoveryBranchLocked
+                    ? selectedScanOrganizationAvailable ? 'Saved evidence stays in its original organization and cannot be transferred.' : 'Saved evidence is held under an organization you cannot currently access. Contact an administrator; do not transfer it.'
+                    : 'No server-side photo was saved. You may correct the organization; the original capture context remains attached.'
+                  : authLoading
+                    ? 'Loading your authorized operating organizations…'
+                    : scanOrganizationOptions.length
+                      ? 'Choose the authorized organization responsible for this capture; the session default is not assumed.'
+                      : 'No authorized organization is available for Freedom Camping. Reload this page or contact an administrator if this is unexpected.'}
+              </small>
+            </label>
+            <label className="fc-field">
               <span>Address <small>search</small></span>
               <div className="fc-select-wrap">
                 <MapPin size={17} aria-hidden="true" />
@@ -665,7 +720,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
             </div>
           )}
 
-          <button className="fc-submit" type="submit" disabled={!imageBase64 || !canSubmitOfficerScan(payload) || preparingImage || submitting}>
+          <button className="fc-submit" type="submit" disabled={!imageBase64 || !canSubmitOfficerScan(payload) || !selectedScanOrganizationAvailable || preparingImage || submitting}>
             {submitting ? <RefreshCw size={19} className="is-spinning" aria-hidden="true" /> : imageBase64 ? <Upload size={19} aria-hidden="true" /> : <ImagePlus size={19} aria-hidden="true" />}
             {submitting ? 'Processing scan' : recoveryOriginalContext ? 'Recover saved capture' : 'Process scan'}
           </button>

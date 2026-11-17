@@ -33,6 +33,46 @@ export function getOfficerScanRecoveryContext(body: OfficerScanPayload): Officer
   };
 }
 
+export function getRecoveryServiceAgreementId(
+  original: OfficerScanRecoveryContext | undefined,
+  selectedZoneId?: string | null,
+  selectedOperatingOrganizationId?: string | null,
+): string | undefined {
+  if (!original
+    || (original.zone_id ?? null) !== (selectedZoneId || null)
+    || (original.operating_organization_id ?? null) !== (selectedOperatingOrganizationId || null)) return undefined;
+  return original.service_agreement_id ?? undefined;
+}
+
+export interface OfficerScanFailureDetails {
+  message: string;
+  code: string | null;
+  captureSaved: boolean | null;
+}
+
+export async function getOfficerScanFailureDetails(error: unknown): Promise<OfficerScanFailureDetails> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    try {
+      const body = await context.clone().json() as { error?: unknown; code?: unknown; capture_saved?: unknown };
+      return {
+        message: typeof body.error === 'string' && body.error.trim()
+          ? body.error.slice(0, 500)
+          : 'The scan service rejected the request without a readable error. Keep the saved capture for review.',
+        code: typeof body.code === 'string' ? body.code : null,
+        captureSaved: typeof body.capture_saved === 'boolean' ? body.capture_saved : null,
+      };
+    } catch {
+      return { message: 'The scan service rejected the request without a readable error. Keep the saved capture for review.', code: null, captureSaved: null };
+    }
+  }
+  return {
+    message: error instanceof Error ? error.message : 'The scan could not be processed.',
+    code: null,
+    captureSaved: null,
+  };
+}
+
 export interface ScanSafetyWarningSummary {
   id: string;
   hazard_class: string;
@@ -85,6 +125,7 @@ export interface QueuedOfficerScan {
   attempts: number;
   status?: 'pending' | 'needs_review';
   lastError?: string;
+  captureSaved?: boolean | null;
   body: OfficerScanPayload;
 }
 
@@ -151,16 +192,7 @@ export function isNetworkFailure(error: unknown): boolean {
 }
 
 export async function describeOfficerScanError(error: unknown): Promise<string> {
-  const context = (error as { context?: unknown } | null)?.context;
-  if (context instanceof Response) {
-    try {
-      const body = await context.clone().json() as { error?: unknown };
-      if (typeof body.error === 'string' && body.error.trim()) return body.error.slice(0, 500);
-    } catch {
-      return 'The scan service rejected the request without a readable error. Keep the saved capture for review.';
-    }
-  }
-  return error instanceof Error ? error.message : 'The scan could not be processed.';
+  return (await getOfficerScanFailureDetails(error)).message;
 }
 
 export async function imageFileToBase64(file: File, maxDimension = 1600): Promise<string> {
@@ -243,6 +275,7 @@ export async function queueOfficerScan(body: OfficerScanPayload, ownerId?: strin
       queued = {
         id: requestId, ownerId, capturedAt: body.captured_at,
         attempts: existing?.attempts ?? 0, status: 'pending',
+        captureSaved: existing?.captureSaved,
         body: { ...body, client_request_id: requestId, offline_queued: true,
           recovery_original_context: getOfficerScanRecoveryContext(existing?.body ?? { ...body, client_request_id: requestId }) },
       };
@@ -265,8 +298,14 @@ export async function removeQueuedOfficerScan(id: string): Promise<void> {
   await runStoreRequest('readwrite', (store) => store.delete(id));
 }
 
-export async function markQueuedOfficerScanAttempt(scan: QueuedOfficerScan, lastError?: string, needsReview = false): Promise<void> {
-  await runStoreRequest('readwrite', (store) => store.put({ ...scan, attempts: scan.attempts + 1, lastError, status: needsReview ? 'needs_review' : 'pending' }));
+export async function markQueuedOfficerScanAttempt(scan: QueuedOfficerScan, lastError?: string, needsReview = false, captureSaved?: boolean | null): Promise<void> {
+  await runStoreRequest('readwrite', (store) => store.put({
+    ...scan,
+    attempts: scan.attempts + 1,
+    lastError,
+    status: needsReview ? 'needs_review' : 'pending',
+    ...(captureSaved !== undefined ? { captureSaved } : {}),
+  }));
 }
 
 export function shouldDropQueuedOfficerScan(scan: QueuedOfficerScan): boolean {
