@@ -2808,6 +2808,113 @@ test('targeted browser checks compare the pinned base and draft without changing
   assert.match(receipts[1].payload.preview, /Targeted browser check \(worktree/);
 });
 
+test('identical pinned-base screenshots are reported without clearing the failed browser gate', async t => {
+  const png = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(1, 16); png.writeUInt32BE(1, 20);
+  const humanTest = async options => {
+    const root = path.join(path.dirname(options.workspacePath), '.human-test-runs');
+    fs.mkdirSync(root, { recursive: true });
+    const evidenceDirectory = fs.mkdtempSync(path.join(root, 'comparison-'));
+    const actual = path.join(evidenceDirectory, 'report-actual.png');
+    const diff = path.join(evidenceDirectory, 'report-diff.png');
+    fs.writeFileSync(actual, png); fs.writeFileSync(diff, png);
+    return { ok: false, status: 'failed', complete: true, passed: 1, failed: 1, skipped: 0, errors: [], warnings: [],
+      evidence_directory: evidenceDirectory,
+      failures: [{ file: 'greeting.spec.ts', title: 'report', project: 'desktop-chromium', screenshot_mismatch: true, error: 'Screenshot mismatch', evidence: [actual, diff] }] };
+  };
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'base', reason: 'compare the pinned base' } },
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'compare the current draft' } },
+    { tool: 'reply', args: { blocked_reason: 'The screenshot baseline still requires review.' } },
+  ], { humanTest });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the browser failure'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
+  const receipt = store.state.rows.find(row => row.payload?.browser_test?.revision === 'worktree');
+  assert.equal(receipt.payload.ok, false);
+  assert.equal(receipt.payload.browser_test.baseline_comparison.matches.length, 1);
+  assert.match(receipt.payload.preview, /identical actual and diff images/);
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified/);
+});
+
+test('resumed Vibe reports retained baseline matches only for the latest unchanged draft', async t => {
+  const png = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(1, 16); png.writeUInt32BE(1, 20);
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'reply', args: { blocked_reason: 'The screenshot baseline still requires review.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const root = path.join(workspaceRoot, 'vibe/.human-test-runs');
+  const makeReport = revision => {
+    fs.mkdirSync(root, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(root, `${revision}-`));
+    const actual = path.join(dir, 'report-actual.png');
+    const diff = path.join(dir, 'report-diff.png');
+    fs.writeFileSync(actual, png); fs.writeFileSync(diff, png);
+    return { revision, base_sha: repo.sha, source_fingerprint: revision === 'base' ? repo.sha : crypto.createHash('sha256').digest('hex'),
+      status: 'failed', complete: true, specs: ['e2e/greeting.spec.ts'], evidence_directory: dir,
+      failures: [{ file: 'greeting.spec.ts', title: 'report', project: 'desktop-chromium', screenshot_mismatch: true, evidence: [actual, diff] }] };
+  };
+  const base = makeReport('base');
+  const draft = makeReport('worktree');
+  store.verificationHistory = async () => [
+    { payload: { tool: 'browser_test', ok: false, browser_test: base } },
+    { payload: { tool: 'browser_test', ok: false, preview: 'screenshot failed', browser_test: draft } },
+  ];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /identical actual and diff images/);
+  assert.match(result.reply, /checks remain failed/);
+
+  store.verificationHistory = async () => [
+    { payload: { tool: 'browser_test', ok: false, browser_test: base } },
+    { payload: { tool: 'browser_test', ok: false, preview: 'older screenshot failed', browser_test: draft } },
+    { payload: { tool: 'browser_test', ok: false, preview: 'newer screenshot failed', browser_test: { ...draft, source_fingerprint: 'c'.repeat(64) } } },
+  ];
+  const stale = await vibe.processVibeMessage({ store, message: ownerMessage('What is the status now?'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
+  assert.equal(stale.error, true);
+  assert.doesNotMatch(stale.reply, /identical actual and diff images/);
+});
+
+test('external Vibe does not disclose historical baseline comparisons after attachments', async t => {
+  const png = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(1, 16); png.writeUInt32BE(1, 20);
+  const health = async () => ({ ollama_cloud: { configured: true, healthy: true, models: ['cloud'], ready_model: 'cloud' } });
+  let draftReport;
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'browser_test', args: { specs: ['e2e/greeting.spec.ts'], revision: 'worktree', reason: 'check the current draft' } },
+    { tool: 'reply', args: { blocked_reason: 'The screenshot baseline still requires review.' } },
+  ], { allowCloud: true, fetchHealth: health, humanTest: async () => draftReport });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installBrowserSpec(repo);
+  const root = path.join(workspaceRoot, 'vibe/.human-test-runs');
+  const makeReport = revision => {
+    fs.mkdirSync(root, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(root, `${revision}-`));
+    const actual = path.join(dir, 'report-actual.png');
+    const diff = path.join(dir, 'report-diff.png');
+    fs.writeFileSync(actual, png); fs.writeFileSync(diff, png);
+    return { revision, base_sha: repo.sha, source_fingerprint: revision === 'base' ? repo.sha : null, ok: false,
+      status: 'failed', complete: true, passed: 1, failed: 1, specs: ['e2e/greeting.spec.ts'], errors: [], warnings: [], evidence_directory: dir,
+      failures: [{ file: 'greeting.spec.ts', title: 'report', project: 'desktop-chromium', screenshot_mismatch: true, evidence: [actual, diff] }] };
+  };
+  const base = makeReport('base');
+  draftReport = makeReport('worktree');
+  store.hasEarlierAttachments = async () => true;
+  store.verificationHistory = async () => [{ payload: { tool: 'browser_test', ok: false, browser_test: base } }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('check the browser failure'), deps, limits: { ...vibe.VIBE_LIMITS, repairRounds: 0 } });
+  const receipt = store.state.rows.find(row => row.payload?.browser_test?.revision === 'worktree');
+  assert.equal(model.calls[0].provider, 'ollama_cloud');
+  assert.equal(receipt.payload.browser_test.baseline_comparison, undefined);
+  assert.doesNotMatch(JSON.stringify(model.calls), /actual_sha256|diff_sha256|baseline_comparison/);
+  assert.equal(result.error, true);
+});
+
 test('a passing targeted browser check cannot clear a failed full walk', async t => {
   const targetedPass = { ok: true, status: 'succeeded', complete: true, passed: 1, failed: 0, skipped: 0, failures: [], errors: [], warnings: [] };
   const { store, deps, repo, workspaceRoot } = setup([

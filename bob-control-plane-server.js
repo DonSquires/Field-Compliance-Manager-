@@ -38,7 +38,7 @@ const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, closeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest, humanTestDeploymentPreflight } = require('./worker-executor');
-const { createMainHealthMonitor } = require('./bob-main-health');
+const { createMainHealthMonitor, verifyToolingSandbox } = require('./bob-main-health');
 const { createProductionHumanTestMonitor, evictableProductionStates, liveDeploymentPreflight, resolveVercelProductionDeployment, worstPreflight } = require('./builder-production-human-test');
 const { collectLiveHttpFindings, fileDrBobFindings, openDrBobPacketFinder } = require('./builder-dr-bob-triage');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
@@ -951,7 +951,7 @@ const mainHealthMonitor = createMainHealthMonitor({
     const source = snapshot.workspacePath;
     const artifactDir = path.join(stateDir, 'main-health-runs', sha);
     fs.mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
-    return executeWorker({
+    const result = await executeWorker({
       image: builderWorkerImage,
       sourceDir: source,
       artifactDir,
@@ -962,7 +962,9 @@ const mainHealthMonitor = createMainHealthMonitor({
       pidsLimit: Number(process.env.BOB_MAIN_HEALTH_PIDS_LIMIT || 1024),
       environment: { E2E_OFFLINE: '1' },
     });
+    return { ...result, toolingSourceDir: mutableSource };
   },
+  verifyTooling: ({ sha, sourceDir }) => verifyToolingSandbox({ workspaceRoot: path.join(stateDir, 'main-health-tooling'), sourceDir, expectedSha: sha }),
   openRepair: openMainHealthRepair,
   readState: async (sha) => mainHealthState(sha),
   writeState: async (state) => saveMainHealthState(state),

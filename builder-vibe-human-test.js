@@ -9,6 +9,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { pngEvidence } = require('./builder-visual-baseline');
 const { executeWorker } = require('./worker-executor');
 const { targetedE2eSpecs } = require('./frontend-worker');
 
@@ -79,6 +80,43 @@ function validateBrowserSpecs(workspacePath, specs) {
     return normalized;
   });
   return [...new Set(normalizedSpecs)];
+}
+
+function compareSnapshotFailures({ base, draft, baseSha, evidenceRoot }) {
+  if (!baseSha || base?.revision !== 'base' || draft?.revision !== 'worktree'
+    || base.base_sha !== baseSha || draft.base_sha !== baseSha || base.source_fingerprint !== baseSha
+    || base.complete !== true || draft.complete !== true || base.status !== 'failed' || draft.status !== 'failed'
+    || (base.report_errors || []).length || (draft.report_errors || []).length
+    || !Array.isArray(base.specs) || !Array.isArray(draft.specs) || !Array.isArray(base.failures) || !Array.isArray(draft.failures)
+    || !draft.specs.every(spec => base.specs.includes(spec)) || !evidenceRoot) return [];
+  const hashes = (failure, result) => {
+    const files = Array.isArray(failure.evidence) ? failure.evidence : [];
+    const read = suffix => {
+      const matches = files.filter(file => typeof file === 'string' && path.basename(file).endsWith(suffix));
+      if (matches.length !== 1 || !path.isAbsolute(matches[0]) || !path.isAbsolute(result.evidence_directory || '')) return null;
+      const runRelative = path.relative(evidenceRoot, result.evidence_directory);
+      const fileRelative = path.relative(result.evidence_directory, matches[0]);
+      if (!runRelative || runRelative.startsWith(`..${path.sep}`) || runRelative === '..' || path.isAbsolute(runRelative)
+        || !fileRelative || fileRelative.startsWith(`..${path.sep}`) || fileRelative === '..' || path.isAbsolute(fileRelative)) return null;
+      const relative = path.relative(evidenceRoot, matches[0]).split(path.sep).join('/');
+      if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return null;
+      try { return pngEvidence(evidenceRoot, relative).sha256; } catch { return null; }
+    };
+    return { actual: read('-actual.png'), diff: read('-diff.png') };
+  };
+  const matched = [];
+  for (const failure of draft.failures) {
+    if (!failure.screenshot_mismatch || typeof failure.file !== 'string' || typeof failure.title !== 'string' || typeof failure.project !== 'string') continue;
+    if (!draft.specs.some(spec => path.posix.basename(spec) === failure.file)) continue;
+    const candidates = base.failures.filter(item => item.screenshot_mismatch && item.file === failure.file && item.title === failure.title && item.project === failure.project);
+    if (candidates.length !== 1) continue;
+    const before = hashes(candidates[0], base);
+    const after = hashes(failure, draft);
+    if (before.actual && before.diff && before.actual === after.actual && before.diff === after.diff) {
+      matched.push({ file: failure.file, title: failure.title, project: failure.project, actual_sha256: after.actual, diff_sha256: after.diff });
+    }
+  }
+  return matched.slice(0, 20);
 }
 
 function decodeAttachment(attachment) {
@@ -221,4 +259,4 @@ function runBrowserSpecs({ workspacePath, specs, reason = '', image = process.en
   return run;
 }
 
-module.exports = { HUMAN_SPEC, SPEC_PATTERN, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, normalizeBrowserSpecPath, validateBrowserSpecs, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
+module.exports = { HUMAN_SPEC, SPEC_PATTERN, humanTestSpecs, humanTestInputFiles, isBrowserSpecPath, normalizeBrowserSpecPath, validateBrowserSpecs, compareSnapshotFailures, runBrowserSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };

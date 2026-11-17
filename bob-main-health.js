@@ -1,6 +1,49 @@
 const SHA_RE = /^[a-f0-9]{40}$/i;
 const RUNNING_TIMEOUT_MS = 30 * 60 * 1000;
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { failedTestPaths } = require('./supabase/functions/_shared/builder-repository-context');
+const TOOLING_RUNTIME_FILES = ['bob-control-plane-server.js', 'bob-main-health.js', 'builder-agentic-engineer.js', 'builder-branch-workspace.js', 'builder-path-policy.js', 'worker-executor.js'];
+
+async function verifyToolingSandbox({ workspaceRoot, sourceDir, expectedSha, createToolsImpl } = {}) {
+  if (!workspaceRoot) throw new Error('tooling verification workspace root is required');
+  if (!sourceDir || !SHA_RE.test(String(expectedSha || ''))) throw new Error('pinned tooling source and SHA are required');
+  for (const file of TOOLING_RUNTIME_FILES) {
+    const pinned = execFileSync('git', ['show', `${expectedSha}:${file}`], { cwd: sourceDir, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (!pinned.equals(fs.readFileSync(path.join(__dirname, file)))) throw new Error(`deployed tooling ${file} does not match pinned main; waiting for managed release`);
+  }
+  fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+  const workspacePath = fs.mkdtempSync(path.join(workspaceRoot, 'main-health-tooling-'));
+  try {
+    execFileSync('git', ['init', '-q', workspacePath], { stdio: 'pipe' });
+    fs.mkdirSync(path.join(workspacePath, 'test'));
+    fs.writeFileSync(path.join(workspacePath, 'test', 'tooling.test.js'), [
+      "const test = require('node:test');",
+      "const assert = require('node:assert/strict');",
+      "const fs = require('node:fs');",
+      "test('tooling sandbox isolates the host', () => {",
+      "  assert.notEqual(process.getuid(), 0);",
+      "  assert.equal(fs.existsSync('/var/run/docker.sock'), false);",
+      "  assert.equal(process.env.SUPABASE_SERVICE_ROLE_KEY, undefined);",
+      "  assert.equal(process.env.BOB_ADMIN_TOKEN, undefined);",
+      "  assert.throws(() => fs.writeFileSync('/etc/fcm-main-health-probe', 'fixture'), error => ['EROFS', 'EACCES'].includes(error.code));",
+      "  assert.throws(() => fs.appendFileSync('/workspace/.git/config', '\\n# fixture'), error => ['EROFS', 'EACCES'].includes(error.code));",
+      "  fs.writeFileSync('/workspace/fixture-output', 'ok');",
+      '});',
+      '',
+    ].join('\n'));
+    const { createTools, DEFAULT_LIMITS } = require('./builder-agentic-engineer');
+    const tools = (createToolsImpl || createTools)({ workspacePath, repoRoot: workspacePath, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+    const result = await tools.run({ command: 'node --test test/tooling.test.js' });
+    if (result?.exit_code !== 0 || result.timed_out || fs.readFileSync(path.join(workspacePath, 'fixture-output'), 'utf8') !== 'ok') {
+      throw new Error('real tooling sandbox verification failed');
+    }
+    return { ok: true, mode: 'real-container' };
+  } finally {
+    fs.rmSync(workspacePath, { recursive: true, force: true });
+  }
+}
 
 function summarizeFailure(result) {
   const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`
@@ -22,7 +65,7 @@ function summarizeFailure(result) {
   };
 }
 
-function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState, writeState, now = Date.now, log = () => {} }) {
+function createMainHealthMonitor({ getMainSha, runChecks, verifyTooling, openRepair, readState, writeState, now = Date.now, log = () => {} }) {
   let inFlight = false;
 
   async function tick() {
@@ -51,9 +94,21 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
         return { sha, outcome: 'superseded', latest_sha: latestSha };
       }
       if (result?.status === 'succeeded') {
-        state = { sha, status: 'passed', checked_at: new Date(now()).toISOString(), exit_code: 0 };
+        const fixtureTooling = /(?:^|\n)BOB_HEALTH_TOOLING_MODE fixture-emulation \(temporary test workspaces only\)(?:\r?\n|$)/.test(`${result.stdout || ''}\n${result.stderr || ''}`);
+        if (result.profile === 'main-health' && !fixtureTooling) throw new Error('main-health tooling provenance is unavailable');
+        if (fixtureTooling) {
+          if (typeof verifyTooling !== 'function') throw new Error('real tooling sandbox verification is unavailable');
+          const verified = await verifyTooling({ sha, sourceDir: result.toolingSourceDir });
+          if (verified?.ok !== true || verified.mode !== 'real-container') throw new Error('real tooling sandbox verification did not pass');
+          if (await getMainSha() !== sha) {
+            state = { sha, status: 'superseded', checked_at: new Date(now()).toISOString() };
+            await writeState(state);
+            return { sha, outcome: 'superseded' };
+          }
+        }
+        state = { sha, status: 'passed', checked_at: new Date(now()).toISOString(), exit_code: 0, ...(fixtureTooling ? { tooling_mode: 'fixture-emulation', tooling_sandbox: 'real-container-passed' } : {}) };
         await writeState(state);
-        log({ sha, outcome: 'passed' });
+        log({ sha, outcome: 'passed', ...(fixtureTooling ? { tooling_mode: 'fixture-emulation' } : {}) });
         return { sha, outcome: 'passed' };
       }
       const infrastructureExitCodes = new Set([125, 126, 127, 137, 143]);
@@ -68,6 +123,15 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
       }
 
       failureEvidence = summarizeFailure(result);
+      const nestedDockerUnavailable = /(?:^|\n)BOB_HEALTH_CAPABILITY nested-docker unavailable(?:\r?\n|$)/.test(`${result.stdout || ''}\n${result.stderr || ''}`);
+      const dockerDependentTests = new Set(['test/builder-agentic-engineer.test.js', 'test/builder-vibe-session.test.js']);
+      if (nestedDockerUnavailable && /spawn docker ENOENT/.test(`${result.stdout || ''}\n${result.stderr || ''}`) && failureEvidence.failing_tests.length > 0
+        && failureEvidence.failing_tests.every(file => dockerDependentTests.has(file))) {
+        state = { sha, status: 'retry', checked_at: new Date(now()).toISOString(), error: 'main-health cannot verify Docker-dependent Builder tests inside its socket-free worker', failing_tests: failureEvidence.failing_tests };
+        await writeState(state);
+        log({ sha, outcome: 'retry', reason: 'nested_docker_unavailable', failing_tests: failureEvidence.failing_tests });
+        return { sha, outcome: 'retry', reason: 'nested_docker_unavailable' };
+      }
       const repair = await openRepair({ sha, failure: failureEvidence });
       if (!repair?.id) throw new Error('main health repair job was not returned');
       state = { sha, status: 'repair_opened', checked_at: new Date(now()).toISOString(), job_id: repair.id, failing_tests: failureEvidence.failing_tests };
@@ -94,4 +158,4 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
   return { tick };
 }
 
-module.exports = { createMainHealthMonitor, summarizeFailure, RUNNING_TIMEOUT_MS };
+module.exports = { createMainHealthMonitor, summarizeFailure, verifyToolingSandbox, RUNNING_TIMEOUT_MS };

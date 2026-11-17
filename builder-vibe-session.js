@@ -15,7 +15,7 @@ const { isIP } = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { ATLAS_RESEARCH_GUIDANCE, SUPABASE_SKILL_GUIDANCE, createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
-const { humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs } = require('./builder-vibe-human-test');
+const { humanTestInputFiles, normalizeBrowserSpecPath, validateBrowserSpecs, compareSnapshotFailures } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { EXTERNAL_PROVIDERS, buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
@@ -379,6 +379,9 @@ function humanTestPreview(result) {
   const lines = [`${label}: ${result.ok ? 'passed' : 'FAILED'} — ${result.passed || 0} passed, ${result.failed || 0} failed, ${result.skipped || 0} skipped${result.status && result.status !== 'succeeded' && result.status !== 'failed' ? ` (${result.status})` : ''}.${result.reused ? ' Reused earlier evidence for unchanged files; no new walk ran.' : ''} Specs: ${(result.specs || []).join(', ')}`];
   for (const failure of result.failures || []) {
     lines.push(`FAILED ${failure.file} > ${failure.title}${failure.screenshot_mismatch ? ' [screenshot mismatch: if this UI change is intentional, regenerate that baseline with generate_visual_baselines]' : ''}: ${clip(failure.error, 300)}`);
+  }
+  if (result.baseline_comparison?.matches?.length) {
+    lines.push(`Pinned base reproduced ${result.baseline_comparison.matches.length} screenshot failure(s) with identical actual and diff images. These checks remain failed; baseline review and fresh verification are required. Do not claim a pass or regenerate unrelated snapshots.`);
   }
   for (const finding of result.errors || []) lines.push(`ERROR at ${finding.step || finding.url}: ${finding.message}`);
   for (const finding of (result.warnings || []).slice(0, 8)) lines.push(`warning at ${finding.step || finding.url}: ${finding.message}`);
@@ -1139,10 +1142,16 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let lastEdit = null;
   let lastVerification = null;
   const failedVerifications = new Map();
+  const baseBrowserEvidence = new Map();
+  const historicalBrowserFailures = new Map();
   let humanFingerprint = null;
   let cachedHumanTest = null;
   for (const entry of verificationHistory) {
     const payload = entry.payload || {};
+    if (payload.tool === 'browser_test' && payload.browser_test?.revision === 'base'
+      && payload.browser_test.base_sha === baseSha && payload.browser_test.complete === true) {
+      baseBrowserEvidence.set(browserVerificationKey(payload.browser_test.specs || []), payload.browser_test);
+    }
     if (payload.tool === 'human_test') {
       const report = payload.human_test;
       const historicalResult = report ? { ...report, ok: payload.ok === true, infrastructure: Boolean(payload.infrastructure) } : null;
@@ -1158,8 +1167,12 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     if (payload.tool === 'browser_test' && trackedBrowserVerification(payload.browser_test)) {
       const key = payload.browser_test.verification_key || browserVerificationKey(payload.browser_test.specs);
-      if (payload.ok === false) failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
-      else if (payload.ok === true) { failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); }
+      if (payload.ok === false) {
+        failedVerifications.set(key, { command: key, failed: true, preview: clip(payload.preview, 3000), historical: true });
+        historicalBrowserFailures.set(key, payload.browser_test);
+      } else if (payload.ok === true) {
+        failedVerifications.delete(key); failedVerifications.delete(INVALID_BROWSER_KEY); historicalBrowserFailures.delete(key);
+      }
       continue;
     }
     if (payload.tool !== 'run') continue;
@@ -1268,6 +1281,17 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     return hash.digest('hex');
   };
+  const historicalFingerprint = uiFingerprint(humanTestInputFiles(changedVsBase()));
+  const historicalEvidenceRoot = path.join(path.dirname(workspacePath), '.human-test-runs');
+  for (const [key, draft] of historicalBrowserFailures) {
+    if (draft?.revision !== 'worktree' || draft.source_fingerprint !== historicalFingerprint || !Array.isArray(draft.specs)) continue;
+    const verification = failedVerifications.get(key);
+    if (!verification?.historical) continue;
+    const matches = [...baseBrowserEvidence.values()].flatMap(base => compareSnapshotFailures({ base, draft, baseSha, evidenceRoot: historicalEvidenceRoot }));
+    if (matches.length) {
+      verification.preview = `${verification.preview}\nPinned base reproduced ${matches.length} screenshot failure(s) with identical actual and diff images. These checks remain failed; baseline review and fresh verification are required.`;
+    }
+  }
   const verificationProgress = new Set(interruptedExecution.flatMap(entry =>
     Array.isArray(entry.payload?.verification_progress)
       ? entry.payload.verification_progress.filter(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value))
@@ -1376,6 +1400,13 @@ async function runConversation({ store, session, message, workspacePath, branch,
         ok: false, infrastructure: true, error: clip(redactGitError(error && error.message), 1500),
         scope: 'targeted', revision, specs: requestedSpecs, verification_key: key, base_sha: baseSha,
       };
+    }
+    if (revision === 'base' && checked.complete === true) baseBrowserEvidence.set(key, checked);
+    if (revision === 'worktree' && checked.ok === false && checked.complete === true
+      && !(historyHasAttachments && isVibeExternal(candidates[active].provider))) {
+      const evidenceRoot = path.join(path.dirname(workspacePath), '.human-test-runs');
+      const comparisons = [...baseBrowserEvidence.values()].flatMap(base => compareSnapshotFailures({ base, draft: checked, baseSha, evidenceRoot }));
+      if (comparisons.length) checked.baseline_comparison = { base_sha: baseSha, matches: comparisons.slice(0, 20) };
     }
     if (revision === 'worktree' || !validRevision) {
       const verification = { command: key, failed: !checked.ok, preview: humanTestPreview(checked) };
