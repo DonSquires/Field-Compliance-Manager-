@@ -51,6 +51,64 @@ it('tells a non-owner the Builder chat is restricted', async () => {
   expect(screen.getByText('Build lane chat · separate from in-app Bob')).toBeTruthy();
 });
 
+it('waits for thread history before focusing or enabling the requested composer', async () => {
+  let resolveThreadQuery!: (result: { data: { id: string }[]; error: null }) => void;
+  let resolveMessagesQuery!: (result: { data: BuilderChatMessage[]; error: null }) => void;
+  const threadQuery = new Promise<{ data: { id: string }[]; error: null }>(resolve => { resolveThreadQuery = resolve; });
+  const messagesQuery = new Promise<{ data: BuilderChatMessage[]; error: null }>(resolve => { resolveMessagesQuery = resolve; });
+  const query = (table: string) => {
+    const builder: Record<string, unknown> = {};
+    for (const name of ['select', 'neq', 'eq', 'order']) builder[name] = () => builder;
+    builder.limit = () => table === 'builder_chat_threads'
+      ? threadQuery
+      : table === 'builder_chat_messages' ? messagesQuery : Promise.resolve({ data: [], error: null });
+    return builder;
+  };
+  from.mockImplementation(query);
+  const sub = { on: vi.fn(() => sub), subscribe: () => sub };
+  channel.mockReturnValue(sub);
+  rpc.mockImplementation(async (name: string) => name === 'is_grand_master'
+    ? { data: true, error: null }
+    : { data: THREAD, error: null });
+
+  render(<BuilderChatPanel context={{}} focusComposer onCreateJob={vi.fn()} />);
+  const composer = screen.getByLabelText('Message Bob Builder') as HTMLTextAreaElement;
+  await waitFor(() => expect(composer.disabled).toBe(true));
+  expect(composer).not.toBe(document.activeElement);
+
+  await act(async () => { resolveThreadQuery({ data: [{ id: THREAD }], error: null }); });
+  await waitFor(() => expect(from).toHaveBeenCalledWith('builder_chat_messages'));
+  expect(composer.disabled).toBe(true);
+  expect(composer).not.toBe(document.activeElement);
+
+  await act(async () => { resolveMessagesQuery({ data: [], error: null }); });
+  await waitFor(() => expect(composer).toBe(document.activeElement));
+  expect(composer.disabled).toBe(false);
+});
+
+it('keeps the composer disabled when initial thread history cannot be loaded', async () => {
+  const query = (table: string) => {
+    const builder: Record<string, unknown> = {};
+    for (const name of ['select', 'neq', 'eq', 'order']) builder[name] = () => builder;
+    builder.limit = async () => table === 'builder_chat_threads'
+      ? { data: [{ id: THREAD }], error: null }
+      : { data: null, error: { message: 'History unavailable' } };
+    return builder;
+  };
+  from.mockImplementation(query);
+  const sub = { on: vi.fn(() => sub), subscribe: () => sub };
+  channel.mockReturnValue(sub);
+  rpc.mockImplementation(async (name: string) => name === 'is_grand_master'
+    ? { data: true, error: null }
+    : { data: THREAD, error: null });
+
+  render(<BuilderChatPanel context={{}} focusComposer onCreateJob={vi.fn()} />);
+  const composer = screen.getByLabelText('Message Bob Builder') as HTMLTextAreaElement;
+  expect((await screen.findByRole('alert')).textContent).toContain('History unavailable');
+  expect(composer.disabled).toBe(true);
+  expect(composer).not.toBe(document.activeElement);
+});
+
 it('defaults to one cloud PM packet, requiring approval and withholding private selected-job context', async () => {
   wire();
   render(<BuilderChatPanel context={{ surface: 'builder_control_room', job_title: 'Dispatch tokens', nested: { no: 1 } }} onCreateJob={vi.fn()} />);
