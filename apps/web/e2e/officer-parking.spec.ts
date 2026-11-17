@@ -80,6 +80,39 @@ test('officer records parking chalk through the verified-Zone scan workflow', as
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
+test('Parking retries an uncertain transport outcome with the original payload and unfiltered officer history', async ({ page }) => {
+  await installOfficerScheduleFixtures(page);
+  const requests: OfficerScanPayload[] = [];
+  const historyQueries: string[] = [];
+  await page.route('**/rest/v1/parking_chalk_records**', (route) => {
+    historyQueries.push(route.request().url());
+    return route.fulfill({ json: [] });
+  });
+  await page.route('**/rest/v1/location_zones**', (route) => route.fulfill({ json: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Retry Zone', module_key: 'parking_enforcement' }] }));
+  await page.route('**/functions/v1/linz-lookup', (route) => route.fulfill({ json: { candidates: [{ label: 'Synthetic address', lat: -41.28886, lng: 174.77722, source: 'linz_address' }] } }));
+  await page.route('**/functions/v1/process-officer-scan', (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}'));
+    if (requests.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { success: true, chalk_record_id: '77777777-7777-4777-8777-777777777777', verdict: 'clear', effective_limit_minutes: 60, zone_name: 'Retry Zone' } });
+  });
+  await signInAsOfficer(page, '/officer/parking');
+  await page.getByRole('button', { name: /Chalk Vehicle/ }).click();
+  await page.locator('input[type="file"]').setInputFiles('node_modules/leaflet/dist/images/marker-icon.png');
+  await page.getByLabel('Verified parking Zone').selectOption('66666666-6666-4666-8666-666666666666');
+  await page.getByLabel('Address').fill('Synthetic address');
+  await page.getByRole('button', { name: /Resolve/ }).click();
+  await expect(page.getByText('Synthetic address', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Chalk Vehicle', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry saved request' })).toBeVisible();
+  await page.getByLabel('Address').fill('Different current form value');
+  await page.getByRole('button', { name: 'Retry saved request' }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[1].location_source).toBe('address_candidate');
+  expect(historyQueries.length).toBeGreaterThan(0);
+  expect(historyQueries.every((url) => new URL(url).searchParams.has('officer_id') && !new URL(url).searchParams.has('zone_id'))).toBe(true);
+});
+
 test('officer keeps a parking address candidate separate from the selected Working Zone', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installOfficerScheduleFixtures(page);

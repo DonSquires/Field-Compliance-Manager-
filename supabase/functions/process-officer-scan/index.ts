@@ -778,7 +778,7 @@ serve(async (req)=>{
     const manualZoneId = locationSource === 'device_gps' ? null : expectedWorkingZoneId ?? null;
     const requestedLocationId = typeof body.location_id === 'string' ? body.location_id : null;
     const requestedSiteId = typeof body.client_site_id === 'string' ? body.client_site_id : null;
-    const serviceAgreementId = typeof body.service_agreement_id === 'string' ? body.service_agreement_id : null;
+    let serviceAgreementId = typeof body.service_agreement_id === 'string' ? body.service_agreement_id : null;
     const { data: operatingContexts, error: operatingOrganizationError } = await callerClient.rpc('get_operating_organization_contexts');
     if (operatingOrganizationError) return json({ error: 'Operating organization access could not be verified' }, 503);
     const operatingContext = (operatingContexts ?? []).find((context) => context.organization_id === orgId)
@@ -805,6 +805,13 @@ serve(async (req)=>{
     if (clientRequestId) {
       const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_type, command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
       if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
+      captureEvidence = existingReceipt?.response?.capture_evidence ?? null;
+      if (captureEvidence && existingReceipt.command_status !== 'completed') {
+        const { data: custody, error: custodyError } = await supabase.from('evidence_items').select('organization_id, module_key, storage_path, metadata').eq('id', captureEvidence.evidence_id).maybeSingle();
+        if (custodyError) return json({ error: 'Saved evidence custody could not be verified', code: 'scan_custody_unavailable' }, 503);
+        if (!custody || custody.organization_id !== orgId || custody.module_key !== moduleKey || custody.storage_path !== captureEvidence.storage_path) return json({ error: 'Recovery must retain the saved evidence organization and module. Keep the capture for review.', code: 'scan_custody_mismatch' }, 409);
+        if (custody.metadata?.observation_id || custody.metadata?.parking_chalk_record_id) return json({ error: 'This evidence is already linked to a record. Operations must recover the existing result.', code: 'scan_recovery_required' }, 409);
+      }
       if (existingReceipt && existingReceipt.response?.request_fingerprint !== requestFingerprint) {
         const original = body.recovery_original_context;
         const unchangedCapture = original && original.client_request_id === clientRequestId
@@ -838,7 +845,6 @@ serve(async (req)=>{
         recoveryFromFingerprint = existingReceipt.response.request_fingerprint;
       }
       recoveryFromFingerprint = recoveryFromFingerprint ?? existingReceipt?.response?.recovery_from_fingerprint ?? null;
-      captureEvidence = existingReceipt?.response?.capture_evidence ?? null;
       if (existingReceipt?.command_status === 'completed' && existingReceipt.response?.success === true) return json(existingReceipt.response);
       if (existingReceipt) {
         if (existingReceipt.command_status !== 'failed' || existingReceipt.response?.retryable !== true) {
@@ -1046,6 +1052,22 @@ serve(async (req)=>{
       if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
       if (!zoneData || zoneData.boundary_verification !== 'verified') return json({ error: 'An active verified Zone in this organization is required' }, 409);
       if (moduleKey && zoneData.module_key && zoneData.module_key !== moduleKey) return json({ error: 'Selected Zone does not support this scan module' }, 409);
+      if (!serviceAgreementId && manualZoneId && zoneData.organization_id !== orgId) {
+        const { data: candidates, error: candidatesError } = await supabase.from('service_agreements')
+          .select('id, starts_on, ends_on').eq('provider_organization_id', orgId).eq('agreement_type', 'operational');
+        if (candidatesError) return json({ error: 'Working Zone agreements could not be checked' }, 503);
+        const captureDay = capturedDate.toISOString().slice(0, 10);
+        const eligibleIds = (candidates ?? []).filter((agreement) => (!agreement.starts_on || agreement.starts_on <= captureDay) && (!agreement.ends_on || agreement.ends_on >= captureDay)).map((agreement) => agreement.id);
+        if (!eligibleIds.length) return json({ error: 'No active agreement covers this operating organization and Working Zone', code: 'scan_agreement_context_mismatch' }, 403);
+        const [placeScopes, moduleScopes] = await Promise.all([
+          supabase.from('service_agreement_locations').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('zone_id', zoneId).eq('status', 'active'),
+          supabase.from('service_agreement_modules').select('service_agreement_id').in('service_agreement_id', eligibleIds).eq('module_key', moduleKey).eq('enabled', true)
+        ]);
+        if (placeScopes.error || moduleScopes.error) return json({ error: 'Working Zone agreement scope could not be checked' }, 503);
+        const matches = eligibleIds.filter((id) => (placeScopes.data ?? []).some((scope) => scope.service_agreement_id === id) && (moduleScopes.data ?? []).some((scope) => scope.service_agreement_id === id));
+        if (matches.length !== 1) return json({ error: matches.length ? 'Multiple active agreements cover this Working Zone. Keep the capture for operations to confirm its agreement.' : 'No active module agreement covers this Working Zone', code: 'scan_agreement_context_mismatch' }, 409);
+        serviceAgreementId = matches[0];
+      }
       if (serviceAgreementId) {
         const [agreementResult, agreementPlaceResult, agreementModuleResult] = await Promise.all([
           supabase.from('service_agreements').select('provider_organization_id, agreement_type, starts_on, ends_on').eq('id', serviceAgreementId).maybeSingle(),
@@ -1095,6 +1117,7 @@ serve(async (req)=>{
       resolved_at: capturedDate.toISOString(),
       resolution_source: locationSource === 'device_gps' ? 'resolve_operational_context_authorized' : locationSource,
       location_source: locationSource,
+      service_agreement_id: serviceAgreementId,
       candidate_coordinates: locationSource === 'address_candidate' ? { lat: submittedGpsLat, lng: submittedGpsLng } : null,
       spatial_resolution_evaluated: locationSource === 'device_gps' && hasLatitude && hasLongitude,
       resolution_status: resolutionStatus,
