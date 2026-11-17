@@ -311,7 +311,22 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const [now, setNow] = useState(() => Date.now());
   const [changedFiles, setChangedFiles] = useState<{ manifestId: string | null; files: LiveChangedFile[]; total: number | null; error: string | null } | null>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const builderChatDockRef = useRef<HTMLElement | null>(null);
   selectedIdRef.current = selectedId;
+
+  useEffect(() => {
+    if (!bobOpen || mobileWorkspaceView !== 'agent') return;
+
+    const dock = builderChatDockRef.current;
+    if (!dock) return;
+
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    dock.scrollIntoView?.({
+      block: 'nearest',
+      behavior: prefersReducedMotion ? 'instant' : 'smooth',
+    });
+  }, [bobOpen, mobileWorkspaceView]);
+
   const listGeneration = useRef(0);
   const loadedPageCount = useRef(1);
   const loadingMoreRef = useRef(false);
@@ -1316,9 +1331,10 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
           </>}
         </section>
         {bobOpen && (
-          <aside className={`builder-agent-dock ${mobileWorkspaceView === 'agent' ? 'is-mobile-active' : ''}`} aria-label="Dedicated Bob Builder agent">
+          <aside ref={builderChatDockRef} className={`builder-agent-dock ${mobileWorkspaceView === 'agent' ? 'is-mobile-active' : ''}`} aria-label="Dedicated Bob Builder agent">
             <BuilderChatPanel
               onClose={() => { setBobOpen(false); setMobileWorkspaceView(selectedJob ? 'workbench' : 'queue'); }}
+              focusComposer={bobOpen && mobileWorkspaceView === 'agent'}
               onCreateJob={createJobFromProposal}
               onOpenJob={jobId => { setSelectedId(jobId); setMobileWorkspaceView('workbench'); }}
               getJobReference={jobId => jobs.find(job => job.id === jobId)?.human_reference ?? null}

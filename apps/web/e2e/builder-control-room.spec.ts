@@ -5,6 +5,33 @@ const JOB_ID = '91919191-9191-4919-8919-919191919191';
 const PROJECT_ID = '92929292-9292-4929-8929-929292929292';
 const ORGANIZATION_ID = '33333333-3333-4333-8333-333333333333';
 
+test('Builder chat dock focuses its visible composer when opened', async ({ page, isMobile }) => {
+  const errors = monitorBrowserErrors(page);
+  await installSupabaseFixtures(page, { adminRole: 'grand_master' });
+  await page.route('**/rest/v1/rpc/is_grand_master', route => route.fulfill({ json: true }));
+  await page.route('**/functions/v1/bob-builder-control-room', async route => {
+    const { action } = route.request().postDataJSON() as { action: string };
+    const response = action === 'list' ? { projects: [], jobs: [] } : { context: null };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) });
+  });
+  await signInAsAdmin(page, '/admin/builder');
+  await page.getByRole('button', { name: 'Jobs & approvals', exact: true }).click();
+
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Bob Builder', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Hide Builder chat' }).click();
+    await page.getByRole('button', { name: 'Builder chat' }).click();
+  }
+
+  const composer = page.locator('#bchat-input');
+  await expect(page.locator('.builder-agent-dock')).toBeVisible();
+  await expect(composer).toBeVisible();
+  expect(errors).toEqual([]);
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeInViewport();
+});
+
 test('incomplete acceptance stays a same-job correction gate after reload, never finished-code approval', async ({ page, isMobile }) => {
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page, { adminRole: 'grand_master' });

@@ -5,10 +5,58 @@ import BuilderControlRoomPage, { failedFrontendPatchRetryCandidate } from './Bui
 
 const { invoke, rpc, getUser } = vi.hoisted(() => ({ invoke: vi.fn(), rpc: vi.fn(), getUser: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { functions: { invoke }, rpc, auth: { getUser } } }));
-vi.mock('../components/BuilderChatPanel', () => ({ BuilderChatPanel: () => null }));
+vi.mock('../components/BuilderChatPanel', async () => {
+  const React = await import('react');
+  return {
+    BuilderChatPanel: ({ focusComposer }: { focusComposer?: boolean }) => {
+      const composerRef = React.useRef<HTMLTextAreaElement | null>(null);
+      React.useEffect(() => {
+        if (focusComposer) composerRef.current?.focus();
+      }, [focusComposer]);
+      return React.createElement('textarea', {
+        ref: composerRef,
+        id: 'bchat-input',
+        'aria-label': 'Message Bob Builder',
+        'data-testid': 'bchat-input',
+      });
+    },
+  };
+});
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 beforeEach(() => { getUser.mockResolvedValue({ data: { user: { id: 'owner' } }, error: null }); });
+
+it('focuses the Builder chat composer when the header reopens the dock', async () => {
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+
+  render(<BuilderControlRoomPage />);
+  const initialComposer = await screen.findByTestId('bchat-input');
+  expect(initialComposer).not.toBe(document.activeElement);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Hide Builder chat' }));
+  await waitFor(() => expect(screen.queryByTestId('bchat-input')).toBeNull());
+  fireEvent.click(await screen.findByRole('button', { name: 'Builder chat' }));
+  const composer = await screen.findByTestId('bchat-input');
+  await waitFor(() => expect(composer).toBe(document.activeElement));
+});
+
+it('focuses the Builder chat composer when the mobile workspace opens it', async () => {
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+
+  render(<BuilderControlRoomPage />);
+  const composer = await screen.findByTestId('bchat-input');
+  fireEvent.click(screen.getByRole('button', { name: 'Workbench' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Bob Builder' }));
+  await waitFor(() => expect(composer).toBe(document.activeElement));
+});
 
 it('shows the persistent Builder reference in the queue and workbench and searches by it', async () => {
   const jobs = [

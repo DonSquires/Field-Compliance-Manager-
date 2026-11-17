@@ -28,6 +28,7 @@ export interface BuilderChatMessage {
 
 interface BuilderChatPanelProps {
   context: Record<string, unknown>;
+  focusComposer?: boolean;
   onClose?: () => void;
   /** Creates the Builder job through the control room and returns its receipt. */
   onCreateJob: (proposal: BuilderChatProposal) => Promise<{ id: string; human_reference?: string | null; duplicate?: boolean } | null>;
@@ -200,7 +201,7 @@ function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingEl
   );
 }
 
-export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, getJobReference, jobSettings }: BuilderChatPanelProps) {
+export function BuilderChatPanel({ context, focusComposer = false, onClose, onCreateJob, onOpenJob, getJobReference, jobSettings }: BuilderChatPanelProps) {
   const [access, setAccess] = useState<Access>('checking');
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BuilderChatMessage[]>([]);
@@ -208,13 +209,31 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, get
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerFocusHandled = useRef(false);
   const threadEnd = useRef<HTMLDivElement | null>(null);
   // Per-tab reservation tokens, so this tab can retry its own create but another tab cannot duplicate it.
   const reservations = useRef(new Map<string, string>());
   const reconcileRef = useRef<(() => Promise<void>) | null>(null);
 
   const working = messages.some(message => message.role === 'owner' && (message.status === 'queued' || message.status === 'claimed'));
+  const historyReady = !loading && threadId !== null && loadedThreadId === threadId;
   const items = useMemo(() => groupChat(messages), [messages]);
+
+  useEffect(() => {
+    if (!focusComposer) {
+      composerFocusHandled.current = false;
+      return;
+    }
+    if (composerFocusHandled.current || access !== 'allowed' || !historyReady || busy) return;
+
+    const composer = composerRef.current;
+    if (!composer || composer.disabled) return;
+
+    composer.focus();
+    composerFocusHandled.current = true;
+  }, [access, busy, focusComposer, historyReady]);
 
   const openThread = useCallback(async (fresh: boolean) => {
     if (!fresh) {
@@ -262,6 +281,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, get
       const snapshot = ((data ?? []) as BuilderChatMessage[]).slice().reverse();
       const liveAfterStart = new Set([...liveAt].filter(([, at]) => at > started).map(([id]) => id));
       setMessages(current => mergeSnapshot(current, snapshot, liveAfterStart));
+      setLoadedThreadId(threadId);
     };
     reconcileRef.current = reconcile;
     void reconcile();
@@ -411,9 +431,9 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, get
           <p className="bchat__context">{typeof context.job_title === 'string' && context.job_title ? <>Selected job (not transferred): <strong>{context.job_title}</strong></> : 'No job selected · cloud PM receives only your approved packet'}</p>
           <form className="bchat__composer" onSubmit={event => event.preventDefault()}>
             <label htmlFor="bchat-input" className="bchat__sr">Message Bob Builder</label>
-            <textarea id="bchat-input" value={draft} onChange={event => setDraft(event.target.value)} rows={3} maxLength={2000} placeholder="Ask your PM a question, or describe the issue to investigate"
-              disabled={access !== 'allowed' || !threadId || Boolean(busy)} />
-            {threadId && <BuilderResearchComposer key={threadId} pmMode threadId={threadId} question={draft} disabled={access !== 'allowed' || Boolean(busy) || working} onSent={() => setDraft('')} onError={message => setError(message || null)} onBusy={value => setBusy(value ? 'research' : null)} />}
+            <textarea ref={composerRef} id="bchat-input" value={draft} onChange={event => setDraft(event.target.value)} rows={3} maxLength={2000} placeholder="Ask your PM a question, or describe the issue to investigate"
+              disabled={access !== 'allowed' || !historyReady || Boolean(busy)} />
+            {threadId && <BuilderResearchComposer key={threadId} pmMode threadId={threadId} question={draft} disabled={access !== 'allowed' || !historyReady || Boolean(busy) || working} onSent={() => setDraft('')} onError={message => setError(message || null)} onBusy={value => setBusy(value ? 'research' : null)} />}
             <span className="bchat__hint">Review the packet and approve cloud transfer before sending · Enter adds a new line</span>
           </form>
         </>
