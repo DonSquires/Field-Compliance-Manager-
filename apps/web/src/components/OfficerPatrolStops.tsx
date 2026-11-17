@@ -1,14 +1,18 @@
 /**
  * OfficerPatrolStops — the contracted site visits of the officer's shift, one action at a time.
- * Reads get_officer_patrol_stops; writes only through manage_officer_patrol_stop (arrive / depart).
+ * Reads the sanitized stop projection; writes only through manage_officer_patrol_stop (arrive / depart).
  */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AlertTriangle, CheckCircle2, MapPin, RefreshCw, Signpost, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { AlertTriangle, CheckCircle2, MapPin, RefreshCw, Signpost } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useOfficerUnsavedWork } from '../context/OfficerUnsavedWorkContext';
 import { plainWords } from '../lib/rosterWords';
 import { briefingNeedsAcknowledgement, fetchShiftSafetyBriefing, type SafetyBriefing } from '../lib/safetyBriefing';
 import { SafetyBriefingDialog } from './ShiftSafetyBriefing';
-import { OfficerStopChecks, checksOutstanding, type StopCheck } from './OfficerStopChecks';
+import { OfficerStopChecks, checksOutstanding, validStopChecks, type StopCheck } from './OfficerStopChecks';
+import { OfficerPatrolMap, type PatrolMapPoint } from './OfficerPatrolMap';
+import { OfficerPatrolBriefing } from './OfficerPatrolBriefing';
+import type { PatrolJourney } from '../lib/officerPatrolJourney';
 import './OfficerPatrolStops.css';
 
 interface StopPlace { kind: 'site' | 'zone' | 'unknown'; name: string; address: string | null; access_instructions: string | null; hs_notes: string | null }
@@ -20,7 +24,7 @@ export interface PatrolStop {
   required_dwell_minutes: number; officer_instructions: string | null;
   actual_arrived_at: string | null; actual_departed_at: string | null;
   arrival_verification: string | null; arrival_distance_m: number | null; officer_notes: string | null;
-  module_key: string; modules?: StopModule[]; checks?: StopCheck[]; place: StopPlace;
+  module_key: string; modules?: StopModule[]; checks: StopCheck[]; place: StopPlace;
   actual_travel_distance_km?: number | null; travel_from_stop_id?: string | null;
   travel_distance_method?: 'recorded_km' | 'odometer_difference' | null; travel_distance_version?: number;
 }
@@ -52,7 +56,12 @@ async function currentPosition(): Promise<{ latitude: number; longitude: number;
   ));
 }
 
-export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
+export function OfficerPatrolStops({ shiftId, journey, renderCheckpoints, onDirtyChange }: {
+  shiftId: string;
+  journey?: PatrolJourney | null;
+  renderCheckpoints?: (stopId: string) => ReactNode;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [bundle, setBundle] = useState<StopsBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -64,21 +73,61 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
   const [stopBriefing, setStopBriefing] = useState<{ stop: PatrolStop; briefing: SafetyBriefing } | null>(null);
   const [travelDrafts, setTravelDrafts] = useState<Record<string, { distance: string; start: string; end: string; useOdometer: boolean }>>({});
   const [travelReceipt, setTravelReceipt] = useState<{ distance_km: number; reference: string } | null>(null);
+  const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({});
+  const [checksDirty, setChecksDirty] = useState(false);
+  const loadVersion = useRef(0);
+  const dirty = Boolean(notes || delayReason || saving || checksDirty
+    || Object.values(travelDrafts).some((draft) => draft.distance || draft.start || draft.end));
+  useOfficerUnsavedWork(dirty);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true); setError(null);
-    // ATLAS READS: get_officer_patrol_stops
-    const { data, error: rpcError } = await supabase.rpc('get_officer_patrol_stops', { p_shift_id: shiftId });
-    if (rpcError) setError(rpcError.message);
-    else setBundle((data as StopsBundle | null) ?? null);
+    // ATLAS READS: get_officer_patrol_stops_sanitized
+    const { data, error: rpcError } = await supabase.rpc('get_officer_patrol_stops_sanitized', { p_shift_id: shiftId });
+    if (version !== loadVersion.current) return;
+    if (rpcError) {
+      setError(`Stops could not be refreshed and may be out of date. Retry or contact operations. ${rpcError.message}`);
+    } else if (!data || typeof data !== 'object' || data.shift?.id !== shiftId || !Array.isArray(data.stops)
+      || data.stops.some((stop: PatrolStop) => !stop || !stop.place || typeof stop.place.name !== 'string' || !validStopChecks(stop.checks))) {
+      setBundle(null);
+      setError('The assigned stop details could not be confirmed. Retry or contact operations.');
+    } else setBundle(data as StopsBundle);
     setLoading(false);
   }, [shiftId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setBundle(null); void load(); return () => { loadVersion.current += 1; }; }, [load]);
 
   const stops = bundle?.stops ?? [];
   const current = stops.find((stop) => stop.status === 'on_scene') ?? stops.find((stop) => stop.status === 'pending' || stop.status === 'en_route') ?? null;
   const done = stops.filter((stop) => stop.status === 'completed').length;
+  const planMatches = Boolean(journey && journey.stops.length === stops.length
+    && journey.stops.every((stop) => stops.some((item) => item.id === stop.id)));
+  const mapPoints = useMemo<PatrolMapPoint[]>(() => (journey?.stops ?? []).flatMap((stop, index) => {
+    const position = stop.place.coordinates;
+    return position ? [{ id: stop.id, name: stop.place.name ?? 'Assigned place', order: index + 1, latitude: position.lat, longitude: position.lng }] : [];
+  }), [journey]);
+  const groups: Array<{ key: string; label: string; stops: Array<{ stop: PatrolStop; index: number }> }> = [];
+  const orderedStops = planMatches && journey
+    ? journey.stops.map((entry) => stops.find((stop) => stop.id === entry.id)).filter((stop): stop is PatrolStop => Boolean(stop))
+    : stops;
+  orderedStops.forEach((stop, index) => {
+    const entry = planMatches ? journey?.stops.find((item) => item.id === stop.id) : undefined;
+    const clients = entry?.clients.slice().sort((a, b) => a.id.localeCompare(b.id)) ?? [];
+    const key = entry ? `${entry.client_attribution_complete}:${clients.map((client) => client.id).join(',')}` : 'unavailable';
+    const names = clients.map((client) => client.name).join(' / ');
+    const label = names ? `${names}${entry?.client_attribution_complete ? '' : ' (client attribution incomplete)'}` : 'Client organisation not confirmed';
+    let group = groups[groups.length - 1];
+    if (!group || group.key !== key) {
+      group = { key, label, stops: [] };
+      groups.push(group);
+    }
+    group.stops.push({ stop, index });
+  });
 
   const act = async (stop: PatrolStop, action: 'arrive' | 'depart') => {
     setSaving(true); setError(null); setReceipt(null);
@@ -138,6 +187,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
       });
       if (travelError || !data) throw travelError ?? new Error('Travel distance was not confirmed.');
       delete pendingRequest.current[key];
+      setTravelDrafts((drafts) => { const next = { ...drafts }; delete next[stop.id]; return next; });
       setTravelReceipt(data as { distance_km: number; reference: string });
       await load();
     } catch (failure) {
@@ -181,8 +231,14 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
       {stops.length === 0 ? (
         <p className="patrol-stops-subtle">This shift has no contracted site visits. If it should, ask your supervisor to build the patrol run for the agreement.</p>
       ) : (
-        <ol className="patrol-stops-list">
-          {stops.map((stop, index) => {
+        <>
+        {journey && !planMatches && <p role="alert">The stop list and patrol plan do not match. Refresh or contact operations before relying on the map or client grouping.</p>}
+        {!journey && <p>Client grouping and the planned stop map are unavailable until the patrol plan loads.</p>}
+        {planMatches && journey && <OfficerPatrolMap points={mapPoints} totalStops={journey.stops.length} />}
+        {groups.map((group, groupIndex) => <section key={`${group.key}:${groupIndex}`} aria-label={group.label}>
+          <h4 className="patrol-stops-client">{group.label}</h4>
+          <ol className="patrol-stops-list">
+          {group.stops.map(({ stop, index }) => {
             const isCurrent = current?.id === stop.id;
             const state = stop.status === 'completed' ? 'done' : stop.status === 'skipped' || stop.status === 'cancelled' ? 'off' : isCurrent ? 'current' : 'later';
             const fromStop = stop.actual_arrived_at ? stops.filter((candidate) => candidate.id !== stop.id && candidate.status === 'completed' && candidate.actual_departed_at
@@ -201,14 +257,16 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
                     <span>{stop.visits_total > 1 ? `Visit ${stop.visit_number} of ${stop.visits_total} · ` : ''}{stop.status === 'completed' ? `Done ${time(stop.actual_departed_at) ?? ''}` : stop.status === 'on_scene' ? `On site since ${time(stop.actual_arrived_at)}` : stop.status === 'skipped' ? 'Skipped by dispatch' : stop.status === 'cancelled' ? 'Cancelled by dispatch' : `Arrive ${stop.sla_window_open ? `between ${time(stop.sla_window_open)} and ` : 'by '}${time(stop.sla_arrive_by)}`} · stay {stop.required_dwell_minutes} min</span>
                   </div>
                   {stop.place.address && <p className="patrol-stop-address">{stop.place.address}</p>}
-                  {(isCurrent || stop.status === 'on_scene') && (
-                    <div className="patrol-stop-brief">
-                      {stop.officer_instructions && <p><strong>Do here:</strong> {stop.officer_instructions}</p>}
-                      {stop.place.access_instructions && <p><strong>Access:</strong> {stop.place.access_instructions}</p>}
-                      {stop.place.hs_notes && <p className="is-safety"><TriangleAlert size={13} aria-hidden="true" /> <strong>Safety:</strong> {stop.place.hs_notes}</p>}
-                      {!stop.officer_instructions && !stop.place.access_instructions && !stop.place.hs_notes && <p>No special instructions for this place.</p>}
-                    </div>
-                  )}
+                  <details className="patrol-stop-detail" onToggle={(event) => {
+                    const open = event.currentTarget.open;
+                    setOpenDetails((currentDetails) => ({ ...currentDetails, [stop.id]: open }));
+                  }}>
+                    <summary>Site information and checkpoints</summary>
+                    <p>{stop.place.address ?? 'Address not supplied.'}</p>
+                    {openDetails[stop.id] && !(isCurrent && (stop.status === 'pending' || stop.status === 'en_route'))
+                      && <OfficerPatrolBriefing shiftId={shiftId} stopId={stop.id} />}
+                    {renderCheckpoints ? renderCheckpoints(stop.id) : <p>Checkpoint details are unavailable. Retry loading the patrol plan.</p>}
+                  </details>
                   {stop.status === 'completed' && stop.officer_notes && <p className="patrol-stop-notes">Your notes: {stop.officer_notes}</p>}
                   {fromStop && (stop.status === 'on_scene' || stop.status === 'completed') && <details className="patrol-stop-notes">
                     <summary>{stop.actual_travel_distance_km == null ? `Record travel from ${fromStop.place.name}` : `${stop.actual_travel_distance_km} km recorded travel`}</summary>
@@ -223,11 +281,14 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
                     </form>
                   </details>}
                   {isCurrent && (stop.status === 'pending' || stop.status === 'en_route') && (
-                    <button type="button" className="btn btn-primary patrol-stop-action" onClick={() => void act(stop, 'arrive')} disabled={saving}><MapPin size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Arrived at ${stop.place.name}`}</button>
+                    <>
+                      <OfficerPatrolBriefing shiftId={shiftId} stopId={stop.id} />
+                      <button type="button" className="btn btn-primary patrol-stop-action" onClick={() => void act(stop, 'arrive')} disabled={saving}><MapPin size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Arrived at ${stop.place.name}`}</button>
+                    </>
                   )}
                   {isCurrent && stop.status === 'on_scene' && (
                     <>
-                    <OfficerStopChecks stopId={stop.id} checks={stop.checks ?? []} onRecorded={() => void load()} />
+                    <OfficerStopChecks stopId={stop.id} checks={stop.checks} onRecorded={() => void load()} onDirtyChange={setChecksDirty} />
                     <form className="patrol-stop-depart" onSubmit={depart}>
                       <label><span>What you found and did here{stop.sla_status === 'breached' ? '' : ' (needed only if you leave early)'}</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="e.g. Gates locked, lights checked, nothing unusual" /></label>
                       {stop.sla_status === 'breached' && <label><span>Why you arrived after the contracted window</span><input value={delayReason} onChange={(event) => setDelayReason(event.target.value)} placeholder="e.g. Held at previous site by an alarm response" required /></label>}
@@ -240,7 +301,9 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
               </li>
             );
           })}
-        </ol>
+          </ol>
+        </section>)}
+        </>
       )}
     </section>
   );

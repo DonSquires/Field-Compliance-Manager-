@@ -10,7 +10,7 @@ const checks = read('apps/mobile/src/components/OfficerStopChecks.tsx');
 test('mobile stops use the officer-authorised stop flow, not the service-only completion RPC', () => {
   assert.doesNotMatch(panel, /complete_shift_stop/);
   assert.doesNotMatch(panel, /from\('shift_stops'\)/);
-  assert.match(panel, /rpc\('get_officer_patrol_stops'/);
+  assert.match(panel, /rpc\('get_officer_patrol_stops_sanitized'/);
   assert.match(panel, /rpc\('manage_officer_patrol_stop'/);
   assert.match(panel, /act\(stop, 'depart'\)/);
   assert.match(panel, /p_action: action === 'arrive' \? 'arrive' : 'depart'/);
@@ -20,6 +20,11 @@ test('mobile departure waits for every check and uses officer-safe errors', () =
   assert.match(panel, /checksOutstanding\(stop\.checks\)/);
   assert.match(panel, /Record every check first/);
   assert.match(panel, /userFacingError\(/);
+});
+
+test('mobile fails closed if a stop omits its check projection', () => {
+  assert.match(panel, /'checks' in stop && Array\.isArray\(stop\.checks\)/);
+  assert.match(checks, /!checks \|\| checks\.some/);
 });
 
 test('mobile check retries resend the stored request from device storage', () => {
@@ -32,7 +37,7 @@ test('mobile check retries resend the stored request from device storage', () =>
 
 test('mobile stops do not claim an empty shift before the first load or after a failed one', () => {
   assert.match(panel, /const \[loading, setLoading\] = useState\(true\)/);
-  assert.match(panel, /!loadError && active\.length === 0/);
+  assert.match(panel, /loadError && !stops\.length \? null : loading && !stops\.length/);
 });
 
 test('mobile stop polling keeps an action error on screen', () => {
@@ -42,7 +47,7 @@ test('mobile stop polling keeps an action error on screen', () => {
 });
 
 test('mobile stop controls name the check and meet the touch target', () => {
-  assert.match(checks, /accessibilityLabel=\{`\$\{check\.label\}: \$\{outcome === 'done' \? 'Done' : "Couldn't complete"\}`\}/);
-  assert.match(checks, /accessibilityLabel=\{`Save \$\{check\.label\}`\}/);
+  assert.match(checks, /accessibilityLabel=\{`\$\{label\}: \$\{outcome === 'done' \? 'Done' : "Couldn't complete"\}`\}/);
+  assert.match(checks, /accessibilityLabel=\{`Save \$\{label\}`\}/);
   assert.match(panel, /refresh: \{[^}]*minHeight: 44/);
 });

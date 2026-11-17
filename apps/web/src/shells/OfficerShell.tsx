@@ -79,6 +79,8 @@ import {
   isBreadcrumbDue,
 } from '../lib/officerBreadcrumb';
 import { resolveAddressForCoordinates } from '../lib/locationAddress';
+import { createPatrolAutoCapture, type PatrolCaptureStatus } from '../lib/patrolAutoCapture';
+import { PATROL_CAPTURE_REQUESTED } from '../lib/patrolCheckpointEvents';
 import './OfficerShell.css';
 import './OfficerUsability.css';
 
@@ -162,6 +164,7 @@ const LazyPageFallback: React.FC = () => (
 const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPortal }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const requestedPatrolShift = new URLSearchParams(location.search).get('shift');
   const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
@@ -195,6 +198,8 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
+  const [patrolCaptureStatus, setPatrolCaptureStatus] = useState<PatrolCaptureStatus | null>(null);
+  const retryPatrolCapture = useRef<() => void>(() => undefined);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
   const contentRef = useRef<HTMLElement | null>(null);
@@ -301,12 +306,49 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
   }, [activeShift?.id]);
 
   useEffect(() => {
-    if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    setPatrolCaptureStatus(null);
+    if (!profile?.id || typeof navigator === 'undefined') return;
+    if (!navigator.geolocation) {
+      if (activeShift?.status === 'in_progress') setPatrolCaptureStatus({ kind: 'warning', message: 'GPS is unavailable on this device. Checkpoints cannot be automatically verified.' });
+      return;
+    }
     const ownerUserId = profile.id;
     const recordsBreadcrumbs = canRecordOfficerBreadcrumbs(profile.role);
+    let active = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const requestFix = () => {
+      if (capture) navigator.geolocation.getCurrentPosition(capture.capture, locationError, { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 });
+    };
+    const retryFreshFix = () => {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => { retryTimer = null; requestFix(); }, 5000);
+    };
+    const capture = activeShift?.status === 'in_progress' ? createPatrolAutoCapture(activeShift.id, setPatrolCaptureStatus, retryFreshFix) : null;
+    if (capture) {
+      setPatrolCaptureStatus({ kind: 'waiting', message: 'Waiting for a fresh GPS fix to check automatic checkpoint recording.' });
+    }
+    const locationError = () => {
+      if (active && capture) setPatrolCaptureStatus({
+        kind: 'warning', message: 'GPS is unavailable or permission was denied. Allow location access and try again.',
+      });
+    };
+    retryPatrolCapture.current = requestFix;
+    const onCaptureRequested = (event: Event) => {
+      if (!(event instanceof CustomEvent) || typeof event.detail?.shiftId !== 'string') return;
+      if (activeShift && event.detail.shiftId !== activeShift.id) return;
+      if (capture) {
+        capture.sessionStarted();
+        setPatrolCaptureStatus({ kind: 'waiting', message: 'Waiting for a fresh GPS fix to check automatic checkpoint recording.' });
+        requestFix();
+      }
+      else void refreshShift();
+    };
+    window.addEventListener(PATROL_CAPTURE_REQUESTED, onCaptureRequested);
+    window.addEventListener('online', requestFix);
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         safety.recordMovement(position.coords.latitude, position.coords.longitude);
+        capture?.capture(position);
         if (!recordsBreadcrumbs) return;
         const capturedAt = Date.now();
         if (!isBreadcrumbDue(lastBreadcrumbAtRef.current, capturedAt)) return;
@@ -318,11 +360,19 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
             setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
           });
       },
-      () => undefined,
+      locationError,
       { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
     );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [activeShift?.id, profile?.id, profile?.role, safety.recordMovement]);
+    return () => {
+      active = false;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      capture?.stop();
+      retryPatrolCapture.current = () => undefined;
+      window.removeEventListener(PATROL_CAPTURE_REQUESTED, onCaptureRequested);
+      window.removeEventListener('online', requestFix);
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [activeShift?.id, activeShift?.status, profile?.id, profile?.role, refreshShift, safety.recordMovement]);
 
   useEffect(() => {
     if (!profile?.id || typeof window === 'undefined' || !canRecordOfficerBreadcrumbs(profile.role)) return;
@@ -636,6 +686,21 @@ const OfficerShell: React.FC<{ onSwitchPortal?: () => void }> = ({ onSwitchPorta
           <div role="status" className="officer-shell-evidence-warning">
             Location evidence not confirmed. {breadcrumbIssue.pendingCount} {breadcrumbIssue.pendingCount === 1 ? 'record is' : 'records are'} queued for retry. {breadcrumbIssue.error}
           </div>
+        )}
+        {(activeModule === 'patrol' || activeModule === 'checkpoint_scan') && requestedPatrolShift && !shiftLoading && activeShift?.id !== requestedPatrolShift && (
+          <div role="status" className="officer-shell-evidence-warning">{activeShift
+            ? 'Automatic checkpoint recording monitors your active shift, not this selected shift.'
+            : 'No active shift is confirmed. Automatic checkpoint recording is unavailable.'}</div>
+        )}
+        {activeShift?.status === 'in_progress' && patrolCaptureStatus
+          && ((activeModule === 'patrol' || activeModule === 'checkpoint_scan') || patrolCaptureStatus.kind === 'warning') && (
+          <div role={patrolCaptureStatus.kind === 'warning' ? 'alert' : 'status'} className="officer-shell-evidence-warning">
+            Active shift: {patrolCaptureStatus.message} Keep the portal open with location enabled; background tracking is not guaranteed.
+            {patrolCaptureStatus.kind === 'warning' && typeof navigator !== 'undefined' && navigator.geolocation && <button type="button" onClick={() => retryPatrolCapture.current()}>Try location again</button>}
+          </div>
+        )}
+        {(activeModule === 'patrol' || activeModule === 'checkpoint_scan') && activeShift && activeShift.status !== 'in_progress' && (
+          <div role="status" className="officer-shell-evidence-warning">Automatic checkpoint recording requires your shift to be started and a patrol session in progress.</div>
         )}
         {!isOnline && <div role="status" className="officer-shell-offline-banner">No connection — field evidence will remain queued until the device is back online.</div>}
         {(officerState === 'standby' || officerState === 'home') && (

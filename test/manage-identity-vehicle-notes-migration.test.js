@@ -35,6 +35,9 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./place-service-terms-migrat
 if (process.env.BOB_TEST_POSTGRES === '1') require('./generator-reads-terms-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./place-static-posts-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-stop-checks-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./officer-patrol-journey-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./auto-record-patrol-checkpoints-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./sanitized-officer-patrol-stops-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./zone-parent-setting-migration.test');
 
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261101180000_manage_identity_vehicle_preserve_notes.sql'), 'utf8');

@@ -229,5 +229,5 @@ test('ending a shift protects unfinished debrief text when closing or opening st
   await expect(summary).toHaveValue('Handover in progress.');
   page.once('dialog', (confirmation) => confirmation.accept());
   await dialog.getByRole('button', { name: 'Open stops' }).click();
-  await expect(page).toHaveURL(/\/officer\/patrol$/);
+  await expect(page).toHaveURL(new RegExp(`/officer/patrol\\?shift=${active.id}$`));
 });

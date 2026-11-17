@@ -13,7 +13,7 @@ const stop = (id: string, name: string, order: number, arrival: string, departur
   sla_window_open: null, sla_arrive_by: arrival, sla_depart_by: null, required_dwell_minutes: 0,
   officer_instructions: null, actual_arrived_at: arrival, actual_departed_at: departure,
   arrival_verification: 'no_geofence', arrival_distance_m: null, officer_notes: null,
-  module_key: 'general_patrol', place: { kind: 'zone', name, address: null, access_instructions: null, hs_notes: null },
+  module_key: 'general_patrol', checks: [], place: { kind: 'zone', name, address: null, access_instructions: null, hs_notes: null },
   actual_travel_distance_km: null, travel_distance_version: 0,
 });
 const bundle = { shift: { id: 'shift', status: 'completed', scheduled_start: '2026-10-19T08:00:00Z', scheduled_end: '2026-10-19T16:00:00Z', route_name: 'Nelson Forestry Patrol' },
@@ -23,7 +23,7 @@ afterEach(cleanup);
 beforeEach(() => {
   mocked.saveError = false;
   mocked.rpc.mockReset();
-  mocked.rpc.mockImplementation(async (name: string) => name === 'get_officer_patrol_stops'
+  mocked.rpc.mockImplementation(async (name: string) => name === 'get_officer_patrol_stops_sanitized'
     ? { data: bundle, error: null }
     : { data: mocked.saveError ? null : { distance_km: 12.5, reference: 'travel-receipt' }, error: mocked.saveError ? { message: 'Travel changed; refresh before retrying.' } : null });
 });
