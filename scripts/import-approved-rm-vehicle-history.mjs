@@ -234,6 +234,13 @@ export async function attachMatchedPhoto(service, governed, row) {
   let uploadedThisRun = false;
   let reused = false;
   let alreadyLinked = false;
+  let prepared = false;
+  const prepareWrite = async () => {
+    if (!prepared) {
+      await row.onPrepared?.({ sha256, storage_path: destination });
+      prepared = true;
+    }
+  };
   if (existing.data?.storage_path) {
     reused = true;
     if ((row.recordKind ?? 'observation') === 'location_event') {
@@ -249,7 +256,7 @@ export async function attachMatchedPhoto(service, governed, row) {
         .limit(1)
         .maybeSingle();
       if (linked.error) throw linked.error;
-      if (!linked.data) return { held: 'photo_already_attached_to_other_record', sha256 };
+      if (!linked.data) return { held: 'photo_already_attached_to_other_record', sha256, no_write: true };
       alreadyLinked = true;
     }
     if ((row.recordKind ?? 'observation') === 'observation') {
@@ -266,6 +273,7 @@ export async function attachMatchedPhoto(service, governed, row) {
       alreadyLinked = Boolean(support.data);
     }
   } else {
+    await prepareWrite();
     const upload = await governed.storage.from('bob-uploads').upload(
       destination,
       new Blob([bytes], { type: mimeType(row.localPath) }),
@@ -280,6 +288,7 @@ export async function attachMatchedPhoto(service, governed, row) {
   const sourceReference = `local://rm/remsec-documents/${row.relativePath.replaceAll('\\', '/')}`;
   const description = `Approved working-file photo${row.plate ? ` for ${row.plate}` : ''}`;
   const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}; ${photoProvenance(bytes, row.fileInfo)}`;
+  await prepareWrite();
   const result = await governed.rpc('attach_external_photo_to_record', {
     p_record_kind: row.recordKind ?? 'observation',
     p_record_id: row.observationId,
@@ -291,47 +300,41 @@ export async function attachMatchedPhoto(service, governed, row) {
     p_captured_at: row.capturedAt,
   });
   if (result.error) {
-    if (uploadedThisRun) await governed.storage.from('bob-uploads').remove([destination]);
     throw new Error(`${row.relativePath}: ${result.error.message}`);
+  }
+  if (typeof result.data !== 'string' || !result.data) {
+    throw new Error(`${row.relativePath}: attachment returned no evidence ID`);
   }
   const registered = await service
     .from('evidence_items')
-    .select('storage_path')
+    .select('storage_path,location_event_id')
+    .eq('id', result.data)
     .eq('organization_id', row.organizationId)
     .eq('evidence_kind', 'photo')
     .eq('sha256_hash', sha256)
-    .limit(1)
     .single();
   if (registered.error) throw registered.error;
-  let discardedDuplicateUpload = false;
-  if (uploadedThisRun && registered.data.storage_path !== destination) {
-    await governed.storage.from('bob-uploads').remove([destination]);
-    destination = registered.data.storage_path;
-    discardedDuplicateUpload = true;
+  if (!registered.data?.storage_path) throw new Error(`${row.relativePath}: registered evidence has no storage path`);
+  if ((row.recordKind ?? 'observation') === 'location_event'
+    && registered.data.location_event_id !== row.observationId) {
+    return { held: 'photo_attachment_record_mismatch', sha256 };
   }
-  return { sha256, storage_path: destination, uploaded: uploadedThisRun && !discardedDuplicateUpload,
-    reused, already_linked: alreadyLinked, discarded_duplicate_upload: discardedDuplicateUpload };
-}
-
-async function runWorkers(rows, concurrency, worker) {
-  let index = 0;
-  const runners = Array.from({ length: Math.min(concurrency, rows.length) }, async () => {
-    while (index < rows.length) {
-      const current = rows[index];
-      index += 1;
-      await worker(current);
-    }
-  });
-  await Promise.all(runners);
+  const retainedDuplicateUpload = uploadedThisRun && registered.data.storage_path !== destination;
+  const retainedStoragePath = retainedDuplicateUpload ? destination : null;
+  return { sha256, storage_path: registered.data.storage_path, uploaded: uploadedThisRun, reused,
+    already_linked: alreadyLinked, retained_duplicate_upload: retainedDuplicateUpload,
+    ...(retainedStoragePath ? { retained_storage_path: retainedStoragePath } : {}) };
 }
 
 async function main() {
+  if (process.argv.includes('--apply')) {
+    throw new Error('Standalone photo apply is disabled until private staging and governed recovery are available');
+  }
   const inventoryPath = requiredArgument('--inventory');
   const sourceRoot = requiredArgument('--source-root');
   const providerOrganizationId = argument('--provider-org', DEFAULT_PROVIDER_ORG);
   const concurrency = Number(argument('--concurrency', '4'));
   const limit = argument('--limit') ? Number(argument('--limit')) : null;
-  const apply = process.argv.includes('--apply');
   if (argument('--tolerance-minutes') !== null) throw new Error('Photo matching uses the exact Auckland-local minute; --tolerance-minutes is no longer supported');
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 12) {
     throw new Error('--concurrency must be an integer from 1 to 12');
@@ -342,75 +345,25 @@ async function main() {
 
   const url = process.env.SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const actorEmail = process.env.RM_PHOTO_IMPORT_ACTOR_EMAIL;
-  const actorPassword = process.env.RM_PHOTO_IMPORT_ACTOR_PASSWORD;
-  validatePhotoImportEnvironment({ apply, url, serviceRole, actorEmail, actorPassword });
+  validatePhotoImportEnvironment({ apply: false, url, serviceRole });
 
   const service = createClient(url, serviceRole, { auth: { persistSession: false } });
-  let governed = null;
-  if (apply) {
-    governed = createClient(url, serviceRole, { auth: { persistSession: false } });
-    const { error: authError } = await governed.auth.signInWithPassword({ email: actorEmail, password: actorPassword });
-    if (authError) throw new Error(`Dedicated photo importer authentication failed: ${authError.message}`);
-  }
-
   const organizationIds = await loadVisibleOrganizationIds(service, providerOrganizationId);
   const { targets, byMinute } = await loadTargets(service, organizationIds);
   const matching = await matchPhotos(inventoryPath, sourceRoot, byMinute);
   const selected = limit === null ? matching.matched : matching.matched.slice(0, limit);
 
-  if (!apply) {
-    console.log(JSON.stringify({
-      mode: 'dry-run',
-      structuredVehicleObservations: targets.length,
-      supportedCorpusPhotos: matching.supportedPhotos,
-      filenameStructuredPhotos: matching.namedPhotos,
-      exactObservationMatches: matching.matched.length,
-      ambiguousMatchesHeld: matching.ambiguous,
-      unmatchedStructuredPhotos: matching.unmatched,
-      selected: selected.length,
-      matchingRule: 'exact Auckland-local date and minute plus filename rego or exact folder place alias',
-    }));
-    return;
-  }
-
-  let uploaded = 0;
-  let reused = 0;
-  let attached = 0;
-  let discardedDuplicateUploads = 0;
-  let alreadyLinked = 0;
-  let held = 0;
-  const observationHashPairs = new Set();
-  await runWorkers(selected, concurrency, async (row) => {
-    const outcome = await attachMatchedPhoto(service, governed, row);
-    if (outcome.held) {
-      held += 1;
-      return;
-    }
-    observationHashPairs.add(`${row.observationId}:${outcome.sha256}`);
-    if (outcome.uploaded) uploaded += 1;
-    if (outcome.reused) reused += 1;
-    if (outcome.already_linked) alreadyLinked += 1;
-    if (outcome.discarded_duplicate_upload) discardedDuplicateUploads += 1;
-    attached += 1;
-  });
-
   console.log(JSON.stringify({
-    mode: 'apply',
+    mode: 'dry-run',
     structuredVehicleObservations: targets.length,
+    supportedCorpusPhotos: matching.supportedPhotos,
+    filenameStructuredPhotos: matching.namedPhotos,
     exactObservationMatches: matching.matched.length,
     ambiguousMatchesHeld: matching.ambiguous,
     unmatchedStructuredPhotos: matching.unmatched,
     selected: selected.length,
-    uploaded,
-    reused,
-    discardedDuplicateUploads,
-    uniqueObservationHashPairs: observationHashPairs.size,
-    alreadyLinked,
-    heldForReview: held,
-    attached,
+    matchingRule: 'exact Auckland-local date and minute plus filename rego or exact folder place alias',
   }));
-  await governed.auth.signOut();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

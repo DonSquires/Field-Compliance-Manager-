@@ -7,6 +7,7 @@ import {
   buildCaptureGroups, captureCsv, chunkCaptureGroups, photoDescription, resolveCaptureClient,
 } from '../services/document-source-worker/source-captures.mjs';
 import { promoteCaptures, runPromotion, validateSourceMap } from '../services/document-source-worker/source-promote.mjs';
+import { loadSyncState } from '../services/document-source-worker/source-sync.mjs';
 import { parsePhotoName } from '../scripts/rm-photo-matcher.mjs';
 
 const PROVIDER = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13';
@@ -199,6 +200,208 @@ test('a committed run captures unmatched photos and attaches them to the new row
         ({ status: 'unmatched', parsed: parsePhotoName(relative) }) }) }, includePhotos: true, settleMs: 0, listPhotos: async () => entries });
     assert.equal(dry.captures.batches[0].status, 'previewed');
     assert.equal(dry.photos.counts['held:no_exact_record_match'], 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a lost capture-batch response holds its photos across subsequent runs', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fcm-capture-recovery-'));
+  try {
+    const statePath = path.join(root, 'state', 'sync.json');
+    const relative = 'Photos/Central Rd - Hira - TPFL/241024 1523 stag.jpg';
+    const entries = [{ relative_path: relative, size_bytes: 5, modified_at: 't1' }];
+    let writes = 0;
+    let intentAtWrite = false;
+    const deps = {
+      ...captureDeps(),
+      syncPlan: async ({ commit }) => {
+        if (!commit) return { status: 'ready', requested: { inserts: 1, updates: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+        intentAtWrite = Boolean((await loadSyncState(statePath)).photo_capture_intents?.[relative]);
+        writes += 1;
+        throw new Error('simulated lost response');
+      },
+      photoDeps: async () => ({
+        classify: async () => ({ status: 'unmatched', parsed: parsePhotoName(relative) }),
+        attach: async () => { throw new Error('unmatched photo must not be attached'); },
+        minuteOrganizations: () => new Set(),
+      }),
+    };
+    const run = currentEntries => runPromotion({
+      root, statePath, map: sourceMap(), deps, commit: true, includePhotos: true, settleMs: 0,
+      listPhotos: async () => currentEntries,
+    });
+
+    const first = await run(entries);
+    assert.equal(intentAtWrite, true);
+    assert.equal(first.captures.batches[0].status, 'held');
+    assert.equal(first.captures.batches[0].reason, 'possible_partial_photo_capture_review');
+    assert.ok((await loadSyncState(statePath)).photo_capture_intents[relative]);
+
+    const second = await run([{ ...entries[0], modified_at: 't2' }]);
+    assert.equal(second.photos.counts['held:possible_partial_photo_capture_review'], 1);
+    assert.equal(writes, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a completed capture is not recreated while its photo target is still absent', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fcm-capture-receipt-'));
+  try {
+    const statePath = path.join(root, 'state', 'sync.json');
+    const relative = 'Photos/Central Rd - Hira - TPFL/241024 1523 stag.jpg';
+    const entries = [{ relative_path: relative, size_bytes: 5, modified_at: 't1' }];
+    let writes = 0;
+    const deps = {
+      ...captureDeps(),
+      syncPlan: async ({ commit }) => {
+        if (commit) writes += 1;
+        return { status: commit ? 'committed' : 'ready', batch_id: commit ? 'batch-1' : null,
+          requested: { inserts: 1, updates: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+      },
+      photoDeps: async () => ({
+        classify: async () => ({ status: 'unmatched', parsed: parsePhotoName(relative) }),
+        attach: async () => { throw new Error('unmatched photo must not be attached'); },
+        minuteOrganizations: () => new Set(),
+      }),
+    };
+    const run = () => runPromotion({
+      root, statePath, map: sourceMap(), deps, commit: true, includePhotos: true, settleMs: 0,
+      listPhotos: async () => entries,
+    });
+
+    await run();
+    const laterPhoto = { ...entries[0], relative_path: 'Photos/Other Gate - Hira - TPFL/241024 1523 cyclist.jpg' };
+    const second = await runPromotion({
+      root, statePath, map: sourceMap(), deps: {
+        ...deps,
+        photoDeps: async () => ({
+          classify: async () => ({ status: 'unmatched', parsed: parsePhotoName(laterPhoto.relative_path) }),
+          attach: async () => { throw new Error('unmatched photo must not be attached'); },
+          minuteOrganizations: () => new Set(),
+        }),
+      },
+      commit: true, includePhotos: true, settleMs: 0, listPhotos: async () => [laterPhoto],
+    });
+    assert.equal(second.photos.counts['held:captured_photo_record_not_found_review'], 1);
+    assert.equal(writes, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a later photo in an uncertain capture group cannot attach to an unreviewed record', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fcm-capture-group-recovery-'));
+  try {
+    const statePath = path.join(root, 'state', 'sync.json');
+    const first = { relative_path: 'Photos/Central Rd - Hira - TPFL/241024 1523 stag.jpg', size_bytes: 5, modified_at: 't1' };
+    const later = { ...first, relative_path: 'Photos/Unlabelled/241024 1523 cyclist.jpg' };
+    let writes = 0;
+    let attachments = 0;
+    let matched = false;
+    const deps = {
+      ...captureDeps(),
+      syncPlan: async ({ commit }) => {
+        if (!commit) return { status: 'ready', requested: { inserts: 1, updates: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+        writes += 1;
+        throw new Error('simulated lost response');
+      },
+      photoDeps: async () => ({
+        classify: async relativePath => matched
+          ? { status: 'matched', row: { matchType: 'place', organizationId: TPFL, parsed: parsePhotoName(relativePath) } }
+          : { status: 'unmatched', parsed: parsePhotoName(relativePath) },
+        attach: async () => { attachments += 1; return { sha256: 'a'.repeat(64), storage_path: 'org/p.jpg' }; },
+        minuteOrganizations: () => new Set(),
+      }),
+    };
+    const run = entry => runPromotion({
+      root, statePath, map: sourceMap(), deps, commit: true, includePhotos: true, settleMs: 0,
+      listPhotos: async () => [entry],
+    });
+    await run(first);
+    matched = true;
+    const second = await runPromotion({
+      root, statePath, map: sourceMap({ photo_captures: captures({ enabled: false }) }), deps,
+      commit: true, includePhotos: true, settleMs: 0, listPhotos: async () => [later],
+    });
+    assert.equal(second.photos.counts['held:possible_partial_photo_capture_review'], 1);
+    assert.equal(writes, 1);
+    assert.equal(attachments, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a renamed unmatched photo cannot create a capture while any attachment is unresolved', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fcm-capture-attachment-hold-'));
+  try {
+    const statePath = path.join(root, 'state', 'sync.json');
+    const first = { relative_path: 'Photos/Central Rd - Hira - TPFL/241024 1523 stag.jpg', size_bytes: 5, modified_at: 't1' };
+    const renamed = { ...first, relative_path: 'Photos/Other Gate - Hira - TPFL/241024 1600 stag.jpg' };
+    let matched = true;
+    let capturesWritten = 0;
+    const deps = {
+      ...captureDeps(),
+      syncPlan: async ({ commit }) => {
+        if (commit) capturesWritten += 1;
+        return { status: commit ? 'committed' : 'ready', batch_id: commit ? 'batch-1' : null,
+          requested: { inserts: 1, updates: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+      },
+      photoDeps: async () => ({
+        classify: async relativePath => matched
+          ? { status: 'matched', row: { matchType: 'place', organizationId: TPFL, parsed: parsePhotoName(relativePath) } }
+          : { status: 'unmatched', parsed: parsePhotoName(relativePath) },
+        attach: async row => {
+          await row.onPrepared({ sha256: 'a'.repeat(64), storage_path: 'org/original.jpg' });
+          throw new Error('simulated lost response');
+        },
+        minuteOrganizations: () => new Set(),
+      }),
+    };
+    const run = entry => runPromotion({
+      root, statePath, map: sourceMap(), deps, commit: true, includePhotos: true, settleMs: 0,
+      listPhotos: async () => [entry],
+    });
+    await run(first);
+    matched = false;
+    const report = await run(renamed);
+    assert.equal(report.photos.counts['held:unresolved_attachment_blocks_capture_review'], 1);
+    assert.equal(capturesWritten, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unavailable private staging blocks photo attachments and capture writes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fcm-photo-private-staging-'));
+  try {
+    const entries = [
+      { relative_path: 'Photos/Central Rd - Hira - TPFL/241024 1523 stag.jpg', size_bytes: 5, modified_at: 't1' },
+      { relative_path: 'Photos/Central Rd - Hira - TPFL/241024 1600 stag.jpg', size_bytes: 5, modified_at: 't1' },
+    ];
+    let writes = 0;
+    const deps = {
+      ...captureDeps(),
+      syncPlan: async ({ commit }) => {
+        if (commit) writes += 1;
+        return { status: 'ready', requested: { inserts: 1, updates: 0 }, plan_summary: {}, plan_hold_reasons: {} };
+      },
+      photoDeps: async () => ({
+        writeDisabledReason: 'photo_import_requires_private_staging',
+        classify: async relativePath => relativePath.includes('1523')
+          ? { status: 'matched', row: { matchType: 'place', parsed: parsePhotoName(relativePath) } }
+          : { status: 'unmatched', parsed: parsePhotoName(relativePath) },
+        attach: async () => { writes += 1; throw new Error('photo writes must be blocked'); },
+        minuteOrganizations: () => new Set(),
+      }),
+    };
+    const report = await runPromotion({
+      root, statePath: path.join(root, 'state.json'), map: sourceMap(), deps,
+      commit: true, includePhotos: true, settleMs: 0, listPhotos: async () => entries,
+    });
+    assert.equal(report.photos.counts['held:photo_import_requires_private_staging'], 2);
+    assert.equal(writes, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

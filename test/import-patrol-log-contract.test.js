@@ -9,7 +9,7 @@ test('patrol imports collapse duplicate external references before chunking', ()
   assert.match(importer, /const seenExternalRefs = new Set\(\)/);
   assert.match(importer, /if \(seenExternalRefs\.has\(externalRef\)\)/);
   assert.match(importer, /skippedDuplicate \+= 1/);
-  assert.match(importer, /skipped: duplicate external reference/);
+  assert.match(importer, /duplicate external references/);
   assert.ok(importer.indexOf('seenExternalRefs.has(externalRef)') < importer.indexOf('eventsBatch.push'));
 });
 
@@ -40,7 +40,7 @@ test('narrative persistence and consequential proposals require explicit opt-in'
   assert.match(importer, /comments: comments \|\| null/);
   assert.match(importer, /officer_notes: includeNarratives \? comments \|\| null : null/);
   assert.match(importer, /status: includeNarratives \?/);
-  assert.match(importer, /if \(includeNarratives\) \{\s*proposalsBatch\.push/);
+  assert.match(importer, /if \(includeNarratives && !sourceHoldReason\) \{\s*proposalsBatch\.push/);
   assert.match(importer, /proposal_generation: includeNarratives \? 'enabled'/);
   assert.match(importer, /const jobKms = leg \? leg\.kms : dayResetKms !== null \? dayResetKms : sourceKms;/);
   assert.match(importer, /job_kms_source_value:/);

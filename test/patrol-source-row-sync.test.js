@@ -122,6 +122,97 @@ test('sync chunks pair each row with its own proposals and never send unchanged 
   assert.equal(buildReconciliationPlan({ sourcePlan: plan, existing: [] }).summary.insert, 4);
 });
 
+test('source financial values remain held before an event, observation, or proposal can be written', async () => {
+  const { runSourceSync } = await load();
+  for (const [kind, field, value] of [
+    ['event', 'job_cost', 0],
+    ['event', 'travel_cost', 8675309.42],
+    ['event', 'source_leg_correction', { total_cost: 31 }],
+    ['observation', 'total_cost', 18],
+    ['proposal', 'job_cost', 5],
+  ]) {
+    const row = sourceRow(1);
+    row.payload.source_row = 2;
+    const plan = sourcePlan(kind === 'observation' ? [] : [row]);
+    if (kind === 'observation') {
+      plan.observations.push({ ...row, plate: 'ABC123' });
+    } else if (kind === 'proposal') {
+      plan.proposals.push({ source_record_key: row.external_ref, source_values: { [field]: value } });
+    }
+    if (kind !== 'proposal') row.payload[field] = value;
+    let writeAttempts = 0;
+    const readQuery = async sql => {
+      if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+      if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+      if (sql.includes('import_actor_id')) return [{ import_actor_id: ACTOR }];
+      return [];
+    };
+    const report = await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER, readQuery,
+      writeQuery: async () => { writeAttempts += 1; throw new Error('Unexpected database write'); }, commit: true });
+    assert.equal(report.status, 'source_rows_held', `${kind}:${field}`);
+    assert.equal(report.plan_hold_reasons.source_financial_values_require_review, 1, `${kind}:${field}`);
+    assert.equal(writeAttempts, 0, `${kind}:${field}`);
+    assert.equal(report.plan_hold_samples[0].external_ref, row.external_ref);
+    if (value === 8675309.42) assert.doesNotMatch(JSON.stringify(report), /8675309\.42/);
+  }
+});
+
+test('absent and null financial values do not hold a source row', async () => {
+  const { buildReconciliationPlan, buildSyncChunks } = await load();
+  const row = sourceRow(1);
+  row.payload.job_cost = null;
+  row.payload.source_leg_correction = { travel_cost: null };
+  const plan = sourcePlan([row], [{ source_record_key: row.external_ref, source_values: { total_cost: null } }]);
+  const reconciliation = buildReconciliationPlan({ sourcePlan: plan, existing: [] });
+  assert.equal(reconciliation.actions[0].operation, 'insert');
+  assert.equal(buildSyncChunks(plan, reconciliation).counts.inserts, 1);
+});
+
+test('financial-only source holds name the actual reason when paired matching is requested', async () => {
+  const { buildReconciliationPlan } = await load();
+  const hold = { external_ref: 'rm_patrol_import:TEST:start', kind: 'source_row', source_row: 4,
+    reason: 'source_financial_values_require_review' };
+  const current = sourcePlan([sourceRow(1)]);
+  current.source_holds = [hold];
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: current, existing: [], sheetCopies: [{}] }),
+    /financial.*review/i);
+
+  const paired = { ...sourcePlan([]), source_sheet: 'CANON', source_holds: [hold] };
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: sourcePlan([sourceRow(1)]), existing: [], canonicalPlan: paired }),
+    /financial.*review/i);
+});
+
+test('a forged reconciliation action cannot put source financial values in a write chunk', async () => {
+  const { buildSyncChunks } = await load();
+  for (const kind of ['event', 'proposal']) {
+    const row = sourceRow(1);
+    if (kind === 'event') row.payload.travel_cost = 0;
+    const proposals = kind === 'proposal' ? [{ source_record_key: row.external_ref, source_values: { job_cost: 5 } }] : [];
+    const plan = sourcePlan([row], proposals);
+    const forged = { source_sha256: HASH, actions: [{ external_ref: row.external_ref, kind: 'event',
+      operation: 'insert', source_fingerprint: 'f'.repeat(64) }] };
+    assert.throws(() => buildSyncChunks(plan, forged), /financial.*review/i, kind);
+  }
+});
+
+test('sync SQL refuses manually constructed chunks containing source financial values', async () => {
+  const { buildSyncChunkSql } = await load();
+  const row = sourceRow(1, { payload: { ...sourceRow(1).payload, job_cost: 0 } });
+  for (const [phase, value] of [
+    ['events', row], ['observations', row], ['proposals', { source_values: { travel_cost: 3 } }],
+    ['baselines', { desired: row }], ['updates', { desired: row }], ['corrections', { desired: row }],
+    ['supersedes', { desired: row }], ['dartUpdates', { update_desired: row }],
+  ]) {
+    const chunk = { observations: [], events: [], proposals: [], baselines: [], updates: [],
+      corrections: [], supersedes: [], dartUpdates: [], [phase]: [value] };
+    const input = { actorId: ACTOR, providerOrganizationId: PROVIDER, clientOrganizationId: CLIENT,
+      batch: sourcePlan([row]).batch, dartUpdateBatch: { manifest: { idempotency_key: 'update-key' } }, chunk };
+    for (const commit of [false, true]) {
+      assert.throws(() => buildSyncChunkSql({ ...input, commit }), /financial.*review/i, `${phase}:${commit}`);
+    }
+  }
+});
+
 test('sync SQL runs as the import identity, rolls back unless committed, and keeps preview DDL out of commits', async () => {
   const { buildSyncChunkSql } = await load();
   const chunk = { observations: [], events: [sourceRow(1)], proposals: [], baselines: [], updates: [] };
@@ -138,7 +229,159 @@ test('sync SQL runs as the import identity, rolls back unless committed, and kee
   assert.throws(() => buildSyncChunkSql({ ...base, chunk: hostile, commit: false }), /delimiter/);
 });
 
-function syncHarness({ existingEvents = [], checkpoints = [], batches = [] } = {}) {
+test('a server hold rolls back its entire sync chunk in PostgreSQL', {
+  skip: process.env.BOB_TEST_POSTGRES !== '1', timeout: 180000,
+}, async () => {
+  const { execFileSync } = require('node:child_process');
+  const { randomUUID } = require('node:crypto');
+  const { buildSyncChunkSql } = await load();
+  const name = `fcm-patrol-sync-${randomUUID()}`;
+  const docker = (args, input) => execFileSync('docker', args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const sql = query => docker(['exec', '-i', name, 'psql', '-h', '127.0.0.1',
+    '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], query).trim();
+  let created = false;
+  try {
+    docker(['run', '--detach', '--name', name, '--network', 'none', '--pull', 'never',
+      '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgis/postgis:17-3.5']);
+    created = true;
+    let ready = false;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']);
+        ready = true;
+        break;
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }
+    assert.ok(ready, 'Disposable PostgreSQL became ready');
+    sql(`CREATE TABLE public.test_stage(id integer);
+      CREATE TABLE public.location_events(id uuid, organization_id uuid, external_ref text);
+      CREATE TABLE public.observations(id uuid, organization_id uuid, external_refs jsonb);
+      CREATE TYPE public.test_batch_result AS (id uuid);
+      CREATE FUNCTION public.begin_patrol_import_batch(
+        p_provider_organization_id uuid, p_client_organization_id uuid, p_batch_name text,
+        p_source_file text, p_source_sha256 text, p_parser text, p_manifest_json jsonb,
+        p_schema_json jsonb, p_row_count integer, p_duplicate_count integer, p_unresolved_count integer)
+      RETURNS public.test_batch_result LANGUAGE sql AS $$ SELECT ROW('${BATCH}'::uuid)::public.test_batch_result $$;
+      CREATE FUNCTION public.stage_patrol_import_chunk(uuid,uuid,uuid,jsonb,jsonb,jsonb)
+      RETURNS TABLE(obs_inserted integer, evt_inserted integer, proposals_inserted integer)
+      LANGUAGE plpgsql AS $$ BEGIN INSERT INTO public.test_stage VALUES (1); RETURN QUERY SELECT 0,1,0; END $$;
+      CREATE FUNCTION public.adopt_patrol_source_baseline(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT 'ref'::text,'${RECORD}'::uuid,
+        CASE WHEN current_setting('test.hold',true)='yes' THEN 'held' ELSE 'adopted' END,
+        'review_required'::text $$;
+      CREATE FUNCTION public.apply_patrol_source_updates(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;
+      CREATE FUNCTION public.correct_legacy_patrol_source_records(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;
+      CREATE FUNCTION public.supersede_duplicate_patrol_events(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;`);
+    const chunk = { observations: [], events: [sourceRow(1)], proposals: [],
+      baselines: [{ kind: 'event', external_ref: sourceRow(1).external_ref, record_id: RECORD }],
+      updates: [], corrections: [], supersedes: [] };
+    const base = { actorId: ACTOR, providerOrganizationId: PROVIDER, clientOrganizationId: CLIENT,
+      batch: sourcePlan([sourceRow(1)]).batch, chunk };
+    const preview = sql(`SET test.hold='yes'; ${buildSyncChunkSql({ ...base, commit: false })}`);
+    assert.match(preview, /"outcome": "held"/);
+    assert.equal(sql('SELECT count(*) FROM public.test_stage;'), '0');
+    assert.throws(() => sql(`SET test.hold='yes'; ${buildSyncChunkSql({ ...base, commit: true })}`),
+      error => /Source rows were held during commit/.test(String(error.stderr))
+        && /phase=baseline/.test(String(error.stderr)) && String(error.stderr).includes(RECORD));
+    assert.equal(sql('SELECT count(*) FROM public.test_stage;'), '0');
+    sql(`SET test.hold='no'; ${buildSyncChunkSql({ ...base, commit: true })}`);
+    assert.equal(sql('SELECT count(*) FROM public.test_stage;'), '1');
+    sql(`INSERT INTO public.location_events(id, organization_id, external_ref)
+      VALUES ('${RECORD}', '${CLIENT}', '${sourceRow(1).external_ref}');`);
+    assert.throws(() => sql(`SET test.hold='no'; ${buildSyncChunkSql({ ...base, commit: true })}`),
+      error => /Source row appeared after comparison/.test(String(error.stderr)));
+    assert.equal(sql('SELECT count(*) FROM public.test_stage;'), '1');
+  } finally {
+    if (created) docker(['rm', '-f', name]);
+  }
+});
+
+test('a concurrent record edit cannot be overwritten by a committed sync chunk', {
+  skip: process.env.BOB_TEST_POSTGRES !== '1', timeout: 180000,
+}, async () => {
+  const { execFileSync } = require('node:child_process');
+  const { randomUUID } = require('node:crypto');
+  const { buildSyncChunkSql } = await load();
+  const name = `fcm-patrol-sync-race-${randomUUID()}`;
+  const docker = (args, input) => execFileSync('docker', args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const sql = query => docker(['exec', '-i', name, 'psql', '-h', '127.0.0.1',
+    '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], query).trim();
+  let created = false;
+  try {
+    docker(['run', '--detach', '--name', name, '--network', 'none', '--pull', 'never',
+      '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgis/postgis:17-3.5']);
+    created = true;
+    let ready = false;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']);
+        ready = true;
+        break;
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }
+    assert.ok(ready, 'Disposable PostgreSQL became ready');
+    sql(`CREATE EXTENSION dblink;
+      CREATE TABLE public.location_events(id uuid PRIMARY KEY, organization_id uuid, external_ref text, status text);
+      CREATE TABLE public.observations(id uuid, organization_id uuid, external_refs jsonb);
+      INSERT INTO public.location_events VALUES ('${RECORD}', '${CLIENT}', '${sourceRow(1).external_ref}', 'original');
+      CREATE TYPE public.test_batch_result AS (id uuid);
+      CREATE FUNCTION public.begin_patrol_import_batch(
+        p_provider_organization_id uuid, p_client_organization_id uuid, p_batch_name text,
+        p_source_file text, p_source_sha256 text, p_parser text, p_manifest_json jsonb,
+        p_schema_json jsonb, p_row_count integer, p_duplicate_count integer, p_unresolved_count integer)
+      RETURNS public.test_batch_result LANGUAGE sql AS $$ SELECT ROW('${BATCH}'::uuid)::public.test_batch_result $$;
+      CREATE FUNCTION public.stage_patrol_import_chunk(uuid,uuid,uuid,jsonb,jsonb,jsonb)
+      RETURNS TABLE(obs_inserted integer, evt_inserted integer, proposals_inserted integer)
+      LANGUAGE sql AS $$ SELECT 0,0,0 $$;
+      CREATE FUNCTION public.adopt_patrol_source_baseline(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;
+      CREATE FUNCTION public.apply_patrol_source_updates(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        PERFORM event.status FROM public.location_events event WHERE event.id = '${RECORD}';
+        PERFORM public.dblink_exec('host=127.0.0.1 user=postgres dbname=postgres',
+          'UPDATE public.location_events SET status = ''manual edit'' WHERE id = ''${RECORD}''');
+        UPDATE public.location_events event SET status = 'source update' WHERE event.id = '${RECORD}';
+        RETURN QUERY SELECT '${sourceRow(1).external_ref}'::text, '${RECORD}'::uuid, 'updated'::text, NULL::text;
+      END $$;
+      CREATE FUNCTION public.correct_legacy_patrol_source_records(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;
+      CREATE FUNCTION public.supersede_duplicate_patrol_events(uuid,uuid,uuid,jsonb)
+      RETURNS TABLE(external_ref text,record_id uuid,outcome text,detail text)
+      LANGUAGE sql AS $$ SELECT NULL::text,NULL::uuid,NULL::text,NULL::text WHERE false $$;`);
+    const chunk = { observations: [], events: [], proposals: [], baselines: [],
+      updates: [{ kind: 'event', external_ref: sourceRow(1).external_ref, record_id: RECORD }] };
+    const base = { actorId: ACTOR, providerOrganizationId: PROVIDER, clientOrganizationId: CLIENT,
+      batch: sourcePlan([sourceRow(1)]).batch, chunk, commit: true };
+    const guarded = buildSyncChunkSql(base);
+    const unguarded = guarded.replace('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;', '');
+    assert.notEqual(unguarded, guarded);
+    sql(unguarded);
+    assert.equal(sql(`SELECT status FROM public.location_events WHERE id = '${RECORD}';`), 'source update');
+    sql(`UPDATE public.location_events SET status = 'original' WHERE id = '${RECORD}';`);
+    assert.throws(() => sql(guarded),
+      error => /could not serialize access due to concurrent update/.test(String(error.stderr)));
+    assert.equal(sql(`SELECT status FROM public.location_events WHERE id = '${RECORD}';`), 'manual edit');
+  } finally {
+    if (created) docker(['rm', '-f', name]);
+  }
+});
+
+function syncHarness({ existingEvents = [], checkpoints = [], batches = [], serverHold = true } = {}) {
   const reads = [];
   const writes = [];
   return {
@@ -157,7 +400,8 @@ function syncHarness({ existingEvents = [], checkpoints = [], batches = [] } = {
       return [{ batch_id: BATCH, results: [
         { phase: 'stage', outcome: 'staged', detail: JSON.stringify({ evt_inserted: 1, obs_inserted: 0, proposals_inserted: 0 }) },
         { phase: 'baseline', external_ref: 'r', record_id: RECORD, outcome: 'adopted', detail: null },
-        { phase: 'update', external_ref: 'u', record_id: RECORD, outcome: 'held', detail: 'fcm_record_changed_since_last_sync' },
+        ...(serverHold ? [{ phase: 'update', external_ref: 'u', record_id: RECORD,
+          outcome: 'held', detail: 'fcm_record_changed_since_last_sync' }] : []),
       ] }];
     },
   };
@@ -191,6 +435,42 @@ test('a dry run sends rolled-back chunks and never finalizes; nothing is written
   assert.equal(typeof recordFingerprint, 'function');
 });
 
+test('a direct committed sync preflights every chunk and stops on a server hold', async () => {
+  const { runSourceSync } = await load();
+  const harness = syncHarness();
+  let preview = 0;
+  const writeQuery = async sql => {
+    harness.writes.push(sql);
+    if (!sql.endsWith('ROLLBACK;')) assert.fail('a held preview must not reach a committed transaction');
+    preview += 1;
+    return [{ batch_id: BATCH, results: preview === 2
+      ? [{ phase: 'update', outcome: 'held', detail: 'place_outside_contracted_patrol_coverage' }]
+      : [{ phase: 'stage', outcome: 'staged', detail: '{"evt_inserted":1}' }] }];
+  };
+  const report = await runSourceSync({ sourcePlan: sourcePlan([sourceRow(1), sourceRow(2)]),
+    providerOrganizationId: PROVIDER, readQuery: harness.readQuery, writeQuery, chunkSize: 1, commit: true });
+  assert.equal(report.status, 'source_rows_held');
+  assert.equal(report.committed, false);
+  assert.equal(harness.writes.length, 2);
+  assert.deepEqual(report.summary.hold_reasons, { 'update:place_outside_contracted_patrol_coverage': 1 });
+});
+
+test('a later sync failure reports that an earlier chunk committed', async () => {
+  const { runSourceSync } = await load();
+  const harness = syncHarness();
+  let committed = 0;
+  const writeQuery = async sql => {
+    if (sql.endsWith('ROLLBACK;')) return [{ batch_id: BATCH, results: [] }];
+    committed += 1;
+    if (committed === 2) throw new Error('connection reset');
+    return [{ batch_id: BATCH, results: [{ phase: 'stage', outcome: 'staged', detail: '{"evt_inserted":1}' }] }];
+  };
+  await assert.rejects(runSourceSync({ sourcePlan: sourcePlan([sourceRow(1), sourceRow(2)]),
+    providerOrganizationId: PROVIDER, readQuery: harness.readQuery, writeQuery, chunkSize: 1, commit: true }),
+  error => error.message === 'connection reset' && error.sourceSyncReport?.committed === true
+    && error.sourceSyncReport.batch_id === BATCH && error.sourceSyncWriteAttempted === true);
+});
+
 test('evidence-only sync preserves narrative fields but suppresses proposals on every chunk', async () => {
   const { runSourceSync } = await load();
   const rows = [sourceRow(1), sourceRow(2)];
@@ -220,12 +500,13 @@ test('evidence-only sync preserves narrative fields but suppresses proposals on 
 test('a committed sync resumes an open batch, finalizes with a zero-direct-write receipt, and refuses a closed batch', async () => {
   const { runSourceSync } = await load();
   const plan = sourcePlan([sourceRow(1)]);
-  const resumed = syncHarness({ batches: [{ id: BATCH, status: 'staging' }] });
+  const resumed = syncHarness({ batches: [{ id: BATCH, status: 'staging' }], serverHold: false });
   const report = await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
     readQuery: resumed.readQuery, writeQuery: resumed.writeQuery, commit: true });
   assert.equal(report.committed, true);
-  assert.match(resumed.writes[0], /COMMIT;$/);
-  assert.ok(resumed.writes[0].includes(`"batch_id":"${BATCH}"`));
+  assert.match(resumed.writes[0], /ROLLBACK;$/);
+  assert.match(resumed.writes[1], /COMMIT;$/);
+  assert.ok(resumed.writes[1].includes(`"batch_id":"${BATCH}"`));
   const finalize = resumed.writes.at(-1);
   assert.ok(finalize.includes('finalize_patrol_import_batch') && finalize.includes('"direct_finance_writes":0'));
 
@@ -233,7 +514,7 @@ test('a committed sync resumes an open batch, finalizes with a zero-direct-write
   await assert.rejects(runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
     readQuery: closed.readQuery, writeQuery: closed.writeQuery, commit: true }), /next --attempt/);
   assert.equal(closed.writes.length, 0);
-  const next = syncHarness();
+  const next = syncHarness({ serverHold: false });
   await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
     readQuery: next.readQuery, writeQuery: next.writeQuery, commit: true, attempt: 2 });
   assert.ok(next.writes[0].includes('row_sync:2:import-key'));
@@ -253,6 +534,178 @@ test('sync refuses plans without the importer batch definition or an installed s
   };
   await assert.rejects(runSourceSync({ sourcePlan: sourcePlan([sourceRow(1)]), providerOrganizationId: PROVIDER,
     ...uninstalled }), /not installed/);
+});
+
+test('source sync holds the sheet when any source place is conflicting', async () => {
+  const { runSourceSync, buildSyncChunks } = await load();
+  const conflict = { ...sourcePlan([sourceRow(1)], [
+    { source_record_key: 'rm_patrol_import:TEST:2', target_type: 'finance_service_cost' },
+  ]), unresolved_places: [
+    { name: null, reason: 'conflicting_place_fields', source_rows: [7] },
+  ], source_holds: [
+    { external_ref: 'rm_patrol_import:TEST:2', kind: 'event', source_row: 7, reason: 'conflicting_place_fields' },
+  ] };
+  const harness = syncHarness();
+  const report = await runSourceSync({ sourcePlan: conflict, providerOrganizationId: PROVIDER,
+    commit: true, readQuery: harness.readQuery, writeQuery: harness.writeQuery });
+  assert.equal(report.status, 'source_rows_held');
+  assert.equal(report.committed, false);
+  assert.equal(report.plan_summary.hold, 1);
+  assert.equal(report.plan_hold_reasons.conflicting_place_fields, 1);
+  assert.deepEqual(report.plan_hold_samples, [{
+    external_ref: 'rm_patrol_import:TEST:2', kind: 'event', source_row: 7, reason: 'conflicting_place_fields',
+  }]);
+  assert.equal(report.requested.inserts, 1);
+  assert.equal(report.requested.proposals, 0);
+  assert.deepEqual(harness.writes, []);
+  assert.equal(buildSyncChunks(conflict, {
+    source_sha256: HASH, actions: [{ external_ref: 'rm_patrol_import:TEST:2', kind: 'event', operation: 'hold',
+      source_row: 7, reason: 'conflicting_place_fields' }],
+  }).chunks.length, 0);
+
+  for (const extra of [{ canonicalPlan: conflict }, { sheetUpdatePlan: conflict }]) {
+    await assert.rejects(runSourceSync({
+      sourcePlan: sourcePlan([sourceRow(1)]), providerOrganizationId: PROVIDER, commit: true,
+      readQuery: async () => assert.fail('must not read or open a batch'),
+      writeQuery: async () => assert.fail('must not write'), ...extra,
+    }), /conflicting place fields.*review/i);
+  }
+  assert.throws(() => buildSyncChunks({ ...conflict, source_holds: [] }, { source_sha256: HASH, actions: [] }),
+    /conflicting source rows/i);
+});
+
+test('prospective place planning does not call the sync writer or claim server validation', async () => {
+  const { runSourceSync } = await load();
+  const harness = syncHarness();
+  const report = await runSourceSync({ sourcePlan: sourcePlan([sourceRow(1)]), providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, planningOnly: true });
+  assert.equal(report.status, 'planning_only');
+  assert.equal(report.server_validation, 'not_run');
+  assert.equal(report.requested.inserts, 1);
+  assert.deepEqual(harness.writes, []);
+  await assert.rejects(runSourceSync({ sourcePlan: sourcePlan([sourceRow(1)]), providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, planningOnly: true, commit: true }), /cannot commit/i);
+});
+
+test('an unplaced sighting holds safe rows without opening a batch', async () => {
+  const { runSourceSync } = await load();
+  const source = sourcePlan([sourceRow(1)]);
+  source.observations = [{ ...sourceRow(2), zone_id: null, site_id: null, officer_id: ACTOR, plate: 'ABC123' }];
+  const harness = syncHarness();
+  const report = await runSourceSync({ sourcePlan: source, providerOrganizationId: PROVIDER,
+    commit: true, readQuery: harness.readQuery, writeQuery: harness.writeQuery });
+  assert.equal(report.status, 'source_rows_held');
+  assert.equal(report.committed, false);
+  assert.equal(report.plan_hold_reasons.one_resolved_place_required, 1);
+  assert.equal(report.requested.inserts, 1);
+  assert.deepEqual(harness.writes, []);
+});
+
+test('an unresolved source row cannot disappear from both activity and holds', async () => {
+  const { buildReconciliationPlan } = await load();
+  const incomplete = { ...sourcePlan([sourceRow(1)]), unresolved_places: [
+    { name: 'Unknown place', source_rows: [7] },
+  ], source_holds: [] };
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: incomplete, existing: [] }), /unresolved.*row.*hold/i);
+});
+
+test('held source keys cannot be superseded or used in worksheet pairing', async () => {
+  const { buildReconciliationPlan, buildSyncChunks, runSourceSync } = await load();
+  const held = { ...sourcePlan([sourceRow(1)]), unresolved_places: [
+    { reason: 'conflicting_place_fields', source_rows: [7] },
+  ], source_holds: [
+    { external_ref: 'rm_patrol_import:TEST:2', kind: 'event', source_row: 7, reason: 'conflicting_place_fields' },
+  ] };
+  const reconciliation = buildReconciliationPlan({ sourcePlan: held, existing: [] });
+  reconciliation.actions.push({ external_ref: 'rm_patrol_import:TEST:2', kind: 'event',
+    operation: 'supersede', canonical_external_ref: 'rm_patrol_import:OTHER:2' });
+  assert.throws(() => buildSyncChunks(held, reconciliation), /held.*source|source.*held/i);
+  const otherSheet = { ...held, source_sheet: 'OTHER' };
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: sourcePlan([sourceRow(1)]),
+    existing: [], canonicalPlan: otherSheet }), /conflicting place fields/i);
+  await assert.rejects(runSourceSync({ sourcePlan: held, providerOrganizationId: PROVIDER,
+    copySheets: ['OTHER'], readQuery: async () => assert.fail('must not read or open a batch'),
+    writeQuery: async () => assert.fail('must not write') }), /conflicting place fields/i);
+});
+
+test('a worksheet with unresolved visits cannot be used to pair canonical records', async () => {
+  const { buildReconciliationPlan } = await load();
+  const unresolved = { ...sourcePlan([sourceRow(1)]), source_sheet: 'OTHER',
+    unresolved_places: [{ name: 'Unknown place', source_rows: [7] }],
+    source_holds: [{ external_ref: 'rm_patrol_import:TEST:2', kind: 'event',
+      source_row: 7, reason: 'unresolved_source_place' }] };
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: sourcePlan([sourceRow(1)]),
+    existing: [], canonicalPlan: unresolved }), /unresolved.*place|place.*unresolved/i);
+});
+
+test('an unplaced source record stays held even when previously superseded', async () => {
+  const { buildReconciliationPlan, runSourceSync } = await load();
+  const row = { ...sourceRow(1), zone_id: null };
+  const reconciliation = buildReconciliationPlan({ sourcePlan: sourcePlan([row]), existing: [],
+    supersededRefs: [row.external_ref] });
+  assert.equal(reconciliation.actions[0].operation, 'hold');
+  assert.equal(reconciliation.actions[0].reason, 'one_resolved_place_required');
+  await assert.rejects(runSourceSync({ sourcePlan: sourcePlan([row]), providerOrganizationId: PROVIDER,
+    copySheets: ['OTHER'], readQuery: async () => assert.fail('must not read'),
+    writeQuery: async () => assert.fail('must not write') }), /unresolved.*place|place.*unresolved/i);
+});
+
+test('held source rows never create a batch even after partial resolution', async () => {
+  const { runSourceSync } = await load();
+  const makePlan = rows => ({ ...sourcePlan([sourceRow(1)]),
+    unresolved_places: [{ reason: 'conflicting_place_fields', source_rows: rows }],
+    source_holds: rows.map(row => ({ external_ref: `rm_patrol_import:TEST:${row}`, kind: 'event',
+      source_row: row, reason: 'conflicting_place_fields' })),
+  });
+  const first = syncHarness();
+  const firstReport = await runSourceSync({ sourcePlan: makePlan([7, 8]), providerOrganizationId: PROVIDER,
+    readQuery: first.readQuery, writeQuery: first.writeQuery, commit: true });
+  assert.equal(firstReport.status, 'source_rows_held');
+  assert.deepEqual(first.writes, []);
+  assert.ok(!first.reads.some(sql => sql.includes('file_import_batches')));
+  const second = syncHarness();
+  const report = await runSourceSync({ sourcePlan: makePlan([8]), providerOrganizationId: PROVIDER,
+    readQuery: second.readQuery, writeQuery: second.writeQuery, commit: true });
+  assert.equal(report.status, 'source_rows_held');
+  assert.deepEqual(second.writes, []);
+  assert.ok(!second.reads.some(sql => sql.includes('file_import_batches')));
+});
+
+test('an existing evidence record with a different source place requires review', async () => {
+  const { buildReconciliationPlan, buildSyncChunks } = await load();
+  for (const kind of ['event', 'observation']) {
+    const row = sourceRow(1, kind === 'observation' ? { plate: 'ABC123', officer_id: ACTOR } : {});
+    const plan = sourcePlan(kind === 'event' ? [row] : []);
+    if (kind === 'observation') plan.observations = [row];
+    const first = buildReconciliationPlan({ sourcePlan: plan, existing: [] }).actions[0];
+    const existing = [{ external_ref: row.external_ref, id: RECORD, kind, source_file: 'source.xlsx',
+      source_sheet: 'DATA', record: first.desired }];
+    const checkpoints = [{ external_ref: row.external_ref, record_id: RECORD, kind, source_file: 'source.xlsx',
+      source_sheet: 'DATA', source_fingerprint: first.source_fingerprint, record_fingerprint: first.source_fingerprint }];
+    row.zone_id = 'zone-2';
+    const reconciliation = buildReconciliationPlan({ sourcePlan: plan, existing, checkpoints });
+    assert.equal(reconciliation.actions[0].reason, 'source_place_difference_requires_review');
+    assert.equal(reconciliation.actions[0].operation, 'hold');
+    assert.deepEqual(buildSyncChunks(plan, reconciliation).chunks, []);
+  }
+});
+
+test('an existing-place review hold blocks safe inserts and batch creation', async () => {
+  const { buildReconciliationPlan, runSourceSync } = await load();
+  const original = sourceRow(1);
+  const previous = buildReconciliationPlan({ sourcePlan: sourcePlan([original]), existing: [] }).actions[0];
+  const row = { ...original, zone_id: 'zone-2' };
+  const harness = syncHarness({ existingEvents: [liveEvent(original)], checkpoints: [{
+    external_ref: original.external_ref, record_id: RECORD, kind: 'event', source_file: 'source.xlsx', source_sheet: 'DATA',
+    source_fingerprint: previous.source_fingerprint, record_fingerprint: previous.source_fingerprint,
+  }] });
+  const report = await runSourceSync({ sourcePlan: sourcePlan([row, sourceRow(2)]), providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, commit: true });
+  assert.equal(report.status, 'source_rows_held');
+  assert.equal(report.committed, false);
+  assert.equal(report.plan_hold_reasons.source_place_difference_requires_review, 1);
+  assert.equal(report.requested.inserts, 1);
+  assert.deepEqual(harness.writes, []);
 });
 
 const OTHER = '10000000-0000-4000-8000-000000000006';
@@ -281,6 +734,33 @@ test('pre-provenance records become legacy corrections, not identity-mismatch ho
   assert.equal(mismatch.actions[0].reason, 'existing_source_identity_mismatch');
 });
 
+test('legacy place changes are held rather than sent as corrections that the server will reject', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const event = sourceRow(1);
+  const eventPlan = sourcePlan([event]);
+  const eventResult = previewReconciliation(eventPlan, {
+    organization_id: CLIENT, observations: [], events: [legacyLive(event, { zone_id: OTHER })],
+  });
+  assert.equal(eventResult.actions[0].operation, 'hold');
+  assert.equal(eventResult.actions[0].reason, 'legacy_place_difference_requires_review');
+  assert.equal(buildSyncChunks(eventPlan, eventResult).chunks.length, 0);
+
+  const sighting = { ...sourceRow(2), plate: 'ABC123', officer_id: ACTOR, officer_notes: 'original' };
+  const sightingPlan = sourcePlan([], [{ source_record_key: sighting.external_ref, target_type: 'finance_service_cost' }]);
+  sightingPlan.observations = [sighting];
+  const stored = {
+    id: RECORD, organization_id: CLIENT, observed_at: sighting.occurred_at, zone_id: null, site_id: null,
+    officer_id: ACTOR, plate_number: sighting.plate, officer_notes: sighting.officer_notes,
+    distance_km: sighting.distance_km, external_refs: { external_ref: sighting.external_ref, import: sighting.payload },
+  };
+  const sightingResult = previewReconciliation(sightingPlan, {
+    organization_id: CLIENT, observations: [stored], events: [],
+  });
+  assert.equal(sightingResult.actions[0].operation, 'hold');
+  assert.equal(sightingResult.actions[0].reason, 'legacy_place_difference_requires_review');
+  assert.equal(buildSyncChunks(sightingPlan, sightingResult).chunks.length, 0);
+});
+
 test('rows copied from a canonical worksheet are superseded only when the visit is identical', async () => {
   const { buildReconciliationPlan, buildSyncChunks } = await load();
   const canonicalRow = { ...sourceRow(7), external_ref: 'rm_patrol_import:CANON:7',
@@ -293,7 +773,7 @@ test('rows copied from a canonical worksheet are superseded only when the visit 
   canonicalPlan.events.push(canonicalDiffering);
   const plan = sourcePlan([copy, differing, sourceRow(9)]);
   const existing = [{ external_ref: copy.external_ref, id: RECORD, kind: 'event', source_file: null, source_sheet: null,
-    record: { occurred_at: copy.occurred_at } }];
+    record: { occurred_at: copy.occurred_at, zone_id: copy.zone_id, site_id: null } }];
   const result = buildReconciliationPlan({ sourcePlan: plan, existing, canonicalPlan });
   const byRef = Object.fromEntries(result.actions.map(action => [action.external_ref, action]));
   assert.equal(byRef[copy.external_ref].operation, 'supersede');
@@ -473,6 +953,19 @@ function dartFixture() {
   return { canonical, canonicalPlan, update, updatePlan, copyLive };
 }
 
+test('DART update rows with source financial values stay held rather than paired for writing', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const { canonical, canonicalPlan, update, updatePlan, copyLive } = dartFixture();
+  update.payload.source_leg_correction = { job_cost: 0 };
+  const result = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical)], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  assert.equal(result.summary.hold, 1);
+  assert.equal(result.actions.find(action => action.external_ref === copyLive.external_ref).reason,
+    'source_financial_values_require_review');
+  assert.equal(result.actions.some(action => action.operation === 'update_and_supersede'), false);
+  assert.equal(buildSyncChunks(canonicalPlan, result, { sheetUpdatePlan: updatePlan }).counts.dart_updates, undefined);
+});
+
 // What the paired RPC leaves behind: the patched canonical and a version that keeps the 2025 identity.
 function appliedOverlay(canonical, pair) {
   const live = liveEvent({ ...canonical, payload: { ...canonical.payload, ...pair.update_patch } }, RECORD);
@@ -611,6 +1104,81 @@ test('a DART Update pairing that repeats a canonical or copy is refused even acr
   assert.equal(chunks[0].dartUpdates[0].record_fingerprint, pair.record_fingerprint);
 });
 
+test('a later chunk failure retains the committed DART Update batch identity', async () => {
+  const { runSourceSync } = await load();
+  const { canonical, canonicalPlan, update, updatePlan, copyLive } = dartFixture();
+  const updateBatch = '10000000-0000-4000-8000-00000000000a';
+  const next = { ...canonical, external_ref: 'rm_patrol_import:TEST:8', occurred_at: '2026-10-20T12:00:00+12:00',
+    payload: { ...canonical.payload, job_number: '8', source_row: 13, reserve_raw: 'R-8' } };
+  const nextUpdate = { ...update, external_ref: 'rm_patrol_import:UPDATE:row-3', occurred_at: next.occurred_at,
+    payload: { ...update.payload, source_row: 3, reserve_raw: 'R-8' } };
+  canonicalPlan.events.push(next);
+  updatePlan.events.push(nextUpdate);
+  const nextId = '10000000-0000-4000-8000-000000000009';
+  const nextCopy = liveEvent({ ...nextUpdate, external_ref: 'rm_patrol_import:OLD:copy-2' },
+    '10000000-0000-4000-8000-00000000000b');
+  let committed = 0;
+  const readQuery = async sql => {
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true, supersede_history: true } }];
+    if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [
+      legacyLive(canonical, { id: RECORD }), legacyLive(next, { id: nextId }),
+    ], checkpoints: [], superseded: [] } }];
+    if (sql.includes('AS copies')) return [{ copies: [copyLive, nextCopy] }];
+    if (sql.includes('import_actor_id')) return [{ import_actor_id: ACTOR }];
+    if (sql.includes('file_import_batches')) return [];
+    throw new Error('unexpected read');
+  };
+  const writeQuery = async sql => {
+    if (sql.endsWith('ROLLBACK;')) return [{ batch_id: BATCH, dart_update_batch_id: updateBatch, results: [] }];
+    committed += 1;
+    if (committed === 2) throw new Error('connection reset');
+    assert.match(sql, /"dart_updates":\[\{/);
+    return [{ batch_id: BATCH, dart_update_batch_id: updateBatch, results: [] }];
+  };
+
+  const sync = runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery, writeQuery, chunkSize: 1, commit: true, copySheets: ['Update 251215'],
+    sheetUpdatePlan: updatePlan }).then(report => {
+    throw new Error(`sync unexpectedly returned: ${JSON.stringify(report)}`);
+  });
+  await assert.rejects(sync, error => {
+    assert.equal(error.message, 'connection reset');
+    assert.equal(error.sourceSyncReport?.committed, true);
+    assert.equal(error.sourceSyncReport.batch_id, BATCH);
+    assert.equal(error.sourceSyncReport.dart_update_batch_id, updateBatch);
+    return true;
+  });
+});
+
+test('a failed resumed DART chunk retains both existing staging batch identities', async () => {
+  const { runSourceSync } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const updateBatch = '10000000-0000-4000-8000-00000000000a';
+  const readQuery = async sql => {
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true, supersede_history: true } }];
+    if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [legacyLive(canonical, { id: RECORD })],
+      checkpoints: [], superseded: [] } }];
+    if (sql.includes('AS copies')) return [{ copies: [copyLive] }];
+    if (sql.includes('import_actor_id')) return [{ import_actor_id: ACTOR }];
+    if (sql.includes('file_import_batches')) return [{ id: sql.includes('dart_update:') ? updateBatch : BATCH, status: 'staging' }];
+    throw new Error('unexpected read');
+  };
+  const writeQuery = async sql => {
+    if (sql.endsWith('ROLLBACK;')) return [{ batch_id: BATCH, dart_update_batch_id: updateBatch, results: [] }];
+    throw new Error('connection reset');
+  };
+
+  await assert.rejects(runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery, writeQuery, chunkSize: 1, commit: true, copySheets: ['Update 251215'],
+    sheetUpdatePlan: updatePlan }), error => {
+    assert.equal(error.message, 'connection reset');
+    assert.equal(error.sourceSyncWriteAttempted, true);
+    assert.equal(error.sourceSyncReport?.batch_id, BATCH);
+    assert.equal(error.sourceSyncReport.dart_update_batch_id, updateBatch);
+    return true;
+  });
+});
+
 test('a committed re-run with nothing left to send closes both open batches in one transaction', async () => {
   const { previewReconciliation, runSourceSync } = await load();
   const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
@@ -650,4 +1218,13 @@ test('a committed re-run with nothing left to send closes both open batches in o
     copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan });
   assert.equal(idle.status, 'no_source_changes');
   assert.equal(dryRun.length, 0);
+
+  await assert.rejects(runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: async () => { throw new Error('connection lost during finalization'); },
+    commit: true, copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan }), error => {
+    assert.equal(error.sourceSyncWriteAttempted, true);
+    assert.equal(error.sourceSyncReport.batch_id, BATCH);
+    assert.equal(error.sourceSyncReport.dart_update_batch_id, UPDATE_BATCH);
+    return true;
+  });
 });

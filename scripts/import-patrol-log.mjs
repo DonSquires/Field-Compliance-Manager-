@@ -31,6 +31,7 @@ import { materialsUsed } from './patrol-materials.mjs';
 import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 import { aucklandInstantFromLocalParts } from './rm-photo-matcher.mjs';
 import { buildPlaceResolver } from './rm-place-resolver.mjs';
+import { hasSourceFinancialValues } from './patrol-source-financial-hold.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
@@ -315,13 +316,17 @@ const importConfigurationHash = createHash('sha256')
   .digest('hex');
 
 const sourceBytes = readFileSync(inputPath);
+const inputHash = createHash('sha256').update(sourceBytes).digest('hex');
+if (workbookInput && sourceHash && sourceHash.toLowerCase() !== inputHash) {
+  throw new Error('Workbook hash does not match the scanned source version; scan it again before importing');
+}
 const raw = workbookInput ? null : sourceBytes.toString('utf8');
 const table = workbookInput
   ? await readWorkbookSheet(sourceBytes, sheetName, headerRow)
   : parseCsv(raw).filter((r) => r.length > 1);
 const derivativeInput = workbookInput ? JSON.stringify(table) : raw;
 const derivativeHash = createHash('sha256').update(derivativeInput).digest('hex');
-const effectiveSourceHash = sourceHash ?? createHash('sha256').update(sourceBytes).digest('hex');
+const effectiveSourceHash = sourceHash ?? inputHash;
 const effectiveSourceLabel = sourceLabel ?? basename(inputPath);
 // Header cells sometimes carry a leading BOM and/or extra/embedded whitespace (e.g. NCC's
 // "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
@@ -366,6 +371,7 @@ for (const requiredField of ['job', 'patroller', 'date']) {
 const observationsBatch = [];
 const eventsBatch = [];
 const proposalsBatch = [];
+const sourceHolds = [];
 const seenExternalRefs = new Set();
 const unresolvedAliasValues = new Set();
 const unresolvedPlaces = new Map();
@@ -374,6 +380,7 @@ let resolvePendingPlace = buildPlaceResolver(pendingPlaceNames);
 const classificationCounts = { work_subject: {}, work_activity: {}, biosecurity_species: {}, equipment_type: {}, material_type: {} };
 const chargeCodeCounts = {};
 const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
+let financialSourcePresent = false;
 let skipped = 0;
 let skippedNoZone = 0;
 let skippedDuplicate = 0;
@@ -382,38 +389,83 @@ let previousDated = null;
 let startLegCorrections = 0;
 let dayResetKmCorrections = 0;
 
+const sourceRef = (job, occurredAt, location, comments) => `rm_patrol_import:${clientCode}:${job
+  || createHash('md5').update(occurredAt + location + comments).digest('hex').slice(0, 8)}`;
+// A later unsafe duplicate must also stop the first copy from being staged.
+const conflictRefs = new Set();
+const unresolvedRefs = new Set();
+const invalidDateRefs = new Set();
+const refCounts = new Map();
+const refContents = new Map();
+for (const r of table.slice(1)) {
+  const location = (r[col.location] ?? '').trim();
+  const reserve = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
+  const comments = (r[col.comments] ?? '').trim();
+  const occurredAt = parseNzDate(r[col.date], r[col.time]);
+  const job = (r[col.job] ?? '').trim();
+  if (!occurredAt && !job) continue;
+  const ref = sourceRef(job, occurredAt ?? '', location, comments);
+  refCounts.set(ref, (refCounts.get(ref) ?? 0) + 1);
+  const contents = refContents.get(ref) ?? new Set();
+  contents.add(JSON.stringify(r));
+  refContents.set(ref, contents);
+  if (!occurredAt) {
+    invalidDateRefs.add(ref);
+    continue;
+  }
+  const place = resolvePlace(reserve, location);
+  if (place.match === 'conflicting_place_fields') conflictRefs.add(ref);
+  else if (!place.target && (place.sourceCode || place.sourceText || comments.toLowerCase() !== 'start')) unresolvedRefs.add(ref);
+}
+const invalidDateDuplicateRefs = new Set([...invalidDateRefs].filter(ref => refCounts.get(ref) > 1));
+const unresolvedDuplicateRefs = new Set([...unresolvedRefs].filter(ref => refCounts.get(ref) > 1 && !conflictRefs.has(ref)));
+const divergentDuplicateRefs = new Set([...refContents].filter(([ref, contents]) => contents.size > 1
+  && !conflictRefs.has(ref) && !unresolvedDuplicateRefs.has(ref) && !invalidDateDuplicateRefs.has(ref)).map(([ref]) => ref));
+
 for (const [rowIndex, r] of table.slice(1).entries()) {
   const job = (r[col.job] ?? '').trim();
   const patroller = (r[col.patroller] ?? '').trim();
   const occurredAt = parseNzDate(r[col.date], r[col.time]);
-  if (!occurredAt) { skipped += 1; continue; } // header/blank/summary rows with no real date
+  if (!occurredAt) {
+    const ref = job ? sourceRef(job, '', '', '') : null;
+    if (invalidDateDuplicateRefs.has(ref)) {
+      previousDated = null;
+      sourceHolds.push({ external_ref: ref, kind: 'source_row', source_row: sourceFirstRow + rowIndex,
+        reason: 'invalid_date_in_duplicate_source_key' });
+    }
+    skipped += 1;
+    continue;
+  }
+  const locationText = (r[col.location] ?? '').trim();
+  const reserveCode = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
+  const comments = (r[col.comments] ?? '').trim();
+  const externalRef = sourceRef(job, occurredAt, locationText, comments);
   const day = NZ_DAY.format(new Date(occurredAt));
   const sourceKms = importedNumber(r[col.jobKms]);
   const odometer = importedNumber(r[col.odometer]);
   const minutes = elapsedMinutes(occurredAt, r[col.time]);
-  const startRow = previousDated?.day === day && previousDated.start ? previousDated : null;
+  const startRow = previousDated?.day === day && previousDated.start && !previousDated.unsafe ? previousDated : null;
   const leg = startRowLeg({ kms: sourceKms, odometer, minutes, hours: importedNumber(r[col.jobTime]),
     jobCost: importedNumber(r[col.jobCost]), travelCost: importedNumber(r[col.travelCost]) }, startRow);
   if (leg) startLegCorrections += 1;
   const dayResetKms = !leg && sourceKms !== null && sourceKms < 0 && odometer !== null
-    && previousDated && previousDated.day !== day ? odometer : null;
+    && previousDated && !previousDated.unsafe && previousDated.day !== day ? odometer : null;
   if (dayResetKms !== null) dayResetKmCorrections += 1;
   const jobKms = leg ? leg.kms : dayResetKms !== null ? dayResetKms : sourceKms;
   const kmCorrection = sourceKms !== null && sourceKms < 0 && (leg || dayResetKms !== null)
     ? (leg ? 'formula_skipped_start_row' : 'trip_odometer_day_reset') : null;
-  previousDated = { day, odometer, minutes, sourceRow: sourceFirstRow + rowIndex, start: (r[col.comments] ?? '').trim().toLowerCase() === 'start' };
-  const locationText = (r[col.location] ?? '').trim();
-  const reserveCode = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
-  // Reserve code (when the sheet has one) is the stable join key; free-text Location is the fallback
-  // for rows where Reserve is blank, or for sheets that only ever had a single Location column.
+  previousDated = { day, odometer, minutes, sourceRow: sourceFirstRow + rowIndex, start: comments.toLowerCase() === 'start',
+    unsafe: conflictRefs.has(externalRef) || unresolvedRefs.has(externalRef) || invalidDateDuplicateRefs.has(externalRef)
+      || divergentDuplicateRefs.has(externalRef) };
+  // Reserve code is the stable join key unless both fields resolve to different mapped places.
   // A zone-map entry is normally a bare zone UUID string; some clients (e.g. Taylors) also have
   // commercial client_sites, not just residential/patrol zones - those entries are written as
   // { "site_id": "<uuid>" } instead, so a single map can resolve to either place type.
   const place = resolvePlace(reserveCode, locationText);
+  const placeConflict = place.match === 'conflicting_place_fields';
   const resolved = place.target;
   const zoneId = typeof resolved === 'string' ? resolved : null;
   const siteId = resolved && typeof resolved === 'object' ? resolved.site_id ?? null : null;
-  const comments = (r[col.comments] ?? '').trim();
   // Reg column sometimes holds several plates separated by commas/slashes/spaces
   // (e.g. "ACZ755, DAB364, DGY148") - split first, validate each token's shape,
   // rather than stripping separators and concatenating them into one string.
@@ -435,12 +487,23 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     unresolvedAliasRows += 1;
     patrollerNames.forEach((name) => unresolvedAliasValues.add(name));
   }
-  const externalRef = `rm_patrol_import:${clientCode}:${job || createHash('md5').update(occurredAt + locationText + comments).digest('hex').slice(0, 8)}`;
+  let sourceHoldReason = placeConflict ? 'conflicting_place_fields'
+    : conflictRefs.has(externalRef) ? 'duplicate_source_key_with_conflict'
+      : unresolvedDuplicateRefs.has(externalRef)
+        ? (!resolved && (place.sourceCode || place.sourceText || comments.toLowerCase() !== 'start')
+          ? 'unresolved_source_place' : 'duplicate_source_key_with_unresolved_place')
+        : invalidDateDuplicateRefs.has(externalRef) ? 'duplicate_source_key_with_invalid_date'
+          : divergentDuplicateRefs.has(externalRef) ? 'divergent_duplicate_source_key' : null;
   if (seenExternalRefs.has(externalRef)) {
     skippedDuplicate += 1;
-    continue;
+    if (!sourceHoldReason) continue;
   }
   seenExternalRefs.add(externalRef);
+  const sourceCostCells = Object.fromEntries([
+    ['job_cost', r[col.jobCost]],
+    ['travel_cost', r[col.travelCost]],
+    ['total_cost', r[col.totalCost]],
+  ].filter(([, value]) => String(value ?? '').trim() !== ''));
   const payload = {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
     source_file: effectiveSourceLabel, source_sha256: effectiveSourceHash, derivative_sha256: derivativeHash,
@@ -457,6 +520,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     job_cost: leg ? leg.jobCost : importedNumber(r[col.jobCost]),
     travel_cost: leg ? leg.travelCost : importedNumber(r[col.travelCost]),
     total_cost: leg ? leg.totalCost : importedNumber(r[col.totalCost]),
+    ...(Object.keys(sourceCostCells).length ? { source_cost_cells: sourceCostCells } : {}),
     ...(leg ? { source_leg_correction: {
       rule: 'formula_skipped_start_row', start_source_row: startRow.sourceRow,
       job_time_hours: r[col.jobTime] || null, job_kms: r[col.jobKms] || null, job_cost: importedNumber(r[col.jobCost]),
@@ -498,9 +562,15 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     costEvidenceTotals.rows += 1;
     for (const field of ['job_cost', 'travel_cost', 'total_cost']) costEvidenceTotals[field] += Number(payload[field] ?? 0);
   }
+  if (hasSourceFinancialValues(payload)) financialSourcePresent = true;
 
   let evidenceRecordType = null;
-  if (officerId && primaryPlate) {
+  if (sourceHoldReason) {
+    skippedNoZone += 1;
+    sourceHolds.push({ external_ref: externalRef, kind: officerId && primaryPlate ? 'observation' : 'event',
+      source_row: sourceFirstRow + rowIndex, reason: sourceHoldReason });
+  } else if (officerId && primaryPlate) {
+    if (!zoneId && !siteId) skippedNoZone += 1;
     observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: jobKms, payload });
     evidenceRecordType = 'observations';
   } else if (zoneId || siteId) {
@@ -512,28 +582,41 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     });
     evidenceRecordType = 'location_events';
   } else {
-    // location_events requires client_site_id XOR zone_id (no placeless events). The row is
-    // held and its location is reported so the promoter can register it as a new place.
-    skippedNoZone += 1;
+    // location_events requires a place; a blank-place Start is a shift marker, not a visit.
+    if (place.sourceCode || place.sourceText || comments.toLowerCase() !== 'start') {
+      skippedNoZone += 1;
+      sourceHoldReason = 'unresolved_source_place';
+      sourceHolds.push({ external_ref: externalRef, kind: 'event',
+        source_row: sourceFirstRow + rowIndex, reason: sourceHoldReason });
+    } else if (hasSourceFinancialValues(payload)) {
+      sourceHoldReason = 'source_financial_values_require_review';
+      sourceHolds.push({ external_ref: externalRef, kind: 'source_row',
+        source_row: sourceFirstRow + rowIndex, reason: sourceHoldReason });
+    }
   }
-  if (!zoneId && !siteId && (place.sourceCode || place.sourceText)) {
+  if (!zoneId && !siteId && (!sourceHoldReason || placeConflict || sourceHoldReason === 'unresolved_source_place')
+    && (place.sourceCode || place.sourceText || sourceHoldReason === 'unresolved_source_place')) {
     // Shift markers with no place text at all are not unresolved places.
     // Spelling variants of the same new place are grouped so they register as one place.
     const placeCode = place.sourceCode;
     const placeText = place.sourceText;
     const grouped = place.placeName ? resolvePendingPlace(null, placeText || place.placeName).target : null;
-    const key = grouped ?? place.placeName ?? '';
+    const key = placeConflict ? `\0conflict:${JSON.stringify([placeCode, placeText])}` : grouped ?? place.placeName ?? '';
     if (place.placeName && !grouped) {
       pendingPlaceNames[key] = key;
       resolvePendingPlace = buildPlaceResolver(pendingPlaceNames);
     }
-    const pending = unresolvedPlaces.get(key) ?? { name: place.placeName, reserve_codes: [], locations: [], source_rows: [] };
+    const pending = unresolvedPlaces.get(key) ?? {
+      name: place.placeName,
+      ...(placeConflict ? { reason: 'conflicting_place_fields', conflicting_targets: place.conflictingTargets } : {}),
+      reserve_codes: [], locations: [], source_rows: [],
+    };
     if (placeCode && !pending.reserve_codes.includes(placeCode)) pending.reserve_codes.push(placeCode);
     if (placeText && !pending.locations.includes(placeText)) pending.locations.push(placeText);
     pending.source_rows.push(sourceFirstRow + rowIndex);
     unresolvedPlaces.set(key, pending);
   }
-  if (includeNarratives) {
+  if (includeNarratives && !sourceHoldReason) {
     proposalsBatch.push(...buildPatrolImportProposals({
       externalRef,
       evidenceRecordType: evidenceRecordType ?? 'source_row',
@@ -549,7 +632,33 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   }
 }
 
-if (!exportPlan) console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
+if (!exportPlan) {
+  const conflicts = [...unresolvedPlaces.values()].filter(place => place.reason === 'conflicting_place_fields');
+  if (conflicts.length) {
+    const count = conflicts.reduce((total, place) => total + place.source_rows.length, 0);
+    console.error(`${count} source rows have conflicting place fields; review the workbook and mappings before import.`);
+    if (mode === 'apply') process.exit(1);
+  }
+  if (divergentDuplicateRefs.size) {
+    console.error('Duplicate source job keys have different values; review the workbook before import.');
+    if (mode === 'apply') process.exit(1);
+  }
+  if (invalidDateDuplicateRefs.size) {
+    console.error('Duplicate source job keys include an invalid date; review the workbook before import.');
+    if (mode === 'apply') process.exit(1);
+  }
+  const unplacedObservations = observationsBatch.filter(row => !row.zone_id && !row.site_id).length;
+  if (unresolvedPlaces.size || unplacedObservations) {
+    console.error('Source rows have an unresolved place; review the workbook and mappings before import.');
+    if (mode === 'apply') process.exit(1);
+  }
+  if (financialSourcePresent || proposalsBatch.some(hasSourceFinancialValues)) {
+    console.error('Financial source values require review and private staging before database import or preview. Use --export-plan for a local preview.');
+    process.exit(1);
+  }
+}
+
+if (!exportPlan) console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} held: no safe resolved place; ${skippedDuplicate} duplicate external references): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
 const missingOptionalMappings = Object.entries(col).filter(([, index]) => index < 0).map(([field]) => field);
 const proposalCounts = proposalsBatch.reduce((counts, proposal) => ({ ...counts, [proposal.target_type]: (counts[proposal.target_type] ?? 0) + 1 }), {});
 const dryRunReceipt = {
@@ -633,6 +742,8 @@ if (exportPlan) {
     manifest: importManifest,
     schema: importSchema,
     unresolved_places: [...unresolvedPlaces.values()],
+    source_holds: sourceHolds,
+    financial_source_present: financialSourcePresent,
     counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate,
       ...(startLegCorrections ? { start_row_leg_corrections: startLegCorrections } : {}),
       ...(dayResetKmCorrections ? { day_reset_km_corrections: dayResetKmCorrections } : {}) },

@@ -13,8 +13,7 @@ const ABBREVIATIONS = new Map([
 // Words that say what kind of place it is, not which place it is.
 const GENERIC_WORDS = new Set([
   'road', 'street', 'avenue', 'highway', 'state', 'lane', 'drive', 'gate', 'gates', 'forest', 'forests',
-  'reserve', 'block', 'track', 'link', 'entrance', 'main', 'the', 'and', 'of', 'at', 'end', 'top', 'bottom',
-  'north', 'south', 'east', 'west', 'upper', 'lower', 'onefortyone', 'ofo',
+  'reserve', 'block', 'track', 'link', 'entrance', 'main', 'the', 'and', 'of', 'at', 'onefortyone', 'ofo',
 ]);
 
 export function placeKey(value) {
@@ -69,13 +68,27 @@ export function buildPlaceResolver(zoneMap, { nonPlaceTerms = [], placeAliases =
     const code = clean(reserveCode);
     const text = clean(locationText);
     const mappedCode = code ? resolveNamed(code, '') : null;
-    if (mappedCode?.target) return { ...mappedCode, sourceCode: code, sourceText: text };
+    const mappedText = text ? resolveNamed('', text) : null;
+    const conflict = (reserve) => reserve?.target && mappedText?.target
+      && targetKey(reserve.target) !== targetKey(mappedText.target)
+      ? { target: null, match: 'conflicting_place_fields', placeName: null, sourceCode: code, sourceText: text,
+        conflictingTargets: { reserve: reserve.target, location: mappedText.target } }
+      : null;
+    if (mappedCode?.target) {
+      const conflicting = conflict(mappedCode);
+      if (conflicting) return conflicting;
+      return { ...mappedCode, sourceCode: code, sourceText: text };
+    }
     for (const [key, field] of [[code, 'code'], [text, 'text']]) {
       const alias = key && aliases.get(key.toUpperCase());
       if (!alias) continue;
-      const mappedText = field === 'text' ? resolveNamed('', text) : null;
-      if (mappedText?.target) return { ...mappedText, sourceCode: code, sourceText: text };
+      if (field === 'text' && mappedText?.target) return { ...mappedText, sourceCode: code, sourceText: text };
       const named = resolveNamed('', alias);
+      const conflicting = field === 'code' ? conflict(named) : null;
+      if (conflicting) return conflicting;
+      if (field === 'code' && !named.target && mappedText?.target) {
+        return { target: null, match: 'unresolved_reserve_alias', placeName: null, sourceCode: code, sourceText: text };
+      }
       if (named.target) return { ...named, match: `alias_${field}`, sourceCode: code, sourceText: text };
       return { target: null, match: null, placeName: alias,
         sourceCode: field === 'code' ? code : '', sourceText: field === 'text' ? text : '' };

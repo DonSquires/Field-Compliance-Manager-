@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hasSourceFinancialValues } from '../../scripts/patrol-source-financial-hold.mjs';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -78,6 +79,103 @@ function visitIdentity(record, shiftMs = 0, withStatus = true) {
 }
 
 const DART_UPDATE_FIELDS = ['location_raw', 'reserve_raw', 'source_category', 'comments', 'patroller_raw', 'plates_found'];
+
+const hasUnresolvedPlace = plan => [...plan.observations, ...plan.events]
+  .some(row => Boolean(row.zone_id) === Boolean(row.site_id));
+
+function assertNoConflictingPlaces(...plans) {
+  for (const plan of plans.filter(Boolean)) {
+    if (plan.unresolved_places !== undefined && !Array.isArray(plan.unresolved_places)) {
+      throw new Error('Unresolved source places must be an array');
+    }
+    if (plan.source_holds !== undefined && !Array.isArray(plan.source_holds)) {
+      throw new Error('Source place holds must be an array');
+    }
+    if (plan.unresolved_places?.some(place => place.reason === 'conflicting_place_fields')) {
+      throw new Error('Source has conflicting place fields; review the workbook and mappings before syncing');
+    }
+    if (plan.source_holds?.some(hold => hold.reason === 'source_financial_values_require_review')) {
+      throw new Error('Paired worksheet financial values require review before matching activity');
+    }
+    if (plan.unresolved_places?.length || plan.source_holds?.length
+      || plan.observations?.some(row => !row.zone_id && !row.site_id)) {
+      throw new Error('A paired worksheet has unresolved places; review it before matching activity');
+    }
+  }
+}
+
+function validateSourceHolds(plan) {
+  const places = plan.unresolved_places ?? [];
+  const holds = plan.source_holds ?? [];
+  if (!Array.isArray(places) || !Array.isArray(holds)) throw new Error('Unresolved source places and holds must be arrays');
+  const conflictRows = new Set();
+  for (const place of places.filter(item => item.reason === 'conflicting_place_fields')) {
+    if (!Array.isArray(place.source_rows) || !place.source_rows.length) throw new Error('Conflicting source rows are incomplete');
+    for (const row of place.source_rows) {
+      if (!Number.isInteger(row) || row < 1 || conflictRows.has(row)) throw new Error('Conflicting source rows are invalid or duplicated');
+      conflictRows.add(row);
+    }
+  }
+  const incomingRefs = new Set([...(plan.observations ?? []), ...(plan.events ?? [])].map(row => row.external_ref));
+  const conflictingRefs = new Set(holds.filter(hold => hold?.reason === 'conflicting_place_fields')
+    .map(hold => hold.external_ref));
+  const unresolvedRows = new Set();
+  for (const place of places.filter(item => item.reason !== 'conflicting_place_fields')) {
+    if (!Array.isArray(place.source_rows) || !place.source_rows.length) throw new Error('Unresolved source rows are incomplete');
+    for (const row of place.source_rows) {
+      if (!Number.isInteger(row) || row < 1 || unresolvedRows.has(row) || conflictRows.has(row)) {
+        throw new Error('Unresolved source rows are invalid or duplicated');
+      }
+      unresolvedRows.add(row);
+    }
+  }
+  const unresolvedRefs = new Set(holds.filter(hold => hold?.reason === 'unresolved_source_place')
+    .map(hold => hold.external_ref));
+  const divergentRefs = new Map();
+  const holdCounts = new Map();
+  const invalidDateRefs = new Set();
+  for (const hold of holds) {
+    holdCounts.set(hold?.external_ref, (holdCounts.get(hold?.external_ref) ?? 0) + 1);
+    if (hold?.reason === 'invalid_date_in_duplicate_source_key') invalidDateRefs.add(hold.external_ref);
+  }
+  for (const hold of holds.filter(item => item?.reason === 'divergent_duplicate_source_key')) {
+    divergentRefs.set(hold.external_ref, (divergentRefs.get(hold.external_ref) ?? 0) + 1);
+  }
+  const heldRows = new Set();
+  for (const hold of holds) {
+    if (!hold || !['conflicting_place_fields', 'duplicate_source_key_with_conflict',
+      'unresolved_source_place', 'duplicate_source_key_with_unresolved_place',
+      'divergent_duplicate_source_key', 'invalid_date_in_duplicate_source_key',
+      'duplicate_source_key_with_invalid_date', 'source_financial_values_require_review'].includes(hold.reason)
+      || (['invalid_date_in_duplicate_source_key', 'source_financial_values_require_review'].includes(hold.reason)
+        ? hold.kind !== 'source_row' || (hold.reason === 'invalid_date_in_duplicate_source_key' && holdCounts.get(hold.external_ref) < 2)
+        : !['event', 'observation'].includes(hold.kind))
+      || typeof hold.external_ref !== 'string' || !hold.external_ref.trim()
+      || !Number.isInteger(hold.source_row) || hold.source_row < 1 || heldRows.has(hold.source_row)
+      || incomingRefs.has(hold.external_ref)
+      || (hold.reason === 'conflicting_place_fields' && !conflictRows.delete(hold.source_row))
+      || (hold.reason === 'duplicate_source_key_with_conflict'
+        && (!conflictingRefs.has(hold.external_ref) || conflictRows.has(hold.source_row)))
+      || (hold.reason === 'unresolved_source_place' && !unresolvedRows.has(hold.source_row))
+      || (hold.reason === 'duplicate_source_key_with_unresolved_place'
+        && (!unresolvedRefs.has(hold.external_ref) || unresolvedRows.has(hold.source_row)))
+      || (hold.reason === 'duplicate_source_key_with_invalid_date' && !invalidDateRefs.has(hold.external_ref))
+      || (hold.reason === 'divergent_duplicate_source_key' && divergentRefs.get(hold.external_ref) < 2)) {
+      throw new Error('Conflicting source rows or unresolved place holds are incomplete or overlap staged activity');
+    }
+    heldRows.add(hold.source_row);
+  }
+  if (conflictRows.size) throw new Error('Conflicting source rows are missing their holds');
+  const incomingUnresolvedRows = new Set([...(plan.observations ?? []), ...(plan.events ?? [])]
+    .filter(row => Boolean(row.zone_id) === Boolean(row.site_id))
+    .map(row => row.payload?.source_row));
+  for (const row of unresolvedRows) {
+    if (!heldRows.has(row) && !incomingUnresolvedRows.has(row)) {
+      throw new Error('Unresolved source rows must remain in activity or have a hold');
+    }
+  }
+  return holds;
+}
 
 function validateDartUpdatePlan(sourcePlan, sheetUpdatePlan) {
   if (!sheetUpdatePlan) return;
@@ -186,6 +284,9 @@ function sheetCopyActions(copies, incoming, managedSourceFields, supersededRefs,
       || updateRow.payload?.source_sheet !== sheetUpdatePlan.source_sheet) {
       return { ...action, operation: 'hold', reason: 'update_source_row_not_found' };
     }
+    if (hasSourceFinancialValues(updateRow.payload)) {
+      return { ...action, operation: 'hold', reason: 'source_financial_values_require_review' };
+    }
     if (typeof updateRow.payload?.location_raw !== 'string' || !updateRow.payload.location_raw.trim()) {
       return { ...action, operation: 'hold', reason: 'update_location_missing' };
     }
@@ -223,6 +324,14 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
   if (sourcePlan?.mode !== 'plan' || !Array.isArray(sourcePlan.observations) || !Array.isArray(sourcePlan.events)
     || !Array.isArray(existing) || !Array.isArray(checkpoints) || !Array.isArray(supersededRefs)
     || !Array.isArray(sheetCopies)) throw new Error('Validated source plan and existing rows are required');
+  const sourceHolds = validateSourceHolds(sourcePlan);
+  assertNoConflictingPlaces(canonicalPlan, sheetUpdatePlan);
+  if ((sourceHolds.length || hasUnresolvedPlace(sourcePlan)) && (canonicalPlan || sheetUpdatePlan || sheetCopies.length)) {
+    if (sourceHolds.some(hold => hold.reason === 'source_financial_values_require_review')) {
+      throw new Error('Source financial values require review before matching canonical or copied worksheets');
+    }
+    throw new Error('Conflicting place fields or unresolved places require review before matching canonical or copied worksheets');
+  }
   validateDartUpdatePlan(sourcePlan, sheetUpdatePlan);
   const superseded = new Set(supersededRefs);
   const copiesOfCanonical = canonicalCopies(sourcePlan, canonicalPlan);
@@ -243,6 +352,8 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     ...sourcePlan.observations.map(row => ({ row, kind: 'observation' })),
     ...sourcePlan.events.map(row => ({ row, kind: 'event' })),
   ];
+  const financialProposalRefs = new Set((sourcePlan.proposals ?? [])
+    .filter(hasSourceFinancialValues).map(proposal => proposal.source_record_key));
   const counts = new Map();
   for (const { row } of incoming) counts.set(row.external_ref, (counts.get(row.external_ref) ?? 0) + 1);
   const managedSourceFields = [...new Set(incoming.flatMap(({ row }) => Object.keys(row.payload ?? {})))];
@@ -257,8 +368,23 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     // Imported earlier from this same workbook and sheet, but before source history was recorded.
     const unversioned = Boolean(current && !checkpoint && current.kind === kind
       && current.source_file === row.payload?.source_file && current.source_sheet === row.payload?.source_sheet);
-    if (superseded.has(row.external_ref)) {
+    const invalidDistance = desired.distance_km !== null && (!Number.isFinite(desired.distance_km) || desired.distance_km < 0);
+    if (hasSourceFinancialValues(row.payload) || financialProposalRefs.has(row.external_ref)) {
+      actions.push({ ...action, operation: 'hold',
+        reason: invalidDistance ? 'invalid_source_distance' : 'source_financial_values_require_review',
+        ...(current ? { record_id: current.id } : {}),
+        ...(Number.isInteger(row.payload?.source_row) ? { source_row: row.payload.source_row } : {}) });
+      continue;
+    }
+    if (superseded.has(row.external_ref) && Boolean(row.zone_id) !== Boolean(row.site_id)) {
       actions.push({ ...action, operation: 'superseded' });
+      continue;
+    }
+    if (current && current.kind === kind
+      && ((current.record.zone_id ?? null) !== desired.zone_id || (current.record.site_id ?? null) !== desired.site_id)) {
+      actions.push({ ...action, operation: 'hold',
+        reason: legacy || unversioned ? 'legacy_place_difference_requires_review' : 'source_place_difference_requires_review',
+        record_id: current.id, ...(Number.isInteger(row.payload?.source_row) ? { source_row: row.payload.source_row } : {}) });
       continue;
     }
     if (copiesOfCanonical.has(row.external_ref)) {
@@ -271,7 +397,7 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
     let reason = null;
     if (typeof row.external_ref !== 'string' || !row.external_ref.trim() || !row.payload?.job_number) reason = 'stable_source_job_required';
     else if (Boolean(row.zone_id) === Boolean(row.site_id)) reason = 'one_resolved_place_required';
-    else if (desired.distance_km !== null && (!Number.isFinite(desired.distance_km) || desired.distance_km < 0)) reason = 'invalid_source_distance';
+    else if (invalidDistance) reason = 'invalid_source_distance';
     else if (desired.officer_id && eligibleOfficers && !eligibleOfficers.has(desired.officer_id)) reason = 'source_staff_not_active_for_provider';
     else if (row.payload.source_file !== sourcePlan.source_file || row.payload.source_sha256 !== sourcePlan.source_sha256
       || row.payload.source_sheet !== sourcePlan.source_sheet) reason = 'source_provenance_mismatch';
@@ -286,15 +412,15 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
       ? !checkpoint.record_matches_state_after
       : checkpoint.record_fingerprint !== recordFingerprint(current.record))) reason = 'fcm_record_changed_since_last_sync';
     if (reason) {
-      actions.push({ ...action, operation: 'hold', reason, ...(current ? { record_id: current.id } : {}) });
+      actions.push({ ...action, operation: 'hold', reason, ...(current ? { record_id: current.id } : {}),
+        ...(Number.isInteger(row.payload?.source_row) ? { source_row: row.payload.source_row } : {}) });
     } else if (!current) {
       actions.push({ ...action, operation: 'insert', desired });
     } else if (recordFingerprint(current.record) === sourceFingerprint) {
       actions.push({ ...action, operation: 'unchanged', record_id: current.id,
         ...(checkpoint ? {} : { baseline_required: true }) });
     } else if (legacy || unversioned) {
-      // Source truth (owner ruling 2026-10-30): the server corrects only the known importer artifacts
-      // and holds anything else.
+      // The server still checks for other differences and dependencies before correcting.
       actions.push({ ...action, operation: 'legacy_correct', record_id: current.id, desired });
     } else if (!checkpoint) {
       actions.push({ ...action, operation: 'hold', reason: 'initial_difference_requires_review', record_id: current.id });
@@ -314,6 +440,7 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
         expected_record_fingerprint: checkpoint.record_fingerprint, desired });
     }
   }
+  actions.push(...sourceHolds.map(hold => ({ ...hold, operation: 'hold' })));
   const copyActions = sheetCopyActions(sheetCopies, incoming, managedSourceFields, superseded, sheetUpdatePlan, actions);
   const pairedTargets = new Set(copyActions.filter(action => action.operation === 'update_and_supersede')
     .map(action => action.external_ref));
@@ -424,8 +551,14 @@ export function compareSourcePlans(sourcePlan, previousSourcePlan = null) {
         changed_fields: changedRecordFields(before, record) });
     }
   }
+  for (const action of currentValidation.actions) {
+    if (action.operation === 'hold' && !current.has(action.external_ref)) {
+      actions.push({ external_ref: action.external_ref, kind: action.kind, operation: 'hold', reason: action.reason,
+        ...(action.source_row ? { source_row: action.source_row } : {}) });
+    }
+  }
   for (const [externalRef, record] of previous) {
-    if (!current.has(externalRef)) {
+    if (!current.has(externalRef) && !currentHolds.has(externalRef)) {
       actions.push({ external_ref: externalRef, kind: record.kind, operation: 'missing',
         reason: 'missing_from_current_plan', previous_source_fingerprint: recordFingerprint(record) });
     }
@@ -552,6 +685,16 @@ export function buildSyncChunks(sourcePlan, plan, { chunkSize = 200, sheetUpdate
   if (sourcePlan?.mode !== 'plan' || !Array.isArray(plan?.actions) || plan.source_sha256 !== sourcePlan.source_sha256) {
     throw new Error('A reconciliation plan for this source version is required');
   }
+  const sourceHolds = validateSourceHolds(sourcePlan);
+  if (sourceHolds.some(hold => !plan.actions.some(action => action.operation === 'hold'
+    && action.external_ref === hold.external_ref && action.reason === hold.reason && action.source_row === hold.source_row))) {
+    throw new Error('Conflicting source rows are missing from the reconciliation holds');
+  }
+  const heldRefs = new Set(sourceHolds.map(hold => hold.external_ref));
+  if (plan.actions.some(action => heldRefs.has(action.external_ref) && action.operation !== 'hold')) {
+    throw new Error('A held source key cannot be staged or superseded');
+  }
+  assertNoConflictingPlaces(sheetUpdatePlan);
   validateDartUpdatePlan(sourcePlan, sheetUpdatePlan);
   if (!Number.isInteger(chunkSize) || chunkSize < 1 || chunkSize > 500) throw new Error('Sync chunk size must be 1-500 rows');
   const sourceRows = new Map();
@@ -568,9 +711,20 @@ export function buildSyncChunks(sourcePlan, plan, { chunkSize = 200, sheetUpdate
   const units = [];
   const pairedKeys = new Set();
   for (const action of plan.actions) {
+    const source = sourceRows.get(action.external_ref);
+    const writesSource = ['insert', 'update', 'legacy_correct', 'supersede', 'update_and_supersede'].includes(action.operation)
+      || (action.operation === 'unchanged' && action.baseline_required);
+    if (writesSource && ((source && hasSourceFinancialValues(source.row.payload))
+      || (proposalsByRef.get(action.external_ref) ?? []).some(hasSourceFinancialValues)
+      || hasSourceFinancialValues(action.canonical_desired))) {
+      throw new Error('Source financial values require review before building a write');
+    }
     if (action.operation === 'update_and_supersede') {
       const canonical = sourceRows.get(action.external_ref);
       const update = updateSourceRows.get(action.update_external_ref);
+      if (update && hasSourceFinancialValues(update.payload)) {
+        throw new Error('Source financial values require review before building a write');
+      }
       if (!canonical || canonical.kind !== 'event' || !update || !action.copy_external_ref || !action.copy_record_id
         || !action.update_source_fingerprint || !/^[a-f0-9]{64}$/.test(action.record_fingerprint ?? '')
         || !action.update_patch?.location_raw) {
@@ -600,14 +754,12 @@ export function buildSyncChunks(sourcePlan, plan, { chunkSize = 200, sheetUpdate
       continue;
     }
     if (action.operation === 'supersede') {
-      const source = sourceRows.get(action.external_ref);
       if (action.kind !== 'event' || !action.canonical_external_ref || (source && source.kind !== 'event')) continue;
       units.push({ supersede: { kind: 'event', external_ref: action.external_ref,
         canonical_external_ref: action.canonical_external_ref,
         ...(source ? { source_fingerprint: action.source_fingerprint, desired: source.row } : {}) }, proposals: [] });
       continue;
     }
-    const source = sourceRows.get(action.external_ref);
     if (!source || source.kind !== action.kind) continue;
     const item = { kind: action.kind, external_ref: action.external_ref,
       source_fingerprint: action.source_fingerprint, desired: source.row };
@@ -664,6 +816,7 @@ export function buildSyncChunkSql({ actorId, providerOrganizationId, clientOrgan
     || (batchId !== null && !UUID_PATTERN.test(batchId))
     || (dartUpdateBatchId !== null && !UUID_PATTERN.test(dartUpdateBatchId))) throw new Error('Valid sync identities are required');
   if (commit && previewMigrationSql) throw new Error('A preview migration can only be used in a rolled-back dry run');
+  if (hasSourceFinancialValues(chunk)) throw new Error('Source financial values require review before building a write');
   if (!batchId && !batch?.manifest?.idempotency_key) throw new Error('A sync batch definition is required');
   if (chunk.dartUpdates?.length && !dartUpdateBatchId && !dartUpdateBatch?.manifest?.idempotency_key) {
     throw new Error('DART Update actions require their source worksheet batch');
@@ -702,9 +855,27 @@ where jsonb_array_length(input.data->'dart_updates') > 0;` : '';
   const dartUpdateBatchResult = chunk.dartUpdates?.length
     ? '(select batch_id from fcm_dart_update_input)' : 'null::uuid';
   return `BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 ${previewMigrationSql}
 set local request.jwt.claim.sub = '${actorId}';
 create temp table fcm_sync_input on commit drop as select ${quoted('sync', data)}::jsonb as data, null::uuid as batch_id;
+do $new_source_rows$
+begin
+  if exists (
+    select 1 from fcm_sync_input input
+    cross join lateral jsonb_array_elements(input.data->'events') item
+    join public.location_events event on event.organization_id = ${client}
+      and event.external_ref = item->>'external_ref'
+  ) or exists (
+    select 1 from fcm_sync_input input
+    cross join lateral jsonb_array_elements(input.data->'observations') item
+    join public.observations observation on observation.organization_id = ${client}
+      and observation.external_refs->>'external_ref' = item->>'external_ref'
+  ) then
+    raise exception 'Source row appeared after comparison; review before importing' using errcode = 'P0001';
+  end if;
+end;
+$new_source_rows$;
 update fcm_sync_input set batch_id = coalesce(nullif(data->>'batch_id','')::uuid, (public.begin_patrol_import_batch(
   p_provider_organization_id => ${provider},
   p_client_organization_id => ${client},
@@ -757,6 +928,18 @@ cross join lateral public.supersede_duplicate_patrol_events(input.batch_id, ${pr
   input.data->'supersedes') archived
 where jsonb_array_length(input.data->'supersedes') > 0;
 ${dartUpdatePhaseSql}
+${commit ? `do $hold_guard$
+declare
+  first_held record;
+begin
+  select phase, record_id into first_held from fcm_sync_result
+  where outcome = 'held' order by phase, record_id, external_ref limit 1;
+  if found then
+    raise exception 'Source rows were held during commit; preview again before retrying (phase=%, record_id=%)',
+      first_held.phase, coalesce(first_held.record_id::text, 'unknown') using errcode = 'P0001';
+  end if;
+end;
+$hold_guard$;` : ''}
 select (select batch_id from fcm_sync_input) as batch_id, ${dartUpdateBatchResult} as dart_update_batch_id,
   (select coalesce(jsonb_agg(to_jsonb(result)), '[]'::jsonb) from fcm_sync_result result) as results;
 ${commit ? 'COMMIT;' : 'ROLLBACK;'}`;
@@ -784,8 +967,9 @@ export function summarizeSyncResults(results) {
 // edited rows update FCM through the governed RPCs. Removed rows are never deleted.
 export async function runSourceSync({ sourcePlan, providerOrganizationId, readQuery, writeQuery, commit = false,
   previewMigrationSql = '', attempt = 1, chunkSize = 200, canonicalPlan = null, copySheets = [], sheetUpdatePlan = null,
-  evidenceOnly = false }) {
+  evidenceOnly = false, planningOnly = false }) {
   if (!Number.isInteger(attempt) || attempt < 1) throw new Error('Sync attempt must be a positive integer');
+  if (planningOnly && commit) throw new Error('A planning-only sync cannot commit');
   const batch = sourcePlan?.batch;
   const clientId = sourcePlan?.manifest?.target_client_organization_id;
   if (!batch?.manifest?.idempotency_key || batch.source_sha256 !== sourcePlan.source_sha256
@@ -794,6 +978,17 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
     throw new Error('The source plan must carry the importer batch definition for this provider, client, and workbook version');
   }
   if (!/^[a-z0-9_]{1,80}$/i.test(batch.manifest.source_profile)) throw new Error('Invalid source profile code');
+  if (!Array.isArray(sourcePlan.observations) || !Array.isArray(sourcePlan.events)) {
+    throw new Error('Validated source observations and events are required');
+  }
+  const sourceHolds = validateSourceHolds(sourcePlan);
+  assertNoConflictingPlaces(canonicalPlan, sheetUpdatePlan);
+  if ((sourceHolds.length || hasUnresolvedPlace(sourcePlan)) && (canonicalPlan || sheetUpdatePlan || copySheets.length)) {
+    if (sourceHolds.some(hold => hold.reason === 'source_financial_values_require_review')) {
+      throw new Error('Source financial values require review before matching canonical or copied worksheets');
+    }
+    throw new Error('Conflicting place fields or unresolved places require review before matching canonical or copied worksheets');
+  }
   validateDartUpdatePlan(sourcePlan, sheetUpdatePlan);
   if (sheetUpdatePlan && !copySheets.includes(sheetUpdatePlan.source_sheet)) {
     throw new Error('DART Update reconciliation must load the approved worksheet copies');
@@ -817,16 +1012,34 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
     chunkSize, sheetUpdatePlan, includeProposals: !sheetUpdatePlan && !evidenceOnly,
   });
   const planHoldReasons = {};
+  const planHoldSamples = [];
   for (const action of plan.actions) {
-    if (action.operation === 'hold') planHoldReasons[action.reason] = (planHoldReasons[action.reason] ?? 0) + 1;
+    if (action.operation === 'hold') {
+      planHoldReasons[action.reason] = (planHoldReasons[action.reason] ?? 0) + 1;
+      if (planHoldSamples.length < 50) planHoldSamples.push({
+        external_ref: action.external_ref, kind: action.kind, reason: action.reason,
+        ...(action.source_row ? { source_row: action.source_row } : {}),
+      });
+    }
   }
   const idleStatus = plan.summary.hold ? 'source_rows_held' : 'no_source_changes';
   const report = { mode: commit ? 'apply' : 'dry_run', committed: false, attempt, plan_summary: plan.summary,
-    plan_hold_reasons: planHoldReasons,
+    plan_hold_reasons: planHoldReasons, plan_hold_samples: planHoldSamples,
     requested: counts, batch_id: null, results: [] };
-  if (!chunks.length && !commit) return { ...report, status: idleStatus, summary: summarizeSyncResults([]) };
+  const queryWithReport = async (query, sql) => {
+    try {
+      return await query(sql);
+    } catch (error) {
+      if (error && typeof error === 'object') error.sourceSyncReport = report;
+      throw error;
+    }
+  };
+  if (planningOnly || plan.summary.hold || (!chunks.length && !commit)) {
+    return { ...report, status: plan.summary.hold || !chunks.length ? idleStatus : 'planning_only',
+      ...(planningOnly ? { server_validation: 'not_run' } : {}), summary: summarizeSyncResults([]) };
+  }
 
-  const actorRows = await readQuery(`SELECT import_actor_id FROM public.import_source_profiles
+  const actorRows = await queryWithReport(readQuery, `SELECT import_actor_id FROM public.import_source_profiles
     WHERE organization_id='${providerOrganizationId}'::uuid AND profile_code='${batch.manifest.source_profile}' AND active;`);
   const actorId = actorRows?.length === 1 ? actorRows[0].import_actor_id : null;
   if (!UUID_PATTERN.test(actorId ?? '')) throw new Error('The source profile has no configured import identity');
@@ -849,21 +1062,41 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
   let batchId = null;
   let dartUpdateBatchId = null;
   if (commit) {
-    const existing = await readQuery(`SELECT id, status FROM public.file_import_batches
+    const existing = await queryWithReport(readQuery, `SELECT id, status FROM public.file_import_batches
       WHERE organization_id='${providerOrganizationId}'::uuid
         AND manifest_json->>'idempotency_key'=(${quoted('key', syncKey)}::jsonb #>> '{}');`);
     if (existing?.length && existing[0].status !== 'staging') {
-      throw new Error('This workbook version was already synced; resolve held rows and re-run with the next --attempt');
+      const error = new Error('This workbook version was already synced; resolve held rows and re-run with the next --attempt');
+      error.sourceSyncReport = report;
+      throw error;
     }
     batchId = existing?.[0]?.id ?? null;
+    report.batch_id = batchId;
     if (dartUpdateBatch) {
-      const existingUpdate = await readQuery(`SELECT id, status FROM public.file_import_batches
+      const existingUpdate = await queryWithReport(readQuery, `SELECT id, status FROM public.file_import_batches
         WHERE organization_id='${providerOrganizationId}'::uuid
           AND manifest_json->>'idempotency_key'=(${quoted('key', dartUpdateSyncKey)}::jsonb #>> '{}');`);
       if (existingUpdate?.length && existingUpdate[0].status !== 'staging') {
         throw new Error('This DART Update version was already synced; resolve held rows and re-run with the next --attempt');
       }
       dartUpdateBatchId = existingUpdate?.[0]?.id ?? null;
+      report.dart_update_batch_id = dartUpdateBatchId;
+    }
+  }
+  if (commit && chunks.length) {
+    const previewResults = [];
+    for (const chunk of chunks) {
+      const rows = await queryWithReport(writeQuery, buildSyncChunkSql({ actorId, providerOrganizationId, clientOrganizationId: clientId,
+        batchId, batch: batchId ? null : syncBatch,
+        dartUpdateBatchId: chunk.dartUpdates?.length ? dartUpdateBatchId : null,
+        dartUpdateBatch: chunk.dartUpdates?.length && !dartUpdateBatchId ? dartUpdateBatch : null,
+        chunk, commit: false }));
+      if (rows?.length !== 1 || !Array.isArray(rows[0].results)) throw new Error('Sync preview returned no outcome; no committed chunks were sent');
+      previewResults.push(...rows[0].results);
+    }
+    const previewSummary = summarizeSyncResults(previewResults);
+    if (Object.values(previewSummary.hold_reasons).some(count => count > 0)) {
+      return { ...report, status: 'source_rows_held', summary: previewSummary, results: previewResults };
     }
   }
   // Both receipts close in one transaction, so paired writes can never be left without their
@@ -882,10 +1115,17 @@ export async function runSourceSync({ sourcePlan, providerOrganizationId, readQu
       statements.push(`SELECT batch.id FROM public.finalize_patrol_import_batch('${dartUpdateBatchId}'::uuid, ${quoted('update_receipt', updateReceipt)}::jsonb) batch;`);
     }
     if (!statements.length) return;
-    await writeQuery(`BEGIN;
+    report.batch_id = batchId;
+    report.dart_update_batch_id = dartUpdateBatchId;
+    try {
+      await queryWithReport(writeQuery, `BEGIN;
 set local request.jwt.claim.sub = '${actorId}';
 ${statements.join('\n')}
 COMMIT;`);
+    } catch (error) {
+      if (error && typeof error === 'object') error.sourceSyncWriteAttempted = true;
+      throw error;
+    }
   };
   if (!chunks.length) {
     if (!batchId && !dartUpdateBatchId) return { ...report, status: idleStatus, summary: summarizeSyncResults([]) };
@@ -895,17 +1135,32 @@ COMMIT;`);
   }
   const results = [];
   for (const chunk of chunks) {
-    const rows = await writeQuery(buildSyncChunkSql({ actorId, providerOrganizationId, clientOrganizationId: clientId,
-      batchId, batch: batchId ? null : syncBatch,
-      dartUpdateBatchId: chunk.dartUpdates?.length ? dartUpdateBatchId : null,
-      dartUpdateBatch: chunk.dartUpdates?.length && !dartUpdateBatchId ? dartUpdateBatch : null,
-      chunk, commit, previewMigrationSql }));
-    if (rows?.length !== 1 || !Array.isArray(rows[0].results)) throw new Error('Sync chunk returned no outcome; later chunks were not sent');
+    let rows;
+    try {
+      rows = await queryWithReport(writeQuery, buildSyncChunkSql({ actorId, providerOrganizationId, clientOrganizationId: clientId,
+        batchId, batch: batchId ? null : syncBatch,
+        dartUpdateBatchId: chunk.dartUpdates?.length ? dartUpdateBatchId : null,
+        dartUpdateBatch: chunk.dartUpdates?.length && !dartUpdateBatchId ? dartUpdateBatch : null,
+        chunk, commit, previewMigrationSql }));
+    } catch (error) {
+      if (commit && error && typeof error === 'object') error.sourceSyncWriteAttempted = true;
+      throw error;
+    }
+    if (rows?.length !== 1 || !Array.isArray(rows[0].results)) {
+      const error = new Error('Sync chunk returned no outcome; later chunks were not sent');
+      error.sourceSyncReport = report;
+      if (commit) error.sourceSyncWriteAttempted = true;
+      throw error;
+    }
     if (commit) {
       batchId = rows[0].batch_id;
       if (chunk.dartUpdates?.length) dartUpdateBatchId = rows[0].dart_update_batch_id;
+      report.committed = true;
+      report.batch_id = batchId;
+      report.dart_update_batch_id = dartUpdateBatchId;
     }
     results.push(...rows[0].results);
+    report.results = results;
   }
   if (commit) await finalizeBatches(results, false);
   return { ...report, committed: commit, batch_id: batchId, dart_update_batch_id: dartUpdateBatchId,

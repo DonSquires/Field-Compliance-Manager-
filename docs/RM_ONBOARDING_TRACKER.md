@@ -29,6 +29,143 @@ turn beats false completeness.
   queued file version only after its exact path/hash has an applied receipt.
   Ambiguous photo links, unmapped places and conflicting FCM/source edits must
   remain visible holds, not guessed matches or successful imports.
+- Mapped Reserve/Location conflicts, unresolved places, divergent duplicate
+  jobs and differences from an existing place stay on hold; they are not
+  staged or treated as deleted. The promoter previews every mapped sheet
+  and does not start a workbook with any known hold; a direct sheet sync
+  also stops before opening a batch if its plan contains a hold. Review source
+  and mappings rather than guessing; corrections to historical places need a
+  governed path preserving the original context.
+  Prospective place creation is rolled back first and its overlay is
+  re-exported to detect conflicts before creation. When that overlay depends
+  on a new place or coverage, the preview is planning-only, explicitly marked
+  `server_validation: not_run`; the real server preview follows registration.
+  Committed syncs preview each chunk and refuse a chunk transaction if the
+  server reports a hold. Preview reports include bounded held-row details;
+  a commit-time refusal identifies the first held phase and record ID when
+  known.
+  These checks do **not** make a workbook atomic: registration, chunks, and
+  sheets use separate transactions. A later change or failure can leave
+  earlier writes committed, reported as `partial_commit` or
+  `partial_commit_possible`. The scanner retains the affected sheets and
+  known batch IDs in a recovery hold, even when the source file changes. A
+  write intent is saved before registration or sync, so an interrupted
+  process remains held until its outcome is checked. Reconcile that evidence
+  before explicitly retrying one workbook with `--commit --recheck-holds
+  --confirm-partial-reviewed --only <workbook>`.
+  Direct legacy import refuses to apply conflicts, unresolved places,
+  unplaced sightings or divergent duplicates. A held prior row is never used
+  to calculate the next visit's distance or charges.
+  The scheduler skips held versions; ordinary holds can be reviewed and
+  retried with `--recheck-holds` or a source change. A dry-run recheck can
+  inspect a recovery hold, but a committed retry requires explicit review,
+  `--confirm-partial-reviewed`, one selected workbook and no photos, including
+  after a source change. Generic hold rechecks never bypass recovery holds.
+  No hold itself corrects historical records or changes finance.
+- **Local release blockers (2026-11-17):** a pending migration prevents
+  conflicting staging payload overwrites and locks each target before comparing
+  source-update state; it has only been tested in disposable PostgreSQL and
+  still requires independent review and migration-ledger reconciliation.
+  The local concurrency and place-registration suites passed 38 tests in
+  isolated PostgreSQL containers; the source-sync suite passed 45 tests,
+  including two PostgreSQL rollback and concurrent-edit checks. These fixtures
+  do not prove compatibility with the complete live catalog or release ledger.
+  New-place registration now serializes cooperating imports by a shared name
+  key and holds exact or parenthetical-suffix registry matches for review.
+  Other CRM writers do not take that lock, and name checks cannot establish
+  identity or catch all spelling variants; a review/deduplication path and
+  protection against concurrent non-import writes are still required. Do not
+  deploy these importer changes or claim existing place attribution has been
+  repaired until those risks and the governed historical-correction policy are
+  resolved. Source updates acquire evidence keys, then vehicle keys, in the
+  same sorted order as staging. Baseline adoption now takes evidence keys in
+  that order and holds a key shared by an observation and an event. Legacy
+  correction, DART updates and duplicate supersession still need cross-kind
+  collision and shared lock-order verification; the staging, baseline and
+  source-update guards do not establish protection for those paths.
+  The independent release review also found that an unlocked observation's
+  source update can change its time, plate or officer without updating its
+  INSERT-only `observation_trigger` location-event mirror. Hold those updates
+  or add governed, atomic mirror reconciliation before restarting that lane.
+  The importer-specific place lock does not coordinate with ordinary CRM
+  creation; an eventual bounded restart must use reviewed existing places
+  until shared identity/serialization is provided. Neither issue requires
+  withholding the safety improvements while the scheduler remains disabled.
+  Baseline RPC preflight: Atlas reports present and wired, with no exercise
+  evidence; its direct edges are five calls, three reads and four writes.
+  Flow reach is 21 downstream and one upstream node, while FK reach is zero
+  (structure only). Its refresh commit matched `origin/main` at `fdf3b0cc`
+  when checked. The schema confirms writes to observations, location events,
+  source versions and audit; importer reconciliation is a caller. The risk
+  crosses evidence and reporting, not just the importer. The next check is
+  the remaining correction and supersession paths, not an Atlas refresh.
+  The local promoter now checkpoints photo attachment and capture write
+  intents before remote writes. Uncertain outcomes remain held across source
+  changes, renamed photos with the same hash across clients, and later photos
+  in the same client/minute, including when capture configuration is disabled.
+  Unmatched photos cannot create captures while an attachment is unresolved;
+  missing source files remain in the review report. Successful capture and
+  attachment receipts persist, and potentially referenced uploads are retained
+  rather than deleted.
+  The local linked promoter holds committed photo attachments and photo-created
+  captures until private staging and governed recovery exist; the standalone
+  photo importer's `--apply` also refuses to run. Dry-run matching remains
+  available. These safeguards are **local only**: the existing scheduled job
+  uses the main checkout, so its older photo path is not protected by this
+  work. The laptop's scheduled job was temporarily disabled on 2026-11-18;
+  this pauses workbook imports as well as photos and does not delete records.
+  Review and release the safe path before re-enabling it. This is not a
+  complete recovery workflow: there is
+  no governed photo-hold clearance, and processes using different state files
+  are not coordinated.
+  The local scanner and promoter share a lock. A separate exclusive recovery
+  guard serializes stale-lock reclamation; an interrupted guard fails closed.
+  An operator must first verify that the recorded PID and all source workers
+  using that state are stopped, review any outstanding write intents, and
+  only then remove the specific `<state>.lock.recovery` file before retrying.
+  Never remove a lock merely because a run is slow.
+  Full-state photo checkpoints also need a scalable design: a synthetic
+  76,000-receipt, 12 MB state took 4.19 seconds for ten attachments without
+  network or storage latency. Benchmark a safer journal or equivalent before
+  unattended production use.
+  Source financial fields are present in client-readable evidence payloads.
+  The local importer now holds rows with non-null `job_cost`, `travel_cost` or
+  `total_cost`, including zero and nested correction/proposal values, before
+  database previews, registration or writes. A local `--export-plan` still
+  contains those values and must be treated as sensitive. This covers known
+  structured fields, not every possible sensitive narrative. It neither fixes
+  existing records nor establishes their disclosure policy. Determine that
+  policy and a provider-scoped finance path that preserves the source values
+  before releasing further imports. Populated source cost cells are retained
+  verbatim in local-plan `source_cost_cells` and held even when numeric parsing
+  yields null (for example accounting negatives or spreadsheet errors).
+  A parser-to-source-sync regression verifies those cells cannot reach a write;
+  numeric coercion is not evidence that a source cell was empty.
+- **As-needed patrol gap:** the authoritative `as_attended_patrol` work model
+  has no planned visits or timing quota and is excluded from stop generation.
+  The place-service terms omit that model, while the normal editor requires
+  positive visits and dwell and its version applier changes the work model to
+  `scheduled_patrol`. Do not edit an as-attended service through that editor
+  until the model is preserved. An authorised officer-initiated visit path,
+  briefing, activity selection and governed billing lineage are also still
+  required; a label alone does not provide that workflow.
+- **Owner-requested setup, 2026-11-18:** a scoped live inventory found 513 active
+  agreement/place facets across 493 houses. A rollback dry run followed by the
+  governed `manage_crm_as_attended_patrol` seed configured 50 facets already
+  covered by the intended patrol: 47 Nelson Forestry Patrol and three Blenheim
+  Forestry Patrol. An independent post-commit read verified 175 facets now have
+  the as-attended shape and the intended primary patrol (125 were already
+  correct). The transaction verified 34 existing shift/stop, static-service,
+  other-module configuration and responsibility records remained unchanged.
+  No shifts, visits or invoices were fabricated and no rates were changed.
+  This is **not all R&M places**: 338 facets remain held, comprising 305 without
+  verified patrol allocation, 25 with source-only allocation requiring historical
+  place-attribution review, and eight agreement/configuration/approval/overlap
+  gates. Shared historical attendance did not arbitrarily transfer a primary
+  patrol. The scheduler remains disabled; publication and passing tests do not
+  clear the release blockers above. The final targeted importer suite passed
+  322 tests, including the disposable-PostgreSQL race/rollback cases and the
+  raw-cost-cell regression; all 871 migration versions were unique.
 - Built (branch `feat/rm-source-promotion`): `services/document-source-worker/
   source-promote.mjs` connects the scanner to the versioned writer and photo
   importer, using the reviewed map `rm-patrol-source-map.json` (14 workbooks
@@ -36,8 +173,9 @@ turn beats false completeness.
   `column_aliases`, following NCC's approved `Secondary Issue (U)` precedent).
   Workbook rows are exported with narratives and synced evidence-only, so no
   Workshop proposals are created. Default mode is a dry run; `--commit` writes.
-  A governed RPC refusal becomes a visible hold; a transport failure stays
-  pending for retry. A single lock file prevents overlapping runs.
+  A governed RPC refusal becomes a visible hold; transport failures before any
+  possible write stay pending for retry, while possible partial writes require
+  review. A single lock file prevents overlapping runs.
 - Live workbook dry run (2026-10-26), nothing written: about 788 new rows
   (MR 27, OFO2025 65, OFO2026 350, STAND 12, TDC 198, TPFL2026 135, TAYLORS 1).
   OFO2026's 350 rows exceed the 250-row change-volume guard and are held for
@@ -90,9 +228,11 @@ turn beats false completeness.
   built); photos without the structured `YYMMDD HHMM[SS] [rego]` name are
   ignored (`status: ignored`, not holds). Matching now also falls back to R&M
   patrol `location_events` when no observation matches.
-- Photo attachment runs as the `rm_patrol_log` source profile's configured
+- The older deployed photo attachment path runs as the `rm_patrol_log` source profile's configured
   import identity (the same governed actor as the record writer) via
-  `attach_external_photo_to_record`; no importer password is needed. File
+  `attach_external_photo_to_record`; no importer password is needed. The
+  local branch disables photo writes until the privacy and recovery blockers
+  above are resolved. File
   metadata goes into the source note as provenance (for example, "no camera
   EXIF, consistent with a CCTV screenshot or export"). Rollback check: the
   import identity passes `org_access_allowed` for every R&M client org; the one
