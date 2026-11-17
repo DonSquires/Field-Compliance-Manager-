@@ -36,20 +36,22 @@ turn beats false completeness.
   also stops before opening a batch if its plan contains a hold. Review source
   and mappings rather than guessing; corrections to historical places need a
   governed path preserving the original context.
-  Prospective place creation is rolled back first and its overlay is
-  re-exported to detect conflicts before creation. When that overlay depends
-  on a new place or coverage, the preview is planning-only, explicitly marked
-  `server_validation: not_run`; the real server preview follows registration.
+  Prospective place registration is rolled back and its overlay is re-exported
+  for review. When that overlay depends on a new place or coverage, the preview
+  is planning-only and explicitly marked `server_validation: not_run`.
+  Workbooks with unresolved places are held, even if the preview suggests an
+  existing match or a closed batch; no place registration or sheet sync is
+  committed. A reviewed mapping to an existing place is required first.
   Committed syncs preview each chunk and refuse a chunk transaction if the
   server reports a hold. Preview reports include bounded held-row details;
   a commit-time refusal identifies the first held phase and record ID when
   known.
-  These checks do **not** make a workbook atomic: registration, chunks, and
-  sheets use separate transactions. A later change or failure can leave
+  These checks do **not** make a workbook atomic: chunks and sheets use
+  separate transactions. A later change or failure can leave
   earlier writes committed, reported as `partial_commit` or
   `partial_commit_possible`. The scanner retains the affected sheets and
   known batch IDs in a recovery hold, even when the source file changes. A
-  write intent is saved before registration or sync, so an interrupted
+  write intent is saved before sync, so an interrupted
   process remains held until its outcome is checked. Reconcile that evidence
   before explicitly retrying one workbook with `--commit --recheck-holds
   --confirm-partial-reviewed --only <workbook>`.
@@ -85,12 +87,18 @@ turn beats false completeness.
   source-update guards do not establish protection for those paths.
   The independent release review also found that an unlocked observation's
   source update can change its time, plate or officer without updating its
-  INSERT-only `observation_trigger` location-event mirror. Hold those updates
-  or add governed, atomic mirror reconciliation before restarting that lane.
+  INSERT-only `observation_trigger` location-event mirror. The local update
+  RPC and reconciliation preview now hold these changes, while allowing
+  unchanged-identity note updates; real PostgreSQL regressions verify the
+  hold does not write evidence, version history or audit. This does not
+  establish protection in the other correction paths.
   The importer-specific place lock does not coordinate with ordinary CRM
-  creation; an eventual bounded restart must use reviewed existing places
-  until shared identity/serialization is provided. Neither issue requires
-  withholding the safety improvements while the scheduler remains disabled.
+  creation; the local promoter now holds unresolved places during workbook
+  preview before any sheet writes, including closed-batch and prospective
+  existing-match cases. This is a conservative gate, not a shared identity
+  or serialization fix; direct place-creation paths remain separate. Neither
+  issue requires withholding the safety improvements while the scheduler
+  remains disabled.
   Baseline RPC preflight: Atlas reports present and wired, with no exercise
   evidence; its direct edges are five calls, three reads and four writes.
   Flow reach is 21 downstream and one upstream node, while FK reach is zero

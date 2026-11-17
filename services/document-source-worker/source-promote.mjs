@@ -104,6 +104,7 @@ function syncReviewHold(sync, label, conflictHold) {
   if (conflictHold) return conflictHold;
   const reasons = sync?.plan_hold_reasons ?? {};
   for (const reason of ['source_financial_values_require_review', 'source_place_difference_requires_review', 'legacy_place_difference_requires_review',
+    'observation_mirror_correction_requires_review',
     'unresolved_source_place', 'one_resolved_place_required']) {
     if (reasons[reason] > 0) return { ...label, status: 'held', reason };
   }
@@ -139,8 +140,7 @@ function registrationNeedsReview(places, receipts) {
   });
 }
 
-// Promotes one sheet of one source version through preview, place registration and the governed
-// sync. Returns null when the source changed while it was being exported.
+// Promotes one sheet through place preview and governed sync. Returns null if the source changed.
 export async function promoteSheet({ version, sheet, map, exportPlan, syncPlan, namespaceEventCount, registerPlaces, commit,
   beforeWrite = async () => {} }) {
   const label = { sheet: sheet.sheet, client_code: sheet.client_code };
@@ -167,9 +167,6 @@ export async function promoteSheet({ version, sheet, map, exportPlan, syncPlan, 
     } catch (error) {
       if (error && typeof error === 'object') {
         if (conflictHold) error.sourcePlaceHold = conflictHold;
-        if (placeRegistration === 'applying' || placeRegistration === 'applied') {
-          error.sourceRegistrationStatus = placeRegistration;
-        }
       }
       throw error;
     }
@@ -213,58 +210,34 @@ export async function promoteSheet({ version, sheet, map, exportPlan, syncPlan, 
         ...(rows.length ? { held_rows: rows } : {}),
         ...(places ? { places, place_registration: placeRegistration } : {}) } };
       }
-      if (placeRegistration === 'applied') return { outcome: { ...label, status: 'held',
-        reason: 'already_batched_after_place_registration_review', places, place_registration: placeRegistration } };
       return { outcome: { ...label, status: 'unchanged', reason: 'already_batched_for_this_version',
         ...(places ? { places, place_registration: placeRegistration } : {}) } };
     }
   };
   const provisional = placeRegistration === 'preview' && places.some(place => place.status === 'created' || place.coverage_added);
-  let preview = await previewSync(provisional);
-  if (preview.outcome) return preview.outcome;
-  let reviewRows = heldRows(preview, plan);
-  let summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
+  const preview = await previewSync(provisional);
+  if (preview.outcome) {
+    if (newPlaces.length && preview.outcome.status !== 'held') {
+      return { ...label, status: 'held', reason: 'new_places_require_review',
+        ...(places ? { places, place_registration: placeRegistration } : {}) };
+    }
+    return preview.outcome;
+  }
+  const reviewRows = heldRows(preview, plan);
+  const summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
     ...(reviewRows.length ? { held_rows: reviewRows } : {}),
     preview_result: preview.summary, ...(preview.server_validation ? { server_validation: preview.server_validation } : {}),
     ...(places ? { places, place_registration: placeRegistration } : {}) };
-  let previewHold = syncReviewHold(preview, label, conflictHold);
+  const previewHold = syncReviewHold(preview, label, conflictHold);
   if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
     return { ...label, status: 'held', reason: 'change_volume_review', ...summary,
       ...(previewHold ? { source_review: previewHold } : {}) };
   }
-  if (!commit) return previewHold ? { ...previewHold, ...summary } : { ...label, status: 'previewed', ...summary };
   if (previewHold) return { ...previewHold, ...summary };
+  if (newPlaces.length) return { ...label, status: 'held', reason: 'new_places_require_review', ...summary };
+  if (!commit) return { ...label, status: 'previewed', ...summary };
   if (preview.status === 'no_source_changes' || preview.status === 'source_rows_held') {
     return { ...label, status: 'unchanged', ...summary };
-  }
-  if (newPlaces.length && registerPlaces) {
-    await beforeWrite({ ...label, phase: 'place_registration' });
-    placeRegistration = 'applying';
-    places = await withConflictContext(() => registerPlaces({ version, sheet, map, places: newPlaces, commit: true }));
-    placeRegistration = 'applied';
-    if (!Array.isArray(places)) {
-      const error = new Error(`${sheet.client_code}: place registration returned no receipts`);
-      error.sourceRegistrationStatus = placeRegistration;
-      throw error;
-    }
-    if (registrationNeedsReview(newPlaces, places)) return { ...label, status: 'held', reason: 'place_registration_review',
-      places, place_registration: placeRegistration };
-    plan = await withConflictContext(() => exportPlan({ version, sheet, map, placeOverlay: placeOverlay(newPlaces, places) }));
-    if (!(await withConflictContext(() => freshPlan(plan)))) return { ...label, status: 'stale', reason: 'source_changed_during_promotion',
-      places, place_registration: placeRegistration };
-    conflictHold = conflictingPlaceHold(plan, label, places);
-    preview = await previewSync(false);
-    if (preview.outcome) return preview.outcome;
-    reviewRows = heldRows(preview, plan);
-    summary = { plan: preview.plan_summary, requested: preview.requested, row_holds: preview.plan_hold_reasons,
-      ...(reviewRows.length ? { held_rows: reviewRows } : {}),
-      preview_result: preview.summary, places, place_registration: placeRegistration };
-    previewHold = syncReviewHold(preview, label, conflictHold);
-    if (previewHold) return { ...previewHold, ...summary };
-    if (changedRows(preview.requested) > map.max_new_rows_per_sheet) {
-      return { ...label, status: 'held', reason: 'change_volume_review', ...summary };
-    }
-    if (preview.status === 'no_source_changes') return { ...label, status: 'unchanged', ...summary };
   }
   try {
     await beforeWrite({ ...label, phase: 'source_sync', place_registration: placeRegistration });

@@ -361,7 +361,7 @@ describe('direct patrol source RPC concurrency', {
         officer_id: ACTOR, plate: newPlates[index], officer_notes: 'original', payload: { ...provenance } },
     }));
     assert.deepEqual(probeLockOrder('apply_patrol_source_updates', items, 'vehicle:AAA000', 'vehicle:ZZZ000',
-      'fcm_patrol_vehicle_order'), ['updated', 'updated']);
+      'fcm_patrol_vehicle_order'), ['held', 'held']);
   });
 
   test('staging retains matching event values and permits additive provenance', () => {
@@ -671,6 +671,46 @@ describe('direct patrol source RPC concurrency', {
       SELECT site_id FROM public.observations WHERE id='${OBSERVATION}';
       ROLLBACK;`).split('\n');
     assert.deepEqual(result, ['held:locked_evidence_requires_correction_review', SITE_A]);
+  });
+
+  test('unlocked observation identity and time corrections hold before changing evidence or history', () => {
+    const anotherOfficer = randomUUID();
+    for (const changes of [
+      { occurred_at: '2026-10-19T01:00:00Z' },
+      { plate: 'XYZ789' },
+      { officer_id: anotherOfficer },
+    ]) {
+      const desired = { occurred_at: '2026-10-19T00:00:00Z', zone_id: ZONE,
+        officer_id: ACTOR, plate: 'ABC123', officer_notes: 'changed note',
+        payload: { ...provenance }, ...changes };
+      const update = { kind: 'observation', external_ref: `${REF}:obs`, record_id: OBSERVATION,
+        source_fingerprint: NEXT, prior_source_fingerprint: PREVIOUS, desired };
+      const result = sql(`BEGIN;
+        INSERT INTO public.user_profiles VALUES ('${anotherOfficer}','${PROVIDER}',NULL,NULL);
+        SELECT outcome || ':' || coalesce(detail,'') FROM public.apply_patrol_source_updates(
+          '${BATCH}','${PROVIDER}','${CLIENT}',$json$${JSON.stringify([update])}$json$::jsonb);
+        SELECT observed_at::text || '|' || plate_number || '|' || officer_id || '|' || officer_notes
+          FROM public.observations WHERE id='${OBSERVATION}';
+        SELECT count(*) FROM public.patrol_import_record_versions WHERE record_id='${OBSERVATION}';
+        SELECT count(*) FROM public.audit_log WHERE target_id='${OBSERVATION}';
+        ROLLBACK;`).split('\n');
+      assert.deepEqual(result, ['held:observation_mirror_correction_requires_review',
+        `2026-10-19 00:00:00+00|ABC123|${ACTOR}|original`, '1', '0']);
+    }
+  });
+
+  test('an unlocked observation note can still be updated without changing its identity', () => {
+    const update = { kind: 'observation', external_ref: `${REF}:obs`, record_id: OBSERVATION,
+      source_fingerprint: NEXT, prior_source_fingerprint: PREVIOUS, desired: {
+        occurred_at: '2026-10-19T00:00:00Z', zone_id: ZONE, officer_id: ACTOR,
+        plate: 'ABC123', officer_notes: 'corrected', payload: { ...provenance },
+      } };
+    const result = sql(`BEGIN;
+      SELECT outcome FROM public.apply_patrol_source_updates(
+        '${BATCH}','${PROVIDER}','${CLIENT}',$json$${JSON.stringify([update])}$json$::jsonb);
+      SELECT officer_notes FROM public.observations WHERE id='${OBSERVATION}';
+      ROLLBACK;`).split('\n');
+    assert.deepEqual(result, ['updated', 'corrected']);
   });
 
   test('changing an existing event place requires historical correction review', () => {

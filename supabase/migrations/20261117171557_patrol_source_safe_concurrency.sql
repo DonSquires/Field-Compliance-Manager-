@@ -351,6 +351,10 @@ begin
         v_hold := 'locked_evidence_requires_correction_review';
       elsif v_observation.zone_id is distinct from v_zone or v_observation.site_id is distinct from v_site then
         v_hold := 'source_place_difference_requires_review';
+      elsif v_observation.observed_at is distinct from v_occurred
+        or upper(v_observation.plate_number) is distinct from v_plate
+        or v_observation.officer_id is distinct from v_officer then
+        v_hold := 'observation_mirror_correction_requires_review';
       end if;
     end if;
 

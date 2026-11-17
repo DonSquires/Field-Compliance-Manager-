@@ -387,6 +387,14 @@ export function buildReconciliationPlan({ sourcePlan, existing, checkpoints = []
         record_id: current.id, ...(Number.isInteger(row.payload?.source_row) ? { source_row: row.payload.source_row } : {}) });
       continue;
     }
+    if (current && kind === 'observation' && current.kind === kind
+      && (current.record.occurred_at !== desired.occurred_at
+        || current.record.plate?.toUpperCase() !== desired.plate?.trim().toUpperCase()
+        || current.record.officer_id !== desired.officer_id)) {
+      actions.push({ ...action, operation: 'hold', reason: 'observation_mirror_correction_requires_review',
+        record_id: current.id, ...(Number.isInteger(row.payload?.source_row) ? { source_row: row.payload.source_row } : {}) });
+      continue;
+    }
     if (copiesOfCanonical.has(row.external_ref)) {
       const canonicalRef = copiesOfCanonical.get(row.external_ref);
       if (!canonicalRef) actions.push({ ...action, operation: 'hold', reason: 'canonical_job_differs', ...(current ? { record_id: current.id } : {}) });
