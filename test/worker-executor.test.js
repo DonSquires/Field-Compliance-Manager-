@@ -285,6 +285,19 @@ test('frontend patch validation rejects traversal, binary, and oversized patches
   ].join('\n')), /protected frontend changes require separate approval/);
 });
 
+test('frontend verifier accepts dependency manifest diffs only with the explicit agentic option', () => {
+  const patch = [
+    'diff --git a/apps/web/package.json b/apps/web/package.json',
+    '--- a/apps/web/package.json',
+    '+++ b/apps/web/package.json',
+    '@@ -1 +1 @@',
+    '-{}',
+    '+{"devDependencies":{"@playwright/test":"^1.62.1"}}',
+  ].join('\n');
+  assert.throws(() => validatePatchText(patch), /protected frontend changes require separate approval/);
+  assert.deepEqual(validatePatchText(patch, { allowAgenticDependencies: true }), ['apps/web/package.json']);
+});
+
 test('frontend patch manifest extracts normalized changed files', () => {
   const patch = [
     'diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx',

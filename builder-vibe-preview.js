@@ -70,8 +70,8 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
   const installs = new Map();
   const starting = new Set();
 
-  // node_modules for apps/web comes from a cache keyed by the lockfile (package manifests are protected
-  // paths, so a session can never change them) and is hard-linked into each worktree in seconds.
+  // node_modules for apps/web comes from a cache keyed by both the manifest and lockfile, then is
+  // hard-linked into each worktree. Vibe sessions may update dependencies in their isolated branch.
   async function ensureWebDependencies(workspacePath) {
     const webDir = path.join(workspacePath, 'apps', 'web');
     const target = path.join(webDir, 'node_modules');
@@ -86,7 +86,7 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
           fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
           fs.copyFileSync(path.join(webDir, 'package.json'), path.join(cacheDir, 'package.json'));
           fs.copyFileSync(path.join(webDir, 'package-lock.json'), path.join(cacheDir, 'package-lock.json'));
-          const child = spawnImpl('npm', ['ci', '--include=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: cacheDir, env: safeEnv(), stdio: ['ignore', 'ignore', 'pipe'] });
+          const child = spawnImpl('npm', ['ci', '--include=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: cacheDir, env: safeEnv(cacheDir), stdio: ['ignore', 'ignore', 'pipe'] });
           let stderr = '';
           child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
           child.on('error', reject);
@@ -105,9 +105,35 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
     return target;
   }
 
-  function safeEnv() {
-    const { BOB_ADMIN_TOKEN: _a, BOB_RUNNER_TOKEN: _r, BOB_MODEL_GATEWAY_TOKEN: _g, SUPABASE_SERVICE_ROLE_KEY: _s, OPENAI_API_KEY: _o, OLLAMA_API_TOKEN: _ol, GITEA_TOKEN: _gt, GITHUB_TOKEN: _gh, BOB_GITHUB_ACCESS_TOKEN: _bg, VERCEL_TOKEN: _v, GRANDMASTER_TEST_PASSWORD: _p, BOB_LAPTOP_SSH_KEY: _l, NODE_OPTIONS: _n, PORT: _port, ...rest } = process.env;
-    return { ...rest, CI: '1', FORCE_COLOR: '0', NODE_ENV: 'development', NPM_CONFIG_PRODUCTION: 'false', npm_config_production: 'false' };
+  function safeEnv(scope = 'preview') {
+    const allowed = new Set(['PATH', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'WINDIR']);
+    const rest = Object.fromEntries(Object.entries(process.env).filter(([name]) => allowed.has(name)));
+    const home = path.join(cacheRoot, 'tool-homes', crypto.createHash('sha256').update(String(scope)).digest('hex').slice(0, 20));
+    const browserCache = path.join(home, '.cache', 'ms-playwright');
+    fs.mkdirSync(browserCache, { recursive: true, mode: 0o700 });
+    fs.chmodSync(home, 0o700);
+    const binPaths = [path.join(home, '.local', 'bin'), path.join(home, '.cargo', 'bin'), path.join(home, 'go', 'bin'), path.join(home, '.gem', 'bin'), path.join(home, '.dotnet')];
+    for (const directory of binPaths) fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return {
+      ...rest,
+      PATH: [...binPaths, rest.PATH].filter(Boolean).join(path.delimiter),
+      HOME: home,
+      USERPROFILE: home,
+      DOTNET_ROOT: path.join(home, '.dotnet'),
+      PLAYWRIGHT_BROWSERS_PATH: browserCache,
+      NPM_CONFIG_USERCONFIG: '/dev/null',
+      npm_config_userconfig: '/dev/null',
+      NPM_CONFIG_CACHE: path.join(home, '.cache', 'npm'),
+      npm_config_cache: path.join(home, '.cache', 'npm'),
+      PIP_CONFIG_FILE: '/dev/null',
+      PIP_USER: '1',
+      PYTHONUSERBASE: path.join(home, '.local'),
+      CARGO_HOME: path.join(home, '.cargo'),
+      GOPATH: path.join(home, 'go'),
+      GEM_HOME: path.join(home, '.gem'),
+      CI: '1', FORCE_COLOR: '0', NODE_ENV: 'development',
+      NPM_CONFIG_PRODUCTION: 'false', npm_config_production: 'false',
+    };
   }
 
   function freePort() {
@@ -143,7 +169,7 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
     const port = freePort();
     const child = spawnImpl(process.execPath, [path.join('node_modules', 'vite', 'bin', 'vite.js'), '--config', wrapper, '--port', String(port)], {
       cwd: webDir,
-      env: { ...safeEnv(), VITE_SUPABASE_URL: supabaseUrl || '', VITE_SUPABASE_ANON_KEY: anonKey || '', BROWSER: 'none' },
+      env: { ...safeEnv(workspacePath), VITE_SUPABASE_URL: supabaseUrl || '', VITE_SUPABASE_ANON_KEY: anonKey || '', BROWSER: 'none' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const entry = { sessionId, port, child, workspacePath, lastUsed: Date.now(), output: '', ready: false };

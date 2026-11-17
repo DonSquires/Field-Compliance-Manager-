@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   routeBuilderModel,
+  routedCandidates,
   buildModelRunRequest,
   resolveArtifactType,
   contentMetadata,
@@ -28,32 +29,54 @@ function makeRequest(overrides = {}) {
 
 test('model routing keeps low-risk preprocessing in-house first', () => {
   const route = routeBuilderModel({ workloadKind: 'repository_summary' });
-  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai']);
+  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai']);
   assert.equal(route.provider, 'gpu_workstation');
 });
 
 test('model routing is in-house first with OpenAI as the outsourced fallback, per workload class', () => {
-  // Owner ruling 2026-10-16 (in-house first), refined 2026-10-21: laptop GPU, then Ollama Cloud, then OpenAI as the paid last resort.
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai'], 'structured Builder stages start on in-house compute');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai'], 'unrestricted coding starts on the laptop GPU');
+  // Owner direction 2026-11-11: laptop GPU, then private VPS Ollama, then hosted tiers.
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai'], 'structured Builder stages start on in-house compute');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai'], 'unrestricted coding starts on the laptop GPU and falls back to VPS Ollama');
   assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['anthropic', 'gpu_workstation', 'ollama_cloud', 'openai'], 'the independent check starts on the Claude security-review engine (owner direction 2026-11-10)');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['anthropic', 'gpu_workstation', 'ollama', 'ollama_cloud', 'openai'], 'the independent check starts on Claude, with VPS Ollama after laptop GPU');
   assert.equal(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain.at(-1), 'openai', 'OpenAI is always the last resort');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'openai,gpu_workstation' } }).chain, ['openai', 'gpu_workstation'], 'operators can still pin a strong-first chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'openai,gpu_workstation' } }).chain, ['openai', 'gpu_workstation', 'ollama'], 'GPU-bearing operator pins retain VPS fallback');
   // Operators can pin a class to OpenAI (or anything else) without a code change.
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai'], 'unknown providers fall back to the default chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai'], 'unknown providers fall back to the default chain');
   for (const workloadKind of ['architecture', 'backend_implementation', 'independent_code_review', 'repository_summary']) {
-    assert.ok(!routeBuilderModel({ workloadKind }).chain.includes('ollama'), `the measured-failing VPS CPU tier is out of the ${workloadKind} default chain`);
+    const chain = routeBuilderModel({ workloadKind }).chain;
+    assert.equal(chain.indexOf('ollama'), chain.indexOf('gpu_workstation') + 1, `VPS Ollama directly follows laptop GPU for ${workloadKind}`);
   }
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', containsRestrictedData: true }).chain, ['ollama', 'gpu_workstation'], 'restricted data still stays on Bob\'s own compute, VPS CPU included');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', containsRestrictedData: true }).chain, ['gpu_workstation', 'ollama'], 'restricted work stays on laptop GPU then private VPS only');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {
   const route = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true });
-  assert.deepEqual(route.chain, ['ollama', 'gpu_workstation']);
+  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama']);
   assert.ok(!route.chain.includes('openai'));
   assert.equal(route.reason, 'restricted_data_local_only');
+});
+
+test('auto routing keeps VPS Ollama directly after laptop GPU candidates', async () => {
+  const chain = ['gpu_workstation', 'ollama', 'ollama_cloud'];
+  const health = Object.fromEntries(chain.map(provider => [provider, {
+    configured: true, healthy: true, ready_model: `${provider}-model`, models: [`${provider}-model`], installed: [`${provider}-model`],
+  }]));
+  const result = await routedCandidates({
+    provider: 'gpu_workstation', chain, routing_reason: 'in_house_first_author', prompt_version: 'test-v1',
+    organization_id: 'org-1', request: { workload_kind: 'backend_implementation' },
+  }, {
+    health,
+    router: {
+      async catalogProviders() { return []; },
+      async rank({ candidates }) {
+        return { ordered: [...candidates].reverse(), excluded: [], task_class: 'implementation', policy: null };
+      },
+    },
+  });
+  const providers = result.candidates.map(candidate => candidate.provider);
+  assert.equal(providers.indexOf('ollama'), providers.indexOf('gpu_workstation') + 1);
 });
 
 test('model run request has a deterministic idempotency key', () => {
@@ -417,6 +440,7 @@ test('fallback gets bounded validator corrections, not rejected output, with a d
       gatewayUrl: 'https://feedback.example', apiToken: 'server-token',
       health: {
         gpu_workstation: { configured: true, healthy: true, ready_model: 'local' },
+        ollama: { configured: true, healthy: true, ready_model: 'vps' },
         ollama_cloud: { configured: true, healthy: true, ready_model: 'cloud' }
       },
       fetchImpl: async (_url, init) => {
@@ -431,12 +455,12 @@ test('fallback gets bounded validator corrections, not rejected output, with a d
     }
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(calls.map(call => call.provider), ['gpu_workstation', 'ollama_cloud']);
+  assert.deepEqual(calls.map(call => call.provider), ['gpu_workstation', 'ollama']);
   assert.match(calls[1].user_prompt, /route_map must use supplied identifiers/);
   assert.doesNotMatch(calls[1].user_prompt, /REJECTED_OUTPUT_MUST_NOT_BE_FORWARDED/);
   const feedback = JSON.parse(calls[1].user_prompt.split('\n\n').at(-1));
   assert.equal(feedback.validation_corrections[0].length, 600);
-  assert.match(calls[1].idempotency_key, /::ollama_cloud::correction-[a-f0-9]{16}$/);
+  assert.match(calls[1].idempotency_key, /::ollama::correction-[a-f0-9]{16}$/);
   assert.equal(request.request.user_prompt, 'Assess the requested change.', 'original request is immutable');
   assert.equal(mock.storageWrites.filter(write => write.type === 'upload').length, 1);
 });
@@ -483,9 +507,9 @@ test('model gateway retries a dropped connection once and names the cause; timeo
 
 test('restricted data never reaches Ollama Cloud or OpenAI, even when the environment asks for them', () => {
   const pinned = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true, env: { BOB_BUILDER_ROUTE_RESTRICTED: 'ollama_cloud,gpu_workstation,openai' } });
-  assert.deepEqual(pinned.chain, ['gpu_workstation']);
+  assert.deepEqual(pinned.chain, ['gpu_workstation', 'ollama']);
   const externalOnly = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true, env: { BOB_BUILDER_ROUTE_RESTRICTED: 'ollama_cloud,openai' } });
-  assert.deepEqual(externalOnly.chain, ['ollama', 'gpu_workstation'], 'an all-external pin falls back to local-only, never to an empty or external chain');
+  assert.deepEqual(externalOnly.chain, ['gpu_workstation', 'ollama'], 'an all-external pin falls back to GPU then VPS local-only');
 });
 
 test('Ollama Cloud sits after in-house compute and before paid OpenAI', () => {
@@ -520,13 +544,13 @@ test('Claude leads the security review chains and external tiers never enter a r
   assert.equal(review.provider, 'anthropic');
   assert.equal(review.reason, 'security_review_engine_first');
   assert.ok(SECURITY_WORKLOADS.has('security_review'));
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'security_review' }).chain, ['anthropic', 'gpu_workstation', 'ollama_cloud', 'openai']);
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'security_review', env: { BOB_BUILDER_ROUTE_SECURITY: 'gpu_workstation,anthropic' } }).chain, ['gpu_workstation', 'anthropic']);
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'security_review' }).chain, ['anthropic', 'gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'security_review', env: { BOB_BUILDER_ROUTE_SECURITY: 'gpu_workstation,anthropic' } }).chain, ['gpu_workstation', 'ollama', 'anthropic']);
   for (const provider of ['anthropic', 'omniroute', 'ollama_cloud', 'openai']) assert.ok(EXTERNAL_PROVIDERS.has(provider), provider);
   for (const workloadKind of ['architecture', 'backend_implementation', 'independent_code_review', 'repository_summary', 'security_review']) {
     assert.ok(!routeBuilderModel({ workloadKind }).chain.includes('omniroute'), `OmniRoute is opt-in only (${workloadKind})`);
   }
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'omniroute,gpu_workstation' } }).chain, ['omniroute', 'gpu_workstation'], 'operators opt OmniRoute in by configuration');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'omniroute,gpu_workstation' } }).chain, ['omniroute', 'gpu_workstation', 'ollama'], 'GPU-bearing operator routes retain VPS fallback');
 });
 
 test('stored artifacts written inside a markdown code fence still parse as JSON (BB-170)', () => {

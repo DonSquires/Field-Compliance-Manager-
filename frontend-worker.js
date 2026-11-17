@@ -19,12 +19,6 @@ const VERIFICATION_ENV = Object.freeze({
   // E2E stays deterministic even though workers now have network: fixtures answer external requests with an empty 204 (job ecfb4dc4).
   E2E_OFFLINE: '1'
 });
-const BLOCKED_FILES = new Set([
-  'apps/web/package.json',
-  'apps/web/package-lock.json',
-  'apps/web/pnpm-lock.yaml',
-  'apps/web/yarn.lock'
-]);
 const PROTECTED_FRONTEND_PATHS = [
   /^apps\/web\/src\/context\/AuthContext\.tsx$/,
   /^apps\/web\/src\/lib\/supabase\.ts$/,
@@ -48,7 +42,7 @@ function changedFilesFromPatch(patchText) {
   return [...files].sort();
 }
 
-function validatePatchText(patchText, { lane = 'frontend' } = {}) {
+function validatePatchText(patchText, { lane = 'frontend', allowAgenticDependencies = false } = {}) {
   if (typeof patchText !== 'string' || !patchText.trim()) throw new Error('patch is empty');
   if (Buffer.byteLength(patchText) > MAX_PATCH_BYTES) throw new Error('patch exceeds size limit');
   for (const section of patchText.split(/(?=^diff --git )/m)) {
@@ -72,9 +66,8 @@ function validatePatchText(patchText, { lane = 'frontend' } = {}) {
     }
     // The frontend lane is fenced to apps/web; a verified patch from any lane only has to respect the protected paths.
     if (lane === 'frontend' && !file.startsWith('apps/web/')) throw new Error(`frontend patch cannot modify ${file}`);
-    if (BLOCKED_FILES.has(file)) throw new Error(`dependency manifest changes require separate approval: ${file}`);
     if (/(?:^|\/)\.env(?:\.|$)/.test(file)) throw new Error(`environment files are not allowed: ${file}`);
-    if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file)) || isProtectedPath(file)) {
+    if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file)) || isProtectedPath(file, { allowAgenticDependencies })) {
       throw new Error(`protected ${lane === 'frontend' ? 'frontend ' : ''}changes require separate approval: ${file}`);
     }
   }
@@ -220,6 +213,9 @@ function frontendVerificationCommands({ changedFiles = [], webDir = null } = {})
   const baselineSpecs = changedFiles.map(baselineInfo).filter(Boolean).map(info => info.spec);
   const targeted = [...new Set([...baselineSpecs, ...(webDir ? targetedE2eSpecs(changedFiles, webDir) : [])])].filter(spec => !E2E_SMOKE_SPECS.includes(spec));
   return [
+    ...(changedFiles.some(file => /^apps\/web\/(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(file))
+      ? [['ci', '--prefix', 'apps/web', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund']]
+      : []),
     ['run', 'lint', '--prefix', 'apps/web'],
     ['run', 'build', '--prefix', 'apps/web'],
     ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot'],
@@ -229,7 +225,7 @@ function frontendVerificationCommands({ changedFiles = [], webDir = null } = {})
 
 function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/work/repository', runCommand = run }) {
   const patchText = fs.readFileSync(patchPath, 'utf8');
-  const changedFiles = validatePatchText(patchText);
+  const changedFiles = validatePatchText(patchText, { allowAgenticDependencies: true });
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(workDir, { recursive: true });
   fs.cpSync(sourceDir, workDir, {

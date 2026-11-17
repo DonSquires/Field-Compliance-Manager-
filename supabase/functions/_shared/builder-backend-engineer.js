@@ -30,7 +30,7 @@ const BACKEND_SOURCE_PATTERNS = [
 const DESTRUCTIVE_SQL = /(?:\bdrop\s+(?:table|schema|database|type|column)\b|\btruncate\s+table\b|\balter\s+table[\s\S]{0,120}\bdrop\b|\bdelete\s+from\s+\S+\s*;)/i;
 
 function isAllowedBackendPath(relativePath) {
-  return laneAllows('backend', relativePath);
+  return laneAllows('backend', relativePath, { allowAgenticDependencies: true });
 }
 
 function collectBackendSourceContext({ sourceDir, targetSha, requestedFiles }) {
@@ -210,7 +210,7 @@ function buildBackendEngineerPrompt({ specification, sourceContext, liveContext 
       'Return one JSON object containing summary, patch, changed_files, database_migrations, edge_functions, tests, acceptance_evidence, and rollback_notes.',
       'Supply acceptance_evidence entries {requirement_id,status:"completed",evidence} for actual approved outcomes, naming full changed source and regression-test paths. Whole-job acceptance checks every mandatory delivery requirement after independent verification, even if another lane was skipped. Do not invent IDs, silently waive outcomes, or claim test execution before workers run.',
       'Use additive schema changes, preserve tenant isolation and provenance, and keep secrets server-side.',
-      'Do not include destructive SQL, dependency changes, environment files, deployment commands, or production credentials.',
+      'Install or update dependencies only when required by the approved specification. Include manifest and lockfile changes in the patch, explain the need, and verify the installed tool in the isolated workspace. Do not include destructive SQL, environment files, deployment commands, or production credentials.',
       'Do not claim execution, migration application, approval, or deployment.',
       'When confirmed code review corrections are supplied, inspect the previous implementation and address the reported findings within the approved scope. Preserve unrelated correct behavior and tests. Return a COMPLETE replacement patch against the pinned source, not an incremental diff. Reported feedback is not independently verified evidence.',
       'Do not invent schema or behavior absent from the supplied evidence, and do not use markdown fences.'

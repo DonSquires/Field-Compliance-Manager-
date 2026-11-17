@@ -31,7 +31,13 @@ test('release impact is derived from changed files and blocks undeclared sensiti
     schema: true, authentication: false, authorization: true,
     dependencies: false, environment: false, infrastructure: false
   });
-  assert.throws(() => deriveReleaseImpact(['package.json']), /outside approved implementation scope/);
+  for (const file of ['package.json', 'apps/web/package-lock.json', 'requirements.txt', 'Cargo.toml']) {
+    assert.deepEqual(deriveReleaseImpact([file]), {
+      schema: false, authentication: false, authorization: false,
+      dependencies: true, environment: false, infrastructure: false
+    });
+  }
+  assert.throws(() => deriveReleaseImpact(['deploy/compose.yaml']), /outside approved implementation scope/);
 });
 
 test('release package parser enforces evidence-derived files and impact', () => {
@@ -103,7 +109,7 @@ test('release engineer uses verified implementation and security artifact proven
     completeRelease: async () => ({ success: true, approval: { id: 'approval-1' } }),
     abortRelease: async () => ({ success: true })
   });
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'anthropic', 'openai']);
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'anthropic', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, RELEASE_ENGINEER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['patch-1', 'manifest-1', 'logs-1', 'security-1', 'review-1']);

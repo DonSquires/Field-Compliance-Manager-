@@ -9,7 +9,7 @@
 // job that touches evidential paths is never cleared by the autopilot; it waits for a person.
 const { runBuilderUntilPause, loadBuilderRuntimeSnapshot, implementationRuns } = require('./builder-runtime-coordinator');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
-const { evidentialMentions, evidentialPathsIn, isProtectedPath } = require('./builder-path-policy');
+const { evidentialMentions, evidentialPathsIn, isProtectedPath, isDependencyPath } = require('./builder-path-policy');
 const { baselineInfo } = require('./builder-visual-baseline');
 
 const TERMINAL = new Set(['failed', 'cancelled', 'deployed']);
@@ -62,6 +62,10 @@ function routineRepairHold({ job, approval, evidence }) {
   if (!['routine_monitor', 'main_monitor'].includes(job?.autopilot_source)) return null;
   if (job.repair_risk !== 'routine') {
     return { gate: approval.approval_type, files: [], reasons: ['repair is no longer classified as routine'] };
+  }
+  const dependencyFiles = (evidence?.changedFiles ?? []).filter(file => isDependencyPath(String(file)));
+  if (dependencyFiles.length) {
+    return { gate: approval.approval_type, files: dependencyFiles, reasons: ['routine repair changed dependency manifests'] };
   }
   if (job.autopilot_source === 'routine_monitor' && evidence?.specificationMissing === true) {
     return { gate: approval.approval_type, files: [], reasons: ['no product specification was found to judge the routine scope'] };
