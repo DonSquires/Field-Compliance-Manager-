@@ -161,12 +161,15 @@ test('location patrol responsibility versions confirmed future plans without cha
     const responsibilityMigration = fs.readdirSync(path.join(root, 'supabase/migrations'))
       .find(file => /^\d+_location_patrol_responsibility\.sql$/.test(file));
     if (responsibilityMigration) sql(fs.readFileSync(path.join(root, 'supabase/migrations', responsibilityMigration), 'utf8'));
+    sql(fs.readFileSync(path.join(root, 'supabase/migrations/20261117050000_patrol_setup_null_new_rate.sql'), 'utf8'));
     const effective = sql("SELECT ((clock_timestamp() AT TIME ZONE 'Pacific/Auckland')::date+2)::text");
     const changes = {
       patrol_config_id: id(42), service_agreement_location_id: id(12),
       service_agreement_module_id: id(14), patrol_route_id: id(31), work_unit_id: id(36),
       effective_from: effective,
-      billing: { source: 'agreement', rate_type: 'hourly', billing_unit_code: 'hourly_officer' },
+      // Same shape ResponsibleRunDialog sends: unused choices arrive as JSON null, not as missing keys.
+      billing: { source: 'agreement', rate_type: 'hourly', billing_unit_code: 'hourly_officer',
+        rate_rule_id: null, new_rate: null, expected_selection_id: null, expected_updated_at: null },
     };
 
     await t.test('setup distinguishes contracts and rejects unauthorized or unrosterable responsibility', () => {
@@ -323,7 +326,7 @@ test('location patrol responsibility versions confirmed future plans without cha
       const current = get().billing_workspaces[0].selections[0];
       const amendment = { ...changes, patrol_route_id: id(30), work_unit_id: id(35),
         billing: { source: 'rate_rule', rate_type: 'hourly', billing_unit_code: 'hourly_officer',
-          rate_rule_id: id(95), expected_selection_id: current.id, expected_updated_at: current.updated_at } };
+          rate_rule_id: id(95), new_rate: null, expected_selection_id: current.id, expected_updated_at: current.updated_at } };
       const before = get();
       const plan = preview(amendment);
       sql(`UPDATE public.rate_rules SET amount=99 WHERE id='${id(95)}'`);
