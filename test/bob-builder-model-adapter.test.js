@@ -79,6 +79,28 @@ test('auto routing keeps VPS Ollama directly after laptop GPU candidates', async
   assert.equal(providers.indexOf('ollama'), providers.indexOf('gpu_workstation') + 1);
 });
 
+test('auto routing restores a capped private VPS fallback without overriding policy or avoidance', async () => {
+  const chain = ['gpu_workstation', 'ollama', 'ollama_cloud'];
+  const health = Object.fromEntries(chain.map(provider => [provider, {
+    configured: true, healthy: true, ready_model: `${provider}-model`, models: [`${provider}-model`], installed: [`${provider}-model`],
+  }]));
+  const request = {
+    provider: 'gpu_workstation', chain, routing_reason: 'in_house_first_author', prompt_version: 'test-v1',
+    organization_id: 'org-1', request: { workload_kind: 'backend_implementation' },
+  };
+  const router = excluded => ({
+    async catalogProviders() { return []; },
+    async rank({ candidates }) {
+      return { ordered: candidates.filter(candidate => candidate.provider !== 'ollama'), excluded, task_class: 'implementation', policy: null };
+    },
+  });
+  const providers = async options => (await routedCandidates(request, { health, ...options })).candidates.map(candidate => candidate.provider);
+  assert.deepEqual(await providers({ router: router([]) }), ['gpu_workstation', 'ollama', 'ollama_cloud']);
+  assert.deepEqual(await providers({ router: router([{ provider: 'ollama', model: 'ollama-model', reason: 'policy_excluded' }]) }), ['gpu_workstation', 'ollama_cloud']);
+  assert.deepEqual(await providers({ router: router([]), avoid: [{ provider: 'ollama' }] }), ['gpu_workstation', 'ollama_cloud']);
+  assert.deepEqual(await providers({ router: router([]), health: { ...health, ollama: { ...health.ollama, healthy: false } } }), ['gpu_workstation', 'ollama_cloud']);
+});
+
 test('model run request has a deterministic idempotency key', () => {
   const first = makeRequest({ outputSchema: { required: ['summary', 'risks'] } });
   const second = makeRequest({ outputSchema: { required: ['summary', 'risks'] } });

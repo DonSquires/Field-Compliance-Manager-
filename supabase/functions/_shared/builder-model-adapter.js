@@ -459,6 +459,11 @@ async function routedCandidates(modelRequest, { health = null, avoid = [], start
     .filter(candidate => !restricted || !EXTERNAL_PROVIDERS.has(candidate.provider))
     .map(({ provider, model }) => ({ provider, model }));
   const laptopIndex = ordered.findIndex(candidate => candidate.provider === PROVIDERS.GPU_WORKSTATION);
+  if (laptopIndex >= 0 && !ordered.some(candidate => candidate.provider === PROVIDERS.OLLAMA)) {
+    const fallback = staticCandidates.find(candidate => candidate.provider === PROVIDERS.OLLAMA
+      && !(ranked.excluded || []).some(excluded => excluded.provider === candidate.provider && excluded.model === candidate.model));
+    if (fallback) ordered.push(fallback);
+  }
   if (laptopIndex >= 0) {
     const beforeLaptop = ordered.slice(0, laptopIndex).filter(candidate => candidate.provider !== PROVIDERS.OLLAMA);
     const laptopModels = ordered.filter(candidate => candidate.provider === PROVIDERS.GPU_WORKSTATION);
