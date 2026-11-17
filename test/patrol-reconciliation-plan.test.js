@@ -112,6 +112,20 @@ test('source comparison identifies edited contents by job key, not workbook hash
   assert.notEqual(result.actions[0].source_fingerprint, result.actions[0].previous_source_fingerprint);
 });
 
+test('a source-place conflict remains a hold rather than appearing as a removed row', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { previous, current } = await sourceVersions();
+  const ref = current.events[0].external_ref;
+  current.events = [];
+  current.unresolved_places = [{ name: null, reason: 'conflicting_place_fields', source_rows: [9] }];
+  current.source_holds = [{ external_ref: ref, kind: 'event', source_row: 9, reason: 'conflicting_place_fields' }];
+  const result = compareSourcePlans(current, previous);
+  assert.equal(result.summary.hold, 1);
+  assert.equal(result.summary.missing, 0);
+  assert.deepEqual(result.actions.map(action => [action.external_ref, action.operation, action.reason]),
+    [[ref, 'hold', 'conflicting_place_fields']]);
+});
+
 test('first source snapshot is a baseline, not evidence that an FCM record may be overwritten', async () => {
   const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
   const { current } = await sourceVersions();

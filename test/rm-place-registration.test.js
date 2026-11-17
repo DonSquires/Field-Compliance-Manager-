@@ -23,6 +23,43 @@ test('known places resolve by code, text, case, normalised text and single-lette
   assert.equal(resolve('', 'Elveys Rd').target, 'zone-elveys');
 });
 
+test('a different or missing directional qualifier cannot resolve to a mapped place', async () => {
+  const { buildPlaceResolver } = await loadResolver();
+  for (const [known, source] of [
+    ['Dart South', 'Dart North'],
+    ['Dart South', 'Dart'],
+    ['Pine Upper', 'Pine Lower'],
+    ['Red East', 'Red West'],
+    ['Valley Top', 'Valley Bottom'],
+  ]) {
+    const result = buildPlaceResolver({ [known]: 'mapped-zone' })('', source);
+    assert.equal(result.target, null, `${source} must not resolve to ${known}`);
+  }
+});
+
+test('conflicting mapped reserve and location fields require review instead of choosing either place', async () => {
+  const { buildPlaceResolver } = await loadResolver();
+  const resolve = buildPlaceResolver(ZONES);
+  assert.deepEqual(resolve('ser', 'Dart South'), {
+    target: null, match: 'conflicting_place_fields', placeName: null,
+    sourceCode: 'ser', sourceText: 'Dart South',
+    conflictingTargets: { reserve: 'zone-serpentine', location: 'zone-dart-south' },
+  });
+  assert.equal(resolve('SER', 'Serpentine Rd').target, 'zone-serpentine');
+  assert.equal(resolve('SER', 'Unmapped checkpoint').target, 'zone-serpentine');
+});
+
+test('a reviewed reserve alias that conflicts with a mapped location requires review', async () => {
+  const { buildPlaceResolver } = await loadResolver();
+  const resolve = buildPlaceResolver({ ...ZONES, 'Head Office': 'zone-hq' }, { placeAliases: { HQ: 'Head Office' } });
+  assert.deepEqual(resolve('HQ', 'Dart South'), {
+    target: null, match: 'conflicting_place_fields', placeName: null,
+    sourceCode: 'HQ', sourceText: 'Dart South',
+    conflictingTargets: { reserve: 'zone-hq', location: 'zone-dart-south' },
+  });
+  assert.equal(resolve('HQ', 'Head Office').target, 'zone-hq');
+});
+
 test('a location that is ambiguous or unknown becomes a new place name, never a guess', async () => {
   const { buildPlaceResolver, newPlaceName } = await loadResolver();
   const resolve = buildPlaceResolver(ZONES);
@@ -66,6 +103,17 @@ test('places to register are named with the client suffix and merged by name', a
   assert.deepEqual(placeOverlay(places, [{ name: 'Quinneys Rd (OneFortyOne)', status: 'created', zone_id: 'z1' }]),
     { 'Quinneys Rd': 'z1', 'quinneys rd': 'z1' });
   assert.deepEqual(placeOverlay(places, [{ name: 'Quinneys Rd (OneFortyOne)', status: 'registry_match_review', zone_id: null }]), {});
+});
+
+test('an unregistered reserve alias cannot override a mapped location or create a new place', async () => {
+  const { buildPlaceResolver } = await loadResolver();
+  const resolve = buildPlaceResolver({ 'Dart South': 'zone-dart-south' }, {
+    placeAliases: { HQ: 'Head Office' },
+  });
+  assert.deepEqual(resolve('HQ', 'Dart South'), {
+    target: null, match: 'unresolved_reserve_alias', placeName: null,
+    sourceCode: 'HQ', sourceText: 'Dart South',
+  });
 });
 
 test('place registration runs as the import identity through governed RPCs and never revives an ended link', async () => {

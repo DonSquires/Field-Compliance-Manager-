@@ -61,6 +61,7 @@ DECLARE
   v_created boolean;
   v_linked boolean;
   v_count integer;
+  v_registry_key text;
 BEGIN
   IF NOT EXISTS(SELECT 1 FROM public.import_source_profiles
     WHERE organization_id='${providerId}'::uuid AND profile_code='rm_patrol_log' AND active AND import_actor_id=auth.uid())
@@ -70,6 +71,18 @@ BEGIN
     AND sa.agreement_type='operational' AND sa.invitation_status='accepted'
     AND (sa.ends_on IS NULL OR sa.ends_on>=current_date);
   IF v_agreements<>1 THEN v_agreement:=NULL; END IF;
+  FOR v_registry_key IN
+    SELECT DISTINCT split_part(normalized.name,' (',1) AS registry_key
+    FROM jsonb_array_elements(v_data->'places') place
+    CROSS JOIN LATERAL (VALUES
+      (lower(regexp_replace(btrim(coalesce(place.value->>'name','')),'[[:space:]]+',' ','g'))),
+      (lower(regexp_replace(btrim(coalesce(place.value->>'source_name','')),'[[:space:]]+',' ','g')))
+    ) normalized(name)
+    WHERE split_part(normalized.name,' (',1)<>''
+    ORDER BY registry_key
+  LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended('rm-source-registry:'||v_registry_key,0));
+  END LOOP;
   FOR v_place IN SELECT value FROM jsonb_array_elements(v_data->'places') LOOP
     PERFORM pg_advisory_xact_lock(hashtextextended('${clientId}:'||lower(v_place->>'name'),0));
     SELECT count(*) INTO v_count FROM public.locations
@@ -83,8 +96,19 @@ BEGIN
     ORDER BY (client_request_id=(v_place->>'request_id')::uuid) DESC LIMIT 1;
     v_created:=NOT FOUND;
     IF v_created THEN
-      IF EXISTS(SELECT 1 FROM public.canonical_places WHERE status<>'merged'
-        AND lower(display_name) IN (lower(v_place->>'name'),lower(v_place->>'source_name'))) THEN
+      IF EXISTS(SELECT 1 FROM public.canonical_places cp
+        CROSS JOIN LATERAL (SELECT
+          lower(regexp_replace(btrim(cp.display_name),'[[:space:]]+',' ','g')) AS display_name,
+          lower(regexp_replace(btrim(coalesce(v_place->>'name','')),'[[:space:]]+',' ','g')) AS registered_name,
+          lower(regexp_replace(btrim(coalesce(v_place->>'source_name','')),'[[:space:]]+',' ','g')) AS source_name
+        ) names
+        WHERE cp.status<>'merged' AND (
+          names.display_name IN (names.registered_name,names.source_name)
+          OR (names.source_name<>'' AND right(names.display_name,1)=')'
+            AND left(names.display_name,char_length(names.source_name)+2)=names.source_name||' (')
+          OR (names.source_name<>'' AND right(names.source_name,1)=')'
+            AND left(names.source_name,char_length(names.display_name)+2)=names.display_name||' (')
+        )) THEN
         INSERT INTO source_place_receipts VALUES(v_place->>'name','registry_match_review',NULL,false,false); CONTINUE;
       END IF;
       v_location:=public.manage_crm_location(

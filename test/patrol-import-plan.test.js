@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join, resolve } = require('node:path');
+const { dirname, join, resolve } = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const ExcelJS = require('exceljs');
@@ -18,7 +18,7 @@ function plan(context, extra = [], csvOverride) {
     provider_organization_id: '30000000-0000-4000-8000-000000000001', source_profile: 'test_patrol',
     rows: [
       { record_type: 'source_profile', payload: { parser: 'csv', import_actor_id: '40000000-0000-4000-8000-000000000001',
-        column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], time: ['Time'], location: ['Location'],
+        column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], time: ['Time'], reserve: ['Reserve'], location: ['Location'],
           comments: ['Comments'], registration: ['Reg'], issue: ['Issue'],
           job_km: ['Job Km NCC', 'Job KM Stringer'], odometer: ['Travel Odometer', 'ODO'],
           job_time: ['Job Time'], job_cost: ['Job Cost'], travel_cost: ['Travel Cost'], total_cost: ['Total Cost'],
@@ -43,7 +43,8 @@ function plan(context, extra = [], csvOverride) {
   return { result, csv, args, env, contextPath };
 }
 
-async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false, typedDates = false, formulaDates = false, date1904 = false } = {}) {
+async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false, typedDates = false, formulaDates = false,
+  date1904 = false, sourceHash = null } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'fcm-patrol-xlsx-plan-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   const xlsxPath = join(directory, 'source.xlsx');
@@ -89,6 +90,7 @@ async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false, typed
     '--provider-org-id', '30000000-0000-4000-8000-000000000001', '--classification-profile', 'test_patrol', '--import-context', contextPath,
     '--org-id', '10000000-0000-4000-8000-000000000001', '--client-code', 'TEST',
     '--zone-map', JSON.stringify({ 'Test place': '20000000-0000-4000-8000-000000000001' }),
+    ...(sourceHash ? ['--source-hash', sourceHash === 'actual' ? createHash('sha256').update(bytes).digest('hex') : sourceHash] : []),
   ];
   const result = spawnSync(process.execPath, args, { env, encoding: 'utf8' });
   return { result, bytes };
@@ -113,6 +115,498 @@ test('plan export reuses governed parser without requiring database credentials'
   assert.match(output.events[0].payload.derivative_sha256, /^[a-f0-9]{64}$/);
 });
 
+test('conflicting mapped source places stage neither activity nor consequential proposals', async context => {
+  const csv = [
+    'Job,Patroller,Date,Reserve,Location,Comments,Reg',
+    '42,fixture officer,19/10/2026,DONA,Hope saddle,vehicle sighted,ABC123',
+    '43,Camera,19/10/2026,DONA,Hope saddle,camera alert,',
+  ].join('\n');
+  const reserve = '20000000-0000-4000-8000-000000000002';
+  const location = '20000000-0000-4000-8000-000000000003';
+  const { result } = plan(context, ['--include-narratives', '--place-overlay',
+    JSON.stringify({ DONA: reserve, 'Hope saddle': location })], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.observations, []);
+  assert.deepEqual(output.events, []);
+  assert.deepEqual(output.proposals, []);
+  assert.equal(output.counts.unresolved, 2);
+  assert.deepEqual(output.unresolved_places, [{
+    name: null, reason: 'conflicting_place_fields',
+    conflicting_targets: { reserve, location },
+    reserve_codes: ['DONA'], locations: ['Hope saddle'], source_rows: [2, 3],
+  }]);
+  assert.deepEqual(output.source_holds, [
+    { external_ref: 'rm_patrol_import:TEST:42', kind: 'observation', source_row: 2, reason: 'conflicting_place_fields' },
+    { external_ref: 'rm_patrol_import:TEST:43', kind: 'event', source_row: 3, reason: 'conflicting_place_fields' },
+  ]);
+  const { placesToRegister } = await import('../services/document-source-worker/source-places.mjs');
+  assert.deepEqual(placesToRegister(output, {}), []);
+});
+
+test('a duplicate job key is held in either row order when one copy has conflicting places', async context => {
+  const { buildReconciliationPlan, buildSyncChunks } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const safe = '42,Camera,19/10/2026,DONA,DONA,first copy,';
+  const conflict = '42,Camera,19/10/2026,DONA,Hope saddle,conflicting copy,';
+  for (const rows of [[safe, conflict], [conflict, safe]]) {
+    const csv = [
+      'Job,Patroller,Date,Reserve,Location,Comments,Reg',
+      ...rows,
+      '43,Camera,19/10/2026,,Test place,unrelated,',
+    ].join('\n');
+    const { result } = plan(context, ['--include-narratives', '--place-overlay', JSON.stringify({
+      DONA: '20000000-0000-4000-8000-000000000002',
+      'Hope saddle': '20000000-0000-4000-8000-000000000003',
+    })], csv);
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.events.map(row => row.external_ref), ['rm_patrol_import:TEST:43']);
+    assert.ok(output.proposals.every(proposal => proposal.source_record_key !== 'rm_patrol_import:TEST:42'));
+    assert.equal(output.source_holds.length, 2);
+    assert.deepEqual(new Set(output.source_holds.map(hold => hold.reason)),
+      new Set(['conflicting_place_fields', 'duplicate_source_key_with_conflict']));
+    const reconciliation = buildReconciliationPlan({ sourcePlan: output, existing: [] });
+    assert.equal(reconciliation.summary.hold, 2);
+    assert.equal(reconciliation.summary.insert, 1);
+    assert.ok(!JSON.stringify(buildSyncChunks(output, reconciliation).chunks).includes('rm_patrol_import:TEST:42'));
+  }
+});
+
+function directApply(context, csv, extra = [], apply = true) {
+  const { args, env, contextPath } = plan(context, extra, csv);
+  const fetchStub = join(dirname(contextPath), 'fetch-stub.cjs');
+  writeFileSync(fetchStub, `
+    const fs = require('node:fs');
+    globalThis.fetch = async (_url, options) => {
+      const { query } = JSON.parse(options.body);
+      if (!query.startsWith('SELECT * FROM (')) throw new Error('Unexpected database write in test');
+      return new Response(JSON.stringify(JSON.parse(fs.readFileSync(process.env.TEST_IMPORT_CONTEXT)).rows));
+    };
+  `);
+  const directArgs = args.filter((arg, index) => arg !== '--export-plan'
+    && arg !== '--import-context' && args[index - 1] !== '--import-context');
+  const result = spawnSync(process.execPath, ['--require', fetchStub, ...directArgs, apply ? '--apply' : '--dry-run'], { encoding: 'utf8', env: {
+    ...env, SUPABASE_ACCESS_TOKEN: 'test-token', SUPABASE_PROJECT_REF: 'test-project',
+    TEST_IMPORT_CONTEXT: contextPath,
+  } });
+  return result;
+}
+
+test('direct apply refuses a source-place conflict before opening a batch', context => {
+  const csv = [
+    'Job,Patroller,Date,Reserve,Location,Comments,Reg',
+    '42,fixture officer,19/10/2026,DONA,Hope saddle,vehicle sighted,ABC123',
+  ].join('\n');
+  const result = directApply(context, csv, ['--place-overlay', JSON.stringify({
+    DONA: '20000000-0000-4000-8000-000000000002',
+    'Hope saddle': '20000000-0000-4000-8000-000000000003',
+  })]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /conflicting place fields.*review/i);
+  assert.doesNotMatch(result.stderr, /Unexpected database write/);
+});
+
+test('direct apply refuses unplaced sightings and unresolved visits before opening a batch', context => {
+  for (const row of [
+    '42,fixture officer,19/10/2026,Unknown place,vehicle sighted,ABC123',
+    '42,fixture officer,19/10/2026,,vehicle sighted,ABC123',
+    '42,Camera,19/10/2026,Unknown place,camera alert,',
+    '42,Camera,19/10/2026,,camera alert,',
+  ]) {
+    const result = directApply(context, ['Job,Patroller,Date,Location,Comments,Reg', row].join('\n'));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unresolved place.*review/i);
+    assert.doesNotMatch(result.stderr, /Unexpected database write/);
+  }
+});
+
+test('direct apply refuses source financial values before opening a client-readable batch', context => {
+  const header = 'Job,Patroller,Date,Location,Comments,Reg,Job Cost,Travel Cost,Total Cost';
+  for (const row of [
+    '42,Camera,19/10/2026,Test place,camera alert,,12,,',
+    '43,fixture officer,19/10/2026,Test place,vehicle sighted,ABC123,0,,',
+  ]) {
+    const result = directApply(context, [header, row].join('\n'));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /financial.*review/i);
+    assert.doesNotMatch(result.stderr, /Unexpected database write/);
+  }
+});
+
+test('populated unparseable cost cells survive local planning and block source promotion', async context => {
+  const { runSourceSync } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  for (const cell of ['(12.50)', '#VALUE!', '1.25e2']) {
+    const csv = [
+      'Job,Patroller,Date,Location,Comments,Total Cost',
+      `42,Camera,19/10/2026,Test place,all clear,${cell}`,
+    ].join('\n');
+    const result = plan(context, [], csv).result;
+    assert.equal(result.status, 0, result.stderr);
+    const source = JSON.parse(result.stdout);
+    assert.equal(source.financial_source_present, true, cell);
+    assert.equal(source.events[0].payload.source_cost_cells.total_cost, cell);
+    const writes = [];
+    const report = await runSourceSync({
+      sourcePlan: source, providerOrganizationId: source.provider_organization_id, commit: true,
+      readQuery: async sql => {
+        if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+        if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+        throw new Error('Unexpected read');
+      },
+      writeQuery: async sql => { writes.push(sql); throw new Error('Unexpected database write'); },
+    });
+    assert.equal(report.status, 'source_rows_held');
+    assert.deepEqual(writes, []);
+    const applied = directApply(context, csv);
+    assert.equal(applied.status, 1);
+    assert.match(applied.stderr, /financial.*review/i);
+    assert.doesNotMatch(applied.stderr, /Unexpected database write/);
+  }
+});
+
+test('direct dry run does not expose held-row financial values in its receipt', context => {
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Job Cost',
+    '42,Camera,19/10/2026,Unknown place,camera alert,8675309.42',
+  ].join('\n');
+  const result = directApply(context, csv, [], false);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /financial.*review/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /8675309\.42/);
+  assert.doesNotMatch(result.stderr, /Unexpected database write/);
+});
+
+test('local plan marks financial values even when the source row is held for an unresolved place', context => {
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Job Cost',
+    '42,Camera,19/10/2026,Unknown place,camera alert,0',
+  ].join('\n');
+  const result = plan(context, [], csv).result;
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.events, []);
+  assert.equal(output.source_holds[0].reason, 'unresolved_source_place');
+  assert.equal(output.financial_source_present, true);
+});
+
+test('a cost on an unplaced Start marker holds direct source sync before any write', async context => {
+  const { runSourceSync } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Job Cost',
+    '41,Camera,19/10/2026,,Start,12',
+    '42,Camera,19/10/2026,Test place,all clear,',
+  ].join('\n');
+  const result = plan(context, [], csv).result;
+  assert.equal(result.status, 0, result.stderr);
+  const source = JSON.parse(result.stdout);
+  assert.equal(source.financial_source_present, true);
+  assert.equal(source.events.length, 1);
+  assert.equal(source.source_holds[0]?.reason, 'source_financial_values_require_review');
+  const writes = [];
+  const report = await runSourceSync({ sourcePlan: source, providerOrganizationId: source.provider_organization_id, commit: true,
+    readQuery: async sql => {
+      if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+      if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+      throw new Error('Unexpected read');
+    },
+    writeQuery: async sql => { writes.push(sql); throw new Error('Unexpected database write'); },
+  });
+  assert.equal(report.status, 'source_rows_held');
+  assert.deepEqual(writes, []);
+});
+
+test('a malformed-date duplicate holds both source rows in either order', async context => {
+  const { buildReconciliationPlan, buildSyncChunks } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const valid = '42,Camera,19/10/2026,Test place,valid visit,';
+  const invalid = '42,Camera,bad date,Other place,uncertain visit,';
+  for (const rows of [[valid, invalid], [invalid, valid]]) {
+    const csv = ['Job,Patroller,Date,Location,Comments,Reg', ...rows].join('\n');
+    const { result } = plan(context, ['--include-narratives'], csv);
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.events, []);
+    assert.deepEqual(output.proposals, []);
+    assert.deepEqual(new Set(output.source_holds.map(hold => hold.reason)),
+      new Set(['duplicate_source_key_with_invalid_date', 'invalid_date_in_duplicate_source_key']));
+    assert.deepEqual(output.source_holds.map(hold => hold.source_row).sort(), [2, 3]);
+    const reconciliation = buildReconciliationPlan({ sourcePlan: output, existing: [] });
+    assert.equal(reconciliation.summary.hold, 2);
+    assert.deepEqual(buildSyncChunks(output, reconciliation).chunks, []);
+    const direct = directApply(context, csv);
+    assert.equal(direct.status, 1);
+    assert.match(direct.stderr, /duplicate.*date.*review/i);
+    assert.doesNotMatch(direct.stderr, /Unexpected database write/);
+  }
+});
+
+test('an unplaced sighting is visible as unresolved and cannot enter a sync chunk', async context => {
+  const { buildReconciliationPlan, buildSyncChunks } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Reg',
+    '42,fixture officer,19/10/2026,Unknown place,vehicle sighted,ABC123',
+  ].join('\n');
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.counts.unresolved, 1);
+  const reconciliation = buildReconciliationPlan({ sourcePlan: output, existing: [] });
+  assert.equal(reconciliation.actions[0].reason, 'one_resolved_place_required');
+  assert.equal(reconciliation.actions[0].source_row, 2);
+  assert.deepEqual(buildSyncChunks(output, reconciliation).chunks, []);
+});
+
+test('an unresolved visit remains a hold, not a removed row, while another remains a candidate', async context => {
+  const { buildReconciliationPlan, buildSyncChunks, compareSourcePlans } =
+    await import('../services/document-source-worker/reconcile-plan.mjs');
+  const headers = 'Job,Patroller,Date,Location,Comments,Reg';
+  const known = '42,Camera,19/10/2026,Test place,known visit,';
+  const visit = '43,Camera,19/10/2026,Unknown place,unresolved visit,';
+  const current = JSON.parse(plan(context, ['--include-narratives'], [headers, known, visit].join('\n')).result.stdout);
+  const previous = JSON.parse(plan(context, ['--include-narratives'],
+    [headers, known, visit.replace('Unknown place', 'Test place')].join('\n')).result.stdout);
+  assert.deepEqual(current.source_holds, [{
+    external_ref: 'rm_patrol_import:TEST:43', kind: 'event', source_row: 3, reason: 'unresolved_source_place',
+  }]);
+  assert.ok(current.proposals.every(proposal => proposal.source_record_key !== 'rm_patrol_import:TEST:43'));
+  const reconciliation = buildReconciliationPlan({ sourcePlan: current, existing: [] });
+  assert.equal(reconciliation.summary.hold, 1);
+  const chunks = buildSyncChunks(current, reconciliation).chunks;
+  assert.deepEqual(chunks.flatMap(chunk => chunk.events.map(row => row.external_ref)), ['rm_patrol_import:TEST:42']);
+  const comparison = compareSourcePlans(current, previous);
+  assert.equal(comparison.actions.find(action => action.external_ref === 'rm_patrol_import:TEST:43').operation, 'hold');
+});
+
+test('a visit with a blank place is held while a shift Start marker is not a visit', async context => {
+  const { buildReconciliationPlan } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Reg',
+    '42,Camera,19/10/2026,,Start,',
+    '43,Camera,19/10/2026,,camera alert,',
+  ].join('\n');
+  const { result } = plan(context, ['--include-narratives'], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.source_holds, [{
+    external_ref: 'rm_patrol_import:TEST:43', kind: 'event', source_row: 3, reason: 'unresolved_source_place',
+  }]);
+  assert.deepEqual(output.events, []);
+  assert.equal(output.counts.unresolved, 1);
+  assert.equal(buildReconciliationPlan({ sourcePlan: output, existing: [] }).summary.hold, 1);
+});
+
+test('imported unresolved visits hold the sheet before safe rows are synced', async context => {
+  const { runSourceSync } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { promoteSheet } = await import('../services/document-source-worker/source-promote.mjs');
+  const csv = [
+    'Job,Patroller,Date,Location,Comments,Reg',
+    '42,Camera,19/10/2026,Test place,known visit,',
+    '43,Camera,19/10/2026,Unknown place,unresolved visit,',
+  ].join('\n');
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const source = JSON.parse(result.stdout);
+  const batchId = '50000000-0000-4000-8000-000000000001';
+  const writes = [];
+  const readQuery = async sql => {
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+    if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+    if (sql.includes('import_actor_id')) return [{ import_actor_id: '40000000-0000-4000-8000-000000000001' }];
+    if (sql.includes('file_import_batches')) return [];
+    throw new Error('Unexpected read');
+  };
+  const writeQuery = async sql => {
+    writes.push(sql);
+    if (sql.includes('finalize_patrol_import_batch')) return [{ id: batchId }];
+    return [{ batch_id: batchId, results: [{ phase: 'stage', outcome: 'staged',
+      detail: JSON.stringify({ evt_inserted: 1, obs_inserted: 0, proposals_inserted: 0 }) }] }];
+  };
+  const promoted = await promoteSheet({
+    version: { sha256: source.source_sha256 },
+    sheet: { sheet: '2026', client_code: 'TEST', client_organization_id: source.manifest.target_client_organization_id },
+    map: { max_new_rows_per_sheet: 10 }, commit: true,
+    exportPlan: async () => source, namespaceEventCount: async () => 1,
+    syncPlan: ({ sourcePlan, commit }) => runSourceSync({ sourcePlan,
+      providerOrganizationId: source.provider_organization_id, commit, readQuery, writeQuery }),
+  });
+  assert.equal(promoted.status, 'held');
+  assert.equal(promoted.reason, 'unresolved_source_place');
+  assert.equal(promoted.batch_id, undefined);
+  assert.equal(promoted.row_holds.unresolved_source_place, 1);
+  assert.deepEqual(writes, []);
+});
+
+test('an unregistered reserve alias holds both sightings and visits through promotion', async context => {
+  const { runSourceSync } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { promoteSheet } = await import('../services/document-source-worker/source-promote.mjs');
+  const { placesToRegister } = await import('../services/document-source-worker/source-places.mjs');
+  const csv = [
+    'Job,Patroller,Date,Reserve,Location,Comments,Reg',
+    '42,fixture officer,19/10/2026,HQ,Test place,vehicle sighted,ABC123',
+    '43,Camera,19/10/2026,HQ,Test place,camera alert,',
+    '44,Camera,19/10/2026,,Test place,known visit,',
+  ].join('\n');
+  const { result } = plan(context, ['--place-aliases', JSON.stringify({ HQ: 'Head Office' })], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const source = JSON.parse(result.stdout);
+  assert.deepEqual(placesToRegister(source, {}), []);
+  const writes = [];
+  const readQuery = async sql => {
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+    if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+    throw new Error('Unexpected read');
+  };
+  const promoted = await promoteSheet({
+    version: { sha256: source.source_sha256 },
+    sheet: { sheet: '2026', client_code: 'TEST', client_organization_id: source.manifest.target_client_organization_id },
+    map: { max_new_rows_per_sheet: 10 }, commit: true, namespaceEventCount: async () => 1,
+    exportPlan: async () => source,
+    syncPlan: ({ sourcePlan, commit }) => runSourceSync({ sourcePlan,
+      providerOrganizationId: source.provider_organization_id, commit, readQuery,
+      writeQuery: async sql => { writes.push(sql); return []; } }),
+  });
+  assert.equal(promoted.status, 'held');
+  assert.equal(promoted.reason, 'unresolved_source_place');
+  assert.equal(promoted.row_holds.unresolved_source_place, 1);
+  assert.equal(promoted.row_holds.one_resolved_place_required, 1);
+  assert.deepEqual(writes, []);
+});
+
+test('a real importer overlay reveals conflicting reserve and location before place creation', async context => {
+  const { runSourceSync } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { promoteSheet } = await import('../services/document-source-worker/source-promote.mjs');
+  const csv = [
+    'Job,Patroller,Date,Reserve,Location,Comments,Reg',
+    '42,Camera,19/10/2026,Test place,Unknown place,first,',
+    '43,Camera,19/10/2026,,Unknown place,second,',
+  ].join('\n');
+  const initial = plan(context, [], csv);
+  assert.equal(initial.result.status, 0, initial.result.stderr);
+  const source = JSON.parse(initial.result.stdout);
+  const registrations = [];
+  const writes = [];
+  const readQuery = async sql => {
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true } }];
+    if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [], checkpoints: [] } }];
+    throw new Error('Unexpected read');
+  };
+  const promoted = await promoteSheet({
+    version: { sha256: source.source_sha256 },
+    sheet: { sheet: '2026', client_code: 'TEST', client_organization_id: source.manifest.target_client_organization_id },
+    map: { max_new_rows_per_sheet: 10 }, commit: true, namespaceEventCount: async () => 1,
+    exportPlan: async ({ placeOverlay }) => {
+      const { result } = plan(context, placeOverlay ? ['--place-overlay', JSON.stringify(placeOverlay)] : [], csv);
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    },
+    registerPlaces: async ({ places, commit }) => {
+      registrations.push(commit);
+      return places.map(place => ({ name: place.name, status: 'created',
+        zone_id: '20000000-0000-4000-8000-000000000003', agreement_linked: true }));
+    },
+    syncPlan: ({ sourcePlan, commit, planningOnly }) => runSourceSync({ sourcePlan,
+      providerOrganizationId: source.provider_organization_id, commit, planningOnly, readQuery,
+      writeQuery: async sql => { writes.push(sql); return []; } }),
+  });
+  assert.equal(promoted.status, 'held');
+  assert.equal(promoted.reason, 'conflicting_place_fields');
+  assert.deepEqual(promoted.source_rows, [2]);
+  assert.deepEqual(registrations, [false]);
+  assert.deepEqual(writes, []);
+});
+
+test('duplicate visits are held in either order if one has an unresolved place', async context => {
+  const { buildReconciliationPlan } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const known = '42,Camera,19/10/2026,Test place,known visit,';
+  const blank = '42,Camera,19/10/2026,,missing place,';
+  const unknown = '42,Camera,19/10/2026,Unknown place,unresolved visit,';
+  for (const rows of [[known, unknown], [unknown, known], [blank, unknown], [unknown, blank]]) {
+    const csv = ['Job,Patroller,Date,Location,Comments,Reg', ...rows].join('\n');
+    const { result } = plan(context, ['--include-narratives'], csv);
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.events, []);
+    assert.deepEqual(output.proposals, []);
+    assert.deepEqual(new Set(output.source_holds.map(hold => hold.reason)),
+      new Set(rows.includes(blank)
+        ? ['unresolved_source_place'] : ['unresolved_source_place', 'duplicate_source_key_with_unresolved_place']));
+    assert.equal(buildReconciliationPlan({ sourcePlan: output, existing: [] }).summary.hold, 2);
+  }
+});
+
+test('duplicate jobs with different places or source amounts are held instead of discarding a row', async context => {
+  const { buildReconciliationPlan, buildSyncChunks } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const first = '42,Camera,19/10/2026,Test place,known visit,10';
+  for (const second of [
+    '42,Camera,19/10/2026,Other place,known visit,10',
+    '42,Camera,19/10/2026,Test place,known visit,20',
+  ]) {
+    for (const rows of [[first, second], [second, first]]) {
+      const csv = ['Job,Patroller,Date,Location,Comments,Job Cost', ...rows].join('\n');
+      const { result } = plan(context, ['--place-overlay',
+        JSON.stringify({ 'Other place': '20000000-0000-4000-8000-000000000002' })], csv);
+      assert.equal(result.status, 0, result.stderr);
+      const output = JSON.parse(result.stdout);
+      assert.deepEqual(output.events, []);
+      assert.deepEqual(output.source_holds.map(hold => hold.reason),
+        ['divergent_duplicate_source_key', 'divergent_duplicate_source_key']);
+      const reconciliation = buildReconciliationPlan({ sourcePlan: output, existing: [] });
+      assert.equal(reconciliation.summary.hold, 2);
+      assert.deepEqual(buildSyncChunks(output, reconciliation).chunks, []);
+    }
+  }
+  const identical = plan(context, [], ['Job,Patroller,Date,Location,Comments,Job Cost', first, first].join('\n'));
+  const output = JSON.parse(identical.result.stdout);
+  assert.equal(output.events.length, 1);
+  assert.deepEqual(output.source_holds, []);
+  const direct = directApply(context,
+    ['Job,Patroller,Date,Location,Comments,Job Cost', first, '42,Camera,19/10/2026,Test place,known visit,20'].join('\n'));
+  assert.equal(direct.status, 1);
+  assert.match(direct.stderr, /duplicate.*review/i);
+  assert.doesNotMatch(direct.stderr, /Unexpected database write/);
+});
+
+test('a held duplicate Start cannot determine the next visit distance or charges', async context => {
+  const { buildReconciliationPlan } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const header = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost';
+  const starts = [
+    '41,Camera,05/06/2026,0900,Test place,Start,100,,,,,',
+    '41,Camera,05/06/2026,0900,Other place,Start,150,,,,,',
+  ];
+  const visit = '42,Camera,05/06/2026,1000,Test place,All clear,160,-1,-50,-80,-80,-130';
+  for (const rows of [starts, [...starts].reverse()]) {
+    const { result } = plan(context, ['--place-overlay',
+      JSON.stringify({ 'Other place': '20000000-0000-4000-8000-000000000002' })],
+    [header, ...rows, visit].join('\n'));
+    assert.equal(result.status, 0, result.stderr);
+    const source = JSON.parse(result.stdout);
+    assert.equal(source.events[0].distance_km, -80);
+    assert.equal(source.events[0].payload.source_leg_correction, undefined);
+    const reconciliation = buildReconciliationPlan({ sourcePlan: source, existing: [] });
+    assert.equal(reconciliation.actions.find(action => action.external_ref.endsWith(':42')).reason, 'invalid_source_distance');
+  }
+});
+
+test('a held prior-day row cannot justify a trip-odometer reset for the next visit', async context => {
+  const { buildReconciliationPlan } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const header = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost';
+  const previous = [
+    '41,Camera,05/06/2026,0900,Test place,Start,100,,,,,',
+    '41,Camera,05/06/2026,0900,Other place,Start,150,,,,,',
+  ];
+  const visit = '42,Camera,06/06/2026,1000,Test place,All clear,160,-1,-50,-80,-80,-130';
+  for (const rows of [previous, [...previous].reverse()]) {
+    const { result } = plan(context, ['--place-overlay',
+      JSON.stringify({ 'Other place': '20000000-0000-4000-8000-000000000002' })],
+    [header, ...rows, visit].join('\n'));
+    assert.equal(result.status, 0, result.stderr);
+    const source = JSON.parse(result.stdout);
+    assert.equal(source.events[0].distance_km, -80);
+    assert.equal(source.events[0].payload.job_kms_correction, undefined);
+    const reconciliation = buildReconciliationPlan({ sourcePlan: source, existing: [] });
+    assert.equal(reconciliation.actions.find(action => action.external_ref.endsWith(':42')).reason, 'invalid_source_distance');
+  }
+});
+
 test('XLSX plan reads the exact selected sheet and preserves original workbook hash and row number', async context => {
   const { result, bytes } = await xlsxPlan(context);
   assert.equal(result.status, 0, result.stderr);
@@ -123,6 +617,15 @@ test('XLSX plan reads the exact selected sheet and preserves original workbook h
   assert.equal(output.events[0].payload.source_sheet, 'DATA');
   assert.equal(output.events[0].payload.source_row, 4);
   assert.equal(output.events[0].occurred_at, '2026-09-20T04:36:00Z');
+});
+
+test('XLSX plan refuses bytes that do not match the scanned workbook hash', async context => {
+  const mismatched = await xlsxPlan(context, { sourceHash: 'a'.repeat(64) });
+  assert.notEqual(mismatched.result.status, 0);
+  assert.match(mismatched.result.stderr, /workbook.*hash/i);
+  const matched = await xlsxPlan(context, { sourceHash: 'actual' });
+  assert.equal(matched.result.status, 0, matched.result.stderr);
+  assert.equal(JSON.parse(matched.result.stdout).source_sha256, createHash('sha256').update(matched.bytes).digest('hex'));
 });
 
 test('XLSX plan rejects a missing selected sheet rather than falling back', async context => {

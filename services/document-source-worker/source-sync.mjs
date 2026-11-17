@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, stat, writeFile, lstat, realpath, opendir } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile, lstat, realpath, opendir, open, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -36,6 +36,65 @@ export async function saveSyncState(statePath, state) {
   const temporary = `${statePath}.${randomUUID()}.tmp`;
   await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
   await rename(temporary, statePath);
+}
+
+const EMPTY_LOCK_STALE_MS = 10 * 60 * 1000;
+
+const processAlive = pid => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'EPERM') return true;
+    if (error.code === 'ESRCH') return false;
+    throw error;
+  }
+};
+
+export async function acquireSourceLock(lockPath, { isAlive = processAlive, now = Date.now } = {}) {
+  const recoveryPath = `${lockPath}.recovery`;
+  let recovery;
+  try {
+    recovery = await open(recoveryPath, 'wx');
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error('Another promotion run holds the source lock or its recovery needs review');
+    throw error;
+  }
+  try {
+    await recovery.writeFile(String(process.pid));
+    let lock;
+    try {
+      lock = await open(lockPath, 'wx');
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      let text;
+      let info;
+      try {
+        [text, info] = await Promise.all([readFile(lockPath, 'utf8'), lstat(lockPath)]);
+      } catch (readError) {
+        if (readError.code !== 'ENOENT') throw readError;
+      }
+      if (info) {
+        const pid = Number.parseInt(text.trim(), 10);
+        const stale = Number.isInteger(pid) && pid > 0
+          ? !isAlive(pid)
+          : now() - info.mtimeMs > EMPTY_LOCK_STALE_MS;
+        if (!stale) throw new Error('Another promotion run holds the source lock');
+        await rm(lockPath);
+      }
+      lock = await open(lockPath, 'wx');
+    }
+    try {
+      await lock.writeFile(String(process.pid));
+    } catch (error) {
+      await lock.close();
+      throw error;
+    }
+    return lock;
+  } finally {
+    await recovery.close();
+    await rm(recoveryPath);
+  }
 }
 
 async function stableFileVersion(root, relativePath, now, settleMs) {
@@ -75,7 +134,7 @@ export async function scanSourceChanges({ root, relativePaths, state, now = Date
         ...previous,
         observed: version,
         availability: 'available',
-        pending: previous?.acknowledged_sha256 !== version.sha256,
+        pending: previous?.acknowledged_sha256 !== version.sha256 || Boolean(previous?.hold?.recovery),
       };
     } catch (error) {
       if (!['ENOENT', 'EACCES', 'EPERM', 'EBUSY', 'EIO'].includes(error.code)) throw error;
@@ -147,7 +206,7 @@ export async function photoSourcePaths(root) {
   return found.sort();
 }
 
-export async function runSourceScan({ root, statePath, includePhotos = false, now, settleMs }) {
+async function runSourceScanLocked({ root, statePath, includePhotos = false, now, settleMs }) {
   let state = await loadSyncState(statePath);
   const workbooks = await scanSourceChanges({ root, relativePaths: patrolSourcePaths(), state, now, settleMs });
   state = workbooks.state;
@@ -175,6 +234,22 @@ export async function runSourceScan({ root, statePath, includePhotos = false, no
     summary.pending = pendingSourceVersions(state).length;
   }
   return summary;
+}
+
+export async function runSourceScan(options) {
+  if (options.sourceLock) {
+    if (!Number.isInteger(options.sourceLock.fd) || options.sourceLock.fd < 0) throw new Error('Invalid source lock');
+    return runSourceScanLocked(options);
+  }
+  const lockPath = `${options.statePath}.lock`;
+  await mkdir(path.dirname(options.statePath), { recursive: true, mode: 0o700 });
+  const lock = await acquireSourceLock(lockPath);
+  try {
+    return await runSourceScanLocked(options);
+  } finally {
+    await lock.close();
+    await rm(lockPath, { force: true });
+  }
 }
 
 async function main() {

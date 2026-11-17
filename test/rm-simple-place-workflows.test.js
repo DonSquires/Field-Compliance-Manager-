@@ -19,6 +19,9 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./location-client-billing-mi
 if (process.env.BOB_TEST_POSTGRES === '1') require('./location-patrol-responsibility-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./checkpoint-operating-branch-migration.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-presence-evidence-migration.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-row-sync.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-direct-races.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-place-registration-db.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
