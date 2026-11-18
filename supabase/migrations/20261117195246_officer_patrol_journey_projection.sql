@@ -119,8 +119,8 @@ BEGIN
           AND sam.service_agreement_id = sal.service_agreement_id AND sam.module_key = m.module_key
         LEFT JOIN public.service_agreements a
           ON a.id = sam.service_agreement_id AND a.agreement_type = 'operational'
-          AND (a.starts_on IS NULL OR a.starts_on <= v_shift.scheduled_start::date)
-          AND (a.ends_on IS NULL OR a.ends_on >= v_shift.scheduled_start::date)
+          AND (a.starts_on IS NULL OR a.starts_on <= (v_shift.scheduled_start AT TIME ZONE 'Pacific/Auckland')::date)
+          AND (a.ends_on IS NULL OR a.ends_on >= (v_shift.scheduled_start AT TIME ZONE 'Pacific/Auckland')::date)
           AND (a.provider_organization_id = v_shift.organization_id
             OR v_shift.organization_id = ANY(public.get_descendant_organizations(a.provider_organization_id)))
         LEFT JOIN public.organizations o ON o.id = a.client_organization_id
