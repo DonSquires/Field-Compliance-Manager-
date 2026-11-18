@@ -102,7 +102,12 @@ BEGIN
     ORDER BY c.id FOR SHARE
   LOOP
     v_status := NULL;
-    IF v_checkpoint.gps_lat IS NULL OR v_checkpoint.gps_lat NOT BETWEEN -90 AND 90
+    IF EXISTS (
+      SELECT 1 FROM public.patrol_checkpoint_visits v
+      WHERE v.patrol_id = v_patrol.id AND v.checkpoint_id = v_checkpoint.id
+    ) THEN
+      v_status := 'already_recorded';
+    ELSIF v_checkpoint.gps_lat IS NULL OR v_checkpoint.gps_lat NOT BETWEEN -90 AND 90
       OR v_checkpoint.gps_lng IS NULL OR v_checkpoint.gps_lng NOT BETWEEN -180 AND 180
       OR v_checkpoint.radius_meters IS NULL OR v_checkpoint.radius_meters NOT BETWEEN 1 AND 500
     THEN v_status := 'missing_or_invalid_geofence';
