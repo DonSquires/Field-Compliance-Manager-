@@ -38694,6 +38694,16 @@ export type Database = {
         }
         Returns: Json
       }
+      auto_record_patrol_checkpoints: {
+        Args: {
+          p_captured_at: string
+          p_gps_accuracy: number
+          p_gps_lat: number
+          p_gps_lng: number
+          p_shift_id: string
+        }
+        Returns: Json
+      }
       base44_rams_resolve_person: {
         Args: {
           p_canonical_key: string
@@ -45813,6 +45823,11 @@ export type Database = {
           user_name: string
         }[]
       }
+      get_assigned_officer_shift_context: { Args: never; Returns: Json }
+      get_assigned_patrol_session: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
       get_bob_active_signing_identity: { Args: never; Returns: Json }
       get_bob_nz_finance_sources: {
         Args: { p_topic?: string }
@@ -46489,7 +46504,15 @@ export type Database = {
       }
       get_officer_break_plan: { Args: { p_shift_id: string }; Returns: Json }
       get_officer_data_package: { Args: { p_shift_id?: string }; Returns: Json }
+      get_officer_patrol_journey: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
       get_officer_patrol_stops: { Args: { p_shift_id?: string }; Returns: Json }
+      get_officer_patrol_stops_sanitized: {
+        Args: { p_shift_id: string }
+        Returns: Json
+      }
       get_officer_recovery_readiness: {
         Args: { p_shift_id: string }
         Returns: Json
