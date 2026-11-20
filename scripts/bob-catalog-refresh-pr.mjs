@@ -8,7 +8,7 @@
 //   node scripts/bob-catalog-refresh-pr.mjs --repo <git dir> --base <sha> --schema <live schema.sql>
 // Gitea is the source of truth (owner ruling 2026-11-21), so by default the PR is opened in Gitea and
 // merged with "merge when checks succeed" (Gitea main requires PR verification); GitHub only mirrors.
-// Env (gitea, default): SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, GITEA_BASE_URL, GITEA_OWNER,
+// Env (gitea, default): SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, GITEA_PUBLIC_URL or GITEA_BASE_URL, GITEA_OWNER,
 //      GITEA_REPO, GITEA_TOKEN (write:repository).
 // Env (BOB_CATALOG_FORGE=github, legacy): BOB_GITHUB_ACCESS_TOKEN, GITHUB_OWNER, GITHUB_REPO,
 //      GIT_SSH_COMMAND (deploy key) and BOB_CATALOG_REMOTE (git@github.com:owner/repo.git).
@@ -64,7 +64,8 @@ export async function refreshCatalog({ repo, base, schema, env = process.env, fe
   const githubToken = env.BOB_GITHUB_ACCESS_TOKEN;
   const owner = forge === 'gitea' ? env.GITEA_OWNER : env.GITHUB_OWNER;
   const name = forge === 'gitea' ? env.GITEA_REPO : env.GITHUB_REPO;
-  const giteaBase = env.GITEA_BASE_URL;
+  // Same choice as the release lane: GITEA_BASE_URL can be a Docker-network name the host cannot resolve.
+  const giteaBase = env.GITEA_PUBLIC_URL || env.GITEA_BASE_URL;
   const giteaToken = env.GITEA_TOKEN;
   // Gitea pushes authenticate with a header, never a token in the URL; BOB_CATALOG_GITEA_REMOTE is a test seam.
   const remote = forge === 'gitea' ? (env.BOB_CATALOG_GITEA_REMOTE || (giteaBase && `${giteaBase.replace(/\/$/, '')}/${owner}/${name}.git`)) : env.BOB_CATALOG_REMOTE;

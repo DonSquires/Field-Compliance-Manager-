@@ -73,6 +73,18 @@ test('by default the catalog PR is opened in Gitea and merged once verification 
   assert.equal(merge.headers.Authorization, 'token gt');
 });
 
+test('the Gitea API uses the public URL when the base URL is a Docker-network name', async () => {
+  const { refreshCatalog } = await load();
+  const fx = fixtureRepo();
+  const schema = path.join(fx.root, 'live.sql');
+  fs.writeFileSync(schema, 'create table a ();\ncreate table e ();\n');
+  const api = fakeGitea();
+  const env = { ...giteaEnv(fx.remote), GITEA_BASE_URL: 'http://gitea:3000', GITEA_PUBLIC_URL: 'http://gitea.test' };
+  const result = await refreshCatalog({ repo: fx.repo, base: fx.base, schema, env, fetchImpl: api.fetchImpl, log: () => {} });
+  assert.equal(result.outcome, 'merged');
+  assert.equal(api.calls.some(call => call.url.startsWith('http://gitea:3000')), false);
+});
+
 test('a Gitea catalog PR still waiting on verification is scheduled, and a repeat tick is idempotent', async () => {
   const { refreshCatalog } = await load();
   const fx = fixtureRepo();
