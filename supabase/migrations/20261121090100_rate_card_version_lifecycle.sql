@@ -780,6 +780,10 @@ BEGIN
       AND v_agreement.client_organization_id IS DISTINCT FROM v_card.client_organization_id) THEN
       RAISE EXCEPTION 'Agreement is not in this operating organisation and client scope';
     END IF;
+    -- Future and backdated agreements may select a card; a cancelled one may only clear it.
+    IF p_rate_card_id IS NOT NULL AND coalesce(v_agreement.ends_on < v_agreement.starts_on, false) THEN
+      RAISE EXCEPTION 'A cancelled agreement cannot select a rate card';
+    END IF;
     PERFORM public._rate_card_lock_actor_authority(p_operating_organization_id);
     IF v_agreement.rate_card_id IS DISTINCT FROM p_expected_previous_card_id THEN
       RAISE EXCEPTION 'Agreement rate card changed since it was opened';
@@ -862,17 +866,26 @@ END $$;
 REVOKE ALL ON FUNCTION public.start_rate_card_version(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.start_rate_card_version(uuid, uuid, uuid) TO authenticated;
 
--- A place on a new price needs an explicit, current contract for this branch.
--- Client cards additionally require that contract's client to match the card.
+-- A place on a new price is covered by this branch's active agreement-location
+-- link, or is a self-managed place of the branch itself (owner ruling 2026-11-21).
+-- Agreement dates do not gate pricing: future and backdated agreements are allowed;
+-- only a cancelled agreement (ends_on before starts_on, as end_service_agreement
+-- records "never took effect") is not cover. Where this branch has any agreement
+-- link to the place, the agreement rules apply: an active link to a non-cancelled
+-- agreement is required and client cards need that agreement's client. A place is
+-- self-managed only when its owner is exactly this operating organisation; a client
+-- owning the place, or a parent branch owning it, is not operation by this branch.
+-- Retired facets and suspended/ended links stay closed.
 CREATE OR REPLACE FUNCTION public._rate_card_lock_place_scope(
   p_organization_id uuid, p_client_organization_id uuid, p_site_id uuid, p_zone_id uuid
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   v_link uuid;
+  v_owner uuid;
 BEGIN
   IF p_site_id IS NOT NULL THEN
-    PERFORM 1 FROM public.client_sites site
+    SELECT site.client_organization_id INTO v_owner FROM public.client_sites site
       WHERE site.id = p_site_id AND site.active FOR SHARE NOWAIT;
     IF NOT FOUND THEN RAISE EXCEPTION 'Site scope is missing or retired'; END IF;
     SELECT link.id INTO v_link
@@ -882,13 +895,18 @@ BEGIN
         AND agreement.provider_organization_id = p_organization_id
         AND (p_client_organization_id IS NULL OR agreement.client_organization_id = p_client_organization_id)
         AND agreement.agreement_type = 'operational'
-        AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
-        AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)
+        AND NOT coalesce(agreement.ends_on < agreement.starts_on, false)
       ORDER BY agreement.id, link.id LIMIT 1 FOR SHARE OF agreement, link NOWAIT;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Site scope needs a current operating agreement'; END IF;
+    IF NOT FOUND AND (v_owner IS DISTINCT FROM p_organization_id OR EXISTS (
+      SELECT 1 FROM public.service_agreement_locations link
+      JOIN public.service_agreements agreement ON agreement.id = link.service_agreement_id
+      WHERE link.site_id = p_site_id AND agreement.provider_organization_id = p_organization_id
+        AND agreement.agreement_type = 'operational')) THEN
+      RAISE EXCEPTION 'Site scope needs an active operating agreement or a self-managed place';
+    END IF;
   END IF;
   IF p_zone_id IS NOT NULL THEN
-    PERFORM 1 FROM public.location_zones zone
+    SELECT zone.organization_id INTO v_owner FROM public.location_zones zone
       WHERE zone.id = p_zone_id AND zone.is_active FOR SHARE NOWAIT;
     IF NOT FOUND THEN RAISE EXCEPTION 'Zone scope is missing or retired'; END IF;
     SELECT link.id INTO v_link
@@ -898,10 +916,15 @@ BEGIN
         AND agreement.provider_organization_id = p_organization_id
         AND (p_client_organization_id IS NULL OR agreement.client_organization_id = p_client_organization_id)
         AND agreement.agreement_type = 'operational'
-        AND (agreement.starts_on IS NULL OR agreement.starts_on <= current_date)
-        AND (agreement.ends_on IS NULL OR agreement.ends_on >= current_date)
+        AND NOT coalesce(agreement.ends_on < agreement.starts_on, false)
       ORDER BY agreement.id, link.id LIMIT 1 FOR SHARE OF agreement, link NOWAIT;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Zone scope needs a current operating agreement'; END IF;
+    IF NOT FOUND AND (v_owner IS DISTINCT FROM p_organization_id OR EXISTS (
+      SELECT 1 FROM public.service_agreement_locations link
+      JOIN public.service_agreements agreement ON agreement.id = link.service_agreement_id
+      WHERE link.zone_id = p_zone_id AND agreement.provider_organization_id = p_organization_id
+        AND agreement.agreement_type = 'operational')) THEN
+      RAISE EXCEPTION 'Zone scope needs an active operating agreement or a self-managed place';
+    END IF;
   END IF;
 END $$;
 REVOKE ALL ON FUNCTION public._rate_card_lock_place_scope(uuid, uuid, uuid, uuid)

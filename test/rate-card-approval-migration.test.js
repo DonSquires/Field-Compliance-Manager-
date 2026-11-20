@@ -102,6 +102,8 @@ test('real PostgreSQL governs versioned rate-card approvals', {
   const foreignPlace = id(224), clientZone = id(225), clientHouse = id(226), clientPlace = id(227);
   const providerOfficer = id(228), branchOfficer = id(229), branchAgreement = id(230);
   const assignedReviewer = id(231), clientSite = id(232), missingSite = id(233);
+  const ownHouse = id(234), ownPlace = id(235), ownZone = id(236), ownSite = id(237);
+  const unlinkedClientZone = id(238);
   const byId = (name, value) => json(`SELECT row_to_json(t) FROM public.${name} t WHERE id=${arg(value, 'uuid')};`);
   const cardFor = client => sql(`SELECT id FROM public.rate_cards
     WHERE organization_id='${provider}' AND client_organization_id='${client}' AND is_client_default;`);
@@ -247,15 +249,20 @@ test('real PostgreSQL governs versioned rate-card approvals', {
         ('${localStaff}','${provider}'), ('${foreignStaff}','${other}');
       INSERT INTO public.canonical_places(id,place_kind,canonical_key,display_name,normalized_name) VALUES
         ('${foreignPlace}','zone','zone:${foreignHouse}','Unrelated zone','unrelated zone'),
-        ('${clientPlace}','zone','zone:${clientHouse}','Client zone','client zone');
+        ('${clientPlace}','zone','zone:${clientHouse}','Client zone','client zone'),
+        ('${ownPlace}','zone','zone:${ownHouse}','Self-managed zone','self-managed zone');
       INSERT INTO public.locations(id,organization_id,name,canonical_place_id) VALUES
         ('${foreignHouse}','${foreignClient}','Unrelated house','${foreignPlace}'),
-        ('${clientHouse}','${clientD}','Client house','${clientPlace}');
+        ('${clientHouse}','${clientD}','Client house','${clientPlace}'),
+        ('${ownHouse}','${provider}','Self-managed house','${ownPlace}');
       INSERT INTO public.location_zones(id,organization_id,name,location_id)
         VALUES ('${foreignZone}','${foreignClient}','Unrelated zone','${foreignHouse}'),
-          ('${clientZone}','${clientD}','Client zone','${clientHouse}');
+          ('${clientZone}','${clientD}','Client zone','${clientHouse}'),
+          ('${ownZone}','${provider}','Self-managed zone','${ownHouse}'),
+          ('${unlinkedClientZone}','${clientD}','Unlinked client zone','${clientHouse}');
       INSERT INTO public.client_sites(id,client_organization_id,name,location_id)
-        VALUES ('${clientSite}','${clientD}','Client site','${clientHouse}');
+        VALUES ('${clientSite}','${clientD}','Client site','${clientHouse}'),
+          ('${ownSite}','${provider}','Self-managed site','${ownHouse}');
       INSERT INTO public.service_agreement_locations(service_agreement_id,zone_id)
         VALUES ('${agreementB}','${foreignZone}'), ('${agreementD}','${clientZone}');
       INSERT INTO public.service_agreement_locations(service_agreement_id,site_id)
@@ -1148,7 +1155,7 @@ test('real PostgreSQL governs versioned rate-card approvals', {
       });
     }
 
-    await t.test('standard_and_pay_place_scopes_need_an_explicit_provider_agreement', () => {
+    await t.test('standard_and_pay_place_scopes_need_an_agreement_or_own_place', () => {
       const standardCard = sql(`SELECT id FROM public.rate_cards WHERE organization_id='${provider}'
         AND kind='charge' AND is_standard;`);
       const existing = sql(`SELECT id FROM public.rate_card_versions
@@ -1169,20 +1176,90 @@ test('real PostgreSQL governs versioned rate-card approvals', {
       }
     });
 
-    await t.test('future_or_ended_agreements_cannot_authorize_new_place_scope', () => {
-      const card = manage(admin, { client: clientD, name: 'Inactive agreement scope' }).result.card;
-      const v = start(admin, card.id, null).version;
-      const options = { request: randomUUID(), version: v.id, expectedAt: version(v.id).updated_at,
-        action: 'create', rule: null, name: 'Inactive agreement rate', type: 'hourly', amount: 80,
-        group: null, scope: { zone_id: clientZone }, from: null, to: null, asset: null };
-      for (const dates of ["starts_on=current_date+1", "ends_on=current_date-1"]) {
-        fails(`BEGIN; UPDATE public.service_agreements SET ${dates} WHERE id='${agreementD}';
-          ${actor(admin)} SELECT ${draftExpression(options)}; ROLLBACK;`, /zone|place|scope|agreement/i);
+    await t.test('allows_branch_finance_place_pricing_without_agreement_link', () => {
+      assert.equal(sql(`SELECT count(*) FROM public.service_agreement_locations
+        WHERE zone_id IN ('${ownZone}','${unlinkedClientZone}') OR site_id='${ownSite}';`), '0');
+      const payCard = manage(admin, { kind: 'pay', client: null, name: 'Self-managed place pay' }).result.card;
+      const pay = start(admin, payCard.id, null).version.id;
+      const zoneLine = draft(admin, { version: pay, expectedAt: version(pay).updated_at,
+        scope: { zone_id: ownZone, pay_code: 'PAY1' } }).result.line;
+      assert.equal(zoneLine.zone_id, ownZone);
+      const siteLine = draft(admin, { version: pay, expectedAt: version(pay).updated_at,
+        scope: { site_id: ownSite, pay_code: 'PAY1' } }).result.line;
+      assert.equal(siteLine.site_id, ownSite);
+      const updated = draft(admin, { version: pay, expectedAt: version(pay).updated_at, action: 'update',
+        rule: zoneLine.id, name: zoneLine.name, type: zoneLine.rate_type, amount: 91, scope: {} }).result.line;
+      assert.equal(Number(updated.amount), 91);
+      submit(admin, pay, '2027-01-01', version(pay).updated_at);
+      assert.equal(decide(reviewer, pay, 'approve', version(pay).updated_at).version.status, 'approved');
+
+      const clientCard = manage(admin, { client: clientD, name: 'Self-managed client place' }).result.card;
+      const clientVersion = start(admin, clientCard.id, null).version.id;
+      assert.equal(draft(admin, { version: clientVersion, expectedAt: version(clientVersion).updated_at,
+        scope: { zone_id: ownZone } }).result.line.zone_id, ownZone);
+      const attempt = (versionId, scope) => draftExpression({ request: randomUUID(), version: versionId,
+        expectedAt: version(versionId).updated_at, action: 'create', rule: null, name: 'Unlinked place',
+        type: 'hourly', amount: 80, group: null, scope, from: null, to: null, asset: null });
+      // A client's own place is not operated by the branch merely because the card is that client's.
+      fails(`BEGIN; ${actor(admin)} SELECT ${attempt(clientVersion, { zone_id: unlinkedClientZone })}; ROLLBACK;`,
+        /zone|place|scope|agreement/i);
+      // A non-finance user of the same branch is still denied for the same place.
+      fails(`BEGIN; ${actor(providerOfficer)} SELECT ${attempt(clientVersion, { zone_id: ownZone })}; ROLLBACK;`,
+        /finance|authori[sz]|permission/i);
+      // Another operating organisation, and a child branch of the owner, cannot price the place.
+      const foreignCard = manage(outsider, { org: other, client: foreignClient, name: 'Other provider place' })
+        .result.card;
+      const foreignVersion = start(outsider, foreignCard.id, null).version.id;
+      fails(`BEGIN; ${actor(outsider)} SELECT ${attempt(foreignVersion, { zone_id: ownZone })}; ROLLBACK;`,
+        /zone|place|scope|agreement/i);
+      const branchCard = manage(branchAdmin, { org: branch, client: clientD, name: 'Branch place' }).result.card;
+      const branchVersion = start(branchAdmin, branchCard.id, null).version.id;
+      fails(`BEGIN; ${actor(branchAdmin)} SELECT ${attempt(branchVersion, { site_id: ownSite })}; ROLLBACK;`,
+        /site|place|scope|agreement/i);
+      for (const versionId of [foreignVersion, branchVersion]) {
+        assert.equal(sql(`SELECT count(*) FROM public.rate_rules WHERE rate_card_version_id='${versionId}';`), '0');
       }
-      assert.equal(sql(`SELECT count(*) FROM public.rate_rules WHERE rate_card_version_id='${v.id}';`), '0');
     });
 
-    await t.test('retired_place_copies_but_cannot_be_repriced_or_approved_without_a_ruling', () => {
+    await t.test('allows_future_and_backdated_agreement_card_links', () => {
+      const card = manage(admin, { client: clientD, name: 'Dated agreement scope' }).result.card;
+      const v = start(admin, card.id, null).version;
+      const placeAttempt = () => draftExpression({ request: randomUUID(), version: v.id,
+        expectedAt: version(v.id).updated_at, action: 'create', rule: null, name: 'Dated agreement rate',
+        type: 'hourly', amount: 80, group: null, scope: { zone_id: clientZone }, from: null, to: null,
+        asset: null });
+      const previous = byId('service_agreements', agreementD).rate_card_id;
+      const linkAttempt = () => `public.manage_rate_card(${args([
+        [randomUUID(), 'uuid'], [provider, 'uuid'], ['link_agreement', 'text'], [card.id, 'uuid'],
+        [null, 'text'], [null, 'text'], [null, 'uuid'], [null, 'boolean'], [agreementD, 'uuid'],
+        [card.updated_at, 'timestamptz'], [previous, 'uuid'], [null, 'text'],
+      ])})`;
+      const future = 'starts_on=current_date+30, ends_on=NULL';
+      const backdated = "starts_on='2020-01-01', ends_on=current_date-1";
+      // ends_on = starts_on - 1 is the schema's "cancelled before it took effect" (end_service_agreement).
+      const cancelled = 'starts_on=current_date+30, ends_on=current_date+29';
+      for (const dates of [future, backdated]) {
+        const line = json(`BEGIN; UPDATE public.service_agreements SET ${dates} WHERE id='${agreementD}';
+          ${actor(admin)} SELECT ${placeAttempt()}; ROLLBACK;`).line;
+        assert.equal(line.zone_id, clientZone, dates);
+        const linked = json(`BEGIN; UPDATE public.service_agreements SET ${dates} WHERE id='${agreementD}';
+          ${actor(admin)} SELECT ${linkAttempt()}; ROLLBACK;`);
+        assert.equal(linked.rate_card_id, card.id, dates);
+      }
+      fails(`BEGIN; UPDATE public.service_agreements SET ${cancelled} WHERE id='${agreementD}';
+        ${actor(admin)} SELECT ${placeAttempt()}; ROLLBACK;`, /zone|place|scope|agreement|cancel/i);
+      fails(`BEGIN; UPDATE public.service_agreements SET ${cancelled} WHERE id='${agreementD}';
+        ${actor(admin)} SELECT ${linkAttempt()}; ROLLBACK;`, /agreement|cancel/i);
+      for (const status of ['suspended', 'ended']) {
+        fails(`BEGIN; UPDATE public.service_agreement_locations SET status='${status}'
+          WHERE service_agreement_id='${agreementD}' AND zone_id='${clientZone}';
+          ${actor(admin)} SELECT ${placeAttempt()}; ROLLBACK;`, /zone|place|scope|agreement/i);
+      }
+      assert.equal(sql(`SELECT count(*) FROM public.rate_rules WHERE rate_card_version_id='${v.id}';`), '0');
+      assert.equal(byId('service_agreements', agreementD).rate_card_id, previous);
+    });
+
+    await t.test('keeps_retired_place_repricing_fail_closed', () => {
       const card = manage(admin, { client: clientD, name: 'Retired place scope' }).result.card;
       const v = start(admin, card.id, null).version;
       const saved = draft(admin, { version: v.id, expectedAt: version(v.id).updated_at,
@@ -1212,6 +1289,20 @@ test('real PostgreSQL governs versioned rate-card approvals', {
       } finally {
         sql(`UPDATE public.location_zones SET is_active=true WHERE id='${clientZone}';`);
       }
+      // Self-management does not reopen retired places or ended coverage.
+      const ownCard = manage(admin, { client: clientD, name: 'Retired self-managed place' }).result.card;
+      const own = start(admin, ownCard.id, null).version;
+      const ownAttempt = scope => draftExpression({ request: randomUUID(), version: own.id,
+        expectedAt: version(own.id).updated_at, action: 'create', rule: null, name: 'Retired own place',
+        type: 'hourly', amount: 80, group: null, scope, from: null, to: null, asset: null });
+      fails(`BEGIN; UPDATE public.location_zones SET is_active=false WHERE id='${ownZone}';
+        ${actor(admin)} SELECT ${ownAttempt({ zone_id: ownZone })}; ROLLBACK;`, /zone|place|scope|retired/i);
+      fails(`BEGIN; UPDATE public.client_sites SET active=false WHERE id='${ownSite}';
+        ${actor(admin)} SELECT ${ownAttempt({ site_id: ownSite })}; ROLLBACK;`, /site|place|scope|retired/i);
+      fails(`BEGIN; INSERT INTO public.service_agreement_locations(service_agreement_id,site_id,status)
+          VALUES ('${agreementD}','${ownSite}','ended');
+        ${actor(admin)} SELECT ${ownAttempt({ site_id: ownSite })}; ROLLBACK;`, /site|place|scope|agreement/i);
+      assert.equal(sql(`SELECT count(*) FROM public.rate_rules WHERE rate_card_version_id='${own.id}';`), '0');
     });
 
     await t.test('approval_locks_its_place_agreement_until_commit', async () => {
