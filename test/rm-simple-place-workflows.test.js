@@ -22,6 +22,7 @@ if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-presence-evidence-m
 if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-row-sync.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-direct-races.test');
 if (process.env.BOB_TEST_POSTGRES === '1') require('./patrol-source-place-registration-db.test');
+if (process.env.BOB_TEST_POSTGRES === '1') require('./versioned-rate-cards-postgres.test');
 
 const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261101190000_rm_simple_place_workflows.sql'), 'utf8');
