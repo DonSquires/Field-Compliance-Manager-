@@ -1,9 +1,9 @@
 [Unit]
-Description=Run the FCM GitHub to Gitea CI bridge every two minutes
+Description=Mirror Gitea main to GitHub every 30 seconds
 
 [Timer]
-OnBootSec=2min
-OnUnitInactiveSec=2min
+OnBootSec=1min
+OnUnitInactiveSec=30s
 
 [Install]
 WantedBy=timers.target

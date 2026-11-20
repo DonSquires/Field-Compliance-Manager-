@@ -8,7 +8,7 @@ Actions is unavailable (account spending limit). Vercel still builds production 
 ```
 branch push ──▶ Gitea PR ──▶ .gitea/workflows/verify.yml on fcm-vps-runner ──▶ rebase merge to Gitea main
                                                                                    │
-                     bridge (systemd timer, every 2 min) ◀────────────────────────┘
+                     bridge (systemd timer, every 30 s) ◀────────────────────────┘
                        ├─ fast-forward GitHub main ──▶ Vercel production deploy
                        └─ after Gitea CI passes on main: refresh the live Atlas on the host
 ```
