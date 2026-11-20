@@ -21,9 +21,12 @@ GitHub commit statuses  <--bridge-- Gitea commit statuses ("PR verification / <j
 ## Install or update on the VPS
 
 1. Copy `fcm-gitea-ci-bridge.mjs` to `/srv/fcm/gitea-ci/`.
-2. Copy the `.service` and `.timer` units to `/etc/systemd/system/`.
-3. Create `/etc/fcm-gitea-ci/` (mode 700) holding `bridge.env` (mode 600) from
-   `bridge.env.example`, and fill in both tokens.
+2. Copy the `.service` and `.timer` units to `/etc/systemd/system/`. Non-secret settings live in
+   the unit's `Environment=` lines.
+3. Put the two tokens in root-only files (directory mode 700, files mode 600):
+   `/etc/fcm-gitea-ci/github-token` (commit-status write and contents read on the GitHub repo) and
+   `/etc/fcm-gitea-ci/gitea-token` (`write:repository` on the Gitea repo). systemd hands them to the
+   bridge with `LoadCredential=`; they are never exported to git or docker child processes.
 4. `systemctl daemon-reload && systemctl enable --now fcm-gitea-ci-bridge.timer`
 5. Watch: `journalctl -u fcm-gitea-ci-bridge.service -f`
 

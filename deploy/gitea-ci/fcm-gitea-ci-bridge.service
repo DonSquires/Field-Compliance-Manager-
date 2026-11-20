@@ -5,7 +5,20 @@ After=network-online.target docker.service
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/fcm-gitea-ci/bridge.env
+Environment=GITHUB_REPOSITORY=DonSquires/Field-Compliance-Manager-
+# Gitea is reached on the host port, not through Cloudflare.
+Environment=GITEA_URL=http://127.0.0.1:3005
+Environment=GITEA_REPOSITORY=Iron-Eagle-Security-Ltd/field-compliance-manager
+Environment=STATE_DIR=/var/lib/fcm-gitea-ci
+# Refresh the live Atlas on the host after main passes. Only SUPABASE_URL and
+# SUPABASE_SERVICE_ROLE_KEY are read from this file and passed to a node:22 container.
+Environment=ATLAS_REFRESH=1
+Environment=ATLAS_ENV_FILE=/opt/fcm/.env
+# Root-only token files (mode 0600) in /etc/fcm-gitea-ci/:
+#   github-token — commit-status write + contents read on GITHUB_REPOSITORY
+#   gitea-token  — write:repository on GITEA_REPOSITORY
+LoadCredential=github-token:/etc/fcm-gitea-ci/github-token
+LoadCredential=gitea-token:/etc/fcm-gitea-ci/gitea-token
 ExecStart=/usr/bin/node /srv/fcm/gitea-ci/fcm-gitea-ci-bridge.mjs
 TimeoutStartSec=25min
 Nice=5

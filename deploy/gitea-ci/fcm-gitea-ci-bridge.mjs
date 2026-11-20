@@ -10,11 +10,13 @@
 //   3. optionally refresh the live Atlas on the host once main's verification passes
 //      (the service-role key never enters a workflow, which any branch could rewrite).
 //
-// Tokens live only in this process's root-only environment file; they are passed to git via
-// an http.extraheader (never in a URL or argv) and are scrubbed from every log line.
+// Tokens are systemd credentials (root-only files loaded with LoadCredential=), never inherited
+// by git or docker child processes, passed to git only via an http.extraheader (never a URL or
+// argv), and scrubbed from every log line.
 //
-// Env: GITHUB_REPOSITORY, GITHUB_TOKEN, GITEA_URL, GITEA_REPOSITORY, GITEA_TOKEN,
-//      STATE_DIR (default /var/lib/fcm-gitea-ci), ATLAS_REFRESH=1 + ATLAS_ENV_FILE (optional).
+// Credentials: github-token, gitea-token (or GITHUB_TOKEN / GITEA_TOKEN for a manual run).
+// Env: GITHUB_REPOSITORY, GITEA_URL, GITEA_REPOSITORY, STATE_DIR (default /var/lib/fcm-gitea-ci),
+//      ATLAS_REFRESH=1 + ATLAS_ENV_FILE (optional).
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -72,6 +74,12 @@ export function aggregateStatus(jobs, expectedJobCount) {
   return { context: STATUS_PREFIX, state: 'success', description: `All ${expectedJobCount} Gitea CI jobs passed` };
 }
 
+/** Child processes (git, docker) never inherit the bridge's tokens. */
+export function childEnv(environment = process.env) {
+  const { GITHUB_TOKEN, GITEA_TOKEN, CREDENTIALS_DIRECTORY, ...rest } = environment;
+  return rest;
+}
+
 export function scrub(text, secrets) {
   let out = String(text);
   for (const s of secrets) if (s) out = out.split(s).join('<token>');
@@ -88,13 +96,22 @@ function env(name, fallback) {
   return v;
 }
 
+/** Secrets come from systemd credentials (LoadCredential=), falling back to the environment for manual runs. */
+export function readSecret(credentialName, envName, environment = process.env) {
+  const dir = environment.CREDENTIALS_DIRECTORY;
+  const file = dir ? path.join(dir, credentialName) : '';
+  const value = file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : environment[envName];
+  if (!value) throw new Error(`credential ${credentialName} (or ${envName}) is required`);
+  return value;
+}
+
 async function main() {
   const cfg = {
     githubRepo: env('GITHUB_REPOSITORY'),
-    githubToken: env('GITHUB_TOKEN'),
+    githubToken: readSecret('github-token', 'GITHUB_TOKEN'),
     giteaUrl: env('GITEA_URL').replace(/\/$/, ''),
     giteaRepo: env('GITEA_REPOSITORY'),
-    giteaToken: env('GITEA_TOKEN'),
+    giteaToken: readSecret('gitea-token', 'GITEA_TOKEN'),
     stateDir: env('STATE_DIR', '/var/lib/fcm-gitea-ci'),
     expectedJobs: Number(process.env.EXPECTED_JOBS || 3),
     atlas: process.env.ATLAS_REFRESH === '1',
@@ -122,7 +139,7 @@ async function main() {
   const mirror = path.join(cfg.stateDir, 'mirror.git');
   const git = (args, extraHeader) => {
     const pre = extraHeader ? ['-c', `http.extraheader=${extraHeader}`] : [];
-    const r = spawnSync('git', [...pre, ...args], { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    const r = spawnSync('git', [...pre, ...args], { encoding: 'utf8', env: { ...childEnv(), GIT_TERMINAL_PROMPT: '0' } });
     if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${scrub((r.stderr || r.stdout || '').trim(), secrets)}`);
     return r.stdout.trim();
   };
@@ -200,7 +217,7 @@ async function refreshAtlas(cfg, sha, mirror, log) {
     '-e', 'SUPABASE_URL', '-e', 'SUPABASE_SERVICE_ROLE_KEY',
     '-e', 'ATLAS_REFRESH_SOURCE_BRANCH=main', '-e', `ATLAS_REFRESH_SOURCE_COMMIT=${sha}`, '-e', 'ATLAS_REFRESH_OUTPUT_DIR=/tmp/atlas',
     'node:22', 'sh', '-c', 'npm ci --no-audit --no-fund --loglevel=error && node scripts/atlas-refresh.js --apply'],
-  { encoding: 'utf8', env: { ...process.env, ...vars }, timeout: 15 * 60_000 });
+  { encoding: 'utf8', env: { ...childEnv(), ...vars }, timeout: 15 * 60_000 });
   fs.rmSync(src, { recursive: true, force: true });
   const ok = r.status === 0;
   const tail = (r.stdout + r.stderr).split('\n').slice(-5).join(' | ');

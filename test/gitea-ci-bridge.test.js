@@ -53,6 +53,19 @@ test('bridge aggregate is queued until all jobs report, and failure wins', async
   assert.equal(failed.description, 'Failed: b');
 });
 
+test('bridge reads tokens from systemd credentials and never hands them to child processes', async (t) => {
+  const { readSecret, childEnv } = await load();
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-cred-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'github-token'), 'from-file\n');
+  assert.equal(readSecret('github-token', 'GITHUB_TOKEN', { CREDENTIALS_DIRECTORY: dir, GITHUB_TOKEN: 'from-env' }), 'from-file');
+  assert.equal(readSecret('gitea-token', 'GITEA_TOKEN', { CREDENTIALS_DIRECTORY: dir, GITEA_TOKEN: 'env-only' }), 'env-only');
+  assert.throws(() => readSecret('gitea-token', 'GITEA_TOKEN', { CREDENTIALS_DIRECTORY: dir }), /required/);
+  assert.deepEqual(childEnv({ PATH: '/bin', GITHUB_TOKEN: 'a', GITEA_TOKEN: 'b', CREDENTIALS_DIRECTORY: dir }), { PATH: '/bin' });
+});
+
 test('bridge scrubs tokens from log output', async () => {
   const { scrub } = await load();
   assert.equal(scrub('fatal: auth ghp_SECRET for tokenX', ['ghp_SECRET', 'tokenX', '']), 'fatal: auth <token> for <token>');
