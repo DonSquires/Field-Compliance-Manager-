@@ -1,13 +1,13 @@
-# Gitea Actions port of .github/workflows/verify-pr.yml (hosted GitHub Actions is unavailable).
-# The GitHub → Gitea bridge (deploy/gitea-ci) pushes GitHub main and every open PR head here and
-# reports these job results back to GitHub as "gitea-ci / <job name>" commit statuses.
-# Keep the run steps identical to verify-pr.yml: test/gitea-verify-workflow.test.js enforces it.
-# No secrets are used: branch pushes run their own copy of this file, so secrets would be exposed.
+# PR verification on the self-hosted Gitea runner. Gitea is the source of truth for pull requests;
+# main's branch protection requires these jobs before a PR can merge (see deploy/gitea-ci/README.md).
+# Keep the run steps identical to .github/workflows/verify-pr.yml: test/gitea-verify-workflow.test.js
+# enforces it. No secrets are used: a pull request runs its own copy of this file.
 name: PR verification
 
 on:
+  pull_request:
   push:
-    branches: ['**']
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

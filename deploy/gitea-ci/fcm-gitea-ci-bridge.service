@@ -1,5 +1,5 @@
 [Unit]
-Description=FCM GitHub to Gitea CI bridge (mirror PR heads, report Gitea results to GitHub)
+Description=FCM Gitea to GitHub release mirror (fast-forward GitHub main; Atlas refresh after main passes)
 Wants=network-online.target
 After=network-online.target docker.service
 
@@ -10,13 +10,13 @@ Environment=GITHUB_REPOSITORY=DonSquires/Field-Compliance-Manager-
 Environment=GITEA_URL=http://127.0.0.1:3005
 Environment=GITEA_REPOSITORY=Iron-Eagle-Security-Ltd/field-compliance-manager
 Environment=STATE_DIR=/var/lib/fcm-gitea-ci
-# Refresh the live Atlas on the host after main passes. Only SUPABASE_URL and
+# Refresh the live Atlas on the host after Gitea main passes. Only SUPABASE_URL and
 # SUPABASE_SERVICE_ROLE_KEY are read from this file and passed to a node:22 container.
 Environment=ATLAS_REFRESH=1
 Environment=ATLAS_ENV_FILE=/opt/fcm/.env
 # Root-only token files (mode 0600) in /etc/fcm-gitea-ci/:
-#   github-token — commit-status write + contents read on GITHUB_REPOSITORY
-#   gitea-token  — write:repository on GITEA_REPOSITORY
+#   github-token — contents write on GITHUB_REPOSITORY (pushes main only, never force)
+#   gitea-token  — read on GITEA_REPOSITORY
 LoadCredential=github-token:/etc/fcm-gitea-ci/github-token
 LoadCredential=gitea-token:/etc/fcm-gitea-ci/gitea-token
 ExecStart=/usr/bin/node /srv/fcm/gitea-ci/fcm-gitea-ci-bridge.mjs

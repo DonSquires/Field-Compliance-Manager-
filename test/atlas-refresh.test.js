@@ -876,14 +876,14 @@ test('Atlas refresh replaces stale caller context with the current derived conte
 test('Atlas refresh is exposed as a post-test CI command', () => {
   const root = path.resolve(__dirname, '..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  // Gitea CI: the host-side bridge refreshes Atlas only after main's verification passes, so the
+  // Gitea CI: the host-side bridge refreshes Atlas only after Gitea main's verification passes, so the
   // service-role key never enters a workflow that a mirrored branch could rewrite.
   const bridge = fs.readFileSync(path.join(root, 'deploy/gitea-ci/fcm-gitea-ci-bridge.mjs'), 'utf8');
   const giteaWorkflow = fs.readFileSync(path.join(root, '.gitea/workflows/verify.yml'), 'utf8');
 
   assert.equal(packageJson.scripts['bob:refresh-capability-map'], 'npm run atlas:refresh');
   assert.match(packageJson.scripts['atlas:check'], /atlas:manifest/);
-  assert.match(bridge, /startsWith\('success\|'\)/);
+  assert.match(bridge, /mainPassed\(jobStates\(statuses\)\)/);
   assert.match(bridge, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(bridge, /node scripts\/atlas-refresh\.js --apply/);
   assert.doesNotMatch(giteaWorkflow, /SUPABASE_SERVICE_ROLE_KEY/);

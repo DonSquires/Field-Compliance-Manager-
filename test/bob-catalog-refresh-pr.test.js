@@ -38,7 +38,62 @@ function fakeApi({ types = 'export type Database = { public: {} }\n', prFiles = 
   return { calls, fetchImpl };
 }
 
-const env = remote => ({ SUPABASE_ACCESS_TOKEN: 'x', BOB_GITHUB_ACCESS_TOKEN: 'y', GITHUB_OWNER: 'o', GITHUB_REPO: 'r', BOB_CATALOG_REMOTE: remote });
+const env = remote => ({ BOB_CATALOG_FORGE: 'github', SUPABASE_ACCESS_TOKEN: 'x', BOB_GITHUB_ACCESS_TOKEN: 'y', GITHUB_OWNER: 'o', GITHUB_REPO: 'r', BOB_CATALOG_REMOTE: remote });
+const giteaEnv = remote => ({ SUPABASE_ACCESS_TOKEN: 'x', GITEA_BASE_URL: 'http://gitea.test', GITEA_OWNER: 'o', GITEA_REPO: 'r', GITEA_TOKEN: 'gt', BOB_CATALOG_GITEA_REMOTE: remote });
+
+function fakeGitea({ prFiles = ['supabase/schema.sql', 'src/types/database.ts'], mergedNow = true, mergeStatus = 200 } = {}) {
+  const calls = [];
+  const json = (status, body) => ({ ok: status < 300, status, json: async () => body, text: async () => (body === null ? '' : JSON.stringify(body)) });
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, method: init.method || 'GET', headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    if (url.includes('/types/typescript')) return json(200, { types: 'export type Database = { public: {} }\n' });
+    const p = url.replace('http://gitea.test/api/v1/repos/o/r', '');
+    if (p.startsWith('/pulls?state=open')) return json(200, []);
+    if (p === '/pulls' && init.method === 'POST') return json(201, { number: 9 });
+    if (p.startsWith('/pulls/9/files')) return json(200, prFiles.map(filename => ({ filename })));
+    if (p === '/pulls/9/merge') return json(mergeStatus, null);
+    if (p === '/pulls/9') return json(200, mergedNow ? { merged: true, merge_commit_sha: 'g'.repeat(40) } : { merged: false });
+    return json(404, {});
+  };
+  return { calls, fetchImpl };
+}
+
+test('by default the catalog PR is opened in Gitea and merged once verification allows it', async () => {
+  const { refreshCatalog } = await load();
+  const fx = fixtureRepo();
+  const schema = path.join(fx.root, 'live.sql');
+  fs.writeFileSync(schema, 'create table a ();\ncreate table b ();\n');
+  const api = fakeGitea();
+  const result = await refreshCatalog({ repo: fx.repo, base: fx.base, schema, env: giteaEnv(fx.remote), fetchImpl: api.fetchImpl, log: () => {} });
+  assert.equal(result.outcome, 'merged');
+  assert.equal(result.number, 9);
+  assert.equal(api.calls.some(call => call.url.includes('api.github.com')), false);
+  const merge = api.calls.find(call => call.url.endsWith('/pulls/9/merge'));
+  assert.deepEqual(merge.body, { Do: 'rebase', head_commit_id: fx.git(fx.root, `--git-dir=${fx.remote}`, 'rev-parse', `bob/catalog-${fx.base.slice(0, 8)}`), merge_when_checks_succeed: true });
+  assert.equal(merge.headers.Authorization, 'token gt');
+});
+
+test('a Gitea catalog PR still waiting on verification is scheduled, and a repeat tick is idempotent', async () => {
+  const { refreshCatalog } = await load();
+  const fx = fixtureRepo();
+  const schema = path.join(fx.root, 'live.sql');
+  fs.writeFileSync(schema, 'create table a ();\ncreate table c ();\n');
+  const pending = await refreshCatalog({ repo: fx.repo, base: fx.base, schema, env: giteaEnv(fx.remote), fetchImpl: fakeGitea({ mergedNow: false }).fetchImpl, log: () => {} });
+  assert.equal(pending.outcome, 'scheduled');
+  const again = await refreshCatalog({ repo: fx.repo, base: fx.base, schema, env: giteaEnv(fx.remote), fetchImpl: fakeGitea({ mergedNow: false, mergeStatus: 409 }).fetchImpl, log: () => {} });
+  assert.equal(again.outcome, 'scheduled');
+  await assert.rejects(refreshCatalog({ repo: fx.repo, base: fx.base, schema, env: giteaEnv(fx.remote), fetchImpl: fakeGitea({ mergedNow: false, mergeStatus: 405 }).fetchImpl, log: () => {} }), /could not be merged or scheduled/);
+});
+
+test('a Gitea catalog PR that is not catalog-only is left for a person', async () => {
+  const { refreshCatalog } = await load();
+  const fx = fixtureRepo();
+  const schema = path.join(fx.root, 'live.sql');
+  fs.writeFileSync(schema, 'create table a ();\ncreate table d ();\n');
+  const api = fakeGitea({ prFiles: ['supabase/schema.sql', 'apps/web/src/App.tsx'] });
+  await assert.rejects(refreshCatalog({ repo: fx.repo, base: fx.base, schema, env: giteaEnv(fx.remote), fetchImpl: api.fetchImpl, log: () => {} }), /not catalog-only/);
+  assert.equal(api.calls.some(call => call.url.endsWith('/merge')), false);
+});
 
 test('only the two generated catalog files are ever allowed', async () => {
   const { onlyCatalogFiles } = await load();

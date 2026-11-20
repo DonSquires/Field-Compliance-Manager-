@@ -21,12 +21,20 @@ not a flat app, and check the graph before editing shared terrain.
 
 ## Release identity is part of the delivery contract
 
-This repository deploys `main` to Vercel from GitHub. Vercel's protected
-deployment lane rejects commits whose author is not associated with the
-verified owner account. GitHub `main` requires a pull request so concurrent
-agents cannot bypass the shared integration boundary. Before creating or
-pushing a commit intended for release, every agent must use the verified
-GitHub identity:
+**Gitea is the source of truth (owner ruling, 2026-11-21).** Pull requests,
+review and CI live in Gitea
+(`https://git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager`).
+Gitea `main` accepts changes only through a pull request whose
+`PR verification / *` checks (`.gitea/workflows/verify.yml` on the self-hosted
+runner) have passed, merged with the **rebase** style. GitHub
+(`DonSquires/Field-Compliance-Manager-`) is a deploy mirror: the VPS bridge in
+`deploy/gitea-ci/` fast-forwards GitHub `main` to Gitea `main` and Vercel deploys
+from there. Never open, merge or push pull requests or `main` on GitHub; a
+GitHub-side change would diverge from Gitea and stop the mirror.
+
+Vercel's protected deployment lane rejects commits whose author is not
+associated with the verified owner account. Before creating or pushing a commit
+intended for release, every agent must use the verified identity:
 
 ```bash
 git config user.name "DonSquires"
@@ -41,12 +49,13 @@ account's noreply address as an author. Preserve signing; do not disable it to
 work around an identity mismatch. Do not use local placeholders such as
 `don@squires.local`. A commit that is already on `main` cannot be repaired by
 changing repository files afterward; create the next release commit with the
-verified identity so the complete tree can deploy. Merge pull requests with
-`gh pr merge <n> --rebase`, which keeps the verified commit author. Bob Builder's
+verified identity so the complete tree can deploy. Merge Gitea pull requests
+with the rebase style, which keeps the verified commit author. Commits signed on
+a laptop use the SSH signing key registered on the GitHub account. Bob Builder's
 isolated publication lane must fail closed when its configured author or the
-actual branch-head author is not the exact verified GitHub identity. Never
-weaken Vercel protection, push directly to `main`, or bypass the GitHub
-pull-request path.
+actual branch-head author is not the exact verified identity. Never weaken
+Vercel protection, push directly to `main` on either forge, force-push GitHub
+`main`, or bypass the Gitea pull-request path.
 
 **Single target build (owner ruling, 2026-09-15).** Field Compliance Manager is
 the only product being built in this repository. GitLab, FreedomCamp-Manager /

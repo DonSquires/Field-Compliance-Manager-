@@ -24,5 +24,6 @@ test('Gitea verification runs the same jobs and steps as GitHub PR verification'
   // Branch pushes run their own copy of this workflow, so it must never read secrets.
   assert.doesNotMatch(giteaText, /secrets\./);
   const on = parseYaml(giteaText).on;
-  assert.deepEqual(on.push.branches, '[\'**\']');
+  assert.equal(on.push.branches, '[main]');
+  assert.ok('pull_request' in on);
 });

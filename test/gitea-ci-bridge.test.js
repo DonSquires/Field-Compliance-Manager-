@@ -2,61 +2,41 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const load = () => import(pathToFileURL(path.join(__dirname, '..', 'deploy', 'gitea-ci', 'fcm-gitea-ci-bridge.mjs')).href);
-const repo = 'DonSquires/Field-Compliance-Manager-';
-const pr = (number, ref, sha, full = repo) => ({ number, head: { ref, sha, repo: full ? { full_name: full } : null } });
 
-test('bridge mirrors main and same-repository PR heads, never forks or unsafe names', async () => {
-  const { desiredBranches } = await load();
-  const branches = desiredBranches([
-    pr(554, 'feat/rate-cards-20261117', 'aaa'),
-    pr(600, 'patch-1', 'bbb', 'someone/fork'),
-    pr(601, 'deleted-fork', 'ccc', null),
-    pr(602, 'bad..ref', 'ddd'),
-    pr(603, 'main', 'eee'),
-    pr(604, 'x;rm -rf', 'fff'),
-  ], repo, 'm1');
-  assert.deepEqual([...branches.entries()], [
-    ['main', { sha: 'm1', pr: null }],
-    ['feat/rate-cards-20261117', { sha: 'aaa', pr: 554 }],
-  ]);
+test('mirror only fast-forwards GitHub main and stops on divergence', async () => {
+  const { mirrorAction } = await load();
+  assert.deepEqual(mirrorAction({ giteaSha: 'a', githubSha: 'a', githubIsAncestor: true }), { action: 'none' });
+  assert.deepEqual(mirrorAction({ giteaSha: 'b', githubSha: 'a', githubIsAncestor: true }), { action: 'fast-forward' });
+  const stop = mirrorAction({ giteaSha: 'bbbbbbbbbb', githubSha: 'cccccccccc', githubIsAncestor: false });
+  assert.equal(stop.action, 'stop');
+  assert.match(stop.reason, /not an ancestor/);
+  assert.equal(mirrorAction({ giteaSha: null, githubSha: 'a', githubIsAncestor: true }).action, 'skip');
 });
 
-test('bridge maps the latest Gitea Actions job statuses to gitea-ci contexts', async () => {
-  const { jobStatuses } = await load();
-  const jobs = jobStatuses([
-    { context: 'PR verification / Runtime and migration inventory (push)', status: 'pending', updated_at: '2026-11-21T01:00:00Z', target_url: 'https://git/x/1' },
-    { context: 'PR verification / Runtime and migration inventory (push)', status: 'success', updated_at: '2026-11-21T01:30:00Z', description: 'Successful in 20m', target_url: 'https://git/x/1' },
-    { context: 'PR verification / Web types, build and unit tests (push)', status: 'failure', updated_at: '2026-11-21T01:10:00Z' },
-    { context: 'Publish workload containers / publish (push)', status: 'success', updated_at: '2026-11-21T01:10:00Z' },
-    { context: 'PR verification / Offline browser workflows (push)', status: 'warning', updated_at: '2026-11-21T01:10:00Z' },
-  ]);
-  assert.deepEqual(jobs.map((j) => [j.context, j.state]), [
-    ['gitea-ci / Runtime and migration inventory', 'success'],
-    ['gitea-ci / Web types, build and unit tests', 'failure'],
-    ['gitea-ci / Offline browser workflows', 'error'],
-  ]);
-  assert.equal(jobs[0].description, 'Successful in 20m');
-});
-
-test('bridge aggregate is queued until all jobs report, and failure wins', async () => {
-  const { aggregateStatus } = await load();
-  const ok = (name) => ({ context: `gitea-ci / ${name}`, state: 'success' });
-  assert.equal(aggregateStatus([], 3).state, 'pending');
-  assert.equal(aggregateStatus([ok('a'), ok('b')], 3).state, 'pending');
-  assert.equal(aggregateStatus([ok('a'), ok('b'), ok('c')], 3).state, 'success');
-  const failed = aggregateStatus([ok('a'), { context: 'gitea-ci / b', state: 'failure' }], 3);
-  assert.equal(failed.state, 'failure');
-  assert.equal(failed.description, 'Failed: b');
+test('main counts as passed only when every verification job last reported success', async () => {
+  const { jobStates, mainPassed } = await load();
+  const s = (job, status, at, event = 'push') => ({ context: `PR verification / ${job} (${event})`, status, updated_at: at });
+  const statuses = [
+    s('Runtime and migration inventory', 'pending', '2026-11-21T01:00:00Z'),
+    s('Runtime and migration inventory', 'success', '2026-11-21T01:30:00Z'),
+    s('Web types, build and unit tests', 'success', '2026-11-21T01:10:00Z'),
+    { context: 'Publish workload containers / publish (push)', status: 'failure', updated_at: '2026-11-21T01:10:00Z' },
+  ];
+  assert.equal(mainPassed(jobStates(statuses)), false, 'browser job has not reported');
+  statuses.push(s('Offline browser workflows', 'success', '2026-11-21T01:40:00Z'));
+  assert.equal(mainPassed(jobStates(statuses)), true);
+  statuses.push(s('Offline browser workflows', 'failure', '2026-11-21T02:00:00Z'));
+  assert.equal(mainPassed(jobStates(statuses)), false, 'latest rerun failed');
 });
 
 test('bridge reads tokens from systemd credentials and never hands them to child processes', async (t) => {
   const { readSecret, childEnv } = await load();
-  const fs = require('node:fs');
-  const os = require('node:os');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-cred-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'github-token'), 'from-file\n');
