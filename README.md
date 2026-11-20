@@ -41,7 +41,7 @@ sample capture used for inference-tier development is at `engineering-fixtures/c
 - `deploy/bob-control-plane/docker-compose.yml`: active VPS Bob deployment manifest, using a non-root runtime user
 - `deploy/bob-control-plane/deploy.sh`: HPanel/VPS Bob deployment command; fast-forwards the configured Gitea mirror checkout and verifies Bob health
 - `deploy/vision-worker/deploy.sh`: HPanel/VPS CCTV vision-worker deployment; fast-forwards the checkout, rebuilds `fcm-vision-watcher`, and confirms the container is running
-- `.gitea/workflows/runner-test.yml`: private Git runner verification
+- `.gitea/workflows/verify.yml`: PR verification on the self-hosted Gitea runner (see `deploy/gitea-ci/README.md`)
 
 ## Local validation
 

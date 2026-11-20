@@ -1,0 +1,11 @@
+[Unit]
+Description=FCM GitHub to Gitea CI bridge (mirror PR heads, report Gitea results to GitHub)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fcm-gitea-ci/bridge.env
+ExecStart=/usr/bin/node /srv/fcm/gitea-ci/fcm-gitea-ci-bridge.mjs
+TimeoutStartSec=25min
+Nice=5
