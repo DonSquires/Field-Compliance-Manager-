@@ -92,7 +92,7 @@ jobs:
         run: npx playwright test e2e/crm-accounts.spec.ts --grep "location house lookup" --project=desktop-chromium --workers=1 --global-timeout=180000
       - name: Retain fixture browser evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: offline-browser-evidence
           path: |
